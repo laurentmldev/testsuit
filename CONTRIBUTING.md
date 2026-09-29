@@ -41,7 +41,7 @@ A scenario entry `type: foo` runs the criterion `foo`, a function `crit_foo(crit
 
 ## Extending testsuit from another library
 
-An application built on testsuit can add formats, criteria and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`.
+An application built on testsuit can add formats, criteria, datapack importers and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`. `examples/acme_testbench` is a complete example project using all of them, with its own tests run by CI.
 
 ### Data file formats
 
@@ -90,6 +90,17 @@ set_default_report_logo(svg="path/to/logo.svg")    # or title="ACME Bench": ever
 ```
 
 From the command line: `exploit_runner --report-logo logo.svg` or `--report-logo-title "ACME Bench"`.
+
+### datapack importers
+
+```python
+from testsuit.datatools.datapack.importers import register_data_importer
+
+# datasource 'importer: myserver' in datapack setup files; any factory(targetDir, remotePath, versionId)
+register_data_importer("myserver", MyServerImporter)   # an ADataImporter subclass
+```
+
+`remotePath` is the datasource `path`, `versionId` the dataset `path`. After `retrieve()`, the dataset folder must contain a `dataset.dico` file, whose keys the datapack files can use. `git` is the built-in importer.
 
 ### Making registrations visible to the command-line tools
 

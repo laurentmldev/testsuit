@@ -1,13 +1,14 @@
-"""Loading of external extensions (data file formats, mexploit criteria, report logo).
+"""Loading of external extensions (data file formats, mexploit criteria, report logo, datapack importers).
 
 An external library extends testsuit by calling the registration functions:
 
 - ``testsuit.datatools.DataFileMgrs.formats.register_file_format()`` / ``register_csv_variant()``
 - ``testsuit.exploit.mexploit.registry.register_criterion()`` / ``register_criteria_module()``
 - ``testsuit.exploit.runner.report_html.set_default_report_logo()``
+- ``testsuit.datatools.datapack.importers.register_data_importer()``
 
 Calling them from your own code is enough when everything runs in your process. The command-line
-tools (``data2h5``, ``mxp``, ``exploit_runner``, ...) and the ``mxp`` processes that exploit_runner
+tools (``data2h5``, ``mxp``, ``exploit_runner``, ``datapack``, ...) and the ``mxp`` processes that exploit_runner
 starts are separate processes, so they find your registrations through one of:
 
 - an entry point in the ``testsuit.plugins`` group of your package::

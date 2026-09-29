@@ -1,5 +1,6 @@
-"""Extension points used by external libraries: data file formats, mexploit criteria, report logo, plugins."""
-import os,shutil,logging
+"""Extension points used by external libraries: data file formats, mexploit criteria, report logo,
+datapack importers, plugins."""
+import io,os,shutil,logging
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,9 @@ from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS,loadDat
 from testsuit.exploit.mexploit import registry
 from testsuit.exploit.mexploit.mexploit import mexploit
 from testsuit.exploit.runner import report_html
+from testsuit.datatools.datapack import datapack_tools,importers
+from testsuit.datatools.datapack.ADataImporter import ADataImporter
+from testsuit.datatools.datapack.GitImporter import GitImporter
 from testsuit import plugins
 
 logging.basicConfig(level=logging.DEBUG)
@@ -26,6 +30,14 @@ def tmp_folder(request):
     shutil.rmtree(folder,ignore_errors=True)
     folder.mkdir(parents=True)
     return folder
+
+
+@pytest.fixture(autouse=True)
+def no_installed_plugins(monkeypatch):
+    """Ignore the plugins installed in the environment (examples/acme_testbench for instance),
+    and whatever report logo one of them set before."""
+    monkeypatch.setattr(plugins,"entry_points",lambda group: [])
+    report_html.set_default_report_logo()
 
 
 class MyCsvVariantFileMgr(CsvFileMgr):
@@ -196,6 +208,54 @@ def test_set_default_report_logo(tmp_folder):
 def test_invalid_logo():
     with pytest.raises(ValueError):
         report_html.load_logo_svg("<div>not a logo</div>")
+
+
+################### datapack importers ###################
+
+class FakeImporter(ADataImporter):
+    """Imports a dataset by writing its dataset.dico, the version being in a VERSION file."""
+    retrieved=[]
+
+    def retrieve(self):
+        os.makedirs(self._targetDir,exist_ok=True)
+        Path(self._targetDir,"VERSION").write_text(self._versionId)
+        Path(self._targetDir,"dataset.dico").write_text(f"fake.remote={self._remotePath}\n")
+        FakeImporter.retrieved.append(self._versionId)
+        return True
+
+    def getTag(self,testTag=False):
+        return Path(self._targetDir,"VERSION").read_text()
+
+    def getChanges(self,testClean=False):
+        return True if testClean else []
+
+    def checkVersion(self,expectedVersion):
+        return self.getTag()==expectedVersion
+
+
+def test_builtin_git_importer():
+    assert "git" in importers.get_data_importers()
+    importer=importers.create_data_importer("Git","target","https://example.com/repo.git","v1")
+    assert type(importer) is GitImporter
+    with pytest.raises(KeyError, match="unknown datasource importer 'nope'"):
+        importers.create_data_importer("nope","target","remote","v1")
+
+
+def test_register_data_importer(tmp_folder):
+    FakeImporter.retrieved.clear()
+    importers.register_data_importer("fake",FakeImporter)
+    try:
+        dataset={"id":"my_dataset","path":"v1"}
+        dicos=datapack_tools.loadDataset(str(tmp_folder),"FAKE","my/remote",dataset,io.StringIO())
+        assert dicos==[str(tmp_folder / "my_dataset" / "v1" / "dataset.dico")]
+        assert Path(dicos[0]).read_text()=="fake.remote=my/remote\n"
+        # already imported: only its version is checked
+        datapack_tools.loadDataset(str(tmp_folder),"fake","my/remote",dataset,io.StringIO())
+        assert FakeImporter.retrieved==["v1"]
+    finally:
+        importers.unregister_data_importer("fake")
+    with pytest.raises(SystemExit):
+        datapack_tools.loadDataset(str(tmp_folder),"fake","my/remote",{"id":"other","path":"v1"},io.StringIO())
 
 
 ################### plugins ###################
