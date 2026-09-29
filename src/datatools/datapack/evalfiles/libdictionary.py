@@ -60,6 +60,8 @@ def _process_key_def(match):
 def loadDicoEntries(file):
 	global _global_dico
 	global _latest_key
+	# local import: evalkeys imports this module at load time
+	from datatools.datapack.evalfiles import evalkeys
 	_global_dico={}
 	
 	lines,errorDetected,nbIncludes=evalincludes.expandFileIncludes(file)
@@ -237,7 +239,7 @@ def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
 
 	fileout.close()
 		
-	log.info("Generated "+diconame+" with "+str(nbentries)+" entries")
+	print("Generated "+diconame+" with "+str(nbentries)+" entries")
 	
 	return True
 

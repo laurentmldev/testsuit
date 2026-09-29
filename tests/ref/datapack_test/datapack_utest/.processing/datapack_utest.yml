@@ -1,0 +1,10 @@
+my_datapack:
+  id: my_test_def
+  name: My Test Def
+  setup_file: ../setup/utest_conf_dtpk.yml
+  setup_config: nominal
+
+  dictionary:
+    - baseline.dico
+    - values.dico
+    - utest_values.dico
