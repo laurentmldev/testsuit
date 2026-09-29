@@ -50,7 +50,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         self._shiftDateInverted=shiftDateInverted
         self.__clockDriftDf={}
 
-        if supportedExtensions==None:
+        if supportedExtensions is None:
             self.__supportedExtensions=["." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]
             #raise Exception("### Received non supported extentions")
 
@@ -185,7 +185,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         rst=0
         for fileMgr in self.getFileMgrs():
             val=fileMgr.getNbEntries()
-            if val==None:
+            if val is None:
                 return None
             rst+=val
 
@@ -246,7 +246,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
             fileMgr.clearSelectedFieldsIdx()
         
     def getFilesList(self) -> list:
-        if self.__filesList==None:
+        if self.__filesList is None:
             self.buildFilesList()
         return self.__filesList
     
@@ -322,7 +322,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 try:
                     # do not try to apply shiftDateSec when loading shiftDateSec param ... so we use this _date_processing=False flag  
                     shiftDateDfList=self.findParams(shiftDateParamName,_date_processing=False,silent=True,monitorProgress=monitorProgress)
-                    if shiftDateDfList==None:
+                    if shiftDateDfList is None:
                         raise Exception(f"Unable to get clock drift data '{shiftDateParamName}' (returned None)")
                     if len(shiftDateDfList)==0:
                         raise Exception(f"No matching param for clock drift data '{shiftDateParamName}'")
@@ -384,7 +384,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                                     shiftDateInverted=shiftDateInverted,
                                     silent=silent, callback=curCb)
 
-        if curRst == None:
+        if curRst is None:
             raise LookupError(f"Error while finding params matching include regex '{paramSearchRegex}' and exclude regex '{excludeParamsRegex}' in file '"+fileMgr.getFileName()+"'")
 
         if abortEvent and abortEvent.is_set():
@@ -428,7 +428,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         if not shiftDateRegex: shiftDateRegex=self._shiftDateRegex if _date_processing else None
         if not shiftDateInverted: shiftDateInverted=self._shiftDateInverted if _date_processing else None
         
-        if paramSearchRegex==None:
+        if paramSearchRegex is None:
             paramSearchRegex=".*"
         
         m=re.match("((.*)::)?(.*)",paramSearchRegex)
@@ -446,8 +446,8 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 m=re.match("((.*)::)?(.*)",regex)
                 fileRegex=m.group(2)
                 paramRegex=m.group(3)
-                if fileRegex==None: fileRegex=".*"
-                if paramRegex==None: paramRegex=".*"
+                if fileRegex is None: fileRegex=".*"
+                if paramRegex is None: paramRegex=".*"
                 
                 if fileRegex not in fileBasenameExcludeRegex:
                     fileBasenameExcludeRegex[fileRegex]=[]
@@ -547,7 +547,7 @@ Params with same name from various files (and regex) are merged together in a si
                 fileName=m.group(2)
                 paramPath=m.group(3)
 
-                if fileName==None or fileName==fileMgr.getBaseName():
+                if fileName is None or fileName==fileMgr.getBaseName():
                     paramsListForThisFile+=[paramPath]
                     if indexNamesList:
                         indicesForThisFile+=[indexNamesList[idx]]
@@ -569,7 +569,7 @@ Params with same name from various files (and regex) are merged together in a si
             if abortEvent and abortEvent.is_set():
                 raise Exception("Received abort event, params scanning interrupted")            
 
-        if dfList==None:
+        if dfList is None:
             raise LookupError("No param matching given list'"+str(paramNamesList)+"' in '"+self.getFileName()+"'")
         
         return self.mergeParams(dfList)

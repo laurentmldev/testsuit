@@ -27,7 +27,7 @@ class MdfFileMgr(AFileMgr):
         return "mdf"
     
     def getNbEntries(self) -> int:
-        if self._nbEntries == None:
+        if self._nbEntries is None:
             maxSize=0
             for signal in self.__mdfile.iter_channels():
                 if maxSize<signal.samples.size:
@@ -43,7 +43,7 @@ class MdfFileMgr(AFileMgr):
         return htmlTbl
 
     def getFieldNames(self) -> list[str]:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             for signal in self.__mdfile.iter_channels():     
                 self._fieldNamesList.append(signal.name)

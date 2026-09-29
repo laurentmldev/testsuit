@@ -50,7 +50,7 @@ class DxdFileMgr(AFileMgr):
         return "dxd"
     
     def getNbEntries(self) -> int:
-        if self._nbEntries == None:
+        if self._nbEntries is None:
             with self.__lock:
                 self._nbEntries = round(self.__dxdfile.info.sample_rate * self.__dxdfile.info.duration)
                 
@@ -75,7 +75,7 @@ class DxdFileMgr(AFileMgr):
 
     def getFieldNames(self) -> list[str]:
         with self.__lock:                   
-            if self._fieldNamesList==None:
+            if self._fieldNamesList is None:
                 self._fieldNamesList = [fieldName for fieldName in self.__dxdfile]                        
                         
         return self._fieldNamesList
@@ -99,7 +99,7 @@ class DxdFileMgr(AFileMgr):
                 silent: bool = False) -> list[pd.DataFrame]:
         
         # DXD format includes timestamps. No separate index names required.
-        if not (indexNamesList==None or len(indexNamesList)==0):
+        if not (indexNamesList is None or len(indexNamesList)==0):
             raise ValueError("No explicit index (timestamp) allowed for DXD files, sorry.")
             
         # retrieve positions of requested params 
@@ -132,7 +132,7 @@ class DxdFileMgr(AFileMgr):
 
                 def myChunkCb(chunkSize: int) -> None:       
                     
-                    if abortEvent!=None and abortEvent.is_set():
+                    if abortEvent is not None and abortEvent.is_set():
                         raise Exception("Received abort event, DXD params extraction interrupted")                                
                         
                     mpLoad.complete_n(chunkSize)

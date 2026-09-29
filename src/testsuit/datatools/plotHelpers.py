@@ -206,7 +206,7 @@ def plotData_matplotlib(critConf: dict,
             if not maxDate or paramInfo["data"].index[-1]> maxDate:
                 maxDate=paramInfo["data"].index[-1]
             
-    assert minDate!=None,\
+    assert minDate is not None,\
         "CRIT_CHECK\n["+critConf["type"]+"::"+critConf["name"]+"] no min/max date found. "\
             +"Don't know how to plot scalar value on its own, please plot it together with a timeserie."
 

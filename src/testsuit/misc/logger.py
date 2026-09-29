@@ -28,14 +28,14 @@ DEFAULT_CONFIG_DUAL=DEFAULT_CONFIG_CONSOLE_ONLY | DEFAULT_CONFIG_FILE_ONLY
 
 def get_logger() -> logging.Logger:
     global MAIN_LOGGER_INST
-    if MAIN_LOGGER_INST==None:
+    if MAIN_LOGGER_INST is None:
         raise Exception("no logger defined!")
         
     return MAIN_LOGGER_INST
 
 def reset_logger(logger: logging.Logger | None = None) -> None:
     global MAIN_LOGGER_INST
-    if MAIN_LOGGER_INST!=None:
+    if MAIN_LOGGER_INST is not None:
         for handler in MAIN_LOGGER_INST.handlers:
             handler.close()
         del MAIN_LOGGER_INST
@@ -57,8 +57,8 @@ def create_logger(
     # set logger.setLevel as lowest, if handle multiple handlers independently
     logger.setLevel(logging.DEBUG)   # have higher priority than handlers level
     
-    if config==None: 
-        if filename!=None:        
+    if config is None: 
+        if filename is not None:        
             config=DEFAULT_CONFIG_DUAL
         else:
             config=DEFAULT_CONFIG_CONSOLE_ONLY
@@ -74,7 +74,7 @@ def create_logger(
         
     # FileHandler - logging into file
     fileFullPath=None
-    if filename!=None:
+    if filename is not None:
         if "fileFolder" in config and config["fileFolder"]!="":
             pathlib.Path(config["fileFolder"]).mkdir(parents=True, exist_ok=True)            
         else:
@@ -92,7 +92,7 @@ def create_logger(
         print("[logging to file '"+os.path.abspath(fileFullPath)+"']")
 
        
-    if reset or MAIN_LOGGER_INST==None:
+    if reset or MAIN_LOGGER_INST is None:
         MAIN_LOGGER_INST=logger
 
     return logger

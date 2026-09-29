@@ -95,7 +95,7 @@ class TdmsFileMgr(AFileMgr):
         return "tdms"
     
     def getNbEntries(self) -> int:
-        if self._nbEntries == None:
+        if self._nbEntries is None:
             self._nbEntries = 1
             
         return self._nbEntries
@@ -106,7 +106,7 @@ class TdmsFileMgr(AFileMgr):
         return htmlTbl
 
     def getFieldNames(self) -> list[str]:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             for group in self.__tdmsfile.groups():
                 for channel in group.channels():                    

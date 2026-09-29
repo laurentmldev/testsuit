@@ -72,7 +72,7 @@ class H5FileMgr(AFileMgr):
         
     def dumpTreeHtml(self,key: str | None=None,item: h5py.Group | h5py.Dataset | None=None,depth: int=0) -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=self.getBaseName()
 
@@ -103,7 +103,7 @@ class H5FileMgr(AFileMgr):
                     depth: int=0,
                     indent_text: str="   ") -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=self.getBaseName()
 
@@ -136,7 +136,7 @@ class H5FileMgr(AFileMgr):
                       item: h5py.Group | h5py.Dataset | None=None,
                       depth: int=0,path: str="") -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=""
         if key.startswith("/"):
@@ -166,7 +166,7 @@ class H5FileMgr(AFileMgr):
         return htmlTbl
 
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             def visitorCb(name,item):
                 if "/Timestamps/" in name: return
@@ -254,7 +254,7 @@ class H5FileMgr(AFileMgr):
                 else:
                     value = item
             elif item.dtype.kind == 'V': # Compound type
-                if dataset_colname==None:
+                if dataset_colname is None:
                     raise ValueError("provided path is a HDF5 compound dataset, "
                                      +"need a column name as a suffix to provided dataset path: '"+dataset_path+".<my_col>'")
                   
@@ -266,7 +266,7 @@ class H5FileMgr(AFileMgr):
             indexDataset=None
 
             # explicit index path
-            if index_path!=None:
+            if index_path is not None:
                 indexDataset=self.getH5FileRoot()[index_path]
                 if not isinstance(indexDataset, h5py.Dataset):
                     raise ValueError("provided index path is not a DataSet:'"+indexDataset+"'")
@@ -302,7 +302,7 @@ class H5FileMgr(AFileMgr):
                     indexDataset=self.getH5FileRoot()[attrval]                  
 
     # 2. if no luck, try to find a *str* attribute with 'time' or 'date' in their name
-            if indexDataset==None:
+            if indexDataset is None:
                 for (attrkey,attrval) in item.attrs.items():
                     if "time" in attrkey.lower() or "date" in attrkey.lower():
                         try:
@@ -381,7 +381,7 @@ class H5FileMgr(AFileMgr):
             get_logger().error("Could not load any DataSet at path '" + paramName + "' in file '" + self.getFileName() + "' : " + str(e))
             return None
 
-        if h5ParamDataset == None:
+        if h5ParamDataset is None:
             get_logger().error("No DataSet found at path '" + paramName + "' in file '" + self.getFileName() + "'")
             return None
         
@@ -408,7 +408,7 @@ class H5FileMgr(AFileMgr):
 
         # if an index has been identified, assign it as Dataframe index
         indexArray = None
-        if h5IndexDataset != None:
+        if h5IndexDataset is not None:
             indexArray = np.array(h5IndexDataset)
 
             # if data is set horizontally rather than vertically, we fix it here
@@ -574,7 +574,7 @@ class H5FileMgrDewesoft(H5FileMgr):
         
         # asynchronous data (has a "Time" column)
         # or brute force dataframe with time column but wrong header info ... (yes it happened)
-        if timeColIdx!=None \
+        if timeColIdx is not None \
             or len(h5ParamDataset.shape)==2 and h5ParamDataset.shape[1]==2 and len(colNames)==1:
             dfParam.set_index(dfParam.columns[0],inplace=True)
             dfParam.index.name="Time"

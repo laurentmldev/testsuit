@@ -71,7 +71,7 @@ Return:
 
 	finalizeLines(lines, usedkeys, args.partial, args.output)
 
-	if args.output != None:
+	if args.output is not None:
 		print("generated "+str(args.output)+" and associated 'keys' and 'html' files.")
 
 	if evalkeys.nbInfinateRecursion>0 or evalincludes.nbCircularRecursions>0:

@@ -96,7 +96,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
     cbToUse = None
     if listOnly:
         cbToUse=cbPrintName
-    elif targetFile==None:
+    elif targetFile is None:
         cbToUse=cbprintDf
     else:
         cbToUse=cbSaveDfAsH5File

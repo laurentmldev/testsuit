@@ -95,7 +95,7 @@ def getDfName(df: pd.DataFrame | pd.Series) -> str:
     dfName=None
     if hasattr(df,"name"):
         dfName=df.name
-    if dfName==None:
+    if dfName is None:
         if len(df.columns)==1:
             dfName=df.columns[0]
         else:
@@ -158,7 +158,7 @@ def getCoefConvToNanosec(dateUnitStr: str | None = None) -> float:
 #######################
 def getDateOffsetSec(offsetStr: str | None, timezone: str = "Europe/Paris") -> float:
 
-    if offsetStr==None:
+    if offsetStr is None:
         return 0
     
     dateOffset=None
@@ -248,10 +248,10 @@ def timerange(paramData: pd.DataFrame | pd.Series, minDate: float | None = None,
     origin=paramData.origin if hasattr(paramData,"origin") else None
     name=paramData.name if hasattr(paramData,"name") else None
     try:
-        if minDate!=None:
+        if minDate is not None:
             paramData=paramData[paramData.index >= minDate ]
 
-        if maxDate!=None:
+        if maxDate is not None:
             paramData=paramData[paramData.index <= maxDate]
 
     except Exception as e:

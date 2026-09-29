@@ -66,7 +66,7 @@ def evalFile(srcFile,targetFile,dicosListTbl,partialOk=True):
 
     lines,usedkeys=evalfile(srcFile, dicosListTbl,partialEval=partialOk)
 
-    if lines==None:
+    if lines is None:
         print(Fore.RED+"ERROR: unable to eval file : '"+srcFile+"'"+Style.RESET_ALL)        
         sys.exit(3)
     
@@ -90,8 +90,8 @@ def evalFile(srcFile,targetFile,dicosListTbl,partialOk=True):
 def expandPath(path,evalTargetFolder=None,evalDicosList=None,evalPartialOk=False):
 
     respath=misc.files.expandPath(path)    
-    if evalTargetFolder!=None:
-        assert(evalDicosList!=None)
+    if evalTargetFolder is not None:
+        assert(evalDicosList is not None)
         evalFileName=evalTargetFolder+os.sep+os.path.basename(respath)
         #print("         3> "+respath)        
         evalFile(respath,evalFileName,evalDicosList,partialOk=evalPartialOk)
@@ -292,7 +292,7 @@ def genDataPackComponent(targetCompsFolder,componentNode,componentTypeDesc,dico,
             optional=True
         templateFile=findRefFile(testdefFolder,targetCompsFolder,setupFolder,templateFileSearch,optional)        
         
-        if templateFile==None:
+        if templateFile is None:
             assert(optional==True)
             print(Fore.YELLOW+"    [OPTIONAL] "+Fore.LIGHTBLACK_EX+templateFileSearch+Style.RESET_ALL+" --> "\
                 +Fore.LIGHTBLACK_EX+compId+os.sep+"input/"+inputFile["value"]+" "+Fore.LIGHTRED_EX+"X"+Style.RESET_ALL)

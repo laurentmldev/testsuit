@@ -122,7 +122,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
     def toHtmlTbl(self) -> str:
         """Return HTML table rows describing the file contents (used by Jupyter GUI)"""
         htmlTbl = "<tr><th>"+"Nb Fields"+"</th><td>"+str(len(self.getFieldNames()))+"</td></tr>"
-        htmlTbl += "<tr><th>"+"Nb Entries"+"</th><td>"+str(math.floor(self.getNbEntries())) if self.getNbEntries()!=None else "?"+"</td></tr>"
+        htmlTbl += "<tr><th>"+"Nb Entries"+"</th><td>"+str(math.floor(self.getNbEntries())) if self.getNbEntries() is not None else "?"+"</td></tr>"
         return htmlTbl
 
     def getFieldNames(self) -> list:
@@ -196,13 +196,13 @@ class AFileMgr(metaclass=abc.ABCMeta):
         regexParamExclude=[]
         regexIndex=None
 
-        if paramPathRegex!=None:            
+        if paramPathRegex is not None:            
             try:
                regexParam=datatoolbox.getFileParamMatchRegex(paramPathRegex)
             except Exception as e:
                     raise Exception("unable to compile paramPathRegex regular exception '"+str(paramPathRegex)+"' : "+str(e))                
         
-        if excludeParamsRegex!=None:
+        if excludeParamsRegex is not None:
             if isinstance(excludeParamsRegex,str):
                 excludeParamsRegex=[excludeParamsRegex]
             try:
@@ -211,7 +211,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
             except Exception as e:
                     raise Exception("unable to compile excludeParamsRegex regular exception '"+str(excludeParamsRegex)+"' : "+str(e))                
             
-        if indexPathRegex!=None:
+        if indexPathRegex is not None:
             try:
                 regexIndex=datatoolbox.getFileParamMatchRegex(indexPathRegex)            
             except Exception as e:
@@ -220,7 +220,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
         # find all matching parameters and indices
         for fieldName in self.getFieldNames():
             paramIsMatching=False
-            if (regexParam==None or regexParam.match(fieldName)):
+            if (regexParam is None or regexParam.match(fieldName)):
                 paramIsMatching=True
                 for regex in regexParamExclude:
                     if regex.match(fieldName):
@@ -229,7 +229,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
                 if paramIsMatching:
                     paramNamesList.append(fieldName)
                     
-            if indexPathRegex!=None and regexIndex.match(fieldName):
+            if indexPathRegex is not None and regexIndex.match(fieldName):
                 indexNamesList.append(fieldName)
 
         if len(paramNamesList)==0:
@@ -238,7 +238,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
             return []
         
         
-        if indexPathRegex!=None and len(indexNamesList)!=len(paramNamesList):
+        if indexPathRegex is not None and len(indexNamesList)!=len(paramNamesList):
             raise Exception("["+self.getBaseName()+"] "+str(len(paramNamesList))+" param(s) matching for expression '"
                             +paramPathRegex+"', while "+str(len(indexNamesList))+" param(s) matching for explicit indices '"+indexPathRegex+"'")
             

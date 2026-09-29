@@ -67,7 +67,7 @@ def processFolderFiles(root_path: str, processFileCb: Callable[[str, str], bool]
             file_path = os.path.join(root, name)
             if os.path.isfile(file_path):                
                 rst=processFileCb(file_path, root_path)                 
-                if rst==None or rst==False:
+                if rst is None or rst==False:
                     return False
 
     # return last rst

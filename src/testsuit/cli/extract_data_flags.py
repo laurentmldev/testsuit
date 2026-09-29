@@ -146,7 +146,7 @@ def _process_file_with_flags_extraction(fpath, results_folder, flags_info, monit
     if not match:
         raise Exception(f"Unable to detect file extension: {fpath}")
     targetFile = fpath[:match.start()] + FLAGS_FILE_SUFFIX
-    if results_folder!=None:
+    if results_folder is not None:
         targetFile=results_folder+os.sep+os.path.basename(targetFile)
     if os.path.exists(targetFile):
         os.remove(targetFile)

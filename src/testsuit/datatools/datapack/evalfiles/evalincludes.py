@@ -239,7 +239,7 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 			#print("		--- include with params : includeFoundInLatestEval="+str(includeFoundInLatestEval)+" \n"+curParametrizedIncludedTxt)
 
 		# retrieving include params
-		elif curParametrizedIncludedTxt!=None and re.search(INCLUDE_PARAM_REGEX,line) :
+		elif curParametrizedIncludedTxt is not None and re.search(INCLUDE_PARAM_REGEX,line) :
 			paramstr=re.sub(INCLUDE_PARAM_REGEX,_parseParam,line)
 			paramData=paramstr.split("=")
 			paramName=paramData[0]
@@ -247,7 +247,7 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 			curParametersDico[paramName]=paramVal			
 
 		# include 'end' node : performing include with its params
-		elif curParametrizedIncludedTxt!=None and re.search(INCLUDE_WITH_PARAMS_REGEX_END,line) :
+		elif curParametrizedIncludedTxt is not None and re.search(INCLUDE_WITH_PARAMS_REGEX_END,line) :
 			if len(curParametrizedIncludedTxt)>0:
 				
 				resultLine+=lineSep+evalIncludeLinesWithParams(curParametrizedIncludedTxt,curParametersDico,curFilePath)

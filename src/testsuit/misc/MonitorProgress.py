@@ -241,7 +241,7 @@ class MonitorProgress:
     def _percent_unlocked(self) -> float:
         """Calculate overall percent. MUST be called with self._lock held."""
         
-        if self._total==None:
+        if self._total is None:
             return None
         
         if self._total == 0:
@@ -253,7 +253,7 @@ class MonitorProgress:
         for sub in self._sub_monitors.values():
             with sub._lock:
                 subPercent=sub._percent_unlocked()
-                if subPercent==None: 
+                if subPercent is None: 
                     return None
                 progress += subPercent / 100.0
                 
@@ -274,7 +274,7 @@ class MonitorProgress:
         if self._parent is not None:
             self._parent._propagate(msg, msgSeverity, update_percent=update_percent)
         else:
-            msg=[msg] if not isinstance(msg,list) and msg!=None else msg
+            msg=[msg] if not isinstance(msg,list) and msg is not None else msg
             self._post_msg(percent=percent, msg=msg, msgSeverity=msgSeverity)
             
             if self._debug: self.dumpProgressTree()
@@ -287,7 +287,7 @@ class MonitorProgress:
 
         if self._parent is not None and self._name is not None:
             
-            if self._total==None:
+            if self._total is None:
                 self._total=1
             
             self._parent.complete_item(self._name)
@@ -338,7 +338,7 @@ class MonitorProgress:
         return self._total
     
     def set_total_items(self,total_items, resetTotalItems = False):
-        if self._total!=None and not resetTotalItems:
+        if self._total is not None and not resetTotalItems:
             raise Exception(f"cannot set_total_items of {self._name} to {total_items}: already set to {self._total}")
         #print(f"#### MonitorProgress {self._name} total items set to {total_items}")
         self._total=int(total_items)
