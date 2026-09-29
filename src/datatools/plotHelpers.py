@@ -418,6 +418,25 @@ def plotData3D_matplotlib(critConf: dict,
         plt.clf()
         return filePath    
 
+def _mergeXYZParams(dataList: list) -> list:
+    """3D plots take either one param with 3 columns (x,y,z) or 3 separate
+    1D params, taken as X, Y and Z in the given order. The latter are merged
+    into a single 3-column DataFrame here."""
+    if len(dataList) != 3 or not all(isinstance(p["data"], pd.Series) for p in dataList):
+        return dataList
+
+    series = [p["data"] for p in dataList]
+    lengths = [len(s) for s in series]
+    if len(set(lengths)) != 1:
+        names = [p.get("name", getattr(p["data"], "name", "?")) for p in dataList]
+        raise ValueError(f"3D plot from 3 separate params requires same lengths, got {dict(zip(names, lengths))}")
+
+    merged = pd.DataFrame({"x": series[0].values, "y": series[1].values, "z": series[2].values}, index=series[0].index)
+    mergedInfo = dict(dataList[0])
+    mergedInfo["data"] = merged
+    mergedInfo["name"] = " / ".join(str(p.get("name", getattr(p["data"], "name", ""))) for p in dataList)
+    return [mergedInfo]
+
 def plotData3D(critConf: dict,
                dataList: list,
                interactive: bool = True,
@@ -427,6 +446,7 @@ def plotData3D(critConf: dict,
                dataHandles: list | None = None,
                legendsLabels: list | None = None) -> str | tuple:
     """Dispatcher for 3D plotting based on rendering engine"""
+    dataList = _mergeXYZParams(dataList)
     if "rendering_engine" not in critConf:
         critConf["rendering_engine"] = os.getenv("PLOT_RENDERING_BACKEND", "matplotlib")
     
