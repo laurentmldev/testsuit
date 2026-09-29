@@ -398,9 +398,9 @@ class AFileMgr(metaclass=abc.ABCMeta):
                     dfParam.attrs["clock corrected"]=f"{shiftDateSec}"
 
         # apply min/max date if requested
-        if minDateSec or maxDateSec:
-            minDateSecStr = str(minDateSec) if minDateSec else "-"
-            maxDateSecStr = str(maxDateSec) if maxDateSec else "-"
+        if minDateSec is not None or maxDateSec is not None:
+            minDateSecStr = str(minDateSec) if minDateSec is not None else "-"
+            maxDateSecStr = str(maxDateSec) if maxDateSec is not None else "-"
             orginalNbSamples=len(dfParam)
             dfParam=dfParam[minDateSec:maxDateSec]
             durationStr=""

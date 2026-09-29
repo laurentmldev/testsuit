@@ -17,32 +17,12 @@ from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 
 NB_MAX_WORKERS=6
 
+# characters replaced in TDMS channel names, applied in one pass by normalizeColumnName()
+_COLUMN_NAME_TABLE = str.maketrans({**{c: "_" for c in " ()/\\'*$^[]-.:="}, "°": "o", "&": "n", "%": "pct"})
+
 def normalizeColumnName(name: str) -> str:
     """Turn a TDMS channel path into a plain ASCII column name (ex: "/'Grp 1'/'Temp (°C)'" -> "Grp_1___Temp__oC")."""
-    normalizedColName=unidecode(name.replace(" ","_") \
-                    .replace("(","_").replace(")","_") \
-                    .replace("/","_").replace("\\","_") \
-                    .replace("°","o") \
-                    .replace("'","_") \
-                    .replace("*","_") \
-                    .replace("$","_") \
-                    .replace("^","_") \
-                    .replace("[","_").replace("]","_") \
-                    .replace("-","_") \
-                    .replace(".","_") \
-                    .replace("&","n") \
-                    .replace(":","_") \
-                    .replace("=","_") \
-                    .replace("%","pct") \
-                        )
-
-    while normalizedColName.startswith("_"):
-        normalizedColName=normalizedColName[1:]
-
-    while normalizedColName.endswith("_"):
-        normalizedColName=normalizedColName[:-1]
-
-    return normalizedColName
+    return unidecode(name.translate(_COLUMN_NAME_TABLE)).strip("_")
 
 def _absoluteTimeTrack(channel) -> np.ndarray:
     """Same as nptdms channel.time_track(absolute_time=True), but a missing 'wf_start_offset'

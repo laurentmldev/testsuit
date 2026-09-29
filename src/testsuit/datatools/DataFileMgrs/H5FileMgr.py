@@ -276,29 +276,28 @@ class H5FileMgr(AFileMgr):
     # 1. try in priority keys of type *ObjRef*
             # retrieve all attributes of type 'Obj Ref'
             for (attrkey,attrVal) in item.attrs.items():
-                # NOTE: h5py.ref_dtype is a numpy dtype, never the type of an attribute value,
-                # so this test is always False and only step 2 below finds index datasets.
-                # isinstance(attrVal, h5py.Reference) would be the working check.
-                if type(attrVal)==h5py.ref_dtype:  # noqa: E721
+                # (comparing type(attrVal) to h5py.ref_dtype, a numpy dtype, never matched)
+                if isinstance(attrVal, h5py.Reference):
                     refAttrs[attrkey]=attrVal
 
             # try to take best one for implicit index (timestamp)
-            for (attrkey,attrval) in refAttrs.items():                
-
+            if len(refAttrs)==1:
                 # if only one ref, we use it
-                if len(refAttrs.keys())==1:
-                    try:
+                attrkey,attrval=next(iter(refAttrs.items()))
+                try:
+                    indexDataset=self.getH5FileRoot()[attrval]
+                except Exception as e:
+                    errMsg=("unable to find reference pointed by attribute '"+str(attrkey)
+                            +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
+                    if "time" in attrkey.lower() or "date" in attrkey.lower():
+                        raise ValueError(errMsg) from e
+                    get_logger().warning(errMsg)
+            else:
+                # otherwise use the first with 'time' or 'date' in attribute name
+                for (attrkey,attrval) in refAttrs.items():
+                    if "time" in attrkey.lower() or "date" in attrkey.lower():
                         indexDataset=self.getH5FileRoot()[attrval]
-                    except Exception as e:
-                        if "time" in attrkey.lower() or "date" in attrkey.lower():
-                            raise ValueError("unable to find reference pointed by attribute '"+str(attrkey)
-                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
-                        get_logger().warning("unable to find reference pointed by attribute '"+str(attrkey)
-                                     +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
-
-                # otherwise use the first with 'time' or 'date' in attribute
-                if "time" in attrkey.lower() or "date" in attrkey.lower():
-                    indexDataset=self.getH5FileRoot()[attrval]                  
+                        break
 
     # 2. if no luck, try to find a *str* attribute with 'time' or 'date' in their name
             if indexDataset is None:

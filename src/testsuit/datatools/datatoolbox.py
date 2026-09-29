@@ -213,34 +213,25 @@ def zoomAndMerge2DData(npArraysList: list[np.ndarray], xMin: float | None = None
     """Merge several 2D arrays into one DataFrame, limited to the provided x/y domain.
 
     :param npArraysList: 2D arrays of shape (2, n): row 0 holds x values, row 1 holds y values
-    :param xMin, xMax, yMin, yMax: strict bounds of the domain; None (or 0) means unbounded
+    :param xMin, xMax, yMin, yMax: inclusive bounds of the domain; None means unbounded
     :return: DataFrame with an "index" column (x) and one "data_<i>" column per array (i starting at 1),
-        rows sorted by x
+        one row per distinct x value, sorted by x (NaN where an array has no point at that x)
     """
+    frames=[]
+    for serieNb, xy in enumerate(npArraysList, start=1):
+        x, y = xy[0], xy[1]
+        keep = np.ones(x.shape, dtype=bool)
+        if xMin is not None: keep &= x >= xMin
+        if xMax is not None: keep &= x <= xMax
+        if yMin is not None: keep &= y >= yMin
+        if yMax is not None: keep &= y <= yMax
+        frames.append(pd.DataFrame({"index": x[keep], "data_"+str(serieNb): y[keep]}))
 
-    finalDf=pd.DataFrame()
-    serieNb=0
-    for nbArray in npArraysList:
-        serieNb+=1
-        xy_data_filtered=nbArray
-        if xMin:
-            xy_data_filtered=np.where(xy_data_filtered[0]>xMin,xy_data_filtered,np.nan)
-        if xMax:
-            xy_data_filtered=np.where(xy_data_filtered[0]<xMax,xy_data_filtered,np.nan)
-        if yMin:
-            xy_data_filtered=np.where(xy_data_filtered[1]>yMin,xy_data_filtered,np.nan)
-        if yMax:
-            xy_data_filtered=np.where(xy_data_filtered[1]<yMax,xy_data_filtered,np.nan)
-        
-        # need to verticalise arrays for CSV dump (transpose)
-        df = pd.DataFrame(np.transpose(xy_data_filtered),columns=["index","data_"+str(serieNb)])
-        df.dropna(how='all',inplace=True) # removing empty rows
-        finalDf=pd.concat([finalDf,df])
+    if not frames:
+        return pd.DataFrame(columns=["index"])
 
-    finalDf.sort_values("index",inplace=True) # sorting by index
-    finalDf=finalDf.groupby(level=0).first() # group cols sharing same index
-
-    return finalDf
+    # one row per x value: values of every array sharing that x end up on the same row
+    return pd.concat(frames).groupby("index", as_index=False, sort=True).first()
 
 
 #######################

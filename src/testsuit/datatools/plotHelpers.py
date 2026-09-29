@@ -201,9 +201,9 @@ def plotData_matplotlib(critConf: dict,
     # update min/max dates for plotting scalar values    
     for paramInfo in dataList:        
         if isinstance(paramInfo["data"],(pd.DataFrame,pd.Series)):
-            if not minDate or paramInfo["data"].index[0]< minDate:
+            if minDate is None or paramInfo["data"].index[0]< minDate:
                 minDate=paramInfo["data"].index[0]
-            if not maxDate or paramInfo["data"].index[-1]> maxDate:
+            if maxDate is None or paramInfo["data"].index[-1]> maxDate:
                 maxDate=paramInfo["data"].index[-1]
             
     assert minDate is not None,\

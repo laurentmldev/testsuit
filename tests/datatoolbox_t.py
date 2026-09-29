@@ -59,3 +59,18 @@ def test_getDateParser_unknown_format():
     from testsuit.datatools.datatoolbox import getDateParser
     with pytest.raises(Exception, match="Unable to parse date format"):
         getDateParser("garbage")
+
+
+def test_zoomAndMerge2DData_aligns_on_x_and_keeps_zero_bounds():
+    import numpy as np
+    from testsuit.datatools.datatoolbox import zoomAndMerge2DData
+    a = np.array([[1, 2, 3], [10, 20, 30.]])
+    b = np.array([[2, 3, 4], [200, 300, 400.]])
+
+    df = zoomAndMerge2DData([a, b])
+    assert list(df["index"]) == [1, 2, 3, 4]
+    assert df.loc[df["index"] == 2, "data_2"].item() == 200
+
+    # 0 is a real bound, and bounds are inclusive (points on the plot edge are kept)
+    df = zoomAndMerge2DData([np.array([[-1, 0, 1], [5, 0, 5.]])], xMin=0, yMin=0)
+    assert list(df["index"]) == [0, 1]
