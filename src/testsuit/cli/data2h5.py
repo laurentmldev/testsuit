@@ -9,6 +9,7 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.plugins import load_plugins
 from testsuit.datatools.datatoolbox import loadDataframeFromFile,getDateParser
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -118,6 +119,8 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
 
 ## the main function
 def main():
+    # external formats (entry points, TESTSUIT_PLUGINS) show up in --extensions help
+    load_plugins()
     enable_pandas_display_helpers()
     
 

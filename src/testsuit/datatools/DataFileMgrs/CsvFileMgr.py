@@ -22,23 +22,10 @@ MAX_CSV_COLS=512
 DEFAULT_COL_IDX=0
 
 def GetCsvFileType(fileName: str) -> str:
-    
-    with open(fileName) as f:
-        first_line = f.readline().strip('\n')
-
-        # influxdb
-        if first_line.startswith("#datatype"):
-            return "influxdb"
-
-        # channels log
-        if "rawVal;engVal;" in first_line:
-            return "channels-pcap-recorder"
-
-        if "date;channel;" in first_line:
-            return "channels"
-
-
-    return "Generic"
+    """Name of the registered CSV variant detecting given file (see formats.register_csv_variant), "Generic" if none."""
+    from testsuit.datatools.DataFileMgrs.formats import find_csv_variant
+    variant = find_csv_variant(fileName)
+    return variant.name if variant is not None else "Generic"
 
 # prepare all header from unaccepted chars
 def cleanCsvHeaderLine(lineStr: str) -> str:

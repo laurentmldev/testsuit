@@ -84,7 +84,7 @@ ruff check .    # catches runtime errors such as undefined names
 
 CI (`.github/workflows/tests.yml`) runs the same lint, the tests on Python 3.10 and 3.12, and a package build, on every pull request.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a file format, a mexploit check or a script.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a file format, a mexploit check or a script, and how another library can register its own formats, criteria and report logo.
 
 ## License
 

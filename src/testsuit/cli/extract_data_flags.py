@@ -22,7 +22,9 @@ from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 
 
 
-EXTENSION_REGEX = re.compile(r"\.(" + "|".join(SUPPORTED_DATAFILE_EXTENSIONS) + r")$", re.IGNORECASE)
+def _extensionRegex() -> re.Pattern:
+    # built at call time: SUPPORTED_DATAFILE_EXTENSIONS grows when external formats are registered
+    return re.compile(r"\.(" + "|".join(re.escape(ext) for ext in SUPPORTED_DATAFILE_EXTENSIONS) + r")$", re.IGNORECASE)
 
 FLAGS_FILE_SUFFIX="_flags.h5"
 
@@ -140,7 +142,7 @@ def _process_file_with_flags_extraction(fpath, results_folder, flags_info, monit
     """Worker function for multithreaded flags extraction processing."""
     
     monitorProgress.msg(msg=f"extracting flags from {fpath}")
-    match = EXTENSION_REGEX.search(fpath)
+    match = _extensionRegex().search(fpath)
     if not match:
         raise Exception(f"Unable to detect file extension: {fpath}")
     targetFile = fpath[:match.start()] + FLAGS_FILE_SUFFIX
