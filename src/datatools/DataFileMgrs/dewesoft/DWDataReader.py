@@ -322,7 +322,7 @@ def read_dws(filename, fields=None, rename=None, scale=None, mixed_sample_rates=
             events_ = (DWEvent * nEvents)()
             stat = mydll.DWGetEventList(events_)
             if stat:
-                raise DWError(stat)
+                raise RuntimeError("DWGetEventList() failed: {}".format(stat))
             for e in events_:
                 time_stamp.append(e.time_stamp)
                 event_type.append(e.event_type)

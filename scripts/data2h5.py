@@ -67,7 +67,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
     def cbSaveDfAsH5File(df,monitorProgress=None):
 
         if df is None:
-            get_logger().warning(f"skipping H5 writing of None param {name} from {origin}")    
+            get_logger().warning(f"skipping H5 writing of None param from {targetFile}")    
             return True
         
         monitorProgress.set_total_items(1)
@@ -83,7 +83,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
         try:
             DataframeToHdf5(targetFile,h5GroupName,df,comment=comment,chunk_size=True)
         except Exception as e:
-            progressCb(msg=f"while writing file '{targetFile}' for {df.name} : {str(e)}",msgSeverity="error")
+            monitorProgress.msg(msg=f"while writing file '{targetFile}' for {df.name} : {str(e)}",msgSeverity="error")
             return False
 
         monitorProgress.msg(msg=f"generated/updated file '{targetFile}' for {df.name}")

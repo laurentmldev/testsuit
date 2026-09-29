@@ -8,7 +8,7 @@ sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.ends
 
 from datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
 from misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
-from datatools.Data2Db import create_data2db
+from datatools.data2db import create_data2db
 from misc.logger import create_logger,get_logger
 
 
