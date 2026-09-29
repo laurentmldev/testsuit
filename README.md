@@ -18,7 +18,6 @@ Optional features are installed as extras:
 | Extra      | Adds                                         |
 |------------|----------------------------------------------|
 | `plotly`   | interactive plots in mexploit reports        |
-| `word`     | Word report generation (`iced.shadox_word`)  |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
 | `test`     | what the test suite needs                    |
@@ -36,7 +35,6 @@ src/                  importable packages (added to the path by an install)
   exploit/
     mexploit/         YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/           runs mexploit over test sessions and builds HTML reports
-  iced/               Shadox API client (v1, v2) and Word report generation
   jupytertools/       ipywidgets GUIs for notebooks
   misc/               logging, progress reporting, file helpers
 scripts/              command-line entry points (see below)

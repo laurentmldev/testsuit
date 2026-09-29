@@ -157,9 +157,6 @@ def loadDataset(repoPath,datasourceImporter,datasourcePath,datasetNode,contextFi
     dataImporter=None
     if datasourceImporter.lower()=="git":        
         dataImporter=GitImporter(datasetFullLocalPath,branch=datasetPath,url=datasourcePath)
-    elif datasourceImporter.lower()=="shadox":
-        from datatools.datapack.ShadoxImporter import ShadoxImporter
-        dataImporter=ShadoxImporter(datasetFullLocalPath,dataset_urn=datasetPath,shadox_url=datasourcePath,keys_prefix=datasetId)
     else:
         print(Fore.RED+"ERROR: unknown datasource importer '"+datasourceImporter+"' for dataset '"+datasetId+"'"+Style.RESET_ALL)
         sys.exit(1)
