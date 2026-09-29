@@ -217,7 +217,9 @@ def getParentKey(key):
 # @param dicoEntries dictionary entries of the dico 
 # @param dicoKeysOrigin keys origin for traceability. If not defined here, a key is traced a coming from <diconame> in the .<diconame>.keysorigin file
 # @return true if success, false otherwise
-def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
+def createDicoFile(diconame, dicoEntries, dicoKeysOrigin=None,deps=None):
+	dicoKeysOrigin=dicoKeysOrigin or {}
+	deps=deps or []
 	fileout=open(diconame, "w")
 	fileout.write("# This dictionary is a merge from : "+str(deps)+"\n")
 	nbentries=0
@@ -245,9 +247,9 @@ def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
 # generate also associated auth. data
 # @param newDicoName file name of the new dictionary
 # @param inputDicosList list of input dicos files
-# @param deps list of dependency files
+# @param deps unused, the input dicos are recorded as dependencies
 # @return True if successful, false otherwise
-def mergeDicos(newDicoName, inputDicosList,deps=[]):
+def mergeDicos(newDicoName, inputDicosList,deps=None):
 	resultDico, keysorigin=loadDicos(inputDicosList)
 	# generating dico file
 	return createDicoFile(newDicoName, resultDico, keysorigin, inputDicosList)

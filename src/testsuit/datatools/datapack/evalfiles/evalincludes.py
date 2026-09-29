@@ -178,13 +178,15 @@ def _replace_last_occ(s, old, new):
 # @param lines lines to process
 # @param parentParamsDico local params given parent include of this one (include within an include)
 # @return a big line (separated with '\n' chars)
-def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
+def _processExpandIncludes(curFilePath,lines, parentParamsDico=None):
 	global curPath
 	global includeFoundInLatestEval
 	resultLine=""
 	nbLine=0
 	curPath.append(dirname(curFilePath))
 
+	if parentParamsDico is None:
+		parentParamsDico={}
 	curParametrizedIncludedTxt=None
 	curParametersDico=parentParamsDico
 	
@@ -208,13 +210,13 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 				includeOnce=True			
 			
 			if re.search(INCLUDE_REGEX,line):				
-				includedTxt=re.sub(INCLUDE_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+				includedTxt=re.sub(INCLUDE_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 				#print("		--- INCLUDE simple:"+line)
 				#print("-->\n"+includedTxt)
 				if len(includedTxt)>0:
 					resultLine+=lineSep+includedTxt		
 			else:
-				curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+				curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 				#print("		--- INCLUDE with params:"+line)
 				#print("-->\n"+curParametrizedIncludedTxt)
 				# remove remaining closing '</_include_>' XML node if no error detected
@@ -231,11 +233,13 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 
 		# starting include with params
 		elif re.search(INCLUDE_WITH_PARAMS_REGEX,line) :
+			# params of this include start from the parent's, without leaking into them
+			curParametersDico=dict(parentParamsDico)
 			includeOnce=False
 			if re.search(KEYMARK_ATTR_ONCE,line):
 				includeOnce=True
 			
-			curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+			curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 			#print("		--- include with params : includeFoundInLatestEval="+str(includeFoundInLatestEval)+" \n"+curParametrizedIncludedTxt)
 
 		# retrieving include params

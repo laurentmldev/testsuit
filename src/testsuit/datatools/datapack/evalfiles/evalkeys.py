@@ -240,7 +240,7 @@ def _getDefaultKeysDico():
 ## Set current replacement context to the given dictionary. This routine must be called prior to invoking 'replaceKeys' routine.
 # Set also few environment keys
 # @see replaceKeys
-def setDico(replaceDictionary, mykeysorigin={}):
+def setDico(replaceDictionary, mykeysorigin=None):
 	global dico
 	global nbUndefined
 	global nbInfinateRecursion
@@ -249,7 +249,7 @@ def setDico(replaceDictionary, mykeysorigin={}):
 	dico.update(replaceDictionary)
 	dico.update(defaultKeysDico)	
 	rpltraces.clear()
-	keysorigin.update(mykeysorigin)
+	keysorigin.update(mykeysorigin or {})
 	keysorigin.update(defaultKeysOrigin)
 
 def getDico():

@@ -1,7 +1,5 @@
 
-import sys,os
-
-import os,os.path,getpass,stat,traceback
+import sys,os,getpass,stat,traceback
 from pathlib import Path
 
 import yaml
@@ -22,7 +20,6 @@ import socket
 from datetime import datetime
 
 import shutil
-import sys
 from colorama import Fore, Style
 from colorama import init as colorama_init
 colorama_init()
@@ -101,7 +98,7 @@ def expandPath(path,evalTargetFolder=None,evalDicosList=None,evalPartialOk=False
     
 def runDataprocessor(arguments, processorName):
 
-    if type(arguments) != list:
+    if not isinstance(arguments, list):
         arguments = [arguments]
 
     # retrieve some potential specific extra arguments for the processor
@@ -341,7 +338,7 @@ def finalizeDatapack(setupId, testId, userId, timestamp, datapackFolder, datapac
 
     try:
         shutil.rmtree(datapacks+os.sep+datatpackName,onerror=del_rw)
-    except:
+    except OSError:
         print(Fore.YELLOW+f"WARNING: unable to clean temporary folder {datapacks+os.sep+datatpackName}."+Style.RESET_ALL)            
     
     return finalFileName

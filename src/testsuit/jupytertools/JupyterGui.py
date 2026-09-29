@@ -72,12 +72,14 @@ class AGuiComponent:
 class GuiFileSelection(AGuiComponent):
     
     def __init__(self,guiComponentsMap,fileMgrsList,customSelectedFilesChangedCb=None,multi=True,\
-                        filterFiles=[("Data Files"," ".join(["*." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]))]):
+                        filterFiles=None):
         self.name="GuiFileSelection"
         self.guiComponentsMap=guiComponentsMap
         self.guiComponentsMap[self.name]=self
         self.customSelectedFilesChangedCb=customSelectedFilesChangedCb
         self.fileMgrsList=fileMgrsList
+        if filterFiles is None:
+            filterFiles=[("Data Files"," ".join(["*." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]))]
         self.filters=filterFiles
         self.multi=multi
         self.label_files_list = HTML("No File Selected")
