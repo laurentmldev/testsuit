@@ -13,6 +13,7 @@ It adds:
 | mexploit criteria registered one by one (`@register_criterion`) | `checks.py` | `type: no_dropout`, `mean_close_to` |
 | a datapack importer | `importer.AcmeArchiveImporter` | `importer: acme-archive` in datapack setups |
 | its own logo on the exploit_runner HTML report | `assets/acme_logo.svg` | every report |
+| a command-line tool | `cli.py` | `acme-bench` |
 
 All of it is registered in one function, `plugin.register()`, which `pyproject.toml` declares as a `testsuit.plugins` entry point. Once the package is installed, testsuit calls it by itself: in your scripts, in the command-line tools (`data2h5`, `mxp`, `exploit_runner`, `datapack`...), and in the `mxp` processes exploit_runner starts for each test run.
 
@@ -24,6 +25,7 @@ acme_testbench/
     filemgrs.py               file managers (readers)
     criteria.py, checks.py    mexploit criteria
     importer.py               datapack importer
+    cli.py                    the acme-bench command
     assets/acme_logo.svg      report logo
   sample/
     data/                     one file of each format, same 60 s run
@@ -84,6 +86,17 @@ datapack sample/datapack/testdef/acme_testdef.yml --nocheck
 
 The dataset is imported into `.work/datarepo/bench_calib/v1.2`, its keys fill `setup/templates/bench_config.yml`, and the datapack zip lands in `.work/datapacks`. Run it again and the dataset is checked (version and checksums) instead of being imported again.
 
+**Use the `acme-bench` command**, installed with the package (`[project.scripts]` in pyproject.toml):
+
+```bash
+acme-bench info sample/data                     # data files, the reader of each one, their parameters
+acme-bench criteria --templates                 # the criteria this package adds, with their scenario syntax
+acme-bench check sample/data max_slope ShaftSpeed_rpm max_per_sec=60     # one criterion, no scenario needed
+acme-bench import sample/datapack/archive_store v1.2 .work/calib/bench_calib/v1.2
+```
+
+`check` runs any criterion registered by a plugin on one parameter (a regex matching a single one), with the criterion settings given as `key=value`. It prints `OK` or `FAILED` with the reason and exits with 0, 1, or 2 on a usage error, so it fits in shell scripts. `import` fetches a dataset version like datapack does; on a folder already imported, it checks the version and checksums instead.
+
 **Run the tests**:
 
 ```bash
@@ -105,5 +118,7 @@ Extensions can contain dots (`"sim.yml"`), and `accepts=lambda filename: ...` na
 **A datapack importer.** Subclass `ADataImporter` (`retrieve()`, `checkVersion()`, `getChanges()`, `getTag()`) and register the class, or any factory `(targetDir, remotePath, versionId)`: `register_data_importer("acme-archive", AcmeArchiveImporter)`. After `retrieve()`, the dataset folder must hold a `dataset.dico` file with the keys the datapack files can use.
 
 **The report logo.** `set_default_report_logo(svg=...)` takes SVG markup or a file path; `title="..."` keeps testsuit's animated logo with your name in it. For one run only, use `exploit_runner --report-logo logo.svg` or `--report-logo-title "ACME Bench"`.
+
+**A command.** Declare it in `[project.scripts]` (`acme-bench = "acme_testbench.cli:main"`) and call `testsuit.plugins.load_plugins()` before using testsuit, so that your command sees the same formats and criteria as testsuit's own commands.
 
 Without installing your package, `TESTSUIT_PLUGINS=acme_testbench.plugin` in the environment does the same as the entry point. See the "Extending testsuit from another library" section of testsuit's CONTRIBUTING.md for the reference.

@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+[project.scripts]
+acme-bench = "acme_testbench.cli:main"
+
 # how testsuit finds this package's registrations, in every process and command-line tool
 [project.entry-points."testsuit.plugins"]
 acme_testbench = "acme_testbench.plugin:register"
