@@ -1,0 +1,14 @@
+__pycache__
+.ipynb_checkpoints
+*.pyc
+*.ipynb
+demo_data
+*.tmp
+tmp/
+.current_datapack
+# for testing datapack import
+dataset.dico
+.dataset.dico
+tests/etc/mexploit/scenarii/*/conftest.py
+.venv
+.current_datapack

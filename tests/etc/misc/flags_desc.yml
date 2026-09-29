@@ -1,0 +1,15 @@
+
+# description how to decode bin 'flag_param' from flags.csv file
+"flags":
+  "flag_param":
+    0:
+      name: active_ON
+      description: is active
+    1:
+      description: anomaly detected
+    2-3:
+      description: current state
+      values:
+        "00": idle
+        "10": starting
+        "11": running

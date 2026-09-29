@@ -1,0 +1,77 @@
+
+import argparse,os,sys
+import sys,json,logging
+
+# add deps path (relative path to this module)
+sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."+os.sep+"src"))
+sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ )))
+
+from datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
+from misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
+from datatools.Data2Db import create_data2db
+from misc.logger import create_logger,get_logger
+
+
+create_logger("data2db")
+
+## check if the given file is accessible
+def isInputReadable(f):
+    if not os.access(f,os.R_OK):
+        get_logger().error("{0} does not exist or is not reachable".format(f))
+        sys.exit(1)
+
+    return f
+
+# override the parsing error message using logger
+class HelpParser(argparse.ArgumentParser):
+    def error(self, message):
+        get_logger().error("Input Arguments Error : "+message)
+        sys.exit(1)
+
+## the main function
+if __name__ == '__main__':
+    parser = HelpParser(description=
+    """Extract given parameters from data files or DB.
+    
+    To extract into a db, you must provide a json file as follow:
+        { 
+            "params" : ["No2"],
+            "indices" : [],
+            "db" : {
+                "dbtype" : "influxdb",
+                "url" : "http://influxdb:8086", 
+                "org" : "_sandbox_",
+                "bucket" : "testBucket", 
+                "measurement" :"testMeas",
+                "rename_params_re" : ".*([^/]+)$",
+                "dateUnit" : "s"
+            }
+        }
+
+    Return 1 if something went wrong, 0 otherwise
+    """,
+    formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('sourceFolderOrFile', metavar="FolderOrFile", help="source folder or file  where to scan data files",type=isInputReadable)
+    parser.add_argument('confJson', help="Conf for DB parameters. See up there of details about expected contents",type=isInputReadable)
+    parser.add_argument('-t','--token',help="DB password or token")
+    parser.add_argument("--test",action='store_true', default=False, help="Dry-run: does not actually inject data")
+    parser.add_argument('-d',"--debug",action='store_true', default=False, help="Show debug messages")
+    parser.add_argument('--extensions',default=SUPPORTED_DATAFILE_EXTENSIONS, help="List files format to use as input")
+    args = parser.parse_args()
+
+    if args.debug==True:
+        get_logger().setLevel(logging.DEBUG)
+
+    conf=None
+    with open(args.confJson) as f:
+        conf=json.load(f)           
+        
+    monitorProgress=MonitorProgress(progressCb=consoleRichProgressCb,name="data2db")
+    dbHandler = create_data2db(conf["db"]["dbtype"])
+    rst = dbHandler.data2db(args.sourceFolderOrFile,conf,args.extensions,token=args.token,dryRun=args.test,monitorProgress=monitorProgress,silent=True)
+
+    if rst == True:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+    

@@ -1,0 +1,26 @@
+[
+  {
+    "pattern": "name1",
+    "swap_needed": false,
+    "bit_fields": [
+      {"name": "PARAM1", "start_bit": 0, "size": 32, "signed": false},
+      {"name": "PARAM2", "start_bit": 0, "size": 8, "signed": false},
+      {"name": "PARAM3", "start_bit": 8, "size": 1, "signed": false},
+      {"name": "PARAM4", "start_bit": 9, "size": 1, "signed": false}
+    ]
+  },
+  {
+    "pattern": "name2",
+    "swap_needed": true,
+    "bit_fields": [
+      {"name": "ENUM", "start_bit": 0, "size": 32, "signed": false}
+    ]
+  },
+  {
+      "pattern": "events",
+      "is_hex_u64": true,
+      "swap_needed": true,
+      "ascii_shift": 10,
+      "factor": 0.000000001
+  }
+]
