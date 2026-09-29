@@ -1,0 +1,7 @@
+# values normally retrieved from Shadox or Git, just declared in local for easier CI/CD test, for now
+my_dataset.param2.meco_min=0.1
+my_dataset.param2=5
+my_dataset.param2.meco_max=0.3
+
+my_dataset.param1.metadata.rawUnit=m3/s
+my_dataset.param1.default=3.1415

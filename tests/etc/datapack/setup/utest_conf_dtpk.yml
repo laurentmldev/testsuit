@@ -1,0 +1,35 @@
+my_conf_dtpk:
+  setup_id: my_
+
+  dictionaries:
+    - globals.dico
+
+  # no datarepository for utest, to facilitate integration all data in local dictionaries
+  # See file ./sample_conf_git.yml for a more complete example
+  repositories: {}
+
+  components:
+    component_def:
+      - type: comp1
+        configuration:
+          - id: standard
+            input:
+              - template: utest_ref_files/ref1.txt
+                method: eval
+                postprocess: ""
+                optional: true
+                value: MyRef1.txt
+              - template: utest_ref_files/ref2.txt
+                method: copy
+                postprocess: ""
+                optional: false
+                value: MyRef2.txt
+
+  configurations:
+    configuration:
+      - id: nominal
+        component:
+          - id: mycmp1
+            name: Comp One
+            type: comp1
+            configuration: standard

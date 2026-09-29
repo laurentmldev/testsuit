@@ -1,0 +1,73 @@
+datapack_setup:
+  setup_id: coffeemaker
+
+  dictionaries:
+    - globals.dico
+
+  datarepositories:
+    - id: git_data
+      name: Repo for Git Data
+      path: ~/Documents/datarepo/from_git
+      datasource:
+        - id: git_datapacks
+          name: Git Datapacks Def
+          importer: git
+          path: https://github.com/to_be_completed/exploit_scn.git
+          dataset:
+            - id: datapacks
+              path: _K_(datapacks_version)
+              postprocess: basickeys.py,finalize.py
+
+    #- id: shadox_data
+    #  name: Repo for Shadox Data
+    #  path: ~/Documents/datarepo/from_shadox
+    #  datasource:
+    #    - id: shadox_instance
+    #      name: Shadox Instance
+    #      importer: shadox
+    #      path: https://xxx/shadox-service/rest/api
+    #      dataset:
+    #        - id: platform_1
+    #          path: /project/CORPORATE/dataset/My_System.My_Test_Facilities.My_Platform@CORP/variant/_K_(ptf_version)
+    #          postprocess: basickeys.py,finalize.py
+
+  components:
+    component_def:
+      - type: comp1
+        configuration:
+          - id: standard
+            input:
+              - template: sample_ref_files/ref1.txt
+                method: eval
+                postprocess: ""
+                optional: true
+                value: MyRef1.txt
+
+      - type: comp2
+        configuration:
+          - id: nominal
+            input:
+              - template: sample_ref_files/ref2.txt
+                method: eval
+                postprocess: ""
+                optional: true
+                value: MyRef2.txt
+              # this template file is not defined here in platform conf, and thus must be defined within testdef
+              - template: local_ref_files/my_ref_file.txt
+                method: copy
+                postprocess: ""
+                optional: false
+                value: MyLocalRefFile.txt
+
+  configurations:
+    configuration:
+      - id: nominal
+        component:
+          - id: mycmp1
+            name: Comp One
+            type: comp1
+            configuration: standard
+          - id: mycmp2
+            name: Comp Two
+            type: comp2
+            configuration: nominal
