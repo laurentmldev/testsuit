@@ -19,15 +19,19 @@ def expandPath(path,relPrefix="."):
 
 
 ## provide a standard seconds-based timestamp
-# @param date Python date object (like the one returned by 'datetime.datetime.now()')
+# @param date Python date object (default: now, evaluated at call time)
 # @return "%Y-%m-%d %H:%M:%S"
-def getTimestamp(date=datetime.now()):
+def getTimestamp(date=None):
+	if date is None:
+		date=datetime.now()
 	return date.strftime("%Y-%m-%d %H:%M:%S")
 
 ## provide a filename optimized seconds-based timestamp
-# @param date Python date object (like the one returned by 'datetime.datetime.now()')
+# @param date Python date object (default: now, evaluated at call time)
 # @return "%Y%m%d_%H-%M-%S"
-def getFileTimestamp(date=datetime.now()):
+def getFileTimestamp(date=None):
+	if date is None:
+		date=datetime.now()
 	return date.strftime("%Y%m%d_%H-%M-%S")
 
 

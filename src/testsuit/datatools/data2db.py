@@ -18,6 +18,26 @@ from testsuit.misc.MonitorProgress import MonitorProgress
 from testsuit.datatools.datatoolbox import *
 
 
+def _confDateToNanosec(conf: dict, key: str) -> float | None:
+    """Read an optional date bound from a data2db conf as nanoseconds since epoch.
+
+    Accepts a date string ('2017-12-16 03:02:35.123456') or seconds since epoch ('1513393355.123456').
+    Returns None when the key is missing or empty.
+    """
+    value=conf.get(key)
+    if value is None or value=="":
+        return None
+    try:
+        return pd.Timestamp(value).timestamp()*1e9
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(value)*1e9
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"invalid value given as '{key}'. Accepted formats are '2017-12-16 03:02:35.123456'"
+                         f" or '1513393355.123456': given value was '{value}'") from e
+
+
 class Data2Db(ABC):
     """Abstract base class: extract data as pandas DataFrames, and inject them into the requested DB.
 
@@ -180,27 +200,8 @@ Example of conf dictionary:
         dateCoefToNanosec=getCoefConvToNanosec(conf.get("dateUnit"))
         dateOffset=getDateOffsetSec(conf.get("dateOffset"),conf.get("timezone"))
         
-        minDate=conf.get("minDate")
-        if minDate and len(minDate)>0:
-            try: minDate=pd.Timestamp(minDate).timestamp()*1e9
-            except: 
-                try: minDate=number(minDate)*1e9
-                except:
-                    raise ValueError("invalid value given as 'minDate'."\
-                                            +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
-                                            +f" given value was '{maxDate}'")
-        else: minDate=None
-
-        maxDate=conf.get("maxDate")
-        if maxDate and len(maxDate)>0:
-            try: maxDate=pd.Timestamp(maxDate).timestamp()*1e9
-            except: 
-                try: maxDate=number(maxDate)*1e9
-                except:
-                    raise ValueError("invalid value given as 'maxDate'. "\
-                                            +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
-                                            +f" given value was '{maxDate}'")
-        else: maxDate=None
+        minDate=_confDateToNanosec(conf,"minDate")
+        maxDate=_confDateToNanosec(conf,"maxDate")
 
         verticalOffset=0
         if "verticalOffset" in conf: verticalOffset=conf["verticalOffset"]    
