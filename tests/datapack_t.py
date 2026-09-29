@@ -14,12 +14,14 @@ log = logging.getLogger()
 IGNORE_PATTERNS = [
     (r'\\','/'),
     (r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}', '<TIMESTAMP>'),
-    (r'(:|=).*/testsuit/',r'$1.../testsuit/'),
+    # pwd before the generic path rule, which would otherwise eat it when the
+    # checkout folder itself is named testsuit (e.g. CI: .../testsuit/testsuit)
+    (r'pwd=\s*\S+', 'pwd=<PWD>'),
+    (r'PWD:\s*\S+', 'PWD: <PWD>'),
+    (r'(:|=).*/testsuit/',r'\1.../testsuit/'),
     (r'User:\s*\S+', 'User: <USER>'),
     (r'Host:\s*\S+', 'Host: <HOST>'),
     (r'host=\s*\S+', 'host=<HOST>'),
-    (r'pwd=\s*\S+', 'pwd=<PWD>'),
-    (r'PWD:\s*\S+', 'PWD: <PWD>'),
     (r'C:/Users/[^/]+/',r'<HOME>/'),
     (r'/home/[^/]+', '<HOME>'),
     (r'/root/[^/]+', '<ROOT_HOME>'),

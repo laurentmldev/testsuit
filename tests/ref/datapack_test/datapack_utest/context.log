@@ -1,0 +1,21 @@
+--- Datapack Generation Context ---
+Date: 2026-09-29 16:49:11
+User: root
+Host: vm
+PWD: /home/claude/testsuit
+Test Procedure: /home/claude/testsuit/tests/etc/datapack/testdef/datapack_utest.yml
+setup: /home/claude/testsuit/tests/etc/datapack/setup/utest_conf_dtpk.yml
+tools: /home/claude/testsuit/src/datatools/datapack/datapack_tools.py
+nocheck: True
+-----------------------------------
+
+WARNING: testdef folder is not a clean tag
+WARNING: Setup folder is not a clean tag
+--------------Baseline-------------
+-----------------------------------
+
+--------------Setup-------------
+setup_id: my_
+setup_conf: nominal
+-----------------------------------
+
