@@ -1,11 +1,11 @@
-"""Base class of all data file readers ("file managers"), and the DataFrame/Series.pstr() helper.
+"""Base class of all data file readers ("file managers"), and the pretty_str() description of a parameter.
 
 A file manager lists the parameters (fields) of one data file and loads the requested ones as pandas objects
 indexed by dates in seconds since epoch. Concrete classes implement getFieldNames() and loadParams();
 findParams() and finalizeParam() apply the common logic (regex selection, clock correction, time range, naming).
 
-/!\ importing this module sets pandas' global float display format and adds a 'pstr()' method
-to pandas DataFrame and Series.
+Importing this module changes nothing in pandas. Applications (CLI commands, mexploit runs, Jupyter GUIs)
+call enable_pandas_display_helpers() to get 6-decimal float display and the df.pstr() shortcut.
 """
 from __future__ import annotations
 
@@ -20,13 +20,18 @@ from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.datatoolbox import getDfName
 
-pd.set_option('display.float_format', lambda x: '%.6f' % x)
+def _float6(x: float) -> str:
+    return '%.6f' % x
 
-def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
+def pretty_str(data: pd.DataFrame | pd.Series) -> str:
     """Detailed description of a parameter for exploitation logs: values, duration, time range, NaN count,
     average sample rate, origin and, for numeric data, mean/min/max with their dates.
-    Available as df.pstr() on any DataFrame or Series."""
-    
+    Also available as df.pstr() once enable_pandas_display_helpers() has been called."""
+    with pd.option_context('display.float_format', _float6):
+        return _pretty_str(data)
+
+def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
+
     nbNan=0
     if isinstance(self, pd.DataFrame):
         nbNan = self.isna().sum().sum()
@@ -83,8 +88,12 @@ def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
     finalStr+="\n-----------------------------------------\n"
     return finalStr
 
-pd.DataFrame.pstr = _pretty_str  
-pd.Series.pstr = _pretty_str  
+def enable_pandas_display_helpers() -> None:
+    """Process-wide pandas settings for testsuit applications: floats displayed with 6 decimals, and
+    DataFrame/Series.pstr() as a shortcut for pretty_str(). Libraries importing testsuit need not call it."""
+    pd.set_option('display.float_format', _float6)
+    pd.DataFrame.pstr = pretty_str
+    pd.Series.pstr = pretty_str
 
 from testsuit.misc.logger import get_logger
 
@@ -369,7 +378,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
                             get_logger().info(f"[skipped clock correction of param {name} (it is itself a timestamp)]")
                             return dfParam
                         msg=f"clock data is not overlapping dates of param {name}, unable to apply clock correction"
-                        print(f"\n{dfParam.pstr()}\n{shiftDateSec.pstr()}")
+                        print(f"\n{pretty_str(dfParam)}\n{pretty_str(shiftDateSec)}")
                         if self._continueOnError:
                             monitorProgress.msg(msg=msg,msgSeverity="error")
                             return None

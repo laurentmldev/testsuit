@@ -4,6 +4,7 @@ import sys,os,logging
 
 
 from testsuit.misc.logger import create_logger
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers, pretty_str
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
 
@@ -89,7 +90,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
 
     def cbprintDf(df,name=None,origin=None):
         if df is not None: 
-            print(df.pstr())
+            print(pretty_str(df))
         return True
 
 
@@ -117,6 +118,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
 
 ## the main function
 def main():
+    enable_pandas_display_helpers()
     
 
     parser = HelpParser(description=

@@ -12,6 +12,7 @@ import pandas as pd
 
 
 from testsuit.misc.logger import create_logger, get_logger
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.misc.MonitorProgress import MonitorProgress, consoleRichProgressCb
 
 from testsuit.datatools.datatoolbox import loadDataframeFromFile
@@ -273,6 +274,7 @@ class HelpParser(argparse.ArgumentParser):
 
 ## the main function
 def main():
+    enable_pandas_display_helpers()
     
     parser = HelpParser(description=
     """Extract given parameters and decode them using a JSON/YAML config.""",

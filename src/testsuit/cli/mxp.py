@@ -4,6 +4,7 @@ import sys,os,re
 
 
 from testsuit.exploit.mexploit.mexploit import mexploit
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit import misc
 
 # clearer messages in HTML report (pytest syscap)
@@ -28,6 +29,7 @@ class _HelpParser(argparse.ArgumentParser):
     
 ## the main function
 def main():
+    enable_pandas_display_helpers()
     parser = _HelpParser(description=
     """ Run mexploit (Master eXPloit) analysis using given configurations.
     

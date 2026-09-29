@@ -6,6 +6,7 @@ import sys
 
 
 from testsuit.datatools.datatoolbox import loadDataframeFromFile
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -137,6 +138,7 @@ def apply_clock_correction(target_folder,
 
  
 def main():
+    enable_pandas_display_helpers()
     parser = argparse.ArgumentParser(
         description="Apply clock correction to extracted data files."
     )

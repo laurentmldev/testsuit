@@ -12,6 +12,7 @@ from ruamel.yaml.error import YAMLError
 
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers, pretty_str
 from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -63,7 +64,7 @@ def cbExtractFlags(df, flags_info, monitorProgress):
         monitorProgress.msg(msg=f"{series.name}: ALL values are NaN", msgSeverity="warning")
     
     elif has_na.any(): 
-        monitorProgress.msg(msg=f"{series.name} contains {len(has_na[has_na==True])}/{len(series)} NaN values:\n{series[has_na].pstr()}", msgSeverity="warning")
+        monitorProgress.msg(msg=f"{series.name} contains {len(has_na[has_na==True])}/{len(series)} NaN values:\n{pretty_str(series[has_na])}", msgSeverity="warning")
             
     
     results = []
@@ -219,6 +220,7 @@ def extract_data_flags(target_files, flags_info_file, results_folder=None,
 
  
 def main():
+    enable_pandas_display_helpers()
     parser = argparse.ArgumentParser(
         description="Extract flags values."
     )
