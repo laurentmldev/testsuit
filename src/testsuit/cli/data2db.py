@@ -1,6 +1,5 @@
 
-import argparse,os,sys
-import sys,json,logging
+import argparse,os,sys,json,logging
 
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
@@ -53,10 +52,11 @@ def main():
     parser.add_argument('-t','--token',help="DB password or token")
     parser.add_argument("--test",action='store_true', default=False, help="Dry-run: does not actually inject data")
     parser.add_argument('-d',"--debug",action='store_true', default=False, help="Show debug messages")
-    parser.add_argument('--extensions',default=SUPPORTED_DATAFILE_EXTENSIONS, help="List files format to use as input")
+    parser.add_argument('--extensions',type=lambda s: s.split(","),metavar='ext1,ext2,...',
+                        help="File extensions to use as input (default: "+",".join(SUPPORTED_DATAFILE_EXTENSIONS)+")")
     args = parser.parse_args()
 
-    if args.debug==True:
+    if args.debug:
         get_logger().setLevel(logging.DEBUG)
 
     conf=None

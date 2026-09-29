@@ -39,7 +39,7 @@ def extract_to_hdf5(h5fileName,paramsDfList):
 
     return True
         
-def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensions=["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],
+def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensions=None,
                                         excludeParamsRegex=None, minDate=None, maxDate=None, mergeParams=True,
                                         shiftDateSec=None,shiftDateRegex=None, shiftDateInverted=None,
                                         listOnly=False, silent=False, 
@@ -134,13 +134,14 @@ def main():
     parser.add_argument('--indices',metavar='paramIdx1,paramIdx2,...', help="use provided params as indices, 'auto' for trying to automatically identify one. Ex: 'param_02_timestamp,auto'")
     parser.add_argument('-d',"--debug",action='store_true', default=False, help="Show debug messages")
     parser.add_argument('-s',"--silent",action='store_true', default=False, help="Only show relevant output messages, no progress.")
-    parser.add_argument('--extensions',default=SUPPORTED_DATAFILE_EXTENSIONS, help="List files format to use as input")
+    parser.add_argument('--extensions',type=lambda s: s.split(","),metavar='ext1,ext2,...',
+                        help="File extensions to use as input (default: "+",".join(SUPPORTED_DATAFILE_EXTENSIONS)+")")
     parser.add_argument('--minDate', help="Minimal date of data to record in file")
     parser.add_argument('--maxDate', help="Maximal date of data to record in file")
     
     args = parser.parse_args()
     
-    if args.debug==True:
+    if args.debug:
         get_logger().setLevel(logging.DEBUG)
 
     get_logger().debug(args.target)

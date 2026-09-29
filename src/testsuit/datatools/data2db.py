@@ -51,7 +51,7 @@ class Data2Db(ABC):
     def data2db(self,
                 sourceFolderOrFiles: str | list,
                 conf: dict,
-                extensions: list = ["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],
+                extensions: list[str] | None = None,
                 token: str | None = None,
                 dryRun: bool = False,
                 monitorProgress: MonitorProgress | None = None,
@@ -61,7 +61,7 @@ class Data2Db(ABC):
         
         :param sourceFolderOrFiles (str|list): path to file or folders containing data to extract."
         :param conf (dict): request configuration (see details here under)
-        :param extensions (list): list of accepted file extensions. See datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS for default list.
+        :param extensions (list): list of accepted file extensions. Defaults to every entry of datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS.
         :param token (str): token or password for DB access
         :param dryRun (bool): if true, only list fields detected, but do not actually upload data
         :monitorProgress (func): progress monitoring obj (see misc::monitorProgress)
@@ -151,7 +151,7 @@ Example of conf dictionary:
     def getFieldsList(self,
                 sourceFolderOrFiles: str | list,
                 conf: dict,
-                extensions: list = ["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],                
+                extensions: list[str] | None = None,                
                 monitorProgress: MonitorProgress | None = None,
                 abortEvent: threading.Event | None = None,
                 silent: bool = False) -> dict | None:

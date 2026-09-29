@@ -20,9 +20,6 @@ from testsuit.misc.logger import create_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 
 
-import pandas as pd
-import numpy as np
-
 
 EXTENSION_REGEX = re.compile(r"\.(" + "|".join(SUPPORTED_DATAFILE_EXTENSIONS) + r")$", re.IGNORECASE)
 
@@ -90,7 +87,7 @@ def cbExtractFlags(df, flags_info, monitorProgress):
             
             # Build binary strings for values_map lookup
             extracted = extracted_int.apply(
-                lambda v: f'{v:0{num_bits}b}' if pd.notna(v) else np.nan
+                lambda v, num_bits=num_bits: f'{v:0{num_bits}b}' if pd.notna(v) else np.nan
             )
             
             if values_map:

@@ -79,10 +79,12 @@ class FolderParamMgr(AFileMgr):
                 self.__filesList.append(source_path)
             else:
                 for root, _subdirs, files in os.walk(source_path):
+                    # case-insensitive on both sides ('influxdbV3.yml'), one entry per file
+                    # even when several extensions match its name
+                    extensions=tuple(ext.lower() for ext in self.getSupportedFileExtensions())
                     for file in files:
-                        for extension in self.getSupportedFileExtensions():
-                            if file.lower().endswith(extension):
-                                self.__filesList.append(root+os.sep+file)
+                        if file.lower().endswith(extensions):
+                            self.__filesList.append(root+os.sep+file)
 
         if len(self.__filesList)==0:
             raise FileNotFoundError("No file matching provided extensions "+str(self.getSupportedFileExtensions())\

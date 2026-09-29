@@ -1,22 +1,12 @@
 
-import sys,os
-
-
 import argparse
-import os,os.path
-
-
-
-
-
-from testsuit.datatools.datapack.datapack_tools import datapack
-
-from testsuit import misc
-
+import os
+import sys
 
 from colorama import Fore, Style
 
-import sys
+from testsuit import misc
+from testsuit.datatools.datapack.datapack_tools import datapack
 
 ## check if the given file is accessible
 def _isInputReadable(f):

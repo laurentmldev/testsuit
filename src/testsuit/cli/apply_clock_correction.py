@@ -65,7 +65,7 @@ def apply_clock_correction(target_folder,
     
     # try to interpret provided shitDateSec as a float litteral, if not, it is considered as a param name
     try: shiftDateSec=float(shiftDateSec)
-    except: pass
+    except (TypeError, ValueError): pass
             
     clock_correction_file=None
     
