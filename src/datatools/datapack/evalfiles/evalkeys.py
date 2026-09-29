@@ -288,9 +288,9 @@ Return:
 
 	if len(undefinedKeys) > 0 :
 		if not args.ignoreundef :
-			print(evalkeys.getUndefinedKeysStr(undefinedkeys))
+			print(getUndefinedKeysStr(undefinedKeys))
 		else :
-			#print("(ignored) "+evalkeys.getUndefinedKeysStr(undefinedkeys))
+			#print("(ignored) "+getUndefinedKeysStr(undefinedKeys))
 			pass
 
 	for line in rlines:

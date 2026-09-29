@@ -21,6 +21,7 @@ import glob
 import random
 
 import shutil
+import stat
 import re
 
 nbTotalFiles=0

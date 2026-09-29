@@ -330,7 +330,7 @@ class DWChannel(ctypes.Structure):
                 chunk_cb(count)
 
         if remaining_count>0:
-            return reduced(self, chunk_cb, chunk_size, data_offset+count, data, remaining_count, total_count)        
+            return self.reduced(chunk_cb, chunk_size, data_offset+count, data, remaining_count, total_count)        
         
         return pandas.DataFrame(data, index=data['time_stamp'],
                 columns=['ave', 'min', 'max', 'rms'])
