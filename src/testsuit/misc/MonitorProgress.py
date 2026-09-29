@@ -3,14 +3,58 @@
 A progress callback has the signature cb(percent, msg, msgSeverity): percent is None for a plain message,
 msg is None, a string or a list of strings, and msgSeverity is one of success|info|warn|warning|error|secondary.
 """
-import threading
+import functools
 import queue
 import sys
+import threading
+import traceback
 
 from collections.abc import Callable
 
 # signature of the functions receiving progress updates, see module docstring
 ProgressCallback = Callable[[float | None, str | list | None, str | None], None]
+
+
+class _CallbackDispatcher:
+    """One daemon thread running the progress callbacks of every top-level MonitorProgress.
+
+    A single FIFO queue keeps each monitor's updates in order, and no thread is left behind by
+    monitors that are never closed (one thread per monitor used to leak in long sessions).
+    The thread starts on first use.
+    """
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._start_lock = threading.Lock()
+
+    def post(self, fn: Callable[[], None], done: threading.Event | None = None) -> None:
+        """Queue fn to run on the dispatcher thread; done is set once it has run."""
+        with self._start_lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="MonitorProgress-dispatcher", daemon=True)
+                self._thread.start()
+        self._queue.put((fn, done))
+
+    def is_dispatcher_thread(self) -> bool:
+        return threading.current_thread() is self._thread
+
+    def _run(self) -> None:
+        while True:
+            fn, done = self._queue.get()
+            if sys.is_finalizing():
+                return
+            try:
+                fn()
+            except Exception:
+                # a failing callback must not stop progress reporting for every other monitor
+                traceback.print_exc()
+            finally:
+                if done is not None:
+                    done.set()
+
+
+_dispatcher = _CallbackDispatcher()
 
 
 def consoleProgressCb(
@@ -140,8 +184,8 @@ class MonitorProgress:
             monitorProgress.complete_n(1)
             ... etc
             
-    Each completion (or just simple msg) is stored in a thread-safe queue.
-    A dedicated Thread dequeue the messages and forward them to some 'progressCallback' functions to handle them.
+    Each completion (or just simple msg) is queued, and one shared background thread forwards the
+    updates, in order, to the top-level monitor's 'progressCallback'.
     
     3 progressCb are provided at the top of this file (consoleProgressCb, consoleSilentProgressCb,
     consoleRichProgressCb). Only the top-level monitor's callback is used: children forward everything to their parent.
@@ -182,65 +226,16 @@ class MonitorProgress:
         self._allowOverTotalItems=allowOverTotalItems
         self._debug=debug
         
-        # --- Dedicated flush thread for top-level monitors ---
         self._is_top_level = parent is None
-        self._msg_queue: queue.Queue | None = None
-        self._flush_thread: threading.Thread | None = None
-        self._stop_event: threading.Event | None = None
         self._closed = False
 
-        if self._is_top_level:
-            self._msg_queue = queue.Queue()
-            self._stop_event = threading.Event()
-            self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
-            self._flush_thread.start()
-
-    # ------------------------------------------------------------------
-    # Flush thread
-    # ------------------------------------------------------------------
-
-    def _flush_loop(self) -> None:
-        """Background thread: drain the queue and call _cb."""
-        
-        while not self._stop_event.is_set():
-            if sys.is_finalizing():
-                return
-            try:
-                item = self._msg_queue.get(timeout=0.4)                
-            except queue.Empty:
-                continue
-            # Drain all currently queued items
-            items = [item]
-            while True:
-                try:
-                    items.append(self._msg_queue.get_nowait())
-                except queue.Empty:
-                    break
-            if sys.is_finalizing():
-                return
-            for percent, msg, msgSeverity in items:
-                if sys.is_finalizing():
-                    return
-                self._cb(percent, msg, msgSeverity)
-
-                
-        # Final drain on shutdown
-        while True:
-            if sys.is_finalizing():
-                return
-            try:
-                item = self._msg_queue.get_nowait()
-            except queue.Empty:
-                break
-            if sys.is_finalizing():
-                return
-            self._cb(*item)
-            
-        self._cb(self.get_percent(), msg=None, msgSeverity=None)
-                
     def _post_msg(self, percent: float | None, msg: list | None, msgSeverity: str) -> None:
-        """Queue an update for the flush thread (top-level monitor only)."""
-        self._msg_queue.put((percent, msg, msgSeverity))
+        """Queue an update for the callback dispatcher (top-level monitor only)."""
+        _dispatcher.post(functools.partial(self._cb, percent, msg, msgSeverity))
+
+    def _final_update(self) -> None:
+        """Last callback of a closed top-level monitor: current percent, no message."""
+        self._cb(self.get_percent(), msg=None, msgSeverity=None)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -302,10 +297,13 @@ class MonitorProgress:
             self._parent = None
             self._name = None
 
-        # Stop the flush thread for top-level monitors
-        if self._is_top_level and self._stop_event is not None:
-            self._stop_event.set()
-            self._flush_thread.join(timeout=2.0)
+        # top-level: send the final update once pending ones are delivered, and wait for it
+        # (bounded, and never from the dispatcher thread itself, which would wait on itself)
+        if self._is_top_level:
+            flushed = threading.Event()
+            _dispatcher.post(self._final_update, done=flushed)
+            if not _dispatcher.is_dispatcher_thread():
+                flushed.wait(timeout=2.0)
             
     def _dumpProgressTreeRecursive(self, monitor: "MonitorProgress", prefix: str) -> None:
         """Internal recursive helper for dumpProgressTree."""
