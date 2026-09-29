@@ -12,3 +12,6 @@ dataset.dico
 tests/etc/mexploit/scenarii/*/conftest.py
 .venv
 .current_datapack
+*.egg-info/
+build/
+dist/

@@ -14,7 +14,6 @@ dependencies = [
     "requests>=2.32.5",
     "setuptools<81",
     "six>=1.17.0",
-    "typing>=3.7",
     "GitPython>=3.1",
     "colorama>=0.4",
     "h5py>=3.15",
@@ -22,8 +21,19 @@ dependencies = [
     "pytest-html>=4.1",
     "pytest-metadata>=3.1",
     "matplotlib>=3.10",
-    "asammdf>=8.7"
+    "asammdf>=8.7",
+    "pytest>=8",
+    "PyYAML>=6.0",
+    "ruamel.yaml>=0.18",
+    "Markdown>=3.5",
+    "python-dateutil>=2.8"
 ]
+
+[project.optional-dependencies]
+plotly = ["plotly>=5"]
+word = ["python-docx>=1.1", "docxtpl>=0.16", "Jinja2>=3.1"]
+jupyter = ["ipython>=8", "ipywidgets>=8"]
+influxdb = ["influxdb-client>=1.40", "influxdb3-python>=0.10", "pyarrow>=15"]
 
 [dependency-groups]
 dev = [
@@ -37,6 +47,10 @@ dev = [
 pythonpath = [
   "src"
 ]
+# test modules are named *_t.py; restrict collection to tests/ so the
+# mexploit conftest under src/ is not loaded as a plugin
+testpaths = ["tests"]
+python_files = ["*_t.py"]
 env = [
     #"SHADOX_USERNAME=myusername",
     #"SHADOX_PWD=mypassword"

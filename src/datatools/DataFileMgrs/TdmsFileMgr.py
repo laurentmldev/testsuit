@@ -25,8 +25,8 @@ class TdmsFileMgr(AFileMgr):
         self.__tdmsfile=TdmsFile(filename,read_metadata_only=True)
         self.showWarningDateOrigin=False
 
-    def showTdmsInfo():
-        tdmsinfo(filename,show_properties=True)
+    def showTdmsInfo(self):
+        tdmsinfo(self.getFileName(),show_properties=True)
 
     def getFileType(self) -> str:
         return "tdms"
