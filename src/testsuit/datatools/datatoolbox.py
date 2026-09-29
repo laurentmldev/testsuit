@@ -1,7 +1,10 @@
+"""Helpers for data manipulation: parameter naming, date parsing, time ranges and loading data files.
 
-#
-# some various helpers related to data manipulation
-#
+Parameters are pandas Series/DataFrames indexed by dates in seconds since epoch (1970-01-01 UTC).
+They may carry two extra attributes: 'name' (parameter name) and 'origin' (source file).
+
+Note: datapack/data2db modules import this one with 'import *', so imports below are part of their namespace.
+"""
 
 import sys,os,re
 import threading
@@ -16,14 +19,29 @@ import pandas as pd
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
-from datetime import datetime
+from datetime import datetime, timezone
 
 SUPPORTED_DATAFILE_EXTENSIONS=["h5","hdf5","dxd","d7d","csv","txt","log","tdms","mdf","mf4","influxdbV3.yml","influxdbV2.yml","dat"]
 MAX_MTHREAD_WORKERS=10
 VERTICAL_OFFSET_DEFAULT_MEAN_VALUE_DURATION_SEC=1
 
-# add deps folder (relative path to this module)
-sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
+# date formats recognized by getDateParser(), tried in this order
+DATE_FORMATS=[
+    '%Y-%m-%dT%H:%M:%SZ',
+    '%Y-%m-%dT%H:%M:%S.%fZ',
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%d %H:%M:%S.%f',
+    '%Y/%m/%d %H:%M:%S',
+    '%Y/%m/%d %H:%M:%S.%f',
+    '%Y-%m-%dZ%H:%M:%S',
+    '%Y-%m-%dZ%H:%M:%S.%f',
+    '%m/%d/%Y %H:%M:%S.%f',
+    '%d/%m/%Y %H:%M:%S.%f',
+]
+# National Instruments writes 7 fractional digits (ex: 02/17/2026 14:17:25.3936538),
+# more than '%f' accepts: such dates are truncated to microseconds (26 chars) before parsing
+NI_DATE_FORMAT='%m/%d/%Y %H:%M:%S.%f'
+NI_DATE_MAX_LEN=26
 
 #######################
 def renameParam(paramName: str, regexMatch: str, regexReplace: str = "") -> str:
@@ -104,11 +122,14 @@ def getDfName(df: pd.DataFrame | pd.Series) -> str:
     return dfName
 
 #######################
-def getVerticalOffset(data: pd.DataFrame, offsetExpr: str | None = None) -> float:
-    """Get the vertical offset of given value. 
+def getVerticalOffset(data: pd.DataFrame | pd.Series, offsetExpr: str | None = None) -> float | pd.Series:
+    """Get the vertical offset to add to given data.
 
-    :data (DataFrame): data to offset
-    :offsetExpr (str): python expression of vertical value to apply. If 'autoz:xxs', then perform auto-zero based on average value over xx first seconds of the param.
+    :param data: data to offset
+    :param offsetExpr: python expression evaluated as a float (ex: "-2.5", "1e3/2"),
+        or 'autoz' / 'autoz:XXs' for an auto-zero: minus the mean value over the first XX seconds
+        (default VERTICAL_OFFSET_DEFAULT_MEAN_VALUE_DURATION_SEC). None or "0" means no offset.
+    :return: the offset (one value per column when data is a DataFrame and auto-zero is used)
     """
     
     if not offsetExpr:
@@ -139,7 +160,8 @@ def getVerticalOffset(data: pd.DataFrame, offsetExpr: str | None = None) -> floa
 
 #######################
 def getCoefConvToNanosec(dateUnitStr: str | None = None) -> float:
-    
+    """Factor converting dates in the given unit ("ns", "us", "µs", "ms" or "s") to nanoseconds. Default unit is seconds."""
+
     dateCoefToNanosec=1e9
     if dateUnitStr:
         match dateUnitStr:
@@ -157,7 +179,12 @@ def getCoefConvToNanosec(dateUnitStr: str | None = None) -> float:
     
 #######################
 def getDateOffsetSec(offsetStr: str | None, timezone: str = "Europe/Paris") -> float:
+    """Convert a date expression into seconds since epoch.
 
+    :param offsetStr: 'now', a value with a unit (ex: "3h", "1.5 D", "200ms"; units D|h|m|s|ms|us|ns)
+        or any string accepted by pandas.Timestamp (ex: "2024-01-02 03:04:05"). None gives 0.
+    :param timezone: timezone used for 'now'
+    """
     if offsetStr is None:
         return 0
     
@@ -183,17 +210,14 @@ def getDateOffsetSec(offsetStr: str | None, timezone: str = "Europe/Paris") -> f
 #######################
 def zoomAndMerge2DData(npArraysList: list[np.ndarray], xMin: float | None = None, xMax: float | None = None,
                        yMin: float | None = None, yMax: float | None = None) -> pd.DataFrame:
+    """Merge several 2D arrays into one DataFrame, limited to the provided x/y domain.
 
-    """Merge several 2D arrays into a Pandas dataframe, limited to provided min/max domain
-
-    Parameters:
-        npArraysList (list of np arrays) : a list of 2D NP arrays (x,y) horizontally stacked
-
-    Returns:
-        Pandas dataframe with optimized/merged rows, limited to given x,y domain
+    :param npArraysList: 2D arrays of shape (2, n): row 0 holds x values, row 1 holds y values
+    :param xMin, xMax, yMin, yMax: strict bounds of the domain; None (or 0) means unbounded
+    :return: DataFrame with an "index" column (x) and one "data_<i>" column per array (i starting at 1),
+        rows sorted by x
     """
-    #print(f"zoomAndMerge2DData x=[{xMin},{xMax}] y=[{yMin},{yMax}]")
-    
+
     finalDf=pd.DataFrame()
     serieNb=0
     for nbArray in npArraysList:
@@ -265,6 +289,14 @@ def timerange(paramData: pd.DataFrame | pd.Series, minDate: float | None = None,
 
 #######################
 def getDfFFT(df: pd.DataFrame | pd.Series, colIdx: int = 0) -> pd.DataFrame:
+    """Magnitude spectrum of a parameter (positive frequencies only).
+
+    The sampling rate is taken as the average over the whole index, so samples are assumed evenly spaced.
+
+    :param df: parameter indexed by time in seconds; df.name is used to name the result
+    :param colIdx: column to use when df is a DataFrame
+    :return: DataFrame "<name>.fft" of normalized magnitudes, indexed by "Frequency (Hz)"
+    """
 
     if isinstance(df,(pd.DataFrame)):
         param_name=df.columns[colIdx]
@@ -296,91 +328,39 @@ def getDfFFT(df: pd.DataFrame | pd.Series, colIdx: int = 0) -> pd.DataFrame:
 
 #######################
 def getDateParser(dateSample: str) -> Callable[[str], datetime] | None:
-    """Return a function converting a string of similar format to a datetime object
-        If date is simple float or int, returns None (for compat with pd.read_csv())"""
-    from datetime import datetime, timezone
+    """Return a function parsing dates written like dateSample into UTC datetime objects.
 
+    Formats are tried in DATE_FORMATS order, then the National Instruments one (see NI_DATE_FORMAT).
+    Returns None if dateSample is a plain int or float, so that pd.read_csv() keeps numeric dates.
+
+    :raises Exception: if no known format matches dateSample
+    """
     # /!\ need explicit tzinfo for Windows env (internal error near epoch time otherwise)
+    for numType in (int, float):
+        try:
+            numType(dateSample)
+            return None
+        except (ValueError, TypeError):
+            pass
 
-    try: 
-        int(dateSample) 
-        return None
-    except: pass
-    try: 
-        float(dateSample)
-        return None
-    except: pass
-    try:
-        dateFormatStr='%Y-%m-%dT%H:%M:%SZ'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    try:
-        dateFormatStr='%Y-%m-%dT%H:%M:%S.%fZ'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    try:
-        dateFormatStr='%Y-%m-%d %H:%M:%S'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    try:
-        dateFormatStr='%Y-%m-%d %H:%M:%S.%f'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
+    def _parser(dateFormatStr: str, maxLen: int | None = None) -> Callable[[str], datetime]:
+        return lambda x: datetime.strptime(x[:maxLen], dateFormatStr).replace(tzinfo=timezone.utc)
 
-    try:
-        dateFormatStr='%Y/%m/%d %H:%M:%S'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    try:
-        dateFormatStr='%Y/%m/%d %H:%M:%S.%f'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-
-    try:
-        dateFormatStr='%Y-%m-%dZ%H:%M:%S'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    try:
-        dateFormatStr='%Y-%m-%dZ%H:%M:%S.%f'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-
-    try:
-        dateFormatStr='%m/%d/%Y %H:%M:%S.%f'
-        date=datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-    
-    try:
-        dateFormatStr='%d/%m/%Y %H:%M:%S.%f'
-        datetime.strptime(dateSample, dateFormatStr)
-        return lambda x: datetime.strptime(x, dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
-
-    # for fucking NI twisted format  02/17/2026 14:17:25.3936538
-    # we truncate timestamp to microseconds
-    try:                    
-        dateFormatStr='%m/%d/%Y %H:%M:%S.%f'                    
-        datetime.strptime(dateSample[:26], dateFormatStr)
-        return lambda x: datetime.strptime(x[:26], dateFormatStr).replace(tzinfo=timezone.utc)
-    except: pass
+    candidates=[_parser(dateFormatStr) for dateFormatStr in DATE_FORMATS]+[_parser(NI_DATE_FORMAT,NI_DATE_MAX_LEN)]
+    for parser in candidates:
+        try:
+            parser(dateSample)
+            return parser
+        except (ValueError, TypeError):
+            pass
 
     raise Exception(f"Unable to parse date format '{dateSample}'")
-
 
 
 def loadDataframeFromFile(sourceFolderOrFile: str,
                           paramRegexes: str | list[str] | None,
                           indices: str | list[str] | None = None,
-                          extensions: list[str] = ["."+fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],
+                          extensions: list[str] | None = None,
                           excludeParamsRegex: str | None = None,
                           dryRun: bool = False,
                           monitorProgress: MonitorProgress | None = None,
@@ -393,13 +373,32 @@ def loadDataframeFromFile(sourceFolderOrFile: str,
                           callback: Callable | None = None,
                           mergeParams: bool = True,
                           silent: bool = False) -> list[pd.DataFrame | pd.Series]:
-    """Load required paramRegexes from given data source folder or file.
-    
-    :param minDateSec (float): minimal date in seconds since epoch 1970-01-01
-    :param maxDateSec (float): maximal date in seconds since epoch 1970-01-01
-    :param shiftDateSec (float|str): float or param name to use for shifting date of loaded paramRegexes
-    :param shiftDateRegex (str): regex to be used to select to which param we shall apply shiftDateSec
+    """Load the parameters matching paramRegexes from a data file, a folder of data files or a list of those.
+
+    :param sourceFolderOrFile: file or folder path (folders are scanned recursively), or a list of paths
+    :param paramRegexes: regex(es) selecting parameters, as a list or a comma-separated string.
+        A regex may be prefixed by a file regex: "fileRegex::paramRegex".
+        None only prints the parameters available in each file and returns [].
+    :param indices: index parameter to use for each regex (same length as paramRegexes), for formats
+        where the time index is a separate parameter
+    :param extensions: file extensions to consider (default: all of SUPPORTED_DATAFILE_EXTENSIONS)
+    :param excludeParamsRegex: parameters matching this regex are skipped
+    :param dryRun: only list matching parameters, without loading values
+    :param monitorProgress: progress reporter (a default one is created if None)
+    :param abortEvent: when set, loading stops as soon as possible
+    :param minDateSec: minimal date in seconds since epoch 1970-01-01
+    :param maxDateSec: maximal date in seconds since epoch 1970-01-01
+    :param shiftDateSec: seconds, or name of a parameter giving the clock drift, used to shift dates of loaded parameters
+    :param shiftDateRegex: only parameters matching this regex are shifted by shiftDateSec
+    :param shiftDateInverted: subtract shiftDateSec instead of adding it
+    :param callback: called on each loaded parameter; its result replaces the parameter in the returned list.
+        It receives a 'monitorProgress' keyword argument if it declares one.
+    :param mergeParams: merge parameters of the same name found in several files
+    :param silent: fewer progress messages
+    :return: loaded parameters (or callback results), in paramRegexes order
     """
+    if extensions is None:
+        extensions=["."+fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS]
 
     if monitorProgress is None:
         monitorProgress=MonitorProgress(name="loadDataframeFromFile")
@@ -445,8 +444,7 @@ def loadDataframeFromFile(sourceFolderOrFile: str,
     nbParamRegexes = len(paramRegexesList)
     monitorProgress.set_total_items(nbParamRegexes)
     
-    def _find_params_task(args: tuple[int, str]) -> list[pd.DataFrame | pd.Series]:
-        i, paramRegex = args
+    def _find_params_task(i: int, paramRegex: str) -> list[pd.DataFrame | pd.Series]:
         paramIndex = indicesList[i] if indicesList is not None else None
 
         if dryRun:
@@ -455,7 +453,7 @@ def loadDataframeFromFile(sourceFolderOrFile: str,
             monitorProgress.msg(msg=f"extracting params for '{paramRegex}' ...")
         
         subMp = monitorProgress.child("Regex "+str(paramRegex))
-        localDfList = paramScanner.findParams(paramRegex, paramIndex if paramIndex is not None else None,
+        localDfList = paramScanner.findParams(paramRegex, paramIndex,
                                             dryRun=dryRun, monitorProgress=subMp,
                                             abortEvent=abortEvent,
                                             mergeParams=mergeParams, silent=silent,
@@ -477,13 +475,12 @@ def loadDataframeFromFile(sourceFolderOrFile: str,
         if abortEvent and abortEvent.is_set():
             break
 
-        dfListRst += _find_params_task((i, paramRegex))
+        dfListRst += _find_params_task(i, paramRegex)
 
-    
     return dfListRst
 
 def addPoints(paramData: pd.Series | pd.DataFrame, newIndex: pd.Index) -> pd.Series | pd.DataFrame:
-    """Apply new index to given paramData, applying forward-fill to get corresponding values"""
+    """Add the dates of newIndex to paramData, with values linearly interpolated on the index."""
     result = paramData.reindex(paramData.index.union(newIndex))
     result = result.loc[~result.index.isna()]
     return result.interpolate('index').sort_index()

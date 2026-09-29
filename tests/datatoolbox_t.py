@@ -32,3 +32,32 @@ def test_overlap():
     assert(math.isnan(dfMainReduced.loc[32]["main"]))
     assert(dfSecReduced.loc[40]["secondary"]==2.883480)
     
+
+@pytest.mark.parametrize(
+    "sample,expected",
+    [
+        ("12", None),
+        ("1.5", None),
+        ("2024-01-02T03:04:05Z", "2024-01-02T03:04:05+00:00"),
+        ("2024-01-02T03:04:05.123Z", "2024-01-02T03:04:05.123000+00:00"),
+        ("2024-01-02 03:04:05", "2024-01-02T03:04:05+00:00"),
+        ("2024/01/02 03:04:05.25", "2024-01-02T03:04:05.250000+00:00"),
+        ("2024-01-02Z03:04:05.1", "2024-01-02T03:04:05.100000+00:00"),
+        ("17/02/2026 14:17:25.3", "2026-02-17T14:17:25.300000+00:00"),
+        # National Instruments: 7 fractional digits, truncated to microseconds
+        ("02/17/2026 14:17:25.3936538", "2026-02-17T14:17:25.393653+00:00"),
+    ],
+)
+def test_getDateParser(sample, expected):
+    from testsuit.datatools.datatoolbox import getDateParser
+    parser = getDateParser(sample)
+    if expected is None:
+        assert parser is None
+    else:
+        assert parser(sample).isoformat() == expected
+
+
+def test_getDateParser_unknown_format():
+    from testsuit.datatools.datatoolbox import getDateParser
+    with pytest.raises(Exception, match="Unable to parse date format"):
+        getDateParser("garbage")

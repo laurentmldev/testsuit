@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable
 
 from testsuit.datatools import datatoolbox
-from  datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 
