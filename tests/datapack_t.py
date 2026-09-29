@@ -4,7 +4,7 @@ from pathlib import Path
 # add deps folder (relative path to this module)
 sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."+os.sep+"src"))
 
-from datatools.datapack.datapack_tools import datapack
+from testsuit.datatools.datapack.datapack_tools import datapack
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger()

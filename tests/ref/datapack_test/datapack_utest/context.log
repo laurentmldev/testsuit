@@ -5,7 +5,7 @@ Host: vm
 PWD: /home/claude/testsuit
 Test Procedure: /home/claude/testsuit/tests/etc/datapack/testdef/datapack_utest.yml
 setup: /home/claude/testsuit/tests/etc/datapack/setup/utest_conf_dtpk.yml
-tools: /home/claude/testsuit/src/datatools/datapack/datapack_tools.py
+tools: /home/claude/testsuit/src/testsuit/datatools/datapack/datapack_tools.py
 nocheck: True
 -----------------------------------
 
