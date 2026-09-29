@@ -18,7 +18,10 @@ from testsuit.misc.MonitorProgress import MonitorProgress
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 
 
-H5_MAX_NB_WORKERS=16
+# h5py serializes every call behind one global lock, so reader threads mostly wait on each other.
+# Measured on 200 params x 200k points (4 cores): 1 worker 0.91s, 2 workers 0.85s, 16 workers 1.1s.
+# 1 runs without any thread pool. Raise it only if measured faster on your files.
+H5_MAX_NB_WORKERS=2
 
 def GetH5FileType(fileName: str, h5File: h5py.File | None=None) -> str:
     if not h5File:
@@ -492,6 +495,17 @@ class H5FileMgr(AFileMgr):
         paramsAsDataframes = [None] * len(paramNamesList)
 
         if not active_tasks:
+            return paramsAsDataframes
+
+        loadArgs = (monitorProgress, abortEvent, minDateSec, maxDateSec, callback,
+                    shiftDateSec, shiftDateRegex, shiftDateInverted, silent)
+        if H5_MAX_NB_WORKERS <= 1:
+            for paramPos, paramName, indexName in active_tasks:
+                try:
+                    paramsAsDataframes[paramPos] = self._loadSingleParam(paramPos, paramName, indexName, *loadArgs)
+                except Exception as exc:
+                    get_logger().error(f"Parameter loading failed: {exc}")
+                    raise
             return paramsAsDataframes
 
         # Run parameter loading in parallel
