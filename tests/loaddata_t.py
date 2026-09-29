@@ -4,13 +4,13 @@ import sys,os,pytest,logging
 # add deps folder (relative path to this module)
 sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
 
-from scripts.data2h5 import data2h5
-from scripts.extract_data_flags import extract_data_flags
+from testsuit.cli.data2h5 import data2h5
+from testsuit.cli.extract_data_flags import extract_data_flags
 
-from datatools.h5diff import diff_h5files_struct
-from datatools.datatoolbox import loadDataframeFromFile
+from testsuit.datatools.h5diff import diff_h5files_struct
+from testsuit.datatools.datatoolbox import loadDataframeFromFile
 
-from misc.MonitorProgress import MonitorProgress,consoleProgressCb
+from testsuit.misc.MonitorProgress import MonitorProgress,consoleProgressCb
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger()

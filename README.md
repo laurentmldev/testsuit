@@ -28,43 +28,47 @@ For example `pip install -e ".[plotly,jupyter]"`.
 ## Repository layout
 
 ```
-src/                  importable packages (added to the path by an install)
-  datatools/          load data files into pandas, convert to HDF5, push to a DB
-    DataFileMgrs/     one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb)
-    datapack/         datapack generation: dictionaries, includes, key replacement
+src/testsuit/           the installable package
+  datatools/            load data files into pandas, convert to HDF5, push to a DB
+    DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb)
+    datapack/           datapack generation: dictionaries, includes, key replacement
   exploit/
-    mexploit/         YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
-    runner/           runs mexploit over test sessions and builds HTML reports
-  jupytertools/       ipywidgets GUIs for notebooks
-  misc/               logging, progress reporting, file helpers
-scripts/              command-line entry points (see below)
-tests/                pytest suite (*_t.py)
-  etc/                input data, scenarios and configs used by the tests
-  ref/                reference outputs the tests compare against
+    mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
+    runner/             runs mexploit over test sessions and builds HTML reports
+  jupytertools/         ipywidgets GUIs for notebooks
+  misc/                 logging, progress reporting, file helpers
+  cli/                  command-line tools (see below)
+examples/               sample configuration files
+tests/                  pytest suite (*_t.py)
+  etc/                  input data, scenarios and configs used by the tests
+  ref/                  reference outputs the tests compare against
 ```
 
-## Command-line scripts
+## Command-line tools
 
-Each script prints its full usage with `--help`. Run them from a clone, for example `python scripts/data2h5.py --help`.
+Installing the package puts these commands on your `PATH`. Each prints its full usage with `--help`, for example `data2h5 --help`. They can also be run as `python -m testsuit.cli.<name>`.
 
-| Script                      | Purpose                                                           |
-|-----------------------------|-------------------------------------------------------------------|
-| `data2h5.py`                | extract parameters from data files or folders into an HDF5 file   |
-| `data2db.py`                | push parameters from data files into a database (InfluxDB, ClickHouse) |
-| `extract_data_any.py`       | decode raw bit fields into parameters from a JSON/YAML config (example: `config_extract_data_any.json`) |
-| `extract_data_flags.py`     | extract flag values described in a YAML file                      |
-| `apply_clock_correction.py` | shift timestamps of a folder of data files                        |
-| `mxp.py`                    | run a mexploit scenario folder against data folders               |
-| `exploit_runner.py`         | run mexploit over whole test sessions from a YAML config          |
-| `datapack.py`               | generate a datapack from a test definition file                   |
-| `evalfile.py`               | resolve includes and keys in a file from dictionaries             |
+| Command                  | Purpose                                                           |
+|--------------------------|-------------------------------------------------------------------|
+| `data2h5`                | extract parameters from data files or folders into an HDF5 file   |
+| `data2db`                | push parameters from data files into a database (InfluxDB, ClickHouse) |
+| `extract_data_any`       | decode raw bit fields into parameters from a JSON/YAML config (example: `examples/config_extract_data_any.json`) |
+| `extract_data_flags`     | extract flag values described in a YAML file                      |
+| `apply_clock_correction` | shift timestamps of a folder of data files                        |
+| `mxp`                    | run a mexploit scenario folder against data folders               |
+| `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
+| `datapack`               | generate a datapack from a test definition file                   |
+| `evalfile`               | resolve includes and keys in a file from dictionaries             |
 
 ## Using the library
 
 ```python
-from exploit.mexploit.mexploit import mexploit
+from testsuit.datatools.datatoolbox import loadDataframeFromFile
+from testsuit.exploit.mexploit.mexploit import mexploit
 
 # run the checks of a scenario folder on a data folder, results written to out/
+dfs = loadDataframeFromFile("tests/etc/data/csv/flags.csv", ".*")  # one DataFrame per parameter
+
 rc = mexploit("tests/etc/mexploit/scenarii/mxp_OK_main_functions", "tests/etc/data", "out/", force=True)
 ```
 

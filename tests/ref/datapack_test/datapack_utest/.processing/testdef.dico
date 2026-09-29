@@ -8,5 +8,5 @@ testdef.setup.conf=nominal
 testdef.timestamp=2026-09-29 16:49:11
 testdef.pwd=/home/claude/testsuit
 testdef.host=vm
-testdef.tools=/home/claude/testsuit/src/datatools/datapack/datapack_tools.py
+testdef.tools=/home/claude/testsuit/src/testsuit/datatools/datapack/datapack_tools.py
 testdef.nocheck=True

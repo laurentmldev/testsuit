@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from nptdms import TdmsWriter, ChannelObject, RootObject
 
-from datatools.datatoolbox import loadDataframeFromFile
-from misc.MonitorProgress import MonitorProgress, consoleSilentProgressCb
+from testsuit.datatools.datatoolbox import loadDataframeFromFile
+from testsuit.misc.MonitorProgress import MonitorProgress, consoleSilentProgressCb
 
 
 def _write_tdms(path, channel_props):

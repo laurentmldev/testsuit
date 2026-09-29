@@ -5,7 +5,7 @@ import pandas as pd
 # add deps folder (relative path to this module)
 sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
 
-from datatools.datatoolbox import overlap
+from testsuit.datatools.datatoolbox import overlap
 
 
 def test_overlap():
