@@ -31,7 +31,3 @@ A scenario entry `type: foo` runs the function `crit_foo(critConf, ...)`.
 
 - For a check everyone can use, add `crit_foo` to `src/exploit/mexploit/criteria.py` and cover it with a scenario under `tests/etc/mexploit/scenarii/mxp_OK_main_functions/`.
 - For a project-specific check, keep it outside this repo: write `crit_foo` in your own module and load it from the scenario with a `# MXP_REGISTER_CRITLIB(path/to/your_criteria.py)` line, as in `tests/etc/mexploit/scenarii/mxp_OK_custom_crit/`.
-
-## Third-party code
-
-`src/datatools/DataFileMgrs/npTDMS.egg/` is a vendored, locally modified copy of npTDMS and `src/datatools/DataFileMgrs/dewesoft/` wraps the Dewesoft reader libraries (`.so`/`.dll`). Do not reformat them; ruff skips the npTDMS copy.

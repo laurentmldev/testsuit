@@ -5,14 +5,26 @@ from datetime import timezone
 from concurrent.futures import ThreadPoolExecutor,wait
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
-import datatools.DataFileMgrs.dewesoft as dw
+import dwdatareader as dw
 from misc.MonitorProgress import MonitorProgress
 
 from misc.logger import get_logger
 
 from datatools.DataFileMgrs.AFileMgr import AFileMgr
+
+
+def _loadChannel(dxdFile: dw.DWFile, channelName: str, chunkCb: Callable[[int], None]) -> pd.DataFrame:
+    """Full speed values of one channel (first array element), indexed by unique time offsets in seconds."""
+    channel=dxdFile[channelName]
+    time,data=channel.scaled()
+    chunkCb(channel.number_of_samples)
+    if len(time)==0:
+        return pd.DataFrame({channelName: pd.Series(dtype='object')})
+    time,ix=np.unique(time,return_index=True) # use unique times
+    return pd.DataFrame({channelName: pd.Series(data.reshape(-1,channel.array_size)[ix,0],index=time,name=channelName)})
 
 
 class DxdFileMgr(AFileMgr):
@@ -25,7 +37,7 @@ class DxdFileMgr(AFileMgr):
         with self.dxdlock:
             if filename not in self.filesLock:
                 self.filesLock[filename]= {
-                                            "fileHandle":dw.open(filename),
+                                            "fileHandle":dw.DWFile(filename,key=lambda channel: channel.name),
                                             "lock":threading.Lock()
                                         }
             self.__dxdfile=self.filesLock[filename]["fileHandle"]
@@ -129,7 +141,7 @@ class DxdFileMgr(AFileMgr):
                                                 f"source type: {self.getFileType()}"])
 
                 try:
-                    dfParam = self.__dxdfile.dataframe(channels=[paramName], chunk_cb=myChunkCb)
+                    dfParam = _loadChannel(self.__dxdfile,paramName,myChunkCb)
                     
                 except Exception as e:
                     monitorProgress and monitorProgress.msg(msg=[self.getBaseName(),paramName,"unable to extract values","ERROR: "+str(e)],msgSeverity="error")
