@@ -31,8 +31,7 @@ class InfluxDbV3FileMgr(AFileMgr):
             with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                try: self._token = config.get('token')
-                except: pass
+                self._token = config.get('token')
                 self._org = config.get('org')
                 self._database = config.get('database')  # Changed from 'bucket'
                 self._table = config.get('table')
@@ -253,7 +252,7 @@ class InfluxDbV3FileMgr(AFileMgr):
                                 try: 
                                     result = self._query_to_dataframe(query)
                                     break
-                                except Exception as e: 
+                                except Exception:
                                     nbHours = nbHours / 2
 
                             if result is not None and len(result) > 0 and paramNamesKey in result.columns:
@@ -348,7 +347,6 @@ class InfluxDbV3FileMgr(AFileMgr):
         param_batch_size = 1
         param_batches = [paramNamesList[i:i + param_batch_size] for i in range(0, len(paramNamesList), param_batch_size)]
         
-        total_params = len(paramNamesList)
         processed_params = 0
         
         monitorProgress.set_total_items(param_batch_size)
@@ -527,8 +525,7 @@ class InfluxDbV2FileMgr(AFileMgr):
             with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                try: self._token = config.get('token')
-                except: pass
+                self._token = config.get('token')
                 self._org = config.get('org')
                 self._bucket = config.get('bucket')
                 self._measurement = config.get('measurement')
@@ -769,9 +766,7 @@ class InfluxDbV2FileMgr(AFileMgr):
         else:
             dfAll = pd.DataFrame(columns=['_time', '_field', '_value'])
         
-        totalNbParams = len(paramNamesList)
-        
-        for paramIdx, requestedFieldName in enumerate(paramNamesList):
+        for requestedFieldName in paramNamesList:
             if abortEvent and abortEvent.is_set():
                 raise Exception("Received abort event, InfluxDB params extraction interrupted")
 

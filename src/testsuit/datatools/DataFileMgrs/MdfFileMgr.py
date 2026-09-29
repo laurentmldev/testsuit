@@ -112,7 +112,6 @@ class MdfFileMgr(AFileMgr):
         # retrieve positions of requested params 
         rstDataframes=[]
         extractedParamsLock=threading.Lock()
-        totalToRead=len(paramNamesList)
         issues=[]
         
         monitorProgress.set_total_items(len(paramNamesList))

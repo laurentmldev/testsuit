@@ -67,7 +67,7 @@ class H5FileMgr(AFileMgr):
         try:
             nbExternalFiles = len(ds.id.get_create_plist().get_external())
             return nbExternalFiles > 0
-        except Exception as e:
+        except Exception:
             return False
         
     def dumpTreeHtml(self,key: str | None=None,item: h5py.Group | h5py.Dataset | None=None,depth: int=0) -> str:
@@ -78,7 +78,7 @@ class H5FileMgr(AFileMgr):
 
         htmlText="<ul>"      
 
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             htmlText+="<li><span style='font-weight:bold;color:blue'>"+key+"</span>"
             if key.startswith("_"):
                 htmlText+="<ul><li><span style='color:grey;font-style:italic'>[...] (truncated)</span></li></ul>"
@@ -86,7 +86,7 @@ class H5FileMgr(AFileMgr):
                 for subkey, childItem in item.items():
                     htmlText+=H5FileMgr.dumpTreeHtml(self,subkey,childItem,depth+1)                
                 htmlText+="</li>"
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             htmlText+="<li><span style='font-weight:bold;color:green'>"+key+"</span><ul>"
             for colName in item.dtype.fields.keys():
                 htmlText+="<li>"+colName+"</li>"
@@ -109,7 +109,7 @@ class H5FileMgr(AFileMgr):
 
         strText=(indent_text * depth)
 
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             strText+=" @"+key+" "
             if key.startswith("_"):
                 strText+="[...] (truncated)\n"
@@ -118,7 +118,7 @@ class H5FileMgr(AFileMgr):
                 for subkey, childItem in item.items():
                     strText+=H5FileMgr.dumpTreeTxt(self,subkey,childItem,depth+1)                
                 
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             strText+=" - "+key+" "
             for colName in item.dtype.fields.keys():
                 strText+="\n"+(indent_text * (depth+1))+" - "+colName
@@ -143,12 +143,12 @@ class H5FileMgr(AFileMgr):
             key=key.removeprefix("/")
 
         strText=""
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             if not key.startswith("_"):                
                 for subkey, childItem in item.items():
                     strText+=H5FileMgr.dumpParamsTxt(self,subkey,childItem,path=path+"/"+key)                
                 
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             if len(item.dtype.fields)>0:
                 for colName in item.dtype.fields.keys():
                     strText+=path+"/"+key+"."+colName+"\n"            
@@ -171,7 +171,7 @@ class H5FileMgr(AFileMgr):
             def visitorCb(name,item):
                 if "/Timestamps/" in name: return
                 
-                if type(item)==h5py._hl.dataset.Dataset:
+                if isinstance(item, h5py.Dataset):
                     # for compound types, add table columns names
                     if item.dtype.kind=="V": 
                         self.__tables.append(item)
@@ -198,9 +198,6 @@ class H5FileMgr(AFileMgr):
     def prepareFile(self,monitorProgress: MonitorProgress) -> None:
        return None
     
-    def finalizeH5Dataframe(self,df: pd.DataFrame) -> pd.DataFrame:
-        return df
-
     def getDataset(self,dataset_path: str,index_path: str | None=None) -> tuple[Any, h5py.Dataset | None]:
         """extract required Dataset from our H5 file"""
 
@@ -269,7 +266,7 @@ class H5FileMgr(AFileMgr):
             if index_path is not None:
                 indexDataset=self.getH5FileRoot()[index_path]
                 if not isinstance(indexDataset, h5py.Dataset):
-                    raise ValueError("provided index path is not a DataSet:'"+indexDataset+"'")
+                    raise ValueError("provided index path is not a DataSet:'"+index_path+"'")
                 return value, indexDataset
 
     # Now we retrieve implicite index DataSet from attributes
@@ -279,7 +276,10 @@ class H5FileMgr(AFileMgr):
     # 1. try in priority keys of type *ObjRef*
             # retrieve all attributes of type 'Obj Ref'
             for (attrkey,attrVal) in item.attrs.items():
-                if type(attrVal)==h5py.ref_dtype:
+                # NOTE: h5py.ref_dtype is a numpy dtype, never the type of an attribute value,
+                # so this test is always False and only step 2 below finds index datasets.
+                # isinstance(attrVal, h5py.Reference) would be the working check.
+                if type(attrVal)==h5py.ref_dtype:  # noqa: E721
                     refAttrs[attrkey]=attrVal
 
             # try to take best one for implicit index (timestamp)
@@ -292,9 +292,8 @@ class H5FileMgr(AFileMgr):
                     except Exception as e:
                         if "time" in attrkey.lower() or "date" in attrkey.lower():
                             raise ValueError("unable to find reference pointed by attribute '"+str(attrkey)
-                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))       
-                            break
-                        get_logger().warn("unable to find reference pointed by attribute '"+str(attrkey)
+                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
+                        get_logger().warning("unable to find reference pointed by attribute '"+str(attrkey)
                                      +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
 
                 # otherwise use the first with 'time' or 'date' in attribute

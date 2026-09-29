@@ -172,21 +172,15 @@ class CsvFileMgr(AFileMgr):
         newFileName=self.getFileName().replace(".csv",".clean.csv")
         totalNbLines = self.getNbEntries()
         
-        with monitorProgress.child("prepareFile",totalNbLines) as subMp:
-                
-            f = open(self.getFileName(),encoding='utf-8')
-            fo = open(newFileName,'w')
-            lineNb = 1
-            for lineStr in f:
+        with monitorProgress.child("prepareFile",totalNbLines) as subMp, \
+                open(self.getFileName(),encoding='utf-8') as f, \
+                open(newFileName,'w') as fo:
+            for lineNb, lineStr in enumerate(f, start=1):
                 keepLine,fixedLine = self.__checkCsvLine(lineStr,lineNb)
                 if keepLine:
                     fo.write(fixedLine)
                 if lineNb % 100 == 0:
                     subMp.complete_n(lineNb)
-                lineNb += 1
-        
-        f.close()
-        fo.close()
         
         return newFileName
 
@@ -273,7 +267,7 @@ class CsvFileMgr(AFileMgr):
 
                 # Pandas <2.0 has only ns reoslution (and as_unit is not present)
                 try: dfParam.index = dfParam.index.as_unit('ns').view('int64') / 1e9
-                except: dfParam.index = dfParam.index.view('int64') / 1e9
+                except AttributeError: dfParam.index = dfParam.index.view('int64') / 1e9
             
             rst.append(self.finalizeParam(dfParam,
                                             name=requestedFieldname,

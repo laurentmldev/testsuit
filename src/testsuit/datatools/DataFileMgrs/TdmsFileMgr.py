@@ -158,13 +158,13 @@ class TdmsFileMgr(AFileMgr):
                 if dfParam.index[0]==0:
                     if "Date Created" in fullTdmsfile.properties:
                         creationDate=fullTdmsfile.properties["Date Created"]
-                        creationDateSec=(creationDate - np.datetime64('1970-01-01T00:00:00Z'))/ np.timedelta64(1, 's')
+                        creationDateSec=(creationDate - np.datetime64('1970-01-01T00:00:00'))/ np.timedelta64(1, 's')
                         dfParam.index+=creationDateSec
-                        if self.showWarningDateOrigin==False:
+                        if not self.showWarningDateOrigin:
                             self.showWarningDateOrigin=True
                             monitorProgress.msg(msg=[self.getBaseName(),"Could not detect dates origin, used 'Date Created' property instead."])
                     else:
-                        if self.showWarningDateOrigin==False:
+                        if not self.showWarningDateOrigin:
                             self.showWarningDateOrigin=True
                             monitorProgress.msg(msg=[self.getBaseName(),"Could not detect dates origin."])
 
