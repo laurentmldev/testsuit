@@ -1,6 +1,4 @@
 
-import re,os,sys
-from unidecode import unidecode
     
 from IPython.display import display,Javascript
 from IPython.core.getipython import get_ipython
@@ -57,7 +55,7 @@ def delete_cells(cellPosStart,cellPosEnd=None):
     display(Javascript(f"for (let i={cellPosStart};i<{cellPosEnd};i++) IPython.notebook.delete_cell({cellPosStart})"))
 
 ################## AGuiComponent ########################
-class AGuiComponent():
+class AGuiComponent:
     def __init__(self):        
         pass
 
@@ -391,7 +389,7 @@ class GuiChooseFields(AGuiComponent):
             if self.isUseFirstFieldAsTimestamp()==True:
                 indexPathRegexStr=self.getSearchTexts()[0]
                 indexPathRegexList=[]
-                for i in range(0,len(fileMgr.getSelectedFieldsNames())):
+                for i in range(len(fileMgr.getSelectedFieldsNames())):
                     indexPathRegexList+=[indexPathRegexStr]            
 
             dfList+=fileMgr.loadParams(fileMgr.getSelectedFieldsNames(),indexNamesList=indexPathRegexList,monitorProgress=monitorProgress.child(fileMgr.getBaseName()))

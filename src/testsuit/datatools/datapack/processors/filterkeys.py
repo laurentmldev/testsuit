@@ -10,7 +10,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def main(args):
     if len(args) < 2:
-        print("Usage: {} <TARGET_FILE> <grepArguments>".format(script_name), file=sys.stderr)
+        print(f"Usage: {script_name} <TARGET_FILE> <grepArguments>", file=sys.stderr)
         sys.exit(1)
 
     TARGET_FILE = args[0]
@@ -18,7 +18,7 @@ def main(args):
 
     pattern = re.compile(grepArguments)
 
-    with open(TARGET_FILE, "r") as f:
+    with open(TARGET_FILE) as f:
         lines = f.readlines()
 
     filtered = [line for line in lines if pattern.search(line) and "metadata" not in line]

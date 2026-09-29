@@ -18,11 +18,9 @@ from testsuit.datatools.datapack.evalfiles import evalincludes
 from testsuit.datatools.datapack.evalfiles import libdictionary
 
 import glob
-import random
 
 import shutil
 import stat
-import re
 
 nbTotalFiles=0
 
@@ -60,7 +58,7 @@ def copytree(src, dst, symlinks = True, ignore = None):
 ## check if the given file is accessible
 def _isInputReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 # override the parsing error message using logger
@@ -194,10 +192,10 @@ def evalSourceFile(method, sourceFile, targetFile, dico, keysorigin, dicosNames)
 		if evalkeys.nbInfinateRecursion>0 :		
 			print("while evaluating file '"+targetFile+"' : "+str(evalkeys.nbInfinateRecursion)+" infinate recursion(s) detected")
 			return False,[]
-		elif evalincludes.nbNotFoundIncludes>0 :
+		if evalincludes.nbNotFoundIncludes>0 :
 			print("while evaluating file '"+targetFile+"' : "+str(evalincludes.nbNotFoundIncludes)+" unresolved file include(s) detected")
 			return False,[]
-		elif evalkeys.nbUndefined>0 :
+		if evalkeys.nbUndefined>0 :
 			print("while evaluating file '"+targetFile+"' : "+str(evalkeys.nbUndefined)+" undefined key(s) detected")
 			return False,[]	
 
@@ -236,7 +234,7 @@ def getSourcePathType(sourcepath):
 		#print("### multi source")
 		return "multi"
 
-	elif os.path.isdir(libdictionary.expandPath(sourcepath)):
+	if os.path.isdir(libdictionary.expandPath(sourcepath)):
 		#print("### folder source")
 		return "folder"
 
@@ -251,13 +249,12 @@ def getSourcePathType(sourcepath):
 #	elif ".tgz" in sourcepath:
 #		return "tgz"
 
-	elif os.path.isfile(libdictionary.expandPath(sourcepath)):
+	if os.path.isfile(libdictionary.expandPath(sourcepath)):
 		#print("### file source")
 		return "file"
 
-	else :
-		print("unable to recognize type of given source-path : '"+sourcepath+"'")
-		sys.exit(1)
+	print("unable to recognize type of given source-path : '"+sourcepath+"'")
+	sys.exit(1)
 
 def evalPath(targetpath,sourcepath, method, dico, keysorigin, dicosPaths):
 

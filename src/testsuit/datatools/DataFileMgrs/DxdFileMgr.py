@@ -1,9 +1,9 @@
 
-import math,threading,sys
-from time import sleep
+import math,threading
 from datetime import timezone
 from concurrent.futures import ThreadPoolExecutor,wait
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -56,7 +56,7 @@ class DxdFileMgr(AFileMgr):
                 
         return self._nbEntries
 
-    def getFileInfo(self) -> List[str]:
+    def getFileInfo(self) -> list[str]:
         fileInfo=super().getFileInfo()
 
         with self.__lock:
@@ -73,7 +73,7 @@ class DxdFileMgr(AFileMgr):
             htmlTbl += "<tr><th>"+"Start Recording Time"+"</th><td>"+str(self.__dxdfile.info.start_store_time)+"</td></tr>"
         return htmlTbl
 
-    def getFieldNames(self) -> List[str]:
+    def getFieldNames(self) -> list[str]:
         with self.__lock:                   
             if self._fieldNamesList==None:
                 self._fieldNamesList = [fieldName for fieldName in self.__dxdfile]                        
@@ -86,17 +86,17 @@ class DxdFileMgr(AFileMgr):
         return None
 
     def loadParams(self,
-                paramNamesList: List[str],
-                indexNamesList: Optional[List[str]] = None,
-                monitorProgress: Optional[MonitorProgress] = None,
-                abortEvent: Optional[threading.Event] = None,
-                minDateSec: Optional[float] = None,
-                maxDateSec: Optional[float] = None,
-                callback: Optional[Callable[..., Any]] = None,
-                shiftDateSec: Optional[float] = None,
-                shiftDateRegex: Optional[str] = None,
-                shiftDateInverted: Optional[bool] = None,
-                silent: bool = False) -> List[pd.DataFrame]:
+                paramNamesList: list[str],
+                indexNamesList: list[str] | None = None,
+                monitorProgress: MonitorProgress | None = None,
+                abortEvent: threading.Event | None = None,
+                minDateSec: float | None = None,
+                maxDateSec: float | None = None,
+                callback: Callable[..., Any] | None = None,
+                shiftDateSec: float | None = None,
+                shiftDateRegex: str | None = None,
+                shiftDateInverted: bool | None = None,
+                silent: bool = False) -> list[pd.DataFrame]:
         
         # DXD format includes timestamps. No separate index names required.
         if not (indexNamesList==None or len(indexNamesList)==0):
@@ -117,7 +117,7 @@ class DxdFileMgr(AFileMgr):
             # absolute time in days since the 30th of December, 1899
             #get_logger().error(self.getBaseName()+": _start_store_time="+str(self.__dxdfile.info._start_store_time))
     
-            def loadParamFromDxdWorker(workerData: Dict[str, Any]) -> None:
+            def loadParamFromDxdWorker(workerData: dict[str, Any]) -> None:
                 nonlocal rstDataframes      
                 
                 paramName=workerData["paramName"]

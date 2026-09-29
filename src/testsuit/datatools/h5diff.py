@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import h5py
-import sys
 import numpy as np
 import pandas as pd
 
@@ -191,12 +190,12 @@ def diff_h5files_struct(file1: str, file2: str) -> bool:
     print("Comparing '"+file1+"' and '"+file2+"'")
     try:
         f1 = H5FileMgr(file1)
-    except IOError:
+    except OSError:
         print("Unable to open file '%s'") % file1
         return False
     try:
         f2 = H5FileMgr(file2)
-    except IOError:
+    except OSError:
         print("Unable to open file '%s'") % file2
         return False
     return diff_groups(f1, f1.getH5FileRoot(), f2, f2.getH5FileRoot(), "/")

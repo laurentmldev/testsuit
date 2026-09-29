@@ -9,11 +9,6 @@ from testsuit.datatools.datapack.evalfiles import evalincludes
 
 from datetime import datetime
 
-try:
-    import xml.etree.cElementTree as ET
-except ImportError:
-    import xml.etree.ElementTree as ET
-
 import re
 
 def expandPath(path,relPrefix="."):
@@ -153,11 +148,10 @@ def loadDicos(dicoFiles):
 
 # return value corresponding to given key
 def getkeyval(key, dico):
-	if not key in dico:
+	if key not in dico:
 		#log.warning("unknown key '"+key+"'")
 		return None
-	else :
-		return dico[key]
+	return dico[key]
 
 
 # return index of given str in ';'-separated string of key
@@ -220,7 +214,7 @@ def getParentKey(key):
 # @param dicoKeysOrigin keys origin for traceability. If not defined here, a key is traced a coming from <diconame> in the .<diconame>.keysorigin file
 # @return true if success, false otherwise
 def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
-	fileout=open(diconame, "wt")
+	fileout=open(diconame, "w")
 	fileout.write("# This dictionary is a merge from : "+str(deps)+"\n")
 	nbentries=0
 	for key in dicoEntries:
@@ -230,9 +224,9 @@ def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
 
 	# create keys origin file
 	keysOriginfile=getKeysOriginFileName(diconame)
-	fileout=open(keysOriginfile, "wt")
+	fileout=open(keysOriginfile, "w")
 	for key in dicoEntries:
-		if not key in dicoKeysOrigin:
+		if key not in dicoKeysOrigin:
 			fileout.write(key+"="+diconame+"\n")
 		else:
 			fileout.write(key+"="+dicoKeysOrigin[key]+"\n")	

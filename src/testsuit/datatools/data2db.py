@@ -9,14 +9,11 @@ import sys,os,json,math
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
-from time import sleep
 from concurrent.futures import ThreadPoolExecutor,wait
 
 import pandas as pd
 
-from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress 
-from functools import partial
 
 # add deps folder (relative path to this module)
 sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
@@ -192,7 +189,7 @@ Example of conf dictionary:
             except: 
                 try: minDate=number(minDate)*1e9
                 except:
-                    raise ValueError(f"invalid value given as 'minDate'."\
+                    raise ValueError("invalid value given as 'minDate'."\
                                             +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
                                             +f" given value was '{maxDate}'")
         else: minDate=None
@@ -203,7 +200,7 @@ Example of conf dictionary:
             except: 
                 try: maxDate=number(maxDate)*1e9
                 except:
-                    raise ValueError(f"invalid value given as 'maxDate'. "\
+                    raise ValueError("invalid value given as 'maxDate'. "\
                                             +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
                                             +f" given value was '{maxDate}'")
         else: maxDate=None
@@ -254,7 +251,7 @@ class InfluxdbV2Data2Db(Data2Db):
         :param token (str): influx access token
         :monitorProgress (func): function to be called for GUI progress messages (see datatoolbox:defaultmonitorProgress for signature)
         """
-        from influxdb_client import InfluxDBClient,BucketRetentionRules
+        from influxdb_client import InfluxDBClient
         from influxdb_client.rest import ApiException
 
         influxdb_client = InfluxDBClient(url=url, token=token, org=org, debug=False)
@@ -268,7 +265,7 @@ class InfluxdbV2Data2Db(Data2Db):
             if err_code == "conflict":
                 pass  # bucket already exists in this org, proceed safely
             elif err_code == "unauthorized":
-                raise ValueError(f"access denied. Maybe you should specify the token to be used ?")
+                raise ValueError("access denied. Maybe you should specify the token to be used ?")
             else:
                 raise ValueError(f"Unable to create bucket: {e}")
 
@@ -278,7 +275,7 @@ class InfluxdbV2Data2Db(Data2Db):
         :param workerData (dict): some context info to be provided to the worker"""
        
         from influxdb_client import InfluxDBClient
-        from influxdb_client.client.write_api import WriteOptions,WriteType,SYNCHRONOUS,ASYNCHRONOUS
+        from influxdb_client.client.write_api import SYNCHRONOUS
         
         dfPos=workerData["dfPos"]
         dbconf=workerData["dbconf"]
@@ -373,7 +370,7 @@ class InfluxdbV2Data2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
 
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' in provided influxdb conf")
+            raise ValueError("missing 'database' in provided influxdb conf")
 
         buckerStr=dbconf["database"]
         monitorProgress.msg(msg=f"checking database '{buckerStr}' exists (and create it if needed)")
@@ -638,10 +635,10 @@ class InfluxdbV3Data2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
         
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' (used as the InfluxDB v3 database name) in provided influxdb3 conf")
+            raise ValueError("missing 'database' (used as the InfluxDB v3 database name) in provided influxdb3 conf")
 
         if "table" not in dbconf:
-            raise ValueError(f"missing 'table' (used as the InfluxDB v3 table name) in provided influxdb3 conf")
+            raise ValueError("missing 'table' (used as the InfluxDB v3 table name) in provided influxdb3 conf")
 
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]
@@ -923,13 +920,13 @@ class ClickhouseData2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
 
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' (used as the ClickHouse database name) in provided clickhouse conf")
+            raise ValueError("missing 'database' (used as the ClickHouse database name) in provided clickhouse conf")
 
         if "table" not in dbconf:
-            raise ValueError(f"missing 'table' (used as the ClickHouse table name) in provided clickhouse conf")
+            raise ValueError("missing 'table' (used as the ClickHouse table name) in provided clickhouse conf")
 
         if "url" not in dbconf:
-            raise ValueError(f"missing 'url' in provided clickhouse conf")
+            raise ValueError("missing 'url' in provided clickhouse conf")
 
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]

@@ -11,7 +11,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def main(args):
     if len(args) < 1:
-        print("Usage: {} <DATASET_DIR>".format(script_name), file=sys.stderr)
+        print(f"Usage: {script_name} <DATASET_DIR>", file=sys.stderr)
         sys.exit(1)
 
     DATASET_DIR = args[0]
@@ -26,8 +26,8 @@ def main(args):
 
     dico_path = os.path.join(DATASET_DIR, "dataset.dico")
     with open(dico_path, "a") as f:
-        f.write("{}.importdate={}\n".format(dataset_name, import_date))
-        f.write("{}.importdateSec={}\n".format(dataset_name, import_date_sec))
+        f.write(f"{dataset_name}.importdate={import_date}\n")
+        f.write(f"{dataset_name}.importdateSec={import_date_sec}\n")
 
     # chmod -R 550 (r-xr-x---)
     for root, dirs, files in os.walk(DATASET_DIR):

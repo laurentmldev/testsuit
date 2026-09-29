@@ -6,10 +6,7 @@ import os,sys
 import pathlib
 from pathlib import Path
 
-import types
-from typing import Callable, Optional, Set, Type, Union
 
-import traceback
 
 MAIN_LOGGER_INST=None
 
@@ -36,7 +33,7 @@ def get_logger() -> logging.Logger:
         
     return MAIN_LOGGER_INST
 
-def reset_logger(logger: Optional[logging.Logger] = None) -> None:
+def reset_logger(logger: logging.Logger | None = None) -> None:
     global MAIN_LOGGER_INST
     if MAIN_LOGGER_INST!=None:
         for handler in MAIN_LOGGER_INST.handlers:
@@ -48,8 +45,8 @@ def reset_logger(logger: Optional[logging.Logger] = None) -> None:
 
 def create_logger(
     name: str = __name__,
-    filename: Optional[str] = None,
-    config: Optional[dict] = None,
+    filename: str | None = None,
+    config: dict | None = None,
     reset: bool = False
 ) -> logging.Logger:
     """Get a dual console/file logger with individual Format and Level for console and file"""    

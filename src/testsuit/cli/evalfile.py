@@ -28,7 +28,7 @@ from testsuit.datatools.datapack.evalfiles import evalincludes
 ## check if the given file is accessible
 def _isInputReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 # override the parsing error message using logger

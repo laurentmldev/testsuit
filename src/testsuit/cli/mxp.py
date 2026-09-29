@@ -4,7 +4,6 @@ import sys,os,re
 
 
 from testsuit.exploit.mexploit.mexploit import mexploit
-import testsuit.misc.logger
 from testsuit import misc
 
 # clearer messages in HTML report (pytest syscap)
@@ -15,7 +14,7 @@ misc.logger.create_logger("mexploit",config=logConfig)
 ## check if the given file is accessible
 def _isInputReadable(f):
     if not os.access(f,os.R_OK):
-        misc.logger.get_logger().error("{0} does not exist or is not reachable".format(f))
+        misc.logger.get_logger().error(f"{f} does not exist or is not reachable")
         sys.exit(1)
 
     return f
@@ -62,7 +61,7 @@ def main():
     if rst!=0:
         print("\nERROR: M-Exploit analysis failed")
 
-        with open(args.output_folder+os.sep+"mexploit.log","r") as f:
+        with open(args.output_folder+os.sep+"mexploit.log") as f:
             for line in f.readlines():
                 if re.search(r"(fail|FAIL|error|ERROR)",line):
                     print(line)

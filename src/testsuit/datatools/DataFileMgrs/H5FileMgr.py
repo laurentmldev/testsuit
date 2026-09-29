@@ -5,12 +5,12 @@ import re
 import h5py
 import pandas as pd
 import numpy as np
-from time import sleep
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import threading
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
@@ -294,9 +294,8 @@ class H5FileMgr(AFileMgr):
                             raise ValueError("unable to find reference pointed by attribute '"+str(attrkey)
                                          +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))       
                             break
-                        else:
-                            get_logger().warn("unable to find reference pointed by attribute '"+str(attrkey)
-                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
+                        get_logger().warn("unable to find reference pointed by attribute '"+str(attrkey)
+                                     +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
 
                 # otherwise use the first with 'time' or 'date' in attribute
                 if "time" in attrkey.lower() or "date" in attrkey.lower():

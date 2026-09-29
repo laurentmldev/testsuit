@@ -1,19 +1,17 @@
 
 from __future__ import annotations
 
-import re,subprocess,sys
+import re
 import pandas as pd
 import numpy as np
-from datetime import datetime,timezone
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
-from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 from testsuit.datatools.datatoolbox import getDateParser
 
 from unidecode import unidecode
@@ -114,18 +112,17 @@ class CsvFileMgr(AFileMgr):
         if self.__separator==None:
             if len(self.getHeaderLine().split(';'))>1:
                 return ';'
-            elif len(self.getHeaderLine().split(','))>1:
+            if len(self.getHeaderLine().split(','))>1:
                 return ','
-            elif len(self.getHeaderLine().split('\t'))>1:
+            if len(self.getHeaderLine().split('\t'))>1:
                 return '\t'
-            else:
-                raise Exception(f"Unable to detect CSV separator in CSV file '{self.getFileName()}'")
+            raise Exception(f"Unable to detect CSV separator in CSV file '{self.getFileName()}'")
         return self.__separator
     
     def getNbEntries(self) -> int:
         if self._nbEntries == None:
             self._nbEntries = 0
-            with open(self.getFileName(), "rbU") as f:
+            with open(self.getFileName(), "rb") as f:
                 self._nbEntries = sum(1 for _ in f)
 
         return self._nbEntries
@@ -224,7 +221,7 @@ class CsvFileMgr(AFileMgr):
             if not indexColName:
                 indexColName=paramNamesList[DEFAULT_COL_IDX]
             indexNamesList=[]
-            for i in range(0,len(paramNamesList)):
+            for i in range(len(paramNamesList)):
                 indexNamesList+=[indexColName]
 
         paramIdx=0

@@ -1,8 +1,8 @@
 
-import sys,os,threading
-from time import sleep
+import threading
 from concurrent.futures import ThreadPoolExecutor,wait
-from typing import Any, Callable, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np 
 import pandas as pd
@@ -14,7 +14,6 @@ from unidecode import unidecode
 
 from testsuit.misc.MonitorProgress import MonitorProgress
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
-from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
 NB_MAX_WORKERS=6
 
@@ -69,7 +68,7 @@ def _absoluteTimeTrack(channel) -> np.ndarray:
 
     return start_time + (relative_time * 1e9).astype("timedelta64[ns]")
 
-def channelsAsDataframe(tdmsFile: TdmsFile, normalizedNames: List[str]) -> pd.DataFrame:
+def channelsAsDataframe(tdmsFile: TdmsFile, normalizedNames: list[str]) -> pd.DataFrame:
     """DataFrame of the channels whose normalized path is in normalizedNames, indexed by absolute time,
     with columns named by normalized path."""
     columns = {}
@@ -106,7 +105,7 @@ class TdmsFileMgr(AFileMgr):
         
         return htmlTbl
 
-    def getFieldNames(self) -> List[str]:
+    def getFieldNames(self) -> list[str]:
         if self._fieldNamesList==None:
             self._fieldNamesList=[]
             for group in self.__tdmsfile.groups():
@@ -121,17 +120,17 @@ class TdmsFileMgr(AFileMgr):
         return None
 
     def loadParams(self,
-                paramNamesList: List[str],
-                indexNamesList: Optional[List[str]] = None,
-                monitorProgress: Optional[MonitorProgress] = None,
-                abortEvent: Optional[threading.Event] = None,
-                minDateSec: Optional[float] = None,
-                maxDateSec: Optional[float] = None,
-                callback: Optional[Callable[..., Any]] = None,
-                shiftDateSec: Optional[float] = None,
-                shiftDateRegex: Optional[str] = None,
-                shiftDateInverted: Optional[bool] = None,
-                silent: bool = False) -> List[pd.DataFrame]:
+                paramNamesList: list[str],
+                indexNamesList: list[str] | None = None,
+                monitorProgress: MonitorProgress | None = None,
+                abortEvent: threading.Event | None = None,
+                minDateSec: float | None = None,
+                maxDateSec: float | None = None,
+                callback: Callable[..., Any] | None = None,
+                shiftDateSec: float | None = None,
+                shiftDateRegex: str | None = None,
+                shiftDateInverted: bool | None = None,
+                silent: bool = False) -> list[pd.DataFrame]:
         
         # retrieve positions of requested params 
         rstDataframes=[]

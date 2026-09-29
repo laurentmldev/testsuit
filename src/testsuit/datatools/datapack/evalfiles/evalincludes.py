@@ -65,7 +65,7 @@ curPath= [ os.getcwd()]
 ## check if the given file is accessible
 def isInputFileReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 
@@ -118,36 +118,32 @@ def _includeStep(match,includeOnce,curParametersDico):
 			#print("##### includedFilePath '"+includedFilePath+"' match ="+str(DETECT_KEY_REGEX.match(includedFilePath)))
 			print("ERROR: Included file '"+includedFilePath+"' not reachable.")
 			return "<"+KEYMARK+UNKNOWN_INCLUDE_MARKER+includeOnceStr+" src=\""+matchText+"\" ></_include_>\n"		
-		else:
+
+		paramsStr=""
+		if len(curParametersDico)>0:
+			paramsStr="\n"
+			for paramName in curParametersDico :
+				paramsStr+="<param name=\""+paramName+"\">"+curParametersDico[paramName]+"</param>\n"
+			paramsStr+="\n"
+		return "<"+KEYMARK+includeOnceStr+" src=\""+matchText+"\" >"+paramsStr+"</_include_>\n"		
 			
-			paramsStr=""
-			if len(curParametersDico)>0:
-				paramsStr="\n"
-				for paramName in curParametersDico :
-					paramsStr+="<param name=\""+paramName+"\">"+curParametersDico[paramName]+"</param>\n"
-				paramsStr+="\n"
-			return "<"+KEYMARK+includeOnceStr+" src=\""+matchText+"\" >"+paramsStr+"</_include_>\n"		
-			
-	else:
-		if includedFilePath in includedFiles and includeOnce:
-			return ""
-		else:
-			if includedFilePath in includedFiles and includedFiles[includedFilePath]>=MAX_ALLOWED_INCLUSIONS:
-					nbCircularRecursions+=1
-					print("WARNING: File '"+includedFilePath+"' has been included more than "+str(MAX_ALLOWED_INCLUSIONS)+". This is considered as a circular reference.")
-					return "["+KEYMARK+CYCLIC_INCLUDE_MARKER+" src=\""+matchText+"\"]\n"		
-			else:		
-				#print("including '"+includedFilePath+"'")
-				#print("\nincluding ## "+includedFilePath+" ## includeOnce="+str(includeOnce)+" files : "+str(includedFiles))
-				#print("\nincluding ## "+includedFilePath+" ## curParametersDico="+str(curParametersDico))
-				nbIncludes+=1
-				if includedFilePath not in includedFiles :
-					includedFiles[includedFilePath]=0
-				includedFiles[includedFilePath]+=1
-				f=open(includedFilePath, "rt")
-				newlines=f.readlines()
-				f.close()
-				return _processExpandIncludes(includedFilePath,newlines,curParametersDico)
+	if includedFilePath in includedFiles and includeOnce:
+		return ""
+	if includedFilePath in includedFiles and includedFiles[includedFilePath]>=MAX_ALLOWED_INCLUSIONS:
+			nbCircularRecursions+=1
+			print("WARNING: File '"+includedFilePath+"' has been included more than "+str(MAX_ALLOWED_INCLUSIONS)+". This is considered as a circular reference.")
+			return "["+KEYMARK+CYCLIC_INCLUDE_MARKER+" src=\""+matchText+"\"]\n"		
+	#print("including '"+includedFilePath+"'")
+	#print("\nincluding ## "+includedFilePath+" ## includeOnce="+str(includeOnce)+" files : "+str(includedFiles))
+	#print("\nincluding ## "+includedFilePath+" ## curParametersDico="+str(curParametersDico))
+	nbIncludes+=1
+	if includedFilePath not in includedFiles :
+		includedFiles[includedFilePath]=0
+	includedFiles[includedFilePath]+=1
+	f=open(includedFilePath)
+	newlines=f.readlines()
+	f.close()
+	return _processExpandIncludes(includedFilePath,newlines,curParametersDico)
 
 ## return given lines, where keys have been evaluated with given dico (when defined)
 def evalIncludeLinesWithParams(lines,includedico,targetFile):
@@ -305,7 +301,7 @@ def expandIncludes(filePath,lines, withPartialEval=False):
 # @param filePath the processed file name
 # @return list of expanded lines
 def expandFileIncludes(filePath):		
-	f=open(filePath, "rt")
+	f=open(filePath)
 	lines=f.readlines()
 	f.close()
 	return expandIncludes(filePath,lines)

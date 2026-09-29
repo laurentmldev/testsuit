@@ -12,8 +12,6 @@ import os,re
 from datetime import datetime,timezone
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import matplotlib.dates as mdates
 from matplotlib.ticker import FuncFormatter
 
 import pandas as pd
@@ -21,7 +19,6 @@ import numpy as np
 from pathlib import Path
 
 from testsuit.misc import files
-import random
 
 # Source - https://stackoverflow.com/a
 # Posted by Matthias Luh, modified by community. See post 'Timeline' for change history
@@ -172,7 +169,7 @@ def plotData_matplotlib(critConf: dict,
 
         if "name" not in dataList[0]:
             if hasattr(dataList[0],"name"):
-                dataList[0]["name"]=getattr(dataList[0],"name")
+                dataList[0]["name"]=dataList[0].name
             else:
                 dataList[0]["name"]=critConf["name"]
         if m:=re.match(r"(.*)::(.*)",dataList[0]["name"]):
@@ -268,14 +265,13 @@ def plotData_matplotlib(critConf: dict,
 
     if interactive: 
         return fig,ax,dataHandles,legendsLabels
-    else: 
-        figPath=critConf["test_run_config"]["results"]+os.sep+figuresRelPath    
-        Path(figPath).mkdir(parents=True, exist_ok=True)
-        filePath=figPath+os.sep+files.normalizeFileName(critConf["name"])+".svg"
-        fig.savefig(filePath)
-        get_logger().info("created plot figure '"+filePath+"'")
-        plt.clf()
-        return filePath
+    figPath=critConf["test_run_config"]["results"]+os.sep+figuresRelPath    
+    Path(figPath).mkdir(parents=True, exist_ok=True)
+    filePath=figPath+os.sep+files.normalizeFileName(critConf["name"])+".svg"
+    fig.savefig(filePath)
+    get_logger().info("created plot figure '"+filePath+"'")
+    plt.clf()
+    return filePath
 
 
 def plotData(critConf: dict,
@@ -291,11 +287,10 @@ def plotData(critConf: dict,
         
     if critConf["rendering_engine"]=="plotly":
         return plotData_plotly(critConf, dataList, interactive, figuresRelPath, fig, ax, dataHandles, legendsLabels)
-    elif critConf["rendering_engine"]=="matplotlib":
+    if critConf["rendering_engine"]=="matplotlib":
         return plotData_matplotlib(critConf, dataList, interactive, figuresRelPath, fig, ax, dataHandles, legendsLabels)
-    else:
-        engine=critConf["rendering_engine"]
-        raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
+    engine=critConf["rendering_engine"]
+    raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
 
 def plotData3D_matplotlib(critConf: dict,
                           dataList: list,
@@ -314,7 +309,6 @@ def plotData3D_matplotlib(critConf: dict,
     :return: path of generated file (non-interactive) or (fig, ax, dataHandles, legendsLabels) (interactive)
     """
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
     
     if not dataHandles:
         dataHandles = []
@@ -336,7 +330,7 @@ def plotData3D_matplotlib(critConf: dict,
     # Camera position parameters
     camera_eye = critConf.get("camera_eye", (1.5, 1.5, 1.5))  # (x, y, z)
     camera_up = critConf.get("camera_up", (0, 0, 1))  # (x, y, z)
-    camera_center = critConf.get("camera_center", None)  # (x, y, z) or None for auto
+    camera_center = critConf.get("camera_center")  # (x, y, z) or None for auto
 
     if not fig:
         fig = plt.figure(critConf["name"], layout="constrained", figsize=figSize)
@@ -409,14 +403,13 @@ def plotData3D_matplotlib(critConf: dict,
     
     if interactive:
         return fig, ax, dataHandles, legendsLabels
-    else:
-        figPath = critConf["test_run_config"]["results"] + os.sep + figuresRelPath
-        Path(figPath).mkdir(parents=True, exist_ok=True)
-        filePath = figPath + os.sep + files.normalizeFileName(critConf["name"]) + ".svg"
-        fig.savefig(filePath)
-        get_logger().info("created 3D plot figure '" + filePath + "'")
-        plt.clf()
-        return filePath    
+    figPath = critConf["test_run_config"]["results"] + os.sep + figuresRelPath
+    Path(figPath).mkdir(parents=True, exist_ok=True)
+    filePath = figPath + os.sep + files.normalizeFileName(critConf["name"]) + ".svg"
+    fig.savefig(filePath)
+    get_logger().info("created 3D plot figure '" + filePath + "'")
+    plt.clf()
+    return filePath    
 
 def _mergeXYZParams(dataList: list) -> list:
     """3D plots take either one param with 3 columns (x,y,z) or 3 separate
@@ -452,11 +445,10 @@ def plotData3D(critConf: dict,
     
     if critConf["rendering_engine"] == "matplotlib":
         return plotData3D_matplotlib(critConf, dataList, interactive, figuresRelPath, fig, ax, dataHandles, legendsLabels)
-    elif critConf["rendering_engine"] == "plotly":
+    if critConf["rendering_engine"] == "plotly":
         raise Exception("3D plotting with plotly is not supported yet")
-    else:
-        engine = critConf["rendering_engine"]
-        raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
+    engine = critConf["rendering_engine"]
+    raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
 
 
 
@@ -478,7 +470,6 @@ def plotData_plotly(critConf: dict,
     """
     
     import plotly.graph_objects as go
-    from plotly.offline import plot as plotly_plot
 
     if not dataHandles:
         dataHandles = []
@@ -500,7 +491,7 @@ def plotData_plotly(critConf: dict,
 
         if "name" not in dataList[0]:
             if hasattr(dataList[0]["data"], "name"):
-                dataList[0]["name"] = getattr(dataList[0]["data"], "name")
+                dataList[0]["name"] = dataList[0]["data"].name
             else:
                 dataList[0]["name"] = critConf["name"]
         if m := re.match(r"(.*)::(.*)", dataList[0]["name"]):
@@ -665,21 +656,20 @@ def plotData_plotly(critConf: dict,
 
     if interactive:
         return fig, ax, dataHandles, legendsLabels
-    else:
-        figPath = critConf["test_run_config"]["results"] + os.sep + figuresRelPath
-        Path(figPath).mkdir(parents=True, exist_ok=True)
-        filePath = figPath + os.sep + files.normalizeFileName(critConf["name"]) + ".svg"
-        
-        # Save figure (requires kaleido)
-        fig.write_image(filePath)
-        
-        # Save figure using orca (requires plotly-orca package and Graphviz)
-        #import plotly_orca
-        #plotly_orca.save(fig, filePath)
-        
-        get_logger().info("created plot figure '" + filePath + "'")
-        
-        return filePath
+    figPath = critConf["test_run_config"]["results"] + os.sep + figuresRelPath
+    Path(figPath).mkdir(parents=True, exist_ok=True)
+    filePath = figPath + os.sep + files.normalizeFileName(critConf["name"]) + ".svg"
+
+    # Save figure (requires kaleido)
+    fig.write_image(filePath)
+
+    # Save figure using orca (requires plotly-orca package and Graphviz)
+    #import plotly_orca
+    #plotly_orca.save(fig, filePath)
+
+    get_logger().info("created plot figure '" + filePath + "'")
+
+    return filePath
     
 
 def plotTimeline(critConf: dict,
@@ -690,11 +680,10 @@ def plotTimeline(critConf: dict,
         
     if critConf["rendering_engine"]=="plotly":
         return plotTimeline_plotly(critConf, eventsData, figuresRelPath)
-    elif critConf["rendering_engine"]=="matplotlib":
+    if critConf["rendering_engine"]=="matplotlib":
         return plotTimeline_matplotlib(critConf, eventsData, figuresRelPath)
-    else:
-        engine=critConf["rendering_engine"]
-        raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
+    engine=critConf["rendering_engine"]
+    raise Exception(f"unknown rendering engine: '{engine}' (plotly|matplotlib)")
 
 
 def _prepare_events_dataframe(eventsData: dict) -> pd.DataFrame:

@@ -8,7 +8,8 @@ import threading
 import numpy as np
 import pandas as pd
 import re
-from typing import Any, Callable, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
@@ -97,7 +98,7 @@ class UdbfFileMgr(AFileMgr):
             self._nbEntries = self._datArray.shape[0]
         return self._nbEntries
 
-    def getFileInfo(self) -> List[str]:
+    def getFileInfo(self) -> list[str]:
         fileInfo = super().getFileInfo()
         return fileInfo + [
             "Sample rate: " + str(self._sampleRate) + " Hz",
@@ -110,7 +111,7 @@ class UdbfFileMgr(AFileMgr):
         htmlTbl += '<tr><th>Timestamp Column</th><td>' + self._channelNames[self._timestampColIdx] + '</td></tr>'
         return htmlTbl
 
-    def getFieldNames(self) -> List[str]:
+    def getFieldNames(self) -> list[str]:
         """Return data channel names (excludes the timestamp column)."""
         if self._fieldNamesList is None:
             self._fieldNamesList=[]
@@ -127,22 +128,21 @@ class UdbfFileMgr(AFileMgr):
         return None
 
     def loadParams(self,
-                paramNamesList: List[str],
-                indexNamesList: Optional[List[str]] = None,
-                monitorProgress: Optional[MonitorProgress] = None,
-                abortEvent: Optional[threading.Event] = None,
-                minDateSec: Optional[float] = None,
-                maxDateSec: Optional[float] = None,
-                callback: Optional[Callable[..., Any]] = None,
-                shiftDateSec: Optional[float] = None,
-                shiftDateRegex: Optional[str] = None,
-                shiftDateInverted: Optional[bool] = None,
-                silent: bool = False) -> List[pd.DataFrame]:
+                paramNamesList: list[str],
+                indexNamesList: list[str] | None = None,
+                monitorProgress: MonitorProgress | None = None,
+                abortEvent: threading.Event | None = None,
+                minDateSec: float | None = None,
+                maxDateSec: float | None = None,
+                callback: Callable[..., Any] | None = None,
+                shiftDateSec: float | None = None,
+                shiftDateRegex: str | None = None,
+                shiftDateInverted: bool | None = None,
+                silent: bool = False) -> list[pd.DataFrame]:
         """Extract requested channels as Pandas DataFrames.
 
         Timestamps are converted from OLE Automation dates to Unix seconds (float64).
         """
-        import re
 
         rst = []
 
@@ -166,8 +166,8 @@ class UdbfFileMgr(AFileMgr):
             # Resolve column index for this parameter
             if paramName not in self._channelNames:
                 raise Exception(
-                    "Parameter '{}' not found in .dat file '{}'. "
-                    "Available: {}".format(paramName, self.getBaseName(), self._channelNames)
+                    f"Parameter '{paramName}' not found in .dat file '{self.getBaseName()}'. "
+                    f"Available: {self._channelNames}"
                 )
 
             colIdx = self._channelNames.index(paramName)
@@ -198,9 +198,7 @@ class UdbfFileMgr(AFileMgr):
 
             except Exception as e:
                 raise Exception(
-                    "Unable to extract param '{}' from .dat file '{}': {}".format(
-                        paramName, self.getFileName(), str(e)
-                    )
+                    f"Unable to extract param '{paramName}' from .dat file '{self.getFileName()}': {str(e)}"
                 )
 
         return rst

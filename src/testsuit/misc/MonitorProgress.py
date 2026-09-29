@@ -2,13 +2,13 @@ import threading
 import queue
 import sys
 
-import types
-from typing import Callable, Optional, Set, Type, Union
+from typing import Optional
+from collections.abc import Callable
 
         
 def consoleProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
     """Handle progress messages
@@ -38,8 +38,8 @@ def consoleProgressCb(
 
 
 def consoleSilentProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
     """Handle progress messages
@@ -56,8 +56,8 @@ def consoleSilentProgressCb(
     consoleProgressCb(percent,msg,msgSeverity)
     
 def consoleRichProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
     """Handle progress messages
@@ -154,7 +154,7 @@ class MonitorProgress:
         total_items: int = None,
         progressCb: Callable[[float, str, str], None] = consoleProgressCb,
         parent: Optional["MonitorProgress"] = None,
-        name: Optional[str] = None,
+        name: str | None = None,
         allowOverTotalItems: bool = False,
         debug: bool = False, # use this flag for debug/investigate
     ):
@@ -165,20 +165,20 @@ class MonitorProgress:
         if total_items is not None:
             self._total=int(total_items)
         self._cb: Callable[[float, str, str], None] = progressCb
-        self._completed_ids: Set[str] = set()
+        self._completed_ids: set[str] = set()
         self._completed_count: int = 0
         self._lock: threading.RLock = threading.RLock()
-        self._parent: Optional["MonitorProgress"] = parent
-        self._name: Optional[str] = name
-        self._sub_monitors: dict[str, "MonitorProgress"] = {}
+        self._parent: MonitorProgress | None = parent
+        self._name: str | None = name
+        self._sub_monitors: dict[str, MonitorProgress] = {}
         self._allowOverTotalItems=allowOverTotalItems
         self._debug=debug
         
         # --- Dedicated flush thread for top-level monitors ---
         self._is_top_level = parent is None
-        self._msg_queue: Optional[queue.Queue] = None
-        self._flush_thread: Optional[threading.Thread] = None
-        self._stop_event: Optional[threading.Event] = None
+        self._msg_queue: queue.Queue | None = None
+        self._flush_thread: threading.Thread | None = None
+        self._stop_event: threading.Event | None = None
         self._closed = False
 
         if self._is_top_level:
@@ -393,7 +393,7 @@ class MonitorProgress:
         self,
         name: str,
         total_sub_items: int = None,
-        progressCb: Optional[Callable[[float, str, str], None]] = None,
+        progressCb: Callable[[float, str, str], None] | None = None,
         allowOverTotalItems: bool = False,
         renameIfExist: bool = False
     ) -> "MonitorProgress":

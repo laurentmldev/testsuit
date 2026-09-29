@@ -23,7 +23,7 @@ create_logger("extract_data_any")
 
 def load_extraction_config(path):
     """Charge la config JSON """
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         content = f.read()
         try:
             import yaml
@@ -261,7 +261,7 @@ def extract_data_any(sourceFolderOrFile, params, targetFile, extractions_config,
 
 def isInputReadable(f):
     if not os.access(f, os.R_OK):
-        get_logger().error("{0} does not exist or is not reachable".format(f))
+        get_logger().error(f"{f} does not exist or is not reachable")
         sys.exit(1)
     return f
 

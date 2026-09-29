@@ -75,7 +75,7 @@ ignoreMissing=False
 ## check if the given file is accessible
 def _isInputFileReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 # override the parsing error message using logger
@@ -119,7 +119,7 @@ def _replaceKeys_substitution(matchObject):
 	# the ID used to check all the replaced keys at this position
 	# this is used to detect circular infinate references
 	rplpos=str(curLineNb)+":"+str(matchObject.start())
-	if not rplpos in rpltraces:
+	if rplpos not in rpltraces:
 		rpltraces[rplpos] = []
 
 	#print(matchObject.group(MATCH_GROUP)+"@"+rplpos)
@@ -278,7 +278,7 @@ Return:
 	
 	args = parser.parse_args()		
 
-	f=open(args.targetfile, "rt")
+	f=open(args.targetfile)
 	lines=f.readlines()
 	f.close()
 

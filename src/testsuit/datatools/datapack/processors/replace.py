@@ -10,7 +10,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def main(args):
     if len(args) < 2:
-        print("Usage: {} <TARGET_FILE> <sedRegex>".format(script_name), file=sys.stderr)
+        print(f"Usage: {script_name} <TARGET_FILE> <sedRegex>", file=sys.stderr)
         sys.exit(1)
 
     TARGET_FILE = args[0]
@@ -20,7 +20,7 @@ def main(args):
     # Extract the substitution pattern from sed syntax
     match = re.match(r"^s/(.*)/(.*)/([gimux]*)$", sedRegex)
     if not match:
-        print("ERROR: replace command failed: invalid sed regex '{}'".format(sedRegex), file=sys.stderr)
+        print(f"ERROR: replace command failed: invalid sed regex '{sedRegex}'", file=sys.stderr)
         sys.exit(1)
 
     pattern_str, replacement, flags = match.groups()
@@ -35,7 +35,7 @@ def main(args):
     pattern = re.compile(pattern_str, re_flags)
     global_replace = "g" in flags
 
-    with open(TARGET_FILE, "r") as f:
+    with open(TARGET_FILE) as f:
         content = f.read()
 
     if global_replace:

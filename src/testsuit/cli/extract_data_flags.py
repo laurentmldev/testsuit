@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 
-from testsuit.datatools.datatoolbox import loadDataframeFromFile, SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
 from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -19,7 +19,6 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.logger import create_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 
-from testsuit.misc.files import expandPath
 
 import pandas as pd
 import numpy as np
@@ -192,7 +191,7 @@ def extract_data_flags(target_files, flags_info_file, results_folder=None,
     
     yaml = YAML()
     try:
-        with open(flags_info_file, 'r') as f:
+        with open(flags_info_file) as f:
             flags_info = yaml.load(f)
     except YAMLError as e:
         raise Exception(f"failed to parse flags_info '{flags_info_file}' YAML file: {e}")
@@ -241,7 +240,7 @@ def main():
     
     rst = extract_data_flags(filtered_target_files, args.flags_info_file,monitorProgress=monitorProgress)
     if not rst:
-        get_logger().error(f"failed to extract flags info.")
+        get_logger().error("failed to extract flags info.")
         sys.exit(1)
 
 

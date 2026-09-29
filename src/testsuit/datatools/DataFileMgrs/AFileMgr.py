@@ -6,7 +6,8 @@ import os,math,abc,re
 import pandas as pd
 import inspect
 import threading
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.datatoolbox import getDfName
@@ -35,7 +36,7 @@ def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
             return pd.to_datetime(ts, unit='s').strftime('%Y-%m-%d %H:%M:%S.%f')
         return str(ts)
         
-    finalStr=f"\n-----------------------------------------"
+    finalStr="\n-----------------------------------------"
     
     finalStr+=f"\n{contentsStr}"
     finalStr+=f"\nDuration: {durationSec:0.6f}s"
@@ -69,7 +70,7 @@ def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
             finalStr+=f"\nmax= {maxVal:.6f} @ {_fmt_ts(idxMax)}"
             
     
-    finalStr+=f"\n-----------------------------------------\n"
+    finalStr+="\n-----------------------------------------\n"
     return finalStr
 
 pd.DataFrame.pstr = _pretty_str  
@@ -281,14 +282,12 @@ class AFileMgr(metaclass=abc.ABCMeta):
         if callback:     
             if 'monitorProgress' in inspect.signature(callback).parameters:                    
                 return callback(df,monitorProgress=monitorProgress.child(f"callback {df.name}", renameIfExist=True))
-            else:
-                rst=callback(df)                
-                monitorProgress.complete_n(1)
-                return rst   
-
-        else:
+            rst=callback(df)                
             monitorProgress.complete_n(1)
-            return df
+            return rst   
+
+        monitorProgress.complete_n(1)
+        return df
             
     def finalizeParam(self,dfParam: pd.DataFrame | pd.Series | None,name: str,indexName: str,origin: str,
                   columns: list | None=None, callback: Callable | None=None,
@@ -347,14 +346,12 @@ class AFileMgr(metaclass=abc.ABCMeta):
                         if 'timestamp' in name.lower():
                             get_logger().info(f"[skipped clock correction of param {name} (it is itself a timestamp)]")
                             return dfParam
-                        else:                                       
-                            msg=f"clock data is not overlapping dates of param {name}, unable to apply clock correction"
-                            print(f"\n{dfParam.pstr()}\n{shiftDateSec.pstr()}")
-                            if self._continueOnError:
-                                monitorProgress.msg(msg=msg,msgSeverity="error")
-                                return None
-                            else:
-                                raise Exception(msg)
+                        msg=f"clock data is not overlapping dates of param {name}, unable to apply clock correction"
+                        print(f"\n{dfParam.pstr()}\n{shiftDateSec.pstr()}")
+                        if self._continueOnError:
+                            monitorProgress.msg(msg=msg,msgSeverity="error")
+                            return None
+                        raise Exception(msg)
                         
                     dfParam=alignedDfParam
                     dfParam.index+=alignedDatesDriftSec[alignedDatesDriftSec.columns[0]]

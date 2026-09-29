@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 
 import sys,os
 
@@ -16,16 +15,15 @@ from testsuit.datatools.datapack.evalfiles.evalpath import evalPath
 
 from testsuit.datatools.datapack.GitImporter import GitImporter
 
-import testsuit.misc.files
 from testsuit import misc
-from testsuit.misc.files import checksumFolder,toBashPath
+from testsuit.misc.files import checksumFolder
 
 import socket
 from datetime import datetime
 
 import shutil
 import sys
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 from colorama import init as colorama_init
 colorama_init()
 
@@ -243,26 +241,24 @@ def findRefFile(testdefFolder,targetCompsFolder,setupFolder,templateFileName,opt
     if os.access(testdefFolder+os.sep+templateFileName,os.R_OK): 
         return testdefFolder+os.sep+templateFileNameOri
     # relative from setup folder
-    elif os.access(setupFolder+os.sep+templateFileName,os.R_OK):
+    if os.access(setupFolder+os.sep+templateFileName,os.R_OK):
         return setupFolder+os.sep+templateFileNameOri
     # relative from testdef folder
-    elif os.access(datapackLocation+os.sep+templateFileName,os.R_OK):
+    if os.access(datapackLocation+os.sep+templateFileName,os.R_OK):
         return datapackLocation+os.sep+templateFileNameOri
     # absolute path or relative from PWD
-    elif  os.access(expandPath(templateFileName),os.R_OK): 
+    if  os.access(expandPath(templateFileName),os.R_OK): 
         return expandPath(templateFileNameOri)
     
-    else:
-        if optional==True:
-            return None
-        else:
-            print(Fore.RED+"ERROR: template file required in component conf is not reachable: '"+templateFileName+"'"+Style.RESET_ALL)
-            print("Tried following solutions:")
-            print(" - relative path from testdef folder: "+testdefFolder)
-            print(" - relative path from setup folder: "+setupFolder)
-            print(" - relative path from datapack location: "+datapackLocation)
-            print(" - absolute path or relative to current user directory")
-            sys.exit(1)
+    if optional==True:
+        return None
+    print(Fore.RED+"ERROR: template file required in component conf is not reachable: '"+templateFileName+"'"+Style.RESET_ALL)
+    print("Tried following solutions:")
+    print(" - relative path from testdef folder: "+testdefFolder)
+    print(" - relative path from setup folder: "+setupFolder)
+    print(" - relative path from datapack location: "+datapackLocation)
+    print(" - absolute path or relative to current user directory")
+    sys.exit(1)
 
 def genDataPackComponent(targetCompsFolder,componentNode,componentTypeDesc,dico,keysorigin,dicosList,setupFolder,testdefFolder,nocheck):
     
@@ -303,14 +299,14 @@ def genDataPackComponent(targetCompsFolder,componentNode,componentTypeDesc,dico,
             continue
             
         if method=="copy":
-            print((Fore.MAGENTA+"    [COPY] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+u'\u2713'+Style.RESET_ALL))
+            print(Fore.MAGENTA+"    [COPY] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
+                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
         elif method=="eval":
-            print((Fore.LIGHTMAGENTA_EX+"    [EVAL] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+u'\u2713'+Style.RESET_ALL))
+            print(Fore.LIGHTMAGENTA_EX+"    [EVAL] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
+                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
         elif method=="exec":
-            print((Fore.LIGHTMAGENTA_EX+"    [EXEC] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+u'\u2713'+Style.RESET_ALL))
+            print(Fore.LIGHTMAGENTA_EX+"    [EXEC] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
+                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
         else:
             raise Exception(f"unknown file evaluation method '{method}' (copy|eval|exec)")
         
@@ -379,7 +375,7 @@ def datapack(testdef_file,nocheck=False):
 
     # load original test definition YAML file to get dicos list
     # import testdef dicos data
-    with open(testdef_file, 'r') as f:
+    with open(testdef_file) as f:
         testdefData = yaml.safe_load(f)
     testdefRoot = _yaml_root(testdefData)
     for dicofileNode in testdefRoot.get('dictionary', []):
@@ -395,7 +391,7 @@ def datapack(testdef_file,nocheck=False):
     evalFile(testdef_file,evaluatedTestDefFilePath,dicosList)
 
     # load contents of evaluated testdef file
-    with open(evaluatedTestDefFilePath, 'r') as f:
+    with open(evaluatedTestDefFilePath) as f:
         testdefData = yaml.safe_load(f)
     testdefRoot = _yaml_root(testdefData)
 
@@ -472,7 +468,7 @@ def datapack(testdef_file,nocheck=False):
                                 evalDicosList=dicosList,\
                                 evalPartialOk=True)    
     try:
-        with open(setupFileEval, 'r') as f:
+        with open(setupFileEval) as f:
             setupData = yaml.safe_load(f)
         setupXmlRoot = _yaml_root(setupData)
     except Exception as e:
@@ -503,7 +499,7 @@ def datapack(testdef_file,nocheck=False):
 
     # reevaluate setup file with also baseline dicos listed inside it
     setupFileEval=expandPath(setupFolder+os.sep+os.path.basename(setupFile),evalTargetFolder=processingFolder,evalDicosList=dicosList)    
-    with open(setupFileEval, 'r') as f:
+    with open(setupFileEval) as f:
         setupData = yaml.safe_load(f)
     setupXmlRoot = _yaml_root(setupData)        
     setupId=setupXmlRoot["setup_id"]

@@ -1,9 +1,6 @@
 
 import os
-import shutil
-import zipfile, tarfile
 import argparse
-from pathlib import Path
 import concurrent.futures
 import sys
 
@@ -109,7 +106,7 @@ def apply_clock_correction(target_folder,
     matching_dfs = loadDataframeFromFile(sourceFolderOrFile=target_folder, paramRegexes=shiftDateRegex, 
                                          indices=None, dryRun=True, silent=True, monitorProgress=subLoadMatchingDfmP)
     if len(matching_dfs) == 0:
-        monitorProgress.msg(msg=[f"found no data needing clock correction", f"pattern: {shiftDateRegex}"], msgSeverity="warning")
+        monitorProgress.msg(msg=["found no data needing clock correction", f"pattern: {shiftDateRegex}"], msgSeverity="warning")
         return False
         
     files_to_process = list(set(df.origin for df in matching_dfs if (df.origin and CORRECTED_CLOCK_FILE_SUFFIX not in df.origin)))

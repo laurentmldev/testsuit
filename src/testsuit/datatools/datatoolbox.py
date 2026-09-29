@@ -94,7 +94,7 @@ def getDfName(df: pd.DataFrame | pd.Series) -> str:
 
     dfName=None
     if hasattr(df,"name"):
-        dfName=getattr(df,"name")
+        dfName=df.name
     if dfName==None:
         if len(df.columns)==1:
             dfName=df.columns[0]
@@ -149,9 +149,9 @@ def getCoefConvToNanosec(dateUnitStr: str | None = None) -> float:
             case "ms": dateCoefToNanosec=1e6
             case "s": dateCoefToNanosec=1e9
             case _:
-                raise ValueError(f"unexpected date unit '"+str(dateUnitStr)+"' (ns|us|ms|s)")
+                raise ValueError("unexpected date unit '"+str(dateUnitStr)+"' (ns|us|ms|s)")
     else:
-        get_logger().debug(f"using default 'dateUnit' as seconds (so dates will be x1e9 to be converted to nanoseconds in influxdb)")
+        get_logger().debug("using default 'dateUnit' as seconds (so dates will be x1e9 to be converted to nanoseconds in influxdb)")
 
     return dateCoefToNanosec
     
@@ -175,7 +175,7 @@ def getDateOffsetSec(offsetStr: str | None, timezone: str = "Europe/Paris") -> f
         try:
             dateOffset = pd.Timestamp(dateOffsetStr,unit=dateOffsetUnit).timestamp()
         except Exception as e:
-            raise ValueError(f"wrong syntax for date offset. Expecting a 'pandas.Timestamp' syntax, "+\
+            raise ValueError("wrong syntax for date offset. Expecting a 'pandas.Timestamp' syntax, "+\
                                         "got '"+str(dateOffsetStr)+"' (unit='"+str(dateOffsetUnit)+"'): "+str(e))
         
     return dateOffset
@@ -245,7 +245,7 @@ def timerange(paramData: pd.DataFrame | pd.Series, minDate: float | None = None,
     :maxDate (float): nb seconds max date of data to retrieve
     :return: original data truncated to provided time range"""
 
-    origin=getattr(paramData,"origin") if hasattr(paramData,"origin") else None
+    origin=paramData.origin if hasattr(paramData,"origin") else None
     name=paramData.name if hasattr(paramData,"name") else None
     try:
         if minDate!=None:

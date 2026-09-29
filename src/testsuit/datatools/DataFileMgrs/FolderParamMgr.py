@@ -7,7 +7,7 @@ from testsuit.misc.logger import get_logger
 import concurrent.futures
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from testsuit.datatools import datatoolbox
 from  datatools.DataFileMgrs.AFileMgr import AFileMgr
@@ -305,9 +305,9 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                     timeranges[dfparamName].append({"minDate":df.index[0],"maxDate":df.index[-1]})
                     mergedDfMap[dfparamName]=datatoolbox.squeezeData(mergedDfMap[dfparamName])    
                 else:
-                    get_logger().warning("parameter found in several files and timestamps overlap: '"+datatoolbox.getDfName(df)+f"':\n"
-                                            +f"  Already Found: "+str(timeranges[dfparamName])+f" (from {mergedDfMap[dfparamName].origin})\n"
-                                            +f"  Newly Found:   "+str({"minDate":df.index[0],"maxDate":df.index[-1]})+f" (from {df.origin})")
+                    get_logger().warning("parameter found in several files and timestamps overlap: '"+datatoolbox.getDfName(df)+"':\n"
+                                            +"  Already Found: "+str(timeranges[dfparamName])+f" (from {mergedDfMap[dfparamName].origin})\n"
+                                            +"  Newly Found:   "+str({"minDate":df.index[0],"maxDate":df.index[-1]})+f" (from {df.origin})")
                     mergedDfMap[df.origin+"::"+datatoolbox.getDfName(df)]=df
 
         return list(mergedDfMap.values())
@@ -337,10 +337,9 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 
             return self.__clockDriftDf[shiftDateParamName]
         
-        else:
-            monitorProgress.set_total_items(1)
-            monitorProgress.complete_item("litteral clock drift")
-            return shiftDateSec
+        monitorProgress.set_total_items(1)
+        monitorProgress.complete_item("litteral clock drift")
+        return shiftDateSec
 
     def _findParamsInFile(self, 
                           fileMgr: AFileMgr, 

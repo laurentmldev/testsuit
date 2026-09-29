@@ -44,7 +44,7 @@ def _expandPath(pathStr):
 ## check if the given file is accessible
 def _isInputReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 # override the parsing error message using logger
@@ -145,7 +145,7 @@ def evallines(targetFile,lines,dico,keysorigin,dicosFiles=None,partialEval=True)
 		# if nothing changed during last round, no use to try again...
 		if len(usedkeys)==0 and nbIncludes==0:
 			#print("QUIT eval of "+targetFile)
-			break;			
+			break			
 
 	#print("		###########################  Final Result ###########################")
 	#for line in lines :
@@ -181,7 +181,7 @@ def doFileEvaluation(targetFile, dico, keysorigin, dicosNames, partialEval=False
 	if not targetFileName:
 		targetFileName=targetFile
 
-	with open(targetFile, "rt",  encoding='utf-8', errors='replace') as f:
+	with open(targetFile,  encoding='utf-8', errors='replace') as f:
 		lines=f.readlines()		
 	
 	pattern_key=re.compile(evalkeys.KEY_REGEX)
@@ -263,8 +263,8 @@ def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile
 		
 		# generate out and hmtl files
 		htmlfile=_getHtmlFileName(outputFile)
-		fileout=open(outputFile, "wt")
-		filehtml=open(htmlfile, "wt")	
+		fileout=open(outputFile, "w")
+		filehtml=open(htmlfile, "w")	
 		for line in evaluatedLines:	
 			fileout.write(evalkeys.finalizeLine(line)+"\n")
 			filehtml.write(finalizeHtmlLine(line)+"\n")
@@ -273,7 +273,7 @@ def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile
 
 		# generate keys file
 		keysfile=libdictionary.getKeysOriginFileName(outputFile)
-		fileout=open(keysfile, "wt")
+		fileout=open(keysfile, "w")
 		for key in usedkeys:
 			fileout.write(key+"="+usedkeys[key]+"\n")
 		fileout.close()	

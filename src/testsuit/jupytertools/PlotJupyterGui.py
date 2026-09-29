@@ -1,15 +1,13 @@
 
-import re,os,sys,csv
-from unidecode import unidecode
+import re,os
 import numpy as np
 import pandas as pd
     
 from IPython.display import display
 from ipywidgets import *
 
-from datetime import datetime
 
-from testsuit.datatools.plotHelpers import plotData, plotData3D, cleanFigureLegendLabel
+from testsuit.datatools.plotHelpers import plotData, plotData3D
 
     
 from testsuit.misc.logger import create_logger
@@ -403,7 +401,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
                 dataDim=df.shape[1]
                 dataValues=(df+offsetVal).transpose().values
 
-                for dim in range(0,dataDim):
+                for dim in range(dataDim):
                     xDataToPlot=dataIndex
                     yDataToPlot=dataValues[dim]
                     if isinstance(offsetVal,(int,float)):

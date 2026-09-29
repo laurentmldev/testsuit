@@ -1,8 +1,6 @@
 
 import argparse
-from time import sleep
 import sys,os,logging
-from functools import partial
 
 
 from testsuit.misc.logger import create_logger
@@ -10,7 +8,7 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
-from testsuit.datatools.datatoolbox import loadDataframeFromFile,getDateParser,timerange
+from testsuit.datatools.datatoolbox import loadDataframeFromFile,getDateParser
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -21,7 +19,7 @@ create_logger("data2h5")
 ## check if the given file is accessible
 def isInputReadable(f):
     if not os.access(f,os.R_OK):
-        get_logger().error("{0} does not exist or is not reachable".format(f))
+        get_logger().error(f"{f} does not exist or is not reachable")
         sys.exit(1)
 
     return f

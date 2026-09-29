@@ -1,7 +1,7 @@
 
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 import os,hashlib,platform,subprocess,re
-from colorama import Style,Fore,init as colorama_init
+from colorama import init as colorama_init
 
 def expandPath(path: str) -> str:
 
@@ -19,7 +19,7 @@ def expandPath(path: str) -> str:
     return respath
 
 
-def toBashPath(p: Union[str, os.PathLike]) -> str:
+def toBashPath(p: str | os.PathLike) -> str:
     """Convert a Windows path to a format understood by Git Bash/MSYS2."""
     if platform.system() != "Windows":
         return str(p)
@@ -30,12 +30,11 @@ def toBashPath(p: Union[str, os.PathLike]) -> str:
     if s.startswith("/"): s="/cygdrive"+s
     return s
 
-def getAbsFilePath(curPath: str, dirname: Optional[str] = None) -> str:
+def getAbsFilePath(curPath: str, dirname: str | None = None) -> str:
     """Return real path, combine it with provided dirname if path is relative"""
     if curPath[0]!=os.sep and curPath[0]!='$' and curPath[0]!='~' and not curPath.startswith("C:"):
         return os.path.realpath(dirname+os.sep+curPath)
-    else:
-        return os.path.realpath(curPath)
+    return os.path.realpath(curPath)
 
 def normalizeFileName(name: str) -> str:
     return re.sub(r"[\s,/\\%@!:;<>~&#*$^]","_",name)
@@ -50,7 +49,7 @@ def sizeof_fmt(num: float, suffix: str = "B") -> str:
 
 ######################
 ## from https://stackoverflow.com/questions/27187490/how-to-efficiently-traverse-a-directory-and-get-the-sha256-checksum-for-each-fil
-def processFolderFiles(root_path: str, processFileCb: Callable[[str, str], bool]) -> Optional[bool]:
+def processFolderFiles(root_path: str, processFileCb: Callable[[str, str], bool]) -> bool | None:
     """Execute callback(file_path, root_path) func for each file under given folder (recursively)
     CB must return True for process to continue"""
     directories = []
@@ -75,7 +74,7 @@ def processFolderFiles(root_path: str, processFileCb: Callable[[str, str], bool]
     return True
 
 ## from https://stackoverflow.com/questions/27187490/how-to-efficiently-traverse-a-directory-and-get-the-sha256-checksum-for-each-fil
-def checksumFile(path: str, root_path: str, block_size: int = 4096) -> Optional[str]:
+def checksumFile(path: str, root_path: str, block_size: int = 4096) -> str | None:
 
     checksumFile=root_path+".sha256"
     try:
@@ -89,9 +88,9 @@ def checksumFile(path: str, root_path: str, block_size: int = 4096) -> Optional[
 
         return checksumFile
     
-    except IOError:
+    except OSError:
         return None
 
 
-def checksumFolder(path: str) -> Optional[bool]:
+def checksumFolder(path: str) -> bool | None:
     return processFolderFiles(path,checksumFile)
