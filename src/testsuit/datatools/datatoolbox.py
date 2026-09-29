@@ -21,7 +21,8 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 from datetime import datetime, timezone
 
-SUPPORTED_DATAFILE_EXTENSIONS=["h5","hdf5","dxd","d7d","csv","txt","log","tdms","mdf","mf4","influxdbV3.yml","influxdbV2.yml","dat"]
+# extensions of the registered data file formats (see DataFileMgrs/formats.py to add one)
+from testsuit.datatools.DataFileMgrs.formats import SUPPORTED_DATAFILE_EXTENSIONS
 MAX_MTHREAD_WORKERS=10
 VERTICAL_OFFSET_DEFAULT_MEAN_VALUE_DURATION_SEC=1
 
@@ -389,6 +390,8 @@ def loadDataframeFromFile(sourceFolderOrFile: str,
     :return: loaded parameters (or callback results), in paramRegexes order
     """
     if extensions is None:
+        from testsuit.plugins import load_plugins
+        load_plugins()
         extensions=["."+fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS]
 
     if monitorProgress is None:

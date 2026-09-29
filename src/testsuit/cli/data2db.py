@@ -3,6 +3,7 @@ import argparse,os,sys,json,logging
 
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.plugins import load_plugins
 from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 from testsuit.datatools.data2db import create_data2db
@@ -27,6 +28,8 @@ class HelpParser(argparse.ArgumentParser):
 
 ## the main function
 def main():
+    # external formats (entry points, TESTSUIT_PLUGINS) show up in --extensions help
+    load_plugins()
     enable_pandas_display_helpers()
     parser = HelpParser(description=
     """Extract given parameters from data files or DB.

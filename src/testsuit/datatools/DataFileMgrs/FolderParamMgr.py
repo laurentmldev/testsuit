@@ -11,13 +11,15 @@ from collections.abc import Callable
 
 from testsuit.datatools import datatoolbox
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.datatools.DataFileMgrs import formats
+from testsuit.plugins import load_plugins
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 
 class FolderParamMgr(AFileMgr):
     """Load parameters from all the data files of a folder (or list of paths), as if they were a single file.
 
-    Each file gets the file manager matching its format (see _loadFileMgrs). Field names are
+    Each file gets the file manager of its registered format (see formats.py). Field names are
     prefixed by "<file basename>::". Parameters with the same name in several files are merged
     when their time ranges do not overlap (see mergeParams).
     A clock drift given as a parameter name ('shiftDateSec') is loaded here once, then applied
@@ -41,6 +43,7 @@ class FolderParamMgr(AFileMgr):
         :param continueOnError: see AFileMgr
         :raises FileNotFoundError: if a path does not exist or no file has a supported extension
         """
+        load_plugins()
         if supportedExtensions is None:
             supportedExtensions=["." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]
 
@@ -91,57 +94,14 @@ class FolderParamMgr(AFileMgr):
                                                                 +" at provided path(s): '"+str(self.__sourcePaths)+"'")
 
     def _loadFileMgrs(self) -> None:
-        """Create the file manager of each file, chosen from its extension (and content for CSV/HDF5 files)."""
+        """Create the file manager of each file, from the registered formats (see formats.py)."""
         self.__fileMgrs=[]
 
         fileIdx=0
         corruptedFileErrors={}
         for filename in self.getFilesList():
             try:
-                fileMgr=None
-                if filename.lower().endswith(".csv") or filename.lower().endswith(".log") or filename.lower().endswith(".txt"):
-                    from testsuit.datatools.DataFileMgrs.CsvFileMgr import GetCsvFileType,CsvFileMgr,CsvFileMgrInfluxDb,CsvFileMgrChannels,CsvFileMgrChannelsPcapRecorder
-                    csvFileType = GetCsvFileType(filename)
-                    if csvFileType=="influxdb":
-                        fileMgr=CsvFileMgrInfluxDb(filename,fileIdx)  
-                    elif csvFileType=="channels-pcap-recorder":
-                        fileMgr=CsvFileMgrChannelsPcapRecorder(filename,fileIdx)  
-                    elif csvFileType=="channels":
-                        fileMgr=CsvFileMgrChannels(filename,fileIdx)   
-                    else:
-                        fileMgr=CsvFileMgr(filename,fileIdx)  
-                elif filename.lower().endswith(".dxd") or filename.endswith(".d7d"):
-                    from testsuit.datatools.DataFileMgrs.DxdFileMgr import DxdFileMgr
-                    fileMgr=DxdFileMgr(filename,fileIdx)
-                elif filename.lower().endswith(".tdms"):
-                    from testsuit.datatools.DataFileMgrs.TdmsFileMgr import TdmsFileMgr
-                    fileMgr=TdmsFileMgr(filename,fileIdx)
-                elif filename.lower().endswith(".mdf") or filename.lower().endswith(".mf4"):
-                    from testsuit.datatools.DataFileMgrs.MdfFileMgr import MdfFileMgr
-                    fileMgr=MdfFileMgr(filename,fileIdx)
-                elif filename.lower().endswith(".h5") or filename.lower().endswith(".hdf5") :
-                    from testsuit.datatools.DataFileMgrs.H5FileMgr import GetH5FileType,H5FileMgr,H5FileMgrDewesoft,H5FileMgrFES,H5FileMgrChannels
-                    h5FileType = GetH5FileType(filename)
-                    if h5FileType=="Dewesoft":
-                        fileMgr=H5FileMgrDewesoft(filename,fileIdx)  
-                    elif h5FileType=="FES":
-                        fileMgr=H5FileMgrFES(filename,fileIdx)  
-                    elif h5FileType=="channels":
-                        fileMgr=H5FileMgrChannels(filename,fileIdx)
-                    else:
-                        fileMgr=H5FileMgr(filename,fileIdx)  
-                elif filename.lower().endswith(".influxdbv3.yml") or filename.lower().endswith(".influxdbv3.yaml") :
-                    from testsuit.datatools.DataFileMgrs.InfluxDbFileMgr import InfluxDbV3FileMgr
-                    fileMgr=InfluxDbV3FileMgr(filename,fileIdx)  
-                elif filename.lower().endswith(".influxdbv2.yml") or filename.lower().endswith(".influxdbv2.yaml") :
-                    from testsuit.datatools.DataFileMgrs.InfluxDbFileMgr import InfluxDbV2FileMgr
-                    fileMgr=InfluxDbV2FileMgr(filename,fileIdx)  
-                # Gantner .dat files
-                elif filename.lower().endswith(".dat") and re.match(r"^.*_\d+_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{6}",os.path.basename(filename)):                                
-                    from testsuit.datatools.DataFileMgrs.UdbfFileMgr import UdbfFileMgr
-                    fileMgr=UdbfFileMgr(filename,fileIdx)
-                else:
-                    raise Exception("[FolderParamMgr] unhandle file type: "+filename)
+                fileMgr=formats.create_file_mgr(filename,fileIdx)
                 fileIdx+=1
                                 
                 fileMgr.setContinueOnError(self._continueOnError)
