@@ -1,9 +1,7 @@
 
-import sys,os,pytest,math
+import pytest,math
 import pandas as pd
 
-# add deps folder (relative path to this module)
-sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
 
 from testsuit.datatools.datatoolbox import overlap
 
@@ -32,3 +30,47 @@ def test_overlap():
     assert(math.isnan(dfMainReduced.loc[32]["main"]))
     assert(dfSecReduced.loc[40]["secondary"]==2.883480)
     
+
+@pytest.mark.parametrize(
+    "sample,expected",
+    [
+        ("12", None),
+        ("1.5", None),
+        ("2024-01-02T03:04:05Z", "2024-01-02T03:04:05+00:00"),
+        ("2024-01-02T03:04:05.123Z", "2024-01-02T03:04:05.123000+00:00"),
+        ("2024-01-02 03:04:05", "2024-01-02T03:04:05+00:00"),
+        ("2024/01/02 03:04:05.25", "2024-01-02T03:04:05.250000+00:00"),
+        ("2024-01-02Z03:04:05.1", "2024-01-02T03:04:05.100000+00:00"),
+        ("17/02/2026 14:17:25.3", "2026-02-17T14:17:25.300000+00:00"),
+        # National Instruments: 7 fractional digits, truncated to microseconds
+        ("02/17/2026 14:17:25.3936538", "2026-02-17T14:17:25.393653+00:00"),
+    ],
+)
+def test_getDateParser(sample, expected):
+    from testsuit.datatools.datatoolbox import getDateParser
+    parser = getDateParser(sample)
+    if expected is None:
+        assert parser is None
+    else:
+        assert parser(sample).isoformat() == expected
+
+
+def test_getDateParser_unknown_format():
+    from testsuit.datatools.datatoolbox import getDateParser
+    with pytest.raises(Exception, match="Unable to parse date format"):
+        getDateParser("garbage")
+
+
+def test_zoomAndMerge2DData_aligns_on_x_and_keeps_zero_bounds():
+    import numpy as np
+    from testsuit.datatools.datatoolbox import zoomAndMerge2DData
+    a = np.array([[1, 2, 3], [10, 20, 30.]])
+    b = np.array([[2, 3, 4], [200, 300, 400.]])
+
+    df = zoomAndMerge2DData([a, b])
+    assert list(df["index"]) == [1, 2, 3, 4]
+    assert df.loc[df["index"] == 2, "data_2"].item() == 200
+
+    # 0 is a real bound, and bounds are inclusive (points on the plot edge are kept)
+    df = zoomAndMerge2DData([np.array([[-1, 0, 1], [5, 0, 5.]])], xMin=0, yMin=0)
+    assert list(df["index"]) == [0, 1]

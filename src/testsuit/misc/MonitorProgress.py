@@ -1,21 +1,72 @@
-import threading
+"""Thread-safe, nestable progress tracking (MonitorProgress) and the console callbacks that display it.
+
+A progress callback has the signature cb(percent, msg, msgSeverity): percent is None for a plain message,
+msg is None, a string or a list of strings, and msgSeverity is one of success|info|warn|warning|error|secondary.
+"""
+import functools
 import queue
 import sys
+import threading
+import traceback
 
-import types
-from typing import Callable, Optional, Set, Type, Union
+from collections.abc import Callable
 
-        
+# signature of the functions receiving progress updates, see module docstring
+ProgressCallback = Callable[[float | None, str | list | None, str | None], None]
+
+
+class _CallbackDispatcher:
+    """One daemon thread running the progress callbacks of every top-level MonitorProgress.
+
+    A single FIFO queue keeps each monitor's updates in order, and no thread is left behind by
+    monitors that are never closed (one thread per monitor used to leak in long sessions).
+    The thread starts on first use.
+    """
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._start_lock = threading.Lock()
+
+    def post(self, fn: Callable[[], None], done: threading.Event | None = None) -> None:
+        """Queue fn to run on the dispatcher thread; done is set once it has run."""
+        with self._start_lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="MonitorProgress-dispatcher", daemon=True)
+                self._thread.start()
+        self._queue.put((fn, done))
+
+    def is_dispatcher_thread(self) -> bool:
+        return threading.current_thread() is self._thread
+
+    def _run(self) -> None:
+        while True:
+            fn, done = self._queue.get()
+            if sys.is_finalizing():
+                return
+            try:
+                fn()
+            except Exception:
+                # a failing callback must not stop progress reporting for every other monitor
+                traceback.print_exc()
+            finally:
+                if done is not None:
+                    done.set()
+
+
+_dispatcher = _CallbackDispatcher()
+
+
 def consoleProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
-    """Handle progress messages
-    
-    :param percent (float): [OPTIONAL] progress percent
-    :param msg (str|list): [OPTIONAL] message (or list of messages) to be displayed
-    :param msgSeverity (fstr): [OPTIONAL] msg msgSeverity (success|info|warn|error|secondary)
+    """Print each progress update on its own line ("[severity] percent% message"); errors go to stderr.
+
+    :param percent: progress percent, or None for a plain message
+    :param msg: message, or list of messages printed on separate lines
+    :param msgSeverity: success|info|warn|error|secondary
     """
 
     if sys.is_finalizing():
@@ -38,16 +89,11 @@ def consoleProgressCb(
 
 
 def consoleSilentProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
-    """Handle progress messages
-    
-    :param percent (float): [OPTIONAL] progress percent
-    :param msg (str|list): [OPTIONAL] message (or list of messages) to be displayed
-    :param msgSeverity (fstr): [OPTIONAL] msg msgSeverity (success|info|warn|error|secondary)
-    """
+    """Like consoleProgressCb, but only prints "error" and "warn" messages."""
 
     if sys.is_finalizing():
         return
@@ -56,15 +102,13 @@ def consoleSilentProgressCb(
     consoleProgressCb(percent,msg,msgSeverity)
     
 def consoleRichProgressCb(
-    percent: Optional[float] = None,
-    msg: Optional[Union[str, list]] = None,
+    percent: float | None = None,
+    msg: str | list | None = None,
     msgSeverity: str = "info"
 ) -> None:
-    """Handle progress messages
-    
-    :param percent (float): [OPTIONAL] progress percent
-    :param msg (str|list): [OPTIONAL] message (or list of messages) to be displayed
-    :param msgSeverity (fstr): [OPTIONAL] msg msgSeverity (success|info|warn|error|secondary)
+    """Display progress as a single progress bar line rewritten in place.
+
+    error/warn/success messages are printed on their own line. Same parameters as consoleProgressCb.
     """
     
     MAX_MSG_LEN=120
@@ -107,7 +151,6 @@ def consoleRichProgressCb(
     endStr = "\n" if percent == 100 else ""
     textStr = "\t" + msgStr
     line = f"\r[{bar}] {(percent):.1f}% {textStr}{endStr}"
-    line.ljust(MAX_MSG_LEN)
     
     if len(line)>MAX_MSG_LEN:
         line=line[:MAX_MSG_LEN-4]+"..."
@@ -127,7 +170,7 @@ class MonitorProgress:
     Thread-safe progress tracker for N items to be completed in parallel, with recursive nesting.
     
     Call flow is following:
-    1. create root myProgressTracker=MonitorProgress(<nb steps at this level>,"Name")
+    1. create root myProgressTracker=MonitorProgress(<nb steps at this level>, name="Name")
     2.a acknowledge completion of a step: myProgressTracker.complete_item("My Item Name")
     2.b or acknowledge completion of n anonymous steps at once: myProgressTracker.complete_n(3)
     3.c or consider 1 step as a complexe task to be subdivided: 
@@ -141,107 +184,67 @@ class MonitorProgress:
             monitorProgress.complete_n(1)
             ... etc
             
-    Each completion (or just simple msg) is stored in a thread-safe queue.
-    A dedicated Thread dequeue the messages and forward them to some 'progressCallback' functions to handle them.
+    Each completion (or just simple msg) is queued, and one shared background thread forwards the
+    updates, in order, to the top-level monitor's 'progressCallback'.
     
-    3 examples of progressCb are given at the bottom of this file.
+    3 progressCb are provided at the top of this file (consoleProgressCb, consoleSilentProgressCb,
+    consoleRichProgressCb). Only the top-level monitor's callback is used: children forward everything to their parent.
 
     Note: to debug your progress pbs, activate 'debug' flag, it will dump state of each subMonitor at every step
     """
 
     def __init__(
         self,
-        total_items: int = None,
-        progressCb: Callable[[float, str, str], None] = consoleProgressCb,
-        parent: Optional["MonitorProgress"] = None,
-        name: Optional[str] = None,
+        total_items: int | None = None,
+        progressCb: ProgressCallback = consoleProgressCb,
+        parent: "MonitorProgress | None" = None,
+        name: str | None = None,
         allowOverTotalItems: bool = False,
         debug: bool = False, # use this flag for debug/investigate
-    ):
+    ) -> None:
+        """
+        :param total_items: number of steps at this level (can be set later with set_total_items())
+        :param progressCb: receives the progress updates (top-level monitor only)
+        :param parent: parent monitor; use parent.child() rather than passing it directly
+        :param name: name shown in messages and in dumpProgressTree()
+        :param allowOverTotalItems: complete_n() beyond total_items caps at 100% instead of raising
+        :param debug: dump the whole progress tree at every update
+        """
         # enfore case when explicitly called with null progressCb
         if not progressCb: progressCb=consoleProgressCb
         
-        self._total: int = None
+        self._total: int | None = None
         if total_items is not None:
             self._total=int(total_items)
-        self._cb: Callable[[float, str, str], None] = progressCb
-        self._completed_ids: Set[str] = set()
+        self._cb: ProgressCallback = progressCb
+        self._completed_ids: set[str] = set()
         self._completed_count: int = 0
         self._lock: threading.RLock = threading.RLock()
-        self._parent: Optional["MonitorProgress"] = parent
-        self._name: Optional[str] = name
-        self._sub_monitors: dict[str, "MonitorProgress"] = {}
+        self._parent: MonitorProgress | None = parent
+        self._name: str | None = name
+        self._sub_monitors: dict[str, MonitorProgress] = {}
         self._allowOverTotalItems=allowOverTotalItems
         self._debug=debug
         
-        # --- Dedicated flush thread for top-level monitors ---
         self._is_top_level = parent is None
-        self._msg_queue: Optional[queue.Queue] = None
-        self._flush_thread: Optional[threading.Thread] = None
-        self._stop_event: Optional[threading.Event] = None
         self._closed = False
 
-        if self._is_top_level:
-            self._msg_queue = queue.Queue()
-            self._stop_event = threading.Event()
-            self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
-            self._flush_thread.start()
+    def _post_msg(self, percent: float | None, msg: list | None, msgSeverity: str) -> None:
+        """Queue an update for the callback dispatcher (top-level monitor only)."""
+        _dispatcher.post(functools.partial(self._cb, percent, msg, msgSeverity))
 
-    # ------------------------------------------------------------------
-    # Flush thread
-    # ------------------------------------------------------------------
-
-    def _flush_loop(self) -> None:
-        """Background thread: drain the queue and call _cb."""
-        
-        while not self._stop_event.is_set():
-            if sys.is_finalizing():
-                return
-            try:
-                item = self._msg_queue.get(timeout=0.4)                
-            except queue.Empty:
-                continue
-            # Drain all currently queued items
-            items = [item]
-            while True:
-                try:
-                    items.append(self._msg_queue.get_nowait())
-                except queue.Empty:
-                    break
-            if sys.is_finalizing():
-                return
-            for percent, msg, msgSeverity in items:
-                if sys.is_finalizing():
-                    return
-                self._cb(percent, msg, msgSeverity)
-
-                
-        # Final drain on shutdown
-        while True:
-            if sys.is_finalizing():
-                return
-            try:
-                item = self._msg_queue.get_nowait()
-            except queue.Empty:
-                break
-            if sys.is_finalizing():
-                return
-            self._cb(*item)
-            
+    def _final_update(self) -> None:
+        """Last callback of a closed top-level monitor: current percent, no message."""
         self._cb(self.get_percent(), msg=None, msgSeverity=None)
-                
-    def _post_msg(self, percent, msg, msgSeverity) -> None:
-        """Buffer for top-level, call _cb directly otherwise."""
-        self._msg_queue.put((percent, msg, msgSeverity))
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _percent_unlocked(self) -> float:
-        """Calculate overall percent. MUST be called with self._lock held."""
+    def _percent_unlocked(self) -> float | None:
+        """Calculate overall percent, None while this monitor or a child has no total. MUST be called with self._lock held."""
         
-        if self._total==None:
+        if self._total is None:
             return None
         
         if self._total == 0:
@@ -253,7 +256,7 @@ class MonitorProgress:
         for sub in self._sub_monitors.values():
             with sub._lock:
                 subPercent=sub._percent_unlocked()
-                if subPercent==None: 
+                if subPercent is None: 
                     return None
                 progress += subPercent / 100.0
                 
@@ -274,7 +277,7 @@ class MonitorProgress:
         if self._parent is not None:
             self._parent._propagate(msg, msgSeverity, update_percent=update_percent)
         else:
-            msg=[msg] if not isinstance(msg,list) and msg!=None else msg
+            msg=[msg] if not isinstance(msg,list) and msg is not None else msg
             self._post_msg(percent=percent, msg=msg, msgSeverity=msgSeverity)
             
             if self._debug: self.dumpProgressTree()
@@ -287,17 +290,20 @@ class MonitorProgress:
 
         if self._parent is not None and self._name is not None:
             
-            if self._total==None:
+            if self._total is None:
                 self._total=1
             
             self._parent.complete_item(self._name)
             self._parent = None
             self._name = None
 
-        # Stop the flush thread for top-level monitors
-        if self._is_top_level and self._stop_event is not None:
-            self._stop_event.set()
-            self._flush_thread.join(timeout=2.0)
+        # top-level: send the final update once pending ones are delivered, and wait for it
+        # (bounded, and never from the dispatcher thread itself, which would wait on itself)
+        if self._is_top_level:
+            flushed = threading.Event()
+            _dispatcher.post(self._final_update, done=flushed)
+            if not _dispatcher.is_dispatcher_thread():
+                flushed.wait(timeout=2.0)
             
     def _dumpProgressTreeRecursive(self, monitor: "MonitorProgress", prefix: str) -> None:
         """Internal recursive helper for dumpProgressTree."""
@@ -331,14 +337,18 @@ class MonitorProgress:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_name(self):
+    def get_name(self) -> str | None:
         return self._name
     
-    def get_total_items(self):
+    def get_total_items(self) -> int | None:
         return self._total
     
-    def set_total_items(self,total_items, resetTotalItems = False):
-        if self._total!=None and not resetTotalItems:
+    def set_total_items(self, total_items: int, resetTotalItems: bool = False) -> None:
+        """Set the number of steps at this level.
+
+        :raises Exception: if already set, unless resetTotalItems is True
+        """
+        if self._total is not None and not resetTotalItems:
             raise Exception(f"cannot set_total_items of {self._name} to {total_items}: already set to {self._total}")
         #print(f"#### MonitorProgress {self._name} total items set to {total_items}")
         self._total=int(total_items)
@@ -363,7 +373,7 @@ class MonitorProgress:
         if n < 0:
             raise ValueError("n must be >= 0")
         with self._lock:
-            if self._total is not None and self._completed_count + n > self._total:
+            if self._completed_count + n > self._total:
                 if self._allowOverTotalItems:
                     self._completed_count=self._total
                 else:
@@ -382,7 +392,7 @@ class MonitorProgress:
             self._completed_count=self._total
         self._propagate(msg, msgSeverity, update_percent=True)
         
-    def msg(self, msg: str = "", msgSeverity: str = "info") -> None:
+    def msg(self, msg: str | list = "", msgSeverity: str = "info") -> None:
         """Post a message without updating progress. Works even if total_items is not set."""
         if not isinstance(msg,(str,list)):
             raise Exception(f"expected str or list, got {type(msg)}")
@@ -392,13 +402,18 @@ class MonitorProgress:
     def child(
         self,
         name: str,
-        total_sub_items: int = None,
-        progressCb: Optional[Callable[[float, str, str], None]] = None,
+        total_sub_items: int | None = None,
+        progressCb: ProgressCallback | None = None,
         allowOverTotalItems: bool = False,
         renameIfExist: bool = False
     ) -> "MonitorProgress":
-        """
-        Create a child MonitorProgress for a specific name.
+        """Create a child monitor counting as one step of this one: the step completes when the child closes
+        (or its own steps are all done).
+
+        :param name: child name, unique among this monitor's children
+        :param total_sub_items: number of steps of the child (can be set later)
+        :param progressCb: kept for compatibility; children forward their updates to this monitor
+        :param renameIfExist: suffix the name with a number instead of raising if it is already used
         """
         
         if name in self._sub_monitors:
@@ -418,12 +433,12 @@ class MonitorProgress:
             self._sub_monitors[name] = sub
         return sub
 
-    def get_percent(self) -> float:
-        """Return current overall completion percent (0-100). Thread-safe."""
+    def get_percent(self) -> float | None:
+        """Return current overall completion percent (0-100), None if some total is not set yet. Thread-safe."""
         with self._lock:
             return self._percent_unlocked()
         
-    def set_debug(self,debug):
+    def set_debug(self, debug: bool) -> None:
         self._debug=debug
 
     @property

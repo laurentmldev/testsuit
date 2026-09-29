@@ -85,6 +85,7 @@ python_files = ["*_t.py"]
 root = "."  # ".git" is in the parent directory
 
 [tool.ruff.lint]
-# only errors that break at runtime (syntax errors, undefined names);
-# style rules can be enabled progressively
-select = ["E9", "F63", "F7", "F82"]
+# errors that break at runtime (syntax errors, undefined names), plus bug-prone patterns
+# the code base is now clean of: bare except, mutable/call defaults, redefinitions,
+# type() comparisons, loop variables captured by closures. Style rules can follow.
+select = ["E9", "F63", "F7", "F82", "E721", "E722", "F811", "B006", "B008", "B023"]

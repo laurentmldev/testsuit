@@ -1,14 +1,12 @@
 
 import os
-import shutil
-import zipfile, tarfile
 import argparse
-from pathlib import Path
 import concurrent.futures
 import sys
 
 
 from testsuit.datatools.datatoolbox import loadDataframeFromFile
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -68,7 +66,7 @@ def apply_clock_correction(target_folder,
     
     # try to interpret provided shitDateSec as a float litteral, if not, it is considered as a param name
     try: shiftDateSec=float(shiftDateSec)
-    except: pass
+    except (TypeError, ValueError): pass
             
     clock_correction_file=None
     
@@ -109,7 +107,7 @@ def apply_clock_correction(target_folder,
     matching_dfs = loadDataframeFromFile(sourceFolderOrFile=target_folder, paramRegexes=shiftDateRegex, 
                                          indices=None, dryRun=True, silent=True, monitorProgress=subLoadMatchingDfmP)
     if len(matching_dfs) == 0:
-        monitorProgress.msg(msg=[f"found no data needing clock correction", f"pattern: {shiftDateRegex}"], msgSeverity="warning")
+        monitorProgress.msg(msg=["found no data needing clock correction", f"pattern: {shiftDateRegex}"], msgSeverity="warning")
         return False
         
     files_to_process = list(set(df.origin for df in matching_dfs if (df.origin and CORRECTED_CLOCK_FILE_SUFFIX not in df.origin)))
@@ -140,6 +138,7 @@ def apply_clock_correction(target_folder,
 
  
 def main():
+    enable_pandas_display_helpers()
     parser = argparse.ArgumentParser(
         description="Apply clock correction to extracted data files."
     )

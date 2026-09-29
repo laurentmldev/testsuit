@@ -12,6 +12,7 @@ import pandas as pd
 
 
 from testsuit.misc.logger import create_logger, get_logger
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.misc.MonitorProgress import MonitorProgress, consoleRichProgressCb
 
 from testsuit.datatools.datatoolbox import loadDataframeFromFile
@@ -23,7 +24,7 @@ create_logger("extract_data_any")
 
 def load_extraction_config(path):
     """Charge la config JSON """
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         content = f.read()
         try:
             import yaml
@@ -261,7 +262,7 @@ def extract_data_any(sourceFolderOrFile, params, targetFile, extractions_config,
 
 def isInputReadable(f):
     if not os.access(f, os.R_OK):
-        get_logger().error("{0} does not exist or is not reachable".format(f))
+        get_logger().error(f"{f} does not exist or is not reachable")
         sys.exit(1)
     return f
 
@@ -273,6 +274,7 @@ class HelpParser(argparse.ArgumentParser):
 
 ## the main function
 def main():
+    enable_pandas_display_helpers()
     
     parser = HelpParser(description=
     """Extract given parameters and decode them using a JSON/YAML config.""",

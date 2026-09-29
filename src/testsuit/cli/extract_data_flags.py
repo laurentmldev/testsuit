@@ -11,7 +11,8 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 
-from testsuit.datatools.datatoolbox import loadDataframeFromFile, SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers, pretty_str
 from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
@@ -19,10 +20,6 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.logger import create_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 
-from testsuit.misc.files import expandPath
-
-import pandas as pd
-import numpy as np
 
 
 EXTENSION_REGEX = re.compile(r"\.(" + "|".join(SUPPORTED_DATAFILE_EXTENSIONS) + r")$", re.IGNORECASE)
@@ -67,7 +64,7 @@ def cbExtractFlags(df, flags_info, monitorProgress):
         monitorProgress.msg(msg=f"{series.name}: ALL values are NaN", msgSeverity="warning")
     
     elif has_na.any(): 
-        monitorProgress.msg(msg=f"{series.name} contains {len(has_na[has_na==True])}/{len(series)} NaN values:\n{series[has_na].pstr()}", msgSeverity="warning")
+        monitorProgress.msg(msg=f"{series.name} contains {len(has_na[has_na==True])}/{len(series)} NaN values:\n{pretty_str(series[has_na])}", msgSeverity="warning")
             
     
     results = []
@@ -91,7 +88,7 @@ def cbExtractFlags(df, flags_info, monitorProgress):
             
             # Build binary strings for values_map lookup
             extracted = extracted_int.apply(
-                lambda v: f'{v:0{num_bits}b}' if pd.notna(v) else np.nan
+                lambda v, num_bits=num_bits: f'{v:0{num_bits}b}' if pd.notna(v) else np.nan
             )
             
             if values_map:
@@ -147,7 +144,7 @@ def _process_file_with_flags_extraction(fpath, results_folder, flags_info, monit
     if not match:
         raise Exception(f"Unable to detect file extension: {fpath}")
     targetFile = fpath[:match.start()] + FLAGS_FILE_SUFFIX
-    if results_folder!=None:
+    if results_folder is not None:
         targetFile=results_folder+os.sep+os.path.basename(targetFile)
     if os.path.exists(targetFile):
         os.remove(targetFile)
@@ -192,7 +189,7 @@ def extract_data_flags(target_files, flags_info_file, results_folder=None,
     
     yaml = YAML()
     try:
-        with open(flags_info_file, 'r') as f:
+        with open(flags_info_file) as f:
             flags_info = yaml.load(f)
     except YAMLError as e:
         raise Exception(f"failed to parse flags_info '{flags_info_file}' YAML file: {e}")
@@ -223,6 +220,7 @@ def extract_data_flags(target_files, flags_info_file, results_folder=None,
 
  
 def main():
+    enable_pandas_display_helpers()
     parser = argparse.ArgumentParser(
         description="Extract flags values."
     )
@@ -241,7 +239,7 @@ def main():
     
     rst = extract_data_flags(filtered_target_files, args.flags_info_file,monitorProgress=monitorProgress)
     if not rst:
-        get_logger().error(f"failed to extract flags info.")
+        get_logger().error("failed to extract flags info.")
         sys.exit(1)
 
 

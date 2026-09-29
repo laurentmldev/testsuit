@@ -1,16 +1,15 @@
 
 import argparse
-from time import sleep
 import sys,os,logging
-from functools import partial
 
 
 from testsuit.misc.logger import create_logger
+from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers, pretty_str
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb,consoleSilentProgressCb
 
 from testsuit.datatools.datatoolbox import SUPPORTED_DATAFILE_EXTENSIONS
-from testsuit.datatools.datatoolbox import loadDataframeFromFile,getDateParser,timerange
+from testsuit.datatools.datatoolbox import loadDataframeFromFile,getDateParser
 from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -21,7 +20,7 @@ create_logger("data2h5")
 ## check if the given file is accessible
 def isInputReadable(f):
     if not os.access(f,os.R_OK):
-        get_logger().error("{0} does not exist or is not reachable".format(f))
+        get_logger().error(f"{f} does not exist or is not reachable")
         sys.exit(1)
 
     return f
@@ -41,7 +40,7 @@ def extract_to_hdf5(h5fileName,paramsDfList):
 
     return True
         
-def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensions=["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],
+def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensions=None,
                                         excludeParamsRegex=None, minDate=None, maxDate=None, mergeParams=True,
                                         shiftDateSec=None,shiftDateRegex=None, shiftDateInverted=None,
                                         listOnly=False, silent=False, 
@@ -91,14 +90,14 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
 
     def cbprintDf(df,name=None,origin=None):
         if df is not None: 
-            print(df.pstr())
+            print(pretty_str(df))
         return True
 
 
     cbToUse = None
     if listOnly:
         cbToUse=cbPrintName
-    elif targetFile==None:
+    elif targetFile is None:
         cbToUse=cbprintDf
     else:
         cbToUse=cbSaveDfAsH5File
@@ -119,6 +118,7 @@ def data2h5(sourceFolderOrFile,paramRegexes,indices=None,targetFile=None,extensi
 
 ## the main function
 def main():
+    enable_pandas_display_helpers()
     
 
     parser = HelpParser(description=
@@ -136,13 +136,14 @@ def main():
     parser.add_argument('--indices',metavar='paramIdx1,paramIdx2,...', help="use provided params as indices, 'auto' for trying to automatically identify one. Ex: 'param_02_timestamp,auto'")
     parser.add_argument('-d',"--debug",action='store_true', default=False, help="Show debug messages")
     parser.add_argument('-s',"--silent",action='store_true', default=False, help="Only show relevant output messages, no progress.")
-    parser.add_argument('--extensions',default=SUPPORTED_DATAFILE_EXTENSIONS, help="List files format to use as input")
+    parser.add_argument('--extensions',type=lambda s: s.split(","),metavar='ext1,ext2,...',
+                        help="File extensions to use as input (default: "+",".join(SUPPORTED_DATAFILE_EXTENSIONS)+")")
     parser.add_argument('--minDate', help="Minimal date of data to record in file")
     parser.add_argument('--maxDate', help="Maximal date of data to record in file")
     
     args = parser.parse_args()
     
-    if args.debug==True:
+    if args.debug:
         get_logger().setLevel(logging.DEBUG)
 
     get_logger().debug(args.target)

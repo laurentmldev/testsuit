@@ -1,5 +1,5 @@
 
-import re,os,sys,traceback
+import re,os,traceback
 from unidecode import unidecode
   
 
@@ -109,7 +109,7 @@ class GuiH5Convertion(JupyterGui.AGuiComponent):
         if self.autoH5FileNameActive==False and forceUpdate==False:
             return
         
-        if newFileName!=None:
+        if newFileName is not None:
             self.txtinput_h5_file_name.value=newFileName
         self.btn_start_conversion.description="Generate "+os.path.basename(self.txtinput_h5_file_name.value)
         self.hideDelH5File()
@@ -171,7 +171,7 @@ class GuiH5Convertion(JupyterGui.AGuiComponent):
             
         for fileMgr in self.fileMgrsList:
             # supposes here that all param have same amount of entries for a given file
-            if fileMgr.getNbEntries()!=None:
+            if fileMgr.getNbEntries() is not None:
                 self.genH5ProgressBar.max=fileMgr.getNbEntries()*len(fileMgr.getSelectedFieldsIdx())
             else:
                 self.genH5ProgressBar.max=0
@@ -179,7 +179,7 @@ class GuiH5Convertion(JupyterGui.AGuiComponent):
             self.genH5ProgressBar.description=fileMgr.getBaseName()
             try:
                 def progressCbLoadParams(percent=None,msg=None,msgSeverity="info"):
-                    if percent!=None:
+                    if percent is not None:
                         percent=percent/2
                     genProgressCb(percent,msg,msgSeverity)
 

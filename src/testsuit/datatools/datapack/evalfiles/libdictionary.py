@@ -9,11 +9,6 @@ from testsuit.datatools.datapack.evalfiles import evalincludes
 
 from datetime import datetime
 
-try:
-    import xml.etree.cElementTree as ET
-except ImportError:
-    import xml.etree.ElementTree as ET
-
 import re
 
 def expandPath(path,relPrefix="."):
@@ -24,15 +19,19 @@ def expandPath(path,relPrefix="."):
 
 
 ## provide a standard seconds-based timestamp
-# @param date Python date object (like the one returned by 'datetime.datetime.now()')
+# @param date Python date object (default: now, evaluated at call time)
 # @return "%Y-%m-%d %H:%M:%S"
-def getTimestamp(date=datetime.now()):
+def getTimestamp(date=None):
+	if date is None:
+		date=datetime.now()
 	return date.strftime("%Y-%m-%d %H:%M:%S")
 
 ## provide a filename optimized seconds-based timestamp
-# @param date Python date object (like the one returned by 'datetime.datetime.now()')
+# @param date Python date object (default: now, evaluated at call time)
 # @return "%Y%m%d_%H-%M-%S"
-def getFileTimestamp(date=datetime.now()):
+def getFileTimestamp(date=None):
+	if date is None:
+		date=datetime.now()
 	return date.strftime("%Y%m%d_%H-%M-%S")
 
 
@@ -153,11 +152,10 @@ def loadDicos(dicoFiles):
 
 # return value corresponding to given key
 def getkeyval(key, dico):
-	if not key in dico:
+	if key not in dico:
 		#log.warning("unknown key '"+key+"'")
 		return None
-	else :
-		return dico[key]
+	return dico[key]
 
 
 # return index of given str in ';'-separated string of key
@@ -219,8 +217,10 @@ def getParentKey(key):
 # @param dicoEntries dictionary entries of the dico 
 # @param dicoKeysOrigin keys origin for traceability. If not defined here, a key is traced a coming from <diconame> in the .<diconame>.keysorigin file
 # @return true if success, false otherwise
-def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
-	fileout=open(diconame, "wt")
+def createDicoFile(diconame, dicoEntries, dicoKeysOrigin=None,deps=None):
+	dicoKeysOrigin=dicoKeysOrigin or {}
+	deps=deps or []
+	fileout=open(diconame, "w")
 	fileout.write("# This dictionary is a merge from : "+str(deps)+"\n")
 	nbentries=0
 	for key in dicoEntries:
@@ -230,9 +230,9 @@ def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
 
 	# create keys origin file
 	keysOriginfile=getKeysOriginFileName(diconame)
-	fileout=open(keysOriginfile, "wt")
+	fileout=open(keysOriginfile, "w")
 	for key in dicoEntries:
-		if not key in dicoKeysOrigin:
+		if key not in dicoKeysOrigin:
 			fileout.write(key+"="+diconame+"\n")
 		else:
 			fileout.write(key+"="+dicoKeysOrigin[key]+"\n")	
@@ -247,9 +247,9 @@ def createDicoFile(diconame, dicoEntries, dicoKeysOrigin={},deps=[]):
 # generate also associated auth. data
 # @param newDicoName file name of the new dictionary
 # @param inputDicosList list of input dicos files
-# @param deps list of dependency files
+# @param deps unused, the input dicos are recorded as dependencies
 # @return True if successful, false otherwise
-def mergeDicos(newDicoName, inputDicosList,deps=[]):
+def mergeDicos(newDicoName, inputDicosList,deps=None):
 	resultDico, keysorigin=loadDicos(inputDicosList)
 	# generating dico file
 	return createDicoFile(newDicoName, resultDico, keysorigin, inputDicosList)

@@ -1,9 +1,5 @@
 
-import sys,os,pytest,math
-import pandas as pd
 
-# add deps folder (relative path to this module)
-sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
 
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleSilentProgressCb,consoleProgressCb
 
@@ -101,3 +97,24 @@ def test_MonitorProgressMT():
     assert mp.get_percent() == 100
     assert sub1.get_percent() == 100
     assert sub2.get_percent() == 100
+
+def test_monitor_progress_shares_one_thread_and_keeps_order():
+    import threading
+    from testsuit.misc.MonitorProgress import MonitorProgress
+
+    received = []
+    def cb(percent, msg, msgSeverity):
+        received.append((percent, msg))
+
+    MonitorProgress(name="warmup", progressCb=cb).close()
+    threads_before = threading.active_count()
+    monitors = [MonitorProgress(total_items=2, name=f"m{i}", progressCb=cb) for i in range(50)]
+    assert threading.active_count() == threads_before
+
+    received.clear()
+    mp = monitors[0]
+    mp.complete_n(1, msg="first")
+    mp.complete_n(1, msg="second")
+    mp.close()
+    # close() waits until pending updates and the final one are delivered, in order
+    assert received == [(50.0, ["first"]), (100.0, ["second"]), (100.0, None)]

@@ -1,15 +1,13 @@
 
-import re,os,sys,csv
-from unidecode import unidecode
+import re,os
 import numpy as np
 import pandas as pd
     
 from IPython.display import display
 from ipywidgets import *
 
-from datetime import datetime
 
-from testsuit.datatools.plotHelpers import plotData, plotData3D, cleanFigureLegendLabel
+from testsuit.datatools.plotHelpers import plotData, plotData3D
 
     
 from testsuit.misc.logger import create_logger
@@ -258,7 +256,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
         self.hide()
 
     def onProjChange(self,evt=None):
-        if self.ax!=None:
+        if self.ax is not None:
             self.ax.remove()
             self.ax=None
 
@@ -266,7 +264,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
         self.titleManuallySet=True
 
     def onTitlesChange(self,evt=None):
-        if self.ax!=None:
+        if self.ax is not None:
             self.fig.suptitle(self.txt_fig_title.value,fontsize=14)
             self.ax.set_title(self.txt_plot_title.value)
             if len(self.txt_plot_xlabel.value)>0:
@@ -296,7 +294,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
         targetFileName = FileDialog.saveFileDialog( title="Export figure as",
                                                     defaultfile=defaultFileName,
                                                     filetypes=fileTypes)
-        if targetFileName==None:
+        if targetFileName is None:
             return
         if targetFileName.lower().endswith("png"):
             self.fig.savefig(targetFileName)
@@ -331,18 +329,18 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
             print("saved "+targetFileName)
 
     def clearFigure(self,clickEvt=None):
-        if self.ax!=None:
+        if self.ax is not None:
             self.ax.clear()
         self.dataLabels=[]
         self.dataHandles=[]
 
     
     def toggleLegend(self,clickEvt=True):
-        if self.ax!=None:
+        if self.ax is not None:
             if clickEvt==True or clickEvt["owner"].value==True:
                 legendsLabels=self.__cleanLegendLabels(self.dataLabels)
                 self.ax.legend(self.dataHandles,legendsLabels,loc="upper right")
-            elif clickEvt["owner"].value==False and self.ax.get_legend()!=None:
+            elif clickEvt["owner"].value==False and self.ax.get_legend() is not None:
                 self.ax.get_legend().remove()
             
 
@@ -403,7 +401,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
                 dataDim=df.shape[1]
                 dataValues=(df+offsetVal).transpose().values
 
-                for dim in range(0,dataDim):
+                for dim in range(dataDim):
                     xDataToPlot=dataIndex
                     yDataToPlot=dataValues[dim]
                     if isinstance(offsetVal,(int,float)):
@@ -470,14 +468,14 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
 
     def update(self,forceUpdate=False, convertSec2Date=None):
           
-        if self.ax==None:
+        if self.ax is None:
             self.createFigure()
 
         self.onTitlesChange()
 
         dfList=self.guiComponentsMap["GuiChooseFields"].loadParams()
 
-        if dfList==None or len(dfList)==0:
+        if dfList is None or len(dfList)==0:
             return   
           
             

@@ -1,8 +1,8 @@
 
-import sys,os,threading
-from time import sleep
+import threading
 from concurrent.futures import ThreadPoolExecutor,wait
-from typing import Any, Callable, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np 
 import pandas as pd
@@ -14,36 +14,15 @@ from unidecode import unidecode
 
 from testsuit.misc.MonitorProgress import MonitorProgress
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
-from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
 NB_MAX_WORKERS=6
 
+# characters replaced in TDMS channel names, applied in one pass by normalizeColumnName()
+_COLUMN_NAME_TABLE = str.maketrans({**{c: "_" for c in " ()/\\'*$^[]-.:="}, "°": "o", "&": "n", "%": "pct"})
+
 def normalizeColumnName(name: str) -> str:
     """Turn a TDMS channel path into a plain ASCII column name (ex: "/'Grp 1'/'Temp (°C)'" -> "Grp_1___Temp__oC")."""
-    normalizedColName=unidecode(name.replace(" ","_") \
-                    .replace("(","_").replace(")","_") \
-                    .replace("/","_").replace("\\","_") \
-                    .replace("°","o") \
-                    .replace("'","_") \
-                    .replace("*","_") \
-                    .replace("$","_") \
-                    .replace("^","_") \
-                    .replace("[","_").replace("]","_") \
-                    .replace("-","_") \
-                    .replace(".","_") \
-                    .replace("&","n") \
-                    .replace(":","_") \
-                    .replace("=","_") \
-                    .replace("%","pct") \
-                        )
-
-    while normalizedColName.startswith("_"):
-        normalizedColName=normalizedColName[1:]
-
-    while normalizedColName.endswith("_"):
-        normalizedColName=normalizedColName[:-1]
-
-    return normalizedColName
+    return unidecode(name.translate(_COLUMN_NAME_TABLE)).strip("_")
 
 def _absoluteTimeTrack(channel) -> np.ndarray:
     """Same as nptdms channel.time_track(absolute_time=True), but a missing 'wf_start_offset'
@@ -69,7 +48,7 @@ def _absoluteTimeTrack(channel) -> np.ndarray:
 
     return start_time + (relative_time * 1e9).astype("timedelta64[ns]")
 
-def channelsAsDataframe(tdmsFile: TdmsFile, normalizedNames: List[str]) -> pd.DataFrame:
+def channelsAsDataframe(tdmsFile: TdmsFile, normalizedNames: list[str]) -> pd.DataFrame:
     """DataFrame of the channels whose normalized path is in normalizedNames, indexed by absolute time,
     with columns named by normalized path."""
     columns = {}
@@ -96,7 +75,7 @@ class TdmsFileMgr(AFileMgr):
         return "tdms"
     
     def getNbEntries(self) -> int:
-        if self._nbEntries == None:
+        if self._nbEntries is None:
             self._nbEntries = 1
             
         return self._nbEntries
@@ -106,8 +85,8 @@ class TdmsFileMgr(AFileMgr):
         
         return htmlTbl
 
-    def getFieldNames(self) -> List[str]:
-        if self._fieldNamesList==None:
+    def getFieldNames(self) -> list[str]:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             for group in self.__tdmsfile.groups():
                 for channel in group.channels():                    
@@ -121,17 +100,17 @@ class TdmsFileMgr(AFileMgr):
         return None
 
     def loadParams(self,
-                paramNamesList: List[str],
-                indexNamesList: Optional[List[str]] = None,
-                monitorProgress: Optional[MonitorProgress] = None,
-                abortEvent: Optional[threading.Event] = None,
-                minDateSec: Optional[float] = None,
-                maxDateSec: Optional[float] = None,
-                callback: Optional[Callable[..., Any]] = None,
-                shiftDateSec: Optional[float] = None,
-                shiftDateRegex: Optional[str] = None,
-                shiftDateInverted: Optional[bool] = None,
-                silent: bool = False) -> List[pd.DataFrame]:
+                paramNamesList: list[str],
+                indexNamesList: list[str] | None = None,
+                monitorProgress: MonitorProgress | None = None,
+                abortEvent: threading.Event | None = None,
+                minDateSec: float | None = None,
+                maxDateSec: float | None = None,
+                callback: Callable[..., Any] | None = None,
+                shiftDateSec: float | None = None,
+                shiftDateRegex: str | None = None,
+                shiftDateInverted: bool | None = None,
+                silent: bool = False) -> list[pd.DataFrame]:
         
         # retrieve positions of requested params 
         rstDataframes=[]
@@ -159,13 +138,13 @@ class TdmsFileMgr(AFileMgr):
                 if dfParam.index[0]==0:
                     if "Date Created" in fullTdmsfile.properties:
                         creationDate=fullTdmsfile.properties["Date Created"]
-                        creationDateSec=(creationDate - np.datetime64('1970-01-01T00:00:00Z'))/ np.timedelta64(1, 's')
+                        creationDateSec=(creationDate - np.datetime64('1970-01-01T00:00:00'))/ np.timedelta64(1, 's')
                         dfParam.index+=creationDateSec
-                        if self.showWarningDateOrigin==False:
+                        if not self.showWarningDateOrigin:
                             self.showWarningDateOrigin=True
                             monitorProgress.msg(msg=[self.getBaseName(),"Could not detect dates origin, used 'Date Created' property instead."])
                     else:
-                        if self.showWarningDateOrigin==False:
+                        if not self.showWarningDateOrigin:
                             self.showWarningDateOrigin=True
                             monitorProgress.msg(msg=[self.getBaseName(),"Could not detect dates origin."])
 

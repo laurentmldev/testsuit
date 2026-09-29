@@ -7,27 +7,43 @@ from testsuit.misc.logger import get_logger
 import concurrent.futures
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from testsuit.datatools import datatoolbox
-from  datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 
 class FolderParamMgr(AFileMgr):
-    """Extract parameters values as Pandas dataframes out of a all files from given folder.
-All parameters from various files with same name will be merged as if they were from a single file (if timestamps do not overlap).
-This is also here than global clock drifting param (if provided as 'shiftDateSec' constructor arg) is loaded
-and then applied within function AFileMgr::finalizeParam() invoked by each concrete sub-ParamMgr."""
+    """Load parameters from all the data files of a folder (or list of paths), as if they were a single file.
+
+    Each file gets the file manager matching its format (see _loadFileMgrs). Field names are
+    prefixed by "<file basename>::". Parameters with the same name in several files are merged
+    when their time ranges do not overlap (see mergeParams).
+    A clock drift given as a parameter name ('shiftDateSec') is loaded here once, then applied
+    by each file manager in AFileMgr.finalizeParam().
+    """
 
     def __init__(self, sourceFileOrFolder: str | list, 
-             fileIdx: int=0, supportedExtensions: list | None=["." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS],
+             fileIdx: int=0, supportedExtensions: list | None=None,
              minDateSec: float | None=None,maxDateSec: float | None=None,
              shiftDateSec: float | str | pd.DataFrame | None=None,shiftDateRegex: str | None=None,
              shiftDateInverted: bool=False,
              ignoreCorruptedFile: bool=False,
              continueOnError: bool=False) -> None:
-        
+        """
+        :param sourceFileOrFolder: data file or folder (scanned recursively), or a list of them
+        :param fileIdx: see AFileMgr
+        :param supportedExtensions: extensions of the files to load (default: all supported formats)
+        :param minDateSec, maxDateSec, shiftDateSec, shiftDateRegex, shiftDateInverted: defaults applied
+            by findParams/loadParams when the call does not give them (see AFileMgr.findParams)
+        :param ignoreCorruptedFile: log files that cannot be opened instead of raising
+        :param continueOnError: see AFileMgr
+        :raises FileNotFoundError: if a path does not exist or no file has a supported extension
+        """
+        if supportedExtensions is None:
+            supportedExtensions=["." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]
+
         # Normalize to list internally
         if isinstance(sourceFileOrFolder, list):
             self.__sourcePaths = sourceFileOrFolder
@@ -50,10 +66,6 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         self._shiftDateInverted=shiftDateInverted
         self.__clockDriftDf={}
 
-        if supportedExtensions==None:
-            self.__supportedExtensions=["." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]
-            #raise Exception("### Received non supported extentions")
-
     def _buildFilesList(self) -> None:
         """Walk over each provided sources, if its a folder, find usable data files based on file extension."""
         self.__filesList=[]
@@ -66,18 +78,20 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
             if os.path.isfile(source_path):
                 self.__filesList.append(source_path)
             else:
-                for root, subdirs, files in os.walk(source_path):
+                for root, _subdirs, files in os.walk(source_path):
+                    # case-insensitive on both sides ('influxdbV3.yml'), one entry per file
+                    # even when several extensions match its name
+                    extensions=tuple(ext.lower() for ext in self.getSupportedFileExtensions())
                     for file in files:
-                        for extension in self.getSupportedFileExtensions():
-                            if file.lower().endswith(extension):
-                                self.__filesList.append(root+os.sep+file)
+                        if file.lower().endswith(extensions):
+                            self.__filesList.append(root+os.sep+file)
 
         if len(self.__filesList)==0:
             raise FileNotFoundError("No file matching provided extensions "+str(self.getSupportedFileExtensions())\
                                                                 +" at provided path(s): '"+str(self.__sourcePaths)+"'")
 
     def _loadFileMgrs(self) -> None:
-        """Factory which identifying which FileMgr class for which file."""
+        """Create the file manager of each file, chosen from its extension (and content for CSV/HDF5 files)."""
         self.__fileMgrs=[]
 
         fileIdx=0
@@ -164,11 +178,11 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
             if len(rst)==0:
                 rst=fileMgr.getFileType()
             elif fileMgr.getFileType() not in rst:
-                rst=","+fileMgr.getFileType()
+                rst+=","+fileMgr.getFileType()
             
         return rst
     
-    def toHtmlTbl(self):
+    def toHtmlTbl(self) -> str:
         """See AFileMgr."""
         htmlTbl=""        
         if len(self.getFileMgrs())==1:
@@ -185,13 +199,14 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         rst=0
         for fileMgr in self.getFileMgrs():
             val=fileMgr.getNbEntries()
-            if val==None:
+            if val is None:
                 return None
             rst+=val
 
         return rst
         
-    def getFileMgrs(self) -> list:
+    def getFileMgrs(self) -> list[AFileMgr]:
+        """File manager of each file, in the order the files were found."""
         return self.__fileMgrs
     
     def dumpTreeHtml(self) -> str:
@@ -245,12 +260,13 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         for fileMgr in self.getFileMgrs():
             fileMgr.clearSelectedFieldsIdx()
         
-    def getFilesList(self) -> list:
-        if self.__filesList==None:
-            self.buildFilesList()
+    def getFilesList(self) -> list[str]:
+        """Paths of the data files found."""
+        if self.__filesList is None:
+            self._buildFilesList()
         return self.__filesList
     
-    def getSupportedFileExtensions(self) -> list:
+    def getSupportedFileExtensions(self) -> list[str]:
         return self.__supportedExtensions
     
     def dumpParamsTxt(self,key: str | None=None,
@@ -266,7 +282,12 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         return rst
     
     def mergeParams(self,dfListToMerge: list) -> list:
-        """Merge parameters with same name from various source files"""
+        """Merge parameters with the same name (ignoring any "file::" prefix) coming from several files.
+
+        A parameter is concatenated to the previous ones (sorted by date, renamed "merged_<name>") only if its
+        time range does not overlap theirs; otherwise it is kept apart under the key "<origin>::<name>" and a
+        warning is logged. None entries are dropped.
+        """
 
         if len(dfListToMerge)==1: 
             return dfListToMerge
@@ -285,10 +306,9 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
             if dfparamName not in mergedDfMap:
                 mergedDfMap[dfparamName]=df
                 # keep timeranges to detect segments overlaps
-                if len(df)>0:
-                    timeranges[dfparamName]=[{"minDate":df.index[0],"maxDate":df.index[-1]}]
-                else:
-                    timeranges[dfparamName]=None
+                timeranges[dfparamName]=[{"minDate":df.index[0],"maxDate":df.index[-1]}] if len(df)>0 else []
+            elif len(df)==0:
+                continue # nothing to merge (and no time range to check)
             else:
                 # ensure there is no segment overlap
                 overlapOk=True
@@ -305,16 +325,19 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                     timeranges[dfparamName].append({"minDate":df.index[0],"maxDate":df.index[-1]})
                     mergedDfMap[dfparamName]=datatoolbox.squeezeData(mergedDfMap[dfparamName])    
                 else:
-                    get_logger().warning("parameter found in several files and timestamps overlap: '"+datatoolbox.getDfName(df)+f"':\n"
-                                            +f"  Already Found: "+str(timeranges[dfparamName])+f" (from {mergedDfMap[dfparamName].origin})\n"
-                                            +f"  Newly Found:   "+str({"minDate":df.index[0],"maxDate":df.index[-1]})+f" (from {df.origin})")
+                    get_logger().warning("parameter found in several files and timestamps overlap: '"+datatoolbox.getDfName(df)+"':\n"
+                                            +"  Already Found: "+str(timeranges[dfparamName])+f" (from {mergedDfMap[dfparamName].origin})\n"
+                                            +"  Newly Found:   "+str({"minDate":df.index[0],"maxDate":df.index[-1]})+f" (from {df.origin})")
                     mergedDfMap[df.origin+"::"+datatoolbox.getDfName(df)]=df
 
         return list(mergedDfMap.values())
 
-    def _getClockDrift(self,shiftDateSec: float | str,
-                       monitorProgress: MonitorProgress) -> float | str | pd.DataFrame:
-        
+    def _getClockDrift(self,shiftDateSec: float | str | None,
+                       monitorProgress: MonitorProgress) -> float | pd.DataFrame | None:
+        """Resolve shiftDateSec: a parameter name is loaded (once, then cached) as a DataFrame, other values are returned as is.
+
+        :raises Exception: if the named parameter matches zero or several parameters, or is empty
+        """
         # if shiftDateSec is a string, it is considered as a parameter to be loaded.
         if isinstance(shiftDateSec,str):
             shiftDateParamName=shiftDateSec
@@ -322,7 +345,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 try:
                     # do not try to apply shiftDateSec when loading shiftDateSec param ... so we use this _date_processing=False flag  
                     shiftDateDfList=self.findParams(shiftDateParamName,_date_processing=False,silent=True,monitorProgress=monitorProgress)
-                    if shiftDateDfList==None:
+                    if shiftDateDfList is None:
                         raise Exception(f"Unable to get clock drift data '{shiftDateParamName}' (returned None)")
                     if len(shiftDateDfList)==0:
                         raise Exception(f"No matching param for clock drift data '{shiftDateParamName}'")
@@ -337,10 +360,9 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 
             return self.__clockDriftDf[shiftDateParamName]
         
-        else:
-            monitorProgress.set_total_items(1)
-            monitorProgress.complete_item("litteral clock drift")
-            return shiftDateSec
+        monitorProgress.set_total_items(1)
+        monitorProgress.complete_item("litteral clock drift")
+        return shiftDateSec
 
     def _findParamsInFile(self, 
                           fileMgr: AFileMgr, 
@@ -385,7 +407,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                                     shiftDateInverted=shiftDateInverted,
                                     silent=silent, callback=curCb)
 
-        if curRst == None:
+        if curRst is None:
             raise LookupError(f"Error while finding params matching include regex '{paramSearchRegex}' and exclude regex '{excludeParamsRegex}' in file '"+fileMgr.getFileName()+"'")
 
         if abortEvent and abortEvent.is_set():
@@ -399,7 +421,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                    dryRun: bool=False,
                    monitorProgress: MonitorProgress | None=None,
                    abortEvent: threading.Event | None=None,
-                   excludeParamsRegex: list | str=["/timestamp"], 
+                   excludeParamsRegex: list | tuple | str | None=("/timestamp",),
                    minDateSec: float | None=None,
                    maxDateSec: float | None=None,
                    shiftDateSec: float | str | pd.DataFrame | None=None,
@@ -429,7 +451,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         if not shiftDateRegex: shiftDateRegex=self._shiftDateRegex if _date_processing else None
         if not shiftDateInverted: shiftDateInverted=self._shiftDateInverted if _date_processing else None
         
-        if paramSearchRegex==None:
+        if paramSearchRegex is None:
             paramSearchRegex=".*"
         
         m=re.match("((.*)::)?(.*)",paramSearchRegex)
@@ -447,8 +469,8 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                 m=re.match("((.*)::)?(.*)",regex)
                 fileRegex=m.group(2)
                 paramRegex=m.group(3)
-                if fileRegex==None: fileRegex=".*"
-                if paramRegex==None: paramRegex=".*"
+                if fileRegex is None: fileRegex=".*"
+                if paramRegex is None: paramRegex=".*"
                 
                 if fileRegex not in fileBasenameExcludeRegex:
                     fileBasenameExcludeRegex[fileRegex]=[]
@@ -464,31 +486,32 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
         monitorProgress.set_total_items(nbSteps) 
         shiftDateSecValue=self._getClockDrift(shiftDateSec,monitorProgress.child("_getClockDrift")) if shiftDateSec else None
         
+        # files are scanned in parallel; results are collected in file order so the output order is deterministic
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = {
+            futures = [
                 executor.submit(
                     self._findParamsInFile,
                     fileMgr,
-                    fileBasenameRegex,
-                    fileBasenameExcludeRegex,
-                    paramPathRegex,
-                    indexPathRegex,
-                    dryRun,
-                    monitorProgress,
-                    abortEvent,
-                    mergeParams,
-                    callback,
-                    minDateSec,
-                    maxDateSec,
-                    shiftDateSecValue,
-                    shiftDateRegex,
-                    shiftDateInverted,
-                    silent,
-                    paramSearchRegex,
-                ): fileMgr
+                    fileBasenameRegex=fileBasenameRegex,
+                    fileBasenameExcludeRegex=fileBasenameExcludeRegex,
+                    paramPathRegex=paramPathRegex,
+                    indexPathRegex=indexPathRegex,
+                    dryRun=dryRun,
+                    monitorProgress=monitorProgress,
+                    abortEvent=abortEvent,
+                    mergeParams=mergeParams,
+                    callback=callback,
+                    minDateSec=minDateSec,
+                    maxDateSec=maxDateSec,
+                    shiftDateSecValue=shiftDateSecValue,
+                    shiftDateRegex=shiftDateRegex,
+                    shiftDateInverted=shiftDateInverted,
+                    silent=silent,
+                    paramSearchRegex=paramSearchRegex,
+                )
                 for fileMgr in self.getFileMgrs()
-            }
-            for future in concurrent.futures.as_completed(futures):
+            ]
+            for future in futures:
                 resultList += future.result()
         
         # if mergeParams, callbacks have not been executed yet: we want to run them on mergeParams
@@ -509,7 +532,7 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
 
     def loadParams(self, 
                    paramNamesList: list,
-                   indexNamesList: list=[],
+                   indexNamesList: list | None=None,
                    monitorProgress: MonitorProgress | None=None,
                    abortEvent: threading.Event | None=None, 
                    callback: Callable | None=None,
@@ -519,14 +542,12 @@ and then applied within function AFileMgr::finalizeParam() invoked by each concr
                    shiftDateRegex: str | None=None,
                    shiftDateInverted: bool | None=None,
                    silent: bool=False) -> list:        
-        """Retrieve params matching provided path regexes list.
-Params with same name from various files (and regex) are merged together in a single Dataframe.
-        
-        :param paramPath (list): list of exact param names to retrieve (not a regex).
-        :param indexPath (list): list of path of explicitly index-param to retrieve (otherwise try its best to automatically get corresponding index)
+        """Load the given parameters from the files they belong to, then merge them (see mergeParams).
 
-        :return: a list of Pandas data series matching requested parameters.
-"""
+        :param paramNamesList: exact parameter names (not regexes); "file basename::name" restricts a name to one file
+        :param indexNamesList: index parameter of each parameter (same order), if the format needs one
+        :return: loaded parameters (or callback results)
+        """
                 
         if not minDateSec: minDateSec=self._minDateSec
         if not maxDateSec: maxDateSec=self._maxDateSec
@@ -542,18 +563,15 @@ Params with same name from various files (and regex) are merged together in a si
         for fileMgr in self.getFileMgrs():
             paramsListForThisFile=[]
             indicesForThisFile=[]
-            idx=0
-            for paramName in paramNamesList:
+            for idx,paramName in enumerate(paramNamesList):
                 m=re.match("((.*)::)?(.*)",paramName)
                 fileName=m.group(2)
                 paramPath=m.group(3)
 
-                if fileName==None or fileName==fileMgr.getBaseName():
+                if fileName is None or fileName==fileMgr.getBaseName():
                     paramsListForThisFile+=[paramPath]
                     if indexNamesList:
                         indicesForThisFile+=[indexNamesList[idx]]
-
-                idx+=1
 
             if len(indicesForThisFile)==0:
                 indicesForThisFile=None
@@ -570,8 +588,5 @@ Params with same name from various files (and regex) are merged together in a si
             if abortEvent and abortEvent.is_set():
                 raise Exception("Received abort event, params scanning interrupted")            
 
-        if dfList==None:
-            raise LookupError("No param matching given list'"+str(paramNamesList)+"' in '"+self.getFileName()+"'")
-        
         return self.mergeParams(dfList)
 

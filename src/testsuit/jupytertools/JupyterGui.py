@@ -1,6 +1,4 @@
 
-import re,os,sys
-from unidecode import unidecode
     
 from IPython.display import display,Javascript
 from IPython.core.getipython import get_ipython
@@ -49,7 +47,7 @@ def execute_next_cell():
 
 def delete_cells(cellPosStart,cellPosEnd=None):
 
-    if cellPosEnd==None:
+    if cellPosEnd is None:
         cellPosEnd=cellPosStart+1
     elif cellPosEnd==-1:
         cellPosEnd="IPython.notebook.ncells()"
@@ -57,7 +55,7 @@ def delete_cells(cellPosStart,cellPosEnd=None):
     display(Javascript(f"for (let i={cellPosStart};i<{cellPosEnd};i++) IPython.notebook.delete_cell({cellPosStart})"))
 
 ################## AGuiComponent ########################
-class AGuiComponent():
+class AGuiComponent:
     def __init__(self):        
         pass
 
@@ -74,12 +72,14 @@ class AGuiComponent():
 class GuiFileSelection(AGuiComponent):
     
     def __init__(self,guiComponentsMap,fileMgrsList,customSelectedFilesChangedCb=None,multi=True,\
-                        filterFiles=[("Data Files"," ".join(["*." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]))]):
+                        filterFiles=None):
         self.name="GuiFileSelection"
         self.guiComponentsMap=guiComponentsMap
         self.guiComponentsMap[self.name]=self
         self.customSelectedFilesChangedCb=customSelectedFilesChangedCb
         self.fileMgrsList=fileMgrsList
+        if filterFiles is None:
+            filterFiles=[("Data Files"," ".join(["*." + fileExt for fileExt in datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS]))]
         self.filters=filterFiles
         self.multi=multi
         self.label_files_list = HTML("No File Selected")
@@ -128,7 +128,7 @@ class GuiFileSelection(AGuiComponent):
             self.guiComponentsMap['GuiPrepareFiles'].show()
         if 'GuiChooseFields' in self.guiComponentsMap:
             self.guiComponentsMap['GuiChooseFields'].show()
-        if len(self.fileMgrsList)>0 and self.customSelectedFilesChangedCb!=None:
+        if len(self.fileMgrsList)>0 and self.customSelectedFilesChangedCb is not None:
             self.customSelectedFilesChangedCb()
         if 'GuiChooseFields' in self.guiComponentsMap:
             self.guiComponentsMap['GuiChooseFields'].update()    
@@ -244,13 +244,13 @@ class GuiPrepareFiles(AGuiComponent):
         for fileMgr in self.fileMgrsList:      
             self.prgbar_prepare_files.value=1            
             self.prgbar_prepare_files.description=fileMgr.getBaseName()
-            if fileMgr.getNbEntries()!=None:
+            if fileMgr.getNbEntries() is not None:
                 self.prgbar_prepare_files.max=fileMgr.getNbEntries()
             else:
                 self.prgbar_prepare_files.max=0
             preparedFileName=fileMgr.prepareFile(self.prepareFilesProgressCb)
             # update files list if prepared file changed name
-            if preparedFileName != None:
+            if preparedFileName is not None:
                 self.fileMgrsList[fileMgr.getFileIdx()]=\
                     self.guiComponentsMap['GuiFileSelection'].openFileMgr(preparedFileName,fileMgr.getFileIdx(),addToList=False)
             # update files list label
@@ -373,7 +373,7 @@ class GuiChooseFields(AGuiComponent):
                     self.nbFieldsLabel.value="<h3 style='color:red'>no field selected</h3>"
   
             # notify changes on selected fields list to other elements of the application
-            if self.customSelectedFieldsChangedCb!=None:
+            if self.customSelectedFieldsChangedCb is not None:
                 self.customSelectedFieldsChangedCb(totalNbFields=totalNbFields,forceUpdate=True)
 
         self.updateFieldsSelection(self.fileMgrsList,onColsChangesCb,self.fieldsTextArea) 
@@ -391,7 +391,7 @@ class GuiChooseFields(AGuiComponent):
             if self.isUseFirstFieldAsTimestamp()==True:
                 indexPathRegexStr=self.getSearchTexts()[0]
                 indexPathRegexList=[]
-                for i in range(0,len(fileMgr.getSelectedFieldsNames())):
+                for i in range(len(fileMgr.getSelectedFieldsNames())):
                     indexPathRegexList+=[indexPathRegexStr]            
 
             dfList+=fileMgr.loadParams(fileMgr.getSelectedFieldsNames(),indexNamesList=indexPathRegexList,monitorProgress=monitorProgress.child(fileMgr.getBaseName()))

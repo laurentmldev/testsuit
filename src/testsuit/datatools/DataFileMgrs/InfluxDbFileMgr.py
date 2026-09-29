@@ -1,13 +1,13 @@
 import yaml
 import pandas as pd
 import threading
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
-from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 
 import re
 
@@ -28,11 +28,10 @@ class InfluxDbV3FileMgr(AFileMgr):
         self._mapping = None  # New: list of (pattern, paramNamesKey, paramValuesKeys)
 
         try:
-            with open(self.getFileName(), 'r') as f:
+            with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                try: self._token = config.get('token')
-                except: pass
+                self._token = config.get('token')
                 self._org = config.get('org')
                 self._database = config.get('database')  # Changed from 'bucket'
                 self._table = config.get('table')
@@ -61,7 +60,7 @@ class InfluxDbV3FileMgr(AFileMgr):
         except Exception as e:
             get_logger().warning(f"Failed to load InfluxDB config from file: {e}")
             
-    def _resolve_mapping(self, table_name: str) -> Tuple[Optional[str], Optional[List[str]]]:
+    def _resolve_mapping(self, table_name: str) -> tuple[str | None, list[str] | None]:
         """
         Resolve paramNamesKey and paramValuesKeys for a given table using pattern matching.
         Returns (paramNamesKey, paramValuesKeys) or (None, None) if no mapping.
@@ -95,7 +94,7 @@ class InfluxDbV3FileMgr(AFileMgr):
             
             print(f"[connected to {self._host}]")
 
-    def _get_matching_tables(self) -> List[str]:
+    def _get_matching_tables(self) -> list[str]:
         """
         Resolve table name with wildcard support.
         Returns list of matching table names.
@@ -136,7 +135,7 @@ class InfluxDbV3FileMgr(AFileMgr):
     def getFileType(self) -> str:
         return "influxdb-v3"
 
-    def getFileInfo(self) -> List[str]:
+    def getFileInfo(self) -> list[str]:
         fileInfo = AFileMgr.getFileInfo(self)        
         matching = self._get_matching_tables()
         table_info = f"Measurement: {self._table}"
@@ -168,7 +167,7 @@ class InfluxDbV3FileMgr(AFileMgr):
         
         return htmlTbl
 
-    def _query_to_dataframe(self, query: str) -> Optional[pd.DataFrame]:
+    def _query_to_dataframe(self, query: str) -> pd.DataFrame | None:
         """
         Execute query using InfluxDB V3 query API and convert result to pandas DataFrame.
         InfluxDB V3 returns PyArrow Table directly.
@@ -224,7 +223,7 @@ class InfluxDbV3FileMgr(AFileMgr):
 
         return self._nbEntries
     
-    def getFieldNames(self) -> List[str]:
+    def getFieldNames(self) -> list[str]:
         """
         Retrieve list of fields (columns) in matching tables via InfluxDB V3 API.
         Returns unique field names across all matching tables.
@@ -253,7 +252,7 @@ class InfluxDbV3FileMgr(AFileMgr):
                                 try: 
                                     result = self._query_to_dataframe(query)
                                     break
-                                except Exception as e: 
+                                except Exception:
                                     nbHours = nbHours / 2
 
                             if result is not None and len(result) > 0 and paramNamesKey in result.columns:
@@ -291,17 +290,17 @@ class InfluxDbV3FileMgr(AFileMgr):
         return self._fieldNamesList
    
     def loadParams(self,
-                    paramNamesList: List[str],
-                    indexNamesList: Optional[List[str]] = None,
-                    monitorProgress: Optional[MonitorProgress] = None,
-                    abortEvent: Optional[threading.Event] = None,
-                    callback: Optional[Callable[..., Any]] = None,
-                    minDateSec: Optional[float] = None,
-                    maxDateSec: Optional[float] = None,
-                    shiftDateSec: Optional[float] = None,
-                    shiftDateRegex: Optional[str] = None,
-                    shiftDateInverted: Optional[bool] = None,
-                    silent: bool = False) -> List[pd.DataFrame]:
+                    paramNamesList: list[str],
+                    indexNamesList: list[str] | None = None,
+                    monitorProgress: MonitorProgress | None = None,
+                    abortEvent: threading.Event | None = None,
+                    callback: Callable[..., Any] | None = None,
+                    minDateSec: float | None = None,
+                    maxDateSec: float | None = None,
+                    shiftDateSec: float | None = None,
+                    shiftDateRegex: str | None = None,
+                    shiftDateInverted: bool | None = None,
+                    silent: bool = False) -> list[pd.DataFrame]:
         """
         Load parameters from InfluxDB V3 database with batched UNION ALL queries for acceleration.
         Supports wildcard table names and arbitrary field/column names.
@@ -348,7 +347,6 @@ class InfluxDbV3FileMgr(AFileMgr):
         param_batch_size = 1
         param_batches = [paramNamesList[i:i + param_batch_size] for i in range(0, len(paramNamesList), param_batch_size)]
         
-        total_params = len(paramNamesList)
         processed_params = 0
         
         monitorProgress.set_total_items(param_batch_size)
@@ -524,11 +522,10 @@ class InfluxDbV2FileMgr(AFileMgr):
         self._client = None
 
         try:
-            with open(self.getFileName(), 'r') as f:
+            with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                try: self._token = config.get('token')
-                except: pass
+                self._token = config.get('token')
                 self._org = config.get('org')
                 self._bucket = config.get('bucket')
                 self._measurement = config.get('measurement')
@@ -561,7 +558,7 @@ class InfluxDbV2FileMgr(AFileMgr):
     def getFileType(self) -> str:
         return "influxdb-v2"
 
-    def getFileInfo(self) -> List[str]:
+    def getFileInfo(self) -> list[str]:
         fileInfo = AFileMgr.getFileInfo(self)        
         return fileInfo + [ f"Host: {self._host}",
                             f"Org: {self._org}",
@@ -604,7 +601,7 @@ class InfluxDbV2FileMgr(AFileMgr):
 
         return self._nbEntries
     
-    def getFieldNames(self) -> List[str]:
+    def getFieldNames(self) -> list[str]:
         """
         Retrieve list of fields in bucket via InfluxDB V2 API.
         """
@@ -644,7 +641,7 @@ class InfluxDbV2FileMgr(AFileMgr):
         return self._fieldNamesList
 
 
-    def _query_to_dataframe(self, query: str) -> Optional[pd.DataFrame]:
+    def _query_to_dataframe(self, query: str) -> pd.DataFrame | None:
         """
         Execute query using InfluxDB V2 query API and convert result to pandas DataFrame.
         """
@@ -670,17 +667,17 @@ class InfluxDbV2FileMgr(AFileMgr):
         return df
     
     def loadParams(self,
-                    paramNamesList: List[str],
-                    indexNamesList: Optional[List[str]] = None,
-                    monitorProgress: Optional[MonitorProgress] = None,
-                    abortEvent: Optional[threading.Event] = None,
-                    callback: Optional[Callable[..., Any]] = None,
-                    minDateSec: Optional[float] = None,
-                    maxDateSec: Optional[float] = None,
-                    shiftDateSec: Optional[float] = None,
-                    shiftDateRegex: Optional[str] = None,
-                    shiftDateInverted: Optional[bool] = None,
-                    silent: bool = False) -> List[pd.DataFrame]:
+                    paramNamesList: list[str],
+                    indexNamesList: list[str] | None = None,
+                    monitorProgress: MonitorProgress | None = None,
+                    abortEvent: threading.Event | None = None,
+                    callback: Callable[..., Any] | None = None,
+                    minDateSec: float | None = None,
+                    maxDateSec: float | None = None,
+                    shiftDateSec: float | None = None,
+                    shiftDateRegex: str | None = None,
+                    shiftDateInverted: bool | None = None,
+                    silent: bool = False) -> list[pd.DataFrame]:
         """
         Load parameters from InfluxDB V2 bucket with batched queries for progress reporting.
         
@@ -769,9 +766,7 @@ class InfluxDbV2FileMgr(AFileMgr):
         else:
             dfAll = pd.DataFrame(columns=['_time', '_field', '_value'])
         
-        totalNbParams = len(paramNamesList)
-        
-        for paramIdx, requestedFieldName in enumerate(paramNamesList):
+        for requestedFieldName in paramNamesList:
             if abortEvent and abortEvent.is_set():
                 raise Exception("Received abort event, InfluxDB params extraction interrupted")
 

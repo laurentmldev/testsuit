@@ -2,7 +2,6 @@
 
 import os
 import sys
-import subprocess
 import re
 from pathlib import Path
 
@@ -12,7 +11,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def main(args):
     if len(args) < 1:
-        print("Usage: {} <DATASET_DIR>".format(script_name), file=sys.stderr)
+        print(f"Usage: {script_name} <DATASET_DIR>", file=sys.stderr)
         sys.exit(1)
 
     DATASET_DIR = args[0]
@@ -29,9 +28,9 @@ def main(args):
 
     dico_path = os.path.join(DATASET_DIR, "dataset.dico")
     with open(dico_path, "a") as f:
-        f.write("{}.path={}\n".format(dataset_name, targetdir))
-        f.write("{}.version={}\n".format(dataset_name, version))
-        f.write("{}.nbfiles={}\n".format(dataset_name, nbfiles))
+        f.write(f"{dataset_name}.path={targetdir}\n")
+        f.write(f"{dataset_name}.version={version}\n")
+        f.write(f"{dataset_name}.nbfiles={nbfiles}\n")
 
     git_path = os.path.join(DATASET_DIR, ".git")
     if os.path.isfile(git_path):
@@ -40,7 +39,7 @@ def main(args):
             print("WARNING: Please create a new tag with a '.gitignore' file containing 'dataset.dico'. ")
             print("         Otherwise, an error will be raised next time because of local file dataset.dico generated during import.")
         else:
-            with open(gitignore_path, "r") as g:
+            with open(gitignore_path) as g:
                 has_entry = any("dataset.dico" in line for line in g)
             if not has_entry:
                 print("WARNING: please create a new tag with 'dataset.dico' added to .gitignore file: otherwise an error will be raised next time because of local file dataset.dico generated during import")
@@ -54,8 +53,8 @@ def main(args):
 
     for dicofile in sorted(dico_files):
         fileNameToPrint = os.path.relpath(dicofile, DATASET_DIR)
-        print("          -> importing keys from {}".format(fileNameToPrint))
-        with open(dicofile, "r") as src, open(dico_path, "a") as dst:
+        print(f"          -> importing keys from {fileNameToPrint}")
+        with open(dicofile) as src, open(dico_path, "a") as dst:
             dst.write(src.read())
 
 

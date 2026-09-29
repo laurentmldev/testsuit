@@ -1,42 +1,17 @@
-# -*- coding: utf-8 -*-
-
-import sys,os
-
 
 import argparse
-import os,os.path,getpass,stat
-from pathlib import Path
-
-import xml.etree.ElementTree as ET
-
-import subprocess
-
-from testsuit.datatools.datapack.evalfiles.libdictionary import loadDicos
-from testsuit.datatools.datapack.evalfiles.libdictionary import getkeyval
-from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,evalkeys,evalincludes,finalizeLines
-from testsuit.datatools.datapack.evalfiles.evalpath import evalPath
-
-from testsuit.datatools.datapack.evalfiles.libdictionary import loadDicos
-
-from testsuit.datatools.datapack.datapack_tools import datapack
-
-import testsuit.misc.files
-from testsuit import misc
-from testsuit.misc.files import checksumFolder
-
-import socket
-from datetime import datetime
-
-from colorama import Fore, Back, Style
-
-import shutil
+import os
 import sys
-import platform
+
+from colorama import Fore, Style
+
+from testsuit import misc
+from testsuit.datatools.datapack.datapack_tools import datapack
 
 ## check if the given file is accessible
 def _isInputReadable(f):
     if not os.access(misc.files.expandPath(f),os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not reachable".format(misc.files.expandPath(f)))
+        raise argparse.ArgumentTypeError(f"{misc.files.expandPath(f)} does not exist or is not reachable")
     return f
 
 # override the parsing error message using logger

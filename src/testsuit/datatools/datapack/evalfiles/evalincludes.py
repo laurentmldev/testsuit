@@ -65,7 +65,7 @@ curPath= [ os.getcwd()]
 ## check if the given file is accessible
 def isInputFileReadable(f):
     if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError("{0} does not exist or is not readable".format(f))
+        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
 
 
@@ -118,36 +118,32 @@ def _includeStep(match,includeOnce,curParametersDico):
 			#print("##### includedFilePath '"+includedFilePath+"' match ="+str(DETECT_KEY_REGEX.match(includedFilePath)))
 			print("ERROR: Included file '"+includedFilePath+"' not reachable.")
 			return "<"+KEYMARK+UNKNOWN_INCLUDE_MARKER+includeOnceStr+" src=\""+matchText+"\" ></_include_>\n"		
-		else:
+
+		paramsStr=""
+		if len(curParametersDico)>0:
+			paramsStr="\n"
+			for paramName in curParametersDico :
+				paramsStr+="<param name=\""+paramName+"\">"+curParametersDico[paramName]+"</param>\n"
+			paramsStr+="\n"
+		return "<"+KEYMARK+includeOnceStr+" src=\""+matchText+"\" >"+paramsStr+"</_include_>\n"		
 			
-			paramsStr=""
-			if len(curParametersDico)>0:
-				paramsStr="\n"
-				for paramName in curParametersDico :
-					paramsStr+="<param name=\""+paramName+"\">"+curParametersDico[paramName]+"</param>\n"
-				paramsStr+="\n"
-			return "<"+KEYMARK+includeOnceStr+" src=\""+matchText+"\" >"+paramsStr+"</_include_>\n"		
-			
-	else:
-		if includedFilePath in includedFiles and includeOnce:
-			return ""
-		else:
-			if includedFilePath in includedFiles and includedFiles[includedFilePath]>=MAX_ALLOWED_INCLUSIONS:
-					nbCircularRecursions+=1
-					print("WARNING: File '"+includedFilePath+"' has been included more than "+str(MAX_ALLOWED_INCLUSIONS)+". This is considered as a circular reference.")
-					return "["+KEYMARK+CYCLIC_INCLUDE_MARKER+" src=\""+matchText+"\"]\n"		
-			else:		
-				#print("including '"+includedFilePath+"'")
-				#print("\nincluding ## "+includedFilePath+" ## includeOnce="+str(includeOnce)+" files : "+str(includedFiles))
-				#print("\nincluding ## "+includedFilePath+" ## curParametersDico="+str(curParametersDico))
-				nbIncludes+=1
-				if includedFilePath not in includedFiles :
-					includedFiles[includedFilePath]=0
-				includedFiles[includedFilePath]+=1
-				f=open(includedFilePath, "rt")
-				newlines=f.readlines()
-				f.close()
-				return _processExpandIncludes(includedFilePath,newlines,curParametersDico)
+	if includedFilePath in includedFiles and includeOnce:
+		return ""
+	if includedFilePath in includedFiles and includedFiles[includedFilePath]>=MAX_ALLOWED_INCLUSIONS:
+			nbCircularRecursions+=1
+			print("WARNING: File '"+includedFilePath+"' has been included more than "+str(MAX_ALLOWED_INCLUSIONS)+". This is considered as a circular reference.")
+			return "["+KEYMARK+CYCLIC_INCLUDE_MARKER+" src=\""+matchText+"\"]\n"		
+	#print("including '"+includedFilePath+"'")
+	#print("\nincluding ## "+includedFilePath+" ## includeOnce="+str(includeOnce)+" files : "+str(includedFiles))
+	#print("\nincluding ## "+includedFilePath+" ## curParametersDico="+str(curParametersDico))
+	nbIncludes+=1
+	if includedFilePath not in includedFiles :
+		includedFiles[includedFilePath]=0
+	includedFiles[includedFilePath]+=1
+	f=open(includedFilePath)
+	newlines=f.readlines()
+	f.close()
+	return _processExpandIncludes(includedFilePath,newlines,curParametersDico)
 
 ## return given lines, where keys have been evaluated with given dico (when defined)
 def evalIncludeLinesWithParams(lines,includedico,targetFile):
@@ -182,13 +178,15 @@ def _replace_last_occ(s, old, new):
 # @param lines lines to process
 # @param parentParamsDico local params given parent include of this one (include within an include)
 # @return a big line (separated with '\n' chars)
-def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
+def _processExpandIncludes(curFilePath,lines, parentParamsDico=None):
 	global curPath
 	global includeFoundInLatestEval
 	resultLine=""
 	nbLine=0
 	curPath.append(dirname(curFilePath))
 
+	if parentParamsDico is None:
+		parentParamsDico={}
 	curParametrizedIncludedTxt=None
 	curParametersDico=parentParamsDico
 	
@@ -212,13 +210,13 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 				includeOnce=True			
 			
 			if re.search(INCLUDE_REGEX,line):				
-				includedTxt=re.sub(INCLUDE_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+				includedTxt=re.sub(INCLUDE_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 				#print("		--- INCLUDE simple:"+line)
 				#print("-->\n"+includedTxt)
 				if len(includedTxt)>0:
 					resultLine+=lineSep+includedTxt		
 			else:
-				curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+				curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 				#print("		--- INCLUDE with params:"+line)
 				#print("-->\n"+curParametrizedIncludedTxt)
 				# remove remaining closing '</_include_>' XML node if no error detected
@@ -235,15 +233,17 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 
 		# starting include with params
 		elif re.search(INCLUDE_WITH_PARAMS_REGEX,line) :
+			# params of this include start from the parent's, without leaking into them
+			curParametersDico=dict(parentParamsDico)
 			includeOnce=False
 			if re.search(KEYMARK_ATTR_ONCE,line):
 				includeOnce=True
 			
-			curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m : _includeStep(m,includeOnce,curParametersDico),line)
+			curParametrizedIncludedTxt=re.sub(INCLUDE_WITH_PARAMS_REGEX,lambda m, includeOnce=includeOnce, params=curParametersDico : _includeStep(m,includeOnce,params),line)
 			#print("		--- include with params : includeFoundInLatestEval="+str(includeFoundInLatestEval)+" \n"+curParametrizedIncludedTxt)
 
 		# retrieving include params
-		elif curParametrizedIncludedTxt!=None and re.search(INCLUDE_PARAM_REGEX,line) :
+		elif curParametrizedIncludedTxt is not None and re.search(INCLUDE_PARAM_REGEX,line) :
 			paramstr=re.sub(INCLUDE_PARAM_REGEX,_parseParam,line)
 			paramData=paramstr.split("=")
 			paramName=paramData[0]
@@ -251,7 +251,7 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico={}):
 			curParametersDico[paramName]=paramVal			
 
 		# include 'end' node : performing include with its params
-		elif curParametrizedIncludedTxt!=None and re.search(INCLUDE_WITH_PARAMS_REGEX_END,line) :
+		elif curParametrizedIncludedTxt is not None and re.search(INCLUDE_WITH_PARAMS_REGEX_END,line) :
 			if len(curParametrizedIncludedTxt)>0:
 				
 				resultLine+=lineSep+evalIncludeLinesWithParams(curParametrizedIncludedTxt,curParametersDico,curFilePath)
@@ -305,7 +305,7 @@ def expandIncludes(filePath,lines, withPartialEval=False):
 # @param filePath the processed file name
 # @return list of expanded lines
 def expandFileIncludes(filePath):		
-	f=open(filePath, "rt")
+	f=open(filePath)
 	lines=f.readlines()
 	f.close()
 	return expandIncludes(filePath,lines)

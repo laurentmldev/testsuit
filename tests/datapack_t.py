@@ -1,8 +1,6 @@
 import sys, os, pytest, logging, re, filecmp, difflib
 from pathlib import Path
 
-# add deps folder (relative path to this module)
-sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."+os.sep+"src"))
 
 from testsuit.datatools.datapack.datapack_tools import datapack
 

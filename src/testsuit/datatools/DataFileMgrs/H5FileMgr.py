@@ -5,12 +5,12 @@ import re
 import h5py
 import pandas as pd
 import numpy as np
-from time import sleep
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import threading
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
@@ -18,7 +18,10 @@ from testsuit.misc.MonitorProgress import MonitorProgress
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 
 
-H5_MAX_NB_WORKERS=16
+# h5py serializes every call behind one global lock, so reader threads mostly wait on each other.
+# Measured on 200 params x 200k points (4 cores): 1 worker 0.91s, 2 workers 0.85s, 16 workers 1.1s.
+# 1 runs without any thread pool. Raise it only if measured faster on your files.
+H5_MAX_NB_WORKERS=2
 
 def GetH5FileType(fileName: str, h5File: h5py.File | None=None) -> str:
     if not h5File:
@@ -67,18 +70,18 @@ class H5FileMgr(AFileMgr):
         try:
             nbExternalFiles = len(ds.id.get_create_plist().get_external())
             return nbExternalFiles > 0
-        except Exception as e:
+        except Exception:
             return False
         
     def dumpTreeHtml(self,key: str | None=None,item: h5py.Group | h5py.Dataset | None=None,depth: int=0) -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=self.getBaseName()
 
         htmlText="<ul>"      
 
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             htmlText+="<li><span style='font-weight:bold;color:blue'>"+key+"</span>"
             if key.startswith("_"):
                 htmlText+="<ul><li><span style='color:grey;font-style:italic'>[...] (truncated)</span></li></ul>"
@@ -86,7 +89,7 @@ class H5FileMgr(AFileMgr):
                 for subkey, childItem in item.items():
                     htmlText+=H5FileMgr.dumpTreeHtml(self,subkey,childItem,depth+1)                
                 htmlText+="</li>"
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             htmlText+="<li><span style='font-weight:bold;color:green'>"+key+"</span><ul>"
             for colName in item.dtype.fields.keys():
                 htmlText+="<li>"+colName+"</li>"
@@ -103,13 +106,13 @@ class H5FileMgr(AFileMgr):
                     depth: int=0,
                     indent_text: str="   ") -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=self.getBaseName()
 
         strText=(indent_text * depth)
 
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             strText+=" @"+key+" "
             if key.startswith("_"):
                 strText+="[...] (truncated)\n"
@@ -118,7 +121,7 @@ class H5FileMgr(AFileMgr):
                 for subkey, childItem in item.items():
                     strText+=H5FileMgr.dumpTreeTxt(self,subkey,childItem,depth+1)                
                 
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             strText+=" - "+key+" "
             for colName in item.dtype.fields.keys():
                 strText+="\n"+(indent_text * (depth+1))+" - "+colName
@@ -136,19 +139,19 @@ class H5FileMgr(AFileMgr):
                       item: h5py.Group | h5py.Dataset | None=None,
                       depth: int=0,path: str="") -> str:
 
-        if item==None:
+        if item is None:
             item=self.getH5FileRoot()
             key=""
         if key.startswith("/"):
             key=key.removeprefix("/")
 
         strText=""
-        if type(item) == h5py._hl.group.Group or type(item) == h5py._hl.files.File:
+        if isinstance(item, h5py.Group):
             if not key.startswith("_"):                
                 for subkey, childItem in item.items():
                     strText+=H5FileMgr.dumpParamsTxt(self,subkey,childItem,path=path+"/"+key)                
                 
-        elif type(item) == h5py._hl.dataset.Dataset and item.dtype.kind == 'V': # Compound type
+        elif isinstance(item, h5py.Dataset) and item.dtype.kind == 'V': # Compound type
             if len(item.dtype.fields)>0:
                 for colName in item.dtype.fields.keys():
                     strText+=path+"/"+key+"."+colName+"\n"            
@@ -166,12 +169,12 @@ class H5FileMgr(AFileMgr):
         return htmlTbl
 
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             def visitorCb(name,item):
                 if "/Timestamps/" in name: return
                 
-                if type(item)==h5py._hl.dataset.Dataset:
+                if isinstance(item, h5py.Dataset):
                     # for compound types, add table columns names
                     if item.dtype.kind=="V": 
                         self.__tables.append(item)
@@ -198,9 +201,6 @@ class H5FileMgr(AFileMgr):
     def prepareFile(self,monitorProgress: MonitorProgress) -> None:
        return None
     
-    def finalizeH5Dataframe(self,df: pd.DataFrame) -> pd.DataFrame:
-        return df
-
     def getDataset(self,dataset_path: str,index_path: str | None=None) -> tuple[Any, h5py.Dataset | None]:
         """extract required Dataset from our H5 file"""
 
@@ -254,7 +254,7 @@ class H5FileMgr(AFileMgr):
                 else:
                     value = item
             elif item.dtype.kind == 'V': # Compound type
-                if dataset_colname==None:
+                if dataset_colname is None:
                     raise ValueError("provided path is a HDF5 compound dataset, "
                                      +"need a column name as a suffix to provided dataset path: '"+dataset_path+".<my_col>'")
                   
@@ -266,10 +266,10 @@ class H5FileMgr(AFileMgr):
             indexDataset=None
 
             # explicit index path
-            if index_path!=None:
+            if index_path is not None:
                 indexDataset=self.getH5FileRoot()[index_path]
                 if not isinstance(indexDataset, h5py.Dataset):
-                    raise ValueError("provided index path is not a DataSet:'"+indexDataset+"'")
+                    raise ValueError("provided index path is not a DataSet:'"+index_path+"'")
                 return value, indexDataset
 
     # Now we retrieve implicite index DataSet from attributes
@@ -279,31 +279,31 @@ class H5FileMgr(AFileMgr):
     # 1. try in priority keys of type *ObjRef*
             # retrieve all attributes of type 'Obj Ref'
             for (attrkey,attrVal) in item.attrs.items():
-                if type(attrVal)==h5py.ref_dtype:
+                # (comparing type(attrVal) to h5py.ref_dtype, a numpy dtype, never matched)
+                if isinstance(attrVal, h5py.Reference):
                     refAttrs[attrkey]=attrVal
 
             # try to take best one for implicit index (timestamp)
-            for (attrkey,attrval) in refAttrs.items():                
-
+            if len(refAttrs)==1:
                 # if only one ref, we use it
-                if len(refAttrs.keys())==1:
-                    try:
+                attrkey,attrval=next(iter(refAttrs.items()))
+                try:
+                    indexDataset=self.getH5FileRoot()[attrval]
+                except Exception as e:
+                    errMsg=("unable to find reference pointed by attribute '"+str(attrkey)
+                            +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
+                    if "time" in attrkey.lower() or "date" in attrkey.lower():
+                        raise ValueError(errMsg) from e
+                    get_logger().warning(errMsg)
+            else:
+                # otherwise use the first with 'time' or 'date' in attribute name
+                for (attrkey,attrval) in refAttrs.items():
+                    if "time" in attrkey.lower() or "date" in attrkey.lower():
                         indexDataset=self.getH5FileRoot()[attrval]
-                    except Exception as e:
-                        if "time" in attrkey.lower() or "date" in attrkey.lower():
-                            raise ValueError("unable to find reference pointed by attribute '"+str(attrkey)
-                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))       
-                            break
-                        else:
-                            get_logger().warn("unable to find reference pointed by attribute '"+str(attrkey)
-                                         +"' for param '"+dataset_path+"' in file '"+self.getFileName()+"': "+str(e))
-
-                # otherwise use the first with 'time' or 'date' in attribute
-                if "time" in attrkey.lower() or "date" in attrkey.lower():
-                    indexDataset=self.getH5FileRoot()[attrval]                  
+                        break
 
     # 2. if no luck, try to find a *str* attribute with 'time' or 'date' in their name
-            if indexDataset==None:
+            if indexDataset is None:
                 for (attrkey,attrval) in item.attrs.items():
                     if "time" in attrkey.lower() or "date" in attrkey.lower():
                         try:
@@ -382,7 +382,7 @@ class H5FileMgr(AFileMgr):
             get_logger().error("Could not load any DataSet at path '" + paramName + "' in file '" + self.getFileName() + "' : " + str(e))
             return None
 
-        if h5ParamDataset == None:
+        if h5ParamDataset is None:
             get_logger().error("No DataSet found at path '" + paramName + "' in file '" + self.getFileName() + "'")
             return None
         
@@ -409,7 +409,7 @@ class H5FileMgr(AFileMgr):
 
         # if an index has been identified, assign it as Dataframe index
         indexArray = None
-        if h5IndexDataset != None:
+        if h5IndexDataset is not None:
             indexArray = np.array(h5IndexDataset)
 
             # if data is set horizontally rather than vertically, we fix it here
@@ -497,6 +497,17 @@ class H5FileMgr(AFileMgr):
         if not active_tasks:
             return paramsAsDataframes
 
+        loadArgs = (monitorProgress, abortEvent, minDateSec, maxDateSec, callback,
+                    shiftDateSec, shiftDateRegex, shiftDateInverted, silent)
+        if H5_MAX_NB_WORKERS <= 1:
+            for paramPos, paramName, indexName in active_tasks:
+                try:
+                    paramsAsDataframes[paramPos] = self._loadSingleParam(paramPos, paramName, indexName, *loadArgs)
+                except Exception as exc:
+                    get_logger().error(f"Parameter loading failed: {exc}")
+                    raise
+            return paramsAsDataframes
+
         # Run parameter loading in parallel
         with ThreadPoolExecutor(max_workers=H5_MAX_NB_WORKERS) as executor:
             future_to_pos = {}
@@ -575,7 +586,7 @@ class H5FileMgrDewesoft(H5FileMgr):
         
         # asynchronous data (has a "Time" column)
         # or brute force dataframe with time column but wrong header info ... (yes it happened)
-        if timeColIdx!=None \
+        if timeColIdx is not None \
             or len(h5ParamDataset.shape)==2 and h5ParamDataset.shape[1]==2 and len(colNames)==1:
             dfParam.set_index(dfParam.columns[0],inplace=True)
             dfParam.index.name="Time"

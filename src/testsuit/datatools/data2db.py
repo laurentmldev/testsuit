@@ -9,19 +9,33 @@ import sys,os,json,math
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
-from time import sleep
 from concurrent.futures import ThreadPoolExecutor,wait
 
 import pandas as pd
 
-from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress 
-from functools import partial
-
-# add deps folder (relative path to this module)
-sys.path.append(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+".."))
 
 from testsuit.datatools.datatoolbox import *
+
+
+def _confDateToNanosec(conf: dict, key: str) -> float | None:
+    """Read an optional date bound from a data2db conf as nanoseconds since epoch.
+
+    Accepts a date string ('2017-12-16 03:02:35.123456') or seconds since epoch ('1513393355.123456').
+    Returns None when the key is missing or empty.
+    """
+    value=conf.get(key)
+    if value is None or value=="":
+        return None
+    try:
+        return pd.Timestamp(value).timestamp()*1e9
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(value)*1e9
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"invalid value given as '{key}'. Accepted formats are '2017-12-16 03:02:35.123456'"
+                         f" or '1513393355.123456': given value was '{value}'") from e
 
 
 class Data2Db(ABC):
@@ -57,7 +71,7 @@ class Data2Db(ABC):
     def data2db(self,
                 sourceFolderOrFiles: str | list,
                 conf: dict,
-                extensions: list = ["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],
+                extensions: list[str] | None = None,
                 token: str | None = None,
                 dryRun: bool = False,
                 monitorProgress: MonitorProgress | None = None,
@@ -67,7 +81,7 @@ class Data2Db(ABC):
         
         :param sourceFolderOrFiles (str|list): path to file or folders containing data to extract."
         :param conf (dict): request configuration (see details here under)
-        :param extensions (list): list of accepted file extensions. See datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS for default list.
+        :param extensions (list): list of accepted file extensions. Defaults to every entry of datatoolbox.SUPPORTED_DATAFILE_EXTENSIONS.
         :param token (str): token or password for DB access
         :param dryRun (bool): if true, only list fields detected, but do not actually upload data
         :monitorProgress (func): progress monitoring obj (see misc::monitorProgress)
@@ -157,7 +171,7 @@ Example of conf dictionary:
     def getFieldsList(self,
                 sourceFolderOrFiles: str | list,
                 conf: dict,
-                extensions: list = ["." + fileExt for fileExt in SUPPORTED_DATAFILE_EXTENSIONS],                
+                extensions: list[str] | None = None,                
                 monitorProgress: MonitorProgress | None = None,
                 abortEvent: threading.Event | None = None,
                 silent: bool = False) -> dict | None:
@@ -186,27 +200,8 @@ Example of conf dictionary:
         dateCoefToNanosec=getCoefConvToNanosec(conf.get("dateUnit"))
         dateOffset=getDateOffsetSec(conf.get("dateOffset"),conf.get("timezone"))
         
-        minDate=conf.get("minDate")
-        if minDate and len(minDate)>0:
-            try: minDate=pd.Timestamp(minDate).timestamp()*1e9
-            except: 
-                try: minDate=number(minDate)*1e9
-                except:
-                    raise ValueError(f"invalid value given as 'minDate'."\
-                                            +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
-                                            +f" given value was '{maxDate}'")
-        else: minDate=None
-
-        maxDate=conf.get("maxDate")
-        if maxDate and len(maxDate)>0:
-            try: maxDate=pd.Timestamp(maxDate).timestamp()*1e9
-            except: 
-                try: maxDate=number(maxDate)*1e9
-                except:
-                    raise ValueError(f"invalid value given as 'maxDate'. "\
-                                            +"Accepted formats are '2017-12-16 03:02:35.123456' or '1513393355.123456' :"\
-                                            +f" given value was '{maxDate}'")
-        else: maxDate=None
+        minDate=_confDateToNanosec(conf,"minDate")
+        maxDate=_confDateToNanosec(conf,"maxDate")
 
         verticalOffset=0
         if "verticalOffset" in conf: verticalOffset=conf["verticalOffset"]    
@@ -254,7 +249,7 @@ class InfluxdbV2Data2Db(Data2Db):
         :param token (str): influx access token
         :monitorProgress (func): function to be called for GUI progress messages (see datatoolbox:defaultmonitorProgress for signature)
         """
-        from influxdb_client import InfluxDBClient,BucketRetentionRules
+        from influxdb_client import InfluxDBClient
         from influxdb_client.rest import ApiException
 
         influxdb_client = InfluxDBClient(url=url, token=token, org=org, debug=False)
@@ -268,7 +263,7 @@ class InfluxdbV2Data2Db(Data2Db):
             if err_code == "conflict":
                 pass  # bucket already exists in this org, proceed safely
             elif err_code == "unauthorized":
-                raise ValueError(f"access denied. Maybe you should specify the token to be used ?")
+                raise ValueError("access denied. Maybe you should specify the token to be used ?")
             else:
                 raise ValueError(f"Unable to create bucket: {e}")
 
@@ -278,7 +273,7 @@ class InfluxdbV2Data2Db(Data2Db):
         :param workerData (dict): some context info to be provided to the worker"""
        
         from influxdb_client import InfluxDBClient
-        from influxdb_client.client.write_api import WriteOptions,WriteType,SYNCHRONOUS,ASYNCHRONOUS
+        from influxdb_client.client.write_api import SYNCHRONOUS
         
         dfPos=workerData["dfPos"]
         dbconf=workerData["dbconf"]
@@ -373,7 +368,7 @@ class InfluxdbV2Data2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
 
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' in provided influxdb conf")
+            raise ValueError("missing 'database' in provided influxdb conf")
 
         buckerStr=dbconf["database"]
         monitorProgress.msg(msg=f"checking database '{buckerStr}' exists (and create it if needed)")
@@ -638,10 +633,10 @@ class InfluxdbV3Data2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
         
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' (used as the InfluxDB v3 database name) in provided influxdb3 conf")
+            raise ValueError("missing 'database' (used as the InfluxDB v3 database name) in provided influxdb3 conf")
 
         if "table" not in dbconf:
-            raise ValueError(f"missing 'table' (used as the InfluxDB v3 table name) in provided influxdb3 conf")
+            raise ValueError("missing 'table' (used as the InfluxDB v3 table name) in provided influxdb3 conf")
 
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]
@@ -923,13 +918,13 @@ class ClickhouseData2Db(Data2Db):
         monitorProgress.set_total_items(len(fieldsDfList))
 
         if "database" not in dbconf:
-            raise ValueError(f"missing 'database' (used as the ClickHouse database name) in provided clickhouse conf")
+            raise ValueError("missing 'database' (used as the ClickHouse database name) in provided clickhouse conf")
 
         if "table" not in dbconf:
-            raise ValueError(f"missing 'table' (used as the ClickHouse table name) in provided clickhouse conf")
+            raise ValueError("missing 'table' (used as the ClickHouse table name) in provided clickhouse conf")
 
         if "url" not in dbconf:
-            raise ValueError(f"missing 'url' in provided clickhouse conf")
+            raise ValueError("missing 'url' in provided clickhouse conf")
 
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]

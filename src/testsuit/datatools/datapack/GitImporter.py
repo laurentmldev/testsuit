@@ -2,9 +2,7 @@
 import git,os,sys
 import subprocess
 from testsuit.datatools.datapack.ADataImporter import ADataImporter
-from git import RemoteProgress
 
-from pathlib import Path
 
 class GitImporter(ADataImporter):
 
@@ -18,8 +16,7 @@ class GitImporter(ADataImporter):
         if testTag==True:
             if 'tag:' not in latestLog:
                 return False
-            else:
-                return True 
+            return True 
             
         return latestLog
 
@@ -32,9 +29,8 @@ class GitImporter(ADataImporter):
         if testClean:
             if len(changes)==0:
                 return True
-            else:
-                print("\n".join(changes))
-                return False
+            print("\n".join(changes))
+            return False
         
         return changes
 

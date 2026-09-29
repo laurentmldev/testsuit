@@ -10,10 +10,10 @@ def openFileDialog(title=None,filters="",multi=False):
     openFileDialog=fd.askopenfilename
     if multi:
         openFileDialog=fd.askopenfilenames
-        if title==None:
+        if title is None:
             title="Choose files"
     else:
-        if title==None:
+        if title is None:
             title="Choose file"
     return openFileDialog(title=title,filetypes=filters,multiple=multi)
     
@@ -23,7 +23,7 @@ def openFolderDialog(title=None,):
     win.attributes('-topmost',1)
 
     openFolderDialog=fd.askdirectory
-    if title==None:
+    if title is None:
         title="Choose Directory"
     return openFolderDialog(title=title)
     

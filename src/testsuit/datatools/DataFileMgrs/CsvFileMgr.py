@@ -1,19 +1,17 @@
 
 from __future__ import annotations
 
-import re,subprocess,sys
+import re
 import pandas as pd
 import numpy as np
-from datetime import datetime,timezone
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
-from testsuit.datatools.DataframeToHdf5 import DataframeToHdf5
 from testsuit.datatools.datatoolbox import getDateParser
 
 from unidecode import unidecode
@@ -76,10 +74,10 @@ class CsvFileMgr(AFileMgr):
         return "Generic"
     
     def getHeaderLine(self) -> str:
-        if self.__headerLine==None:
+        if self.__headerLine is None:
             with open(self.getFileName()) as f:
                 self.__headerLine=f.readline()
-                if self.__headerLine==None or len(self.__headerLine)==0:
+                if self.__headerLine is None or len(self.__headerLine)==0:
                     raise Exception(f"Empty CSV file or empty header line: {self.getFileName()}")
 
         return self.__headerLine
@@ -111,21 +109,20 @@ class CsvFileMgr(AFileMgr):
             if line.strip().startswith('"') and line.strip().endswith('"') and len(line.split('"'))==3:
                 raise Exception(f"Please remove quotes at begin and end of all lines: {self.getFileName()}")
 
-        if self.__separator==None:
+        if self.__separator is None:
             if len(self.getHeaderLine().split(';'))>1:
                 return ';'
-            elif len(self.getHeaderLine().split(','))>1:
+            if len(self.getHeaderLine().split(','))>1:
                 return ','
-            elif len(self.getHeaderLine().split('\t'))>1:
+            if len(self.getHeaderLine().split('\t'))>1:
                 return '\t'
-            else:
-                raise Exception(f"Unable to detect CSV separator in CSV file '{self.getFileName()}'")
+            raise Exception(f"Unable to detect CSV separator in CSV file '{self.getFileName()}'")
         return self.__separator
     
     def getNbEntries(self) -> int:
-        if self._nbEntries == None:
+        if self._nbEntries is None:
             self._nbEntries = 0
-            with open(self.getFileName(), "rbU") as f:
+            with open(self.getFileName(), "rb") as f:
                 self._nbEntries = sum(1 for _ in f)
 
         return self._nbEntries
@@ -155,7 +152,7 @@ class CsvFileMgr(AFileMgr):
         return htmlTbl
 
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             self._fieldNamesList=[]
             self._fieldNamesList=self.getHeaderLine().replace('"',"").strip().split(self.getSeparator())            
             if len(self._fieldNamesList)<2:
@@ -175,21 +172,15 @@ class CsvFileMgr(AFileMgr):
         newFileName=self.getFileName().replace(".csv",".clean.csv")
         totalNbLines = self.getNbEntries()
         
-        with monitorProgress.child("prepareFile",totalNbLines) as subMp:
-                
-            f = open(self.getFileName(),encoding='utf-8')
-            fo = open(newFileName,'w')
-            lineNb = 1
-            for lineStr in f:
+        with monitorProgress.child("prepareFile",totalNbLines) as subMp, \
+                open(self.getFileName(),encoding='utf-8') as f, \
+                open(newFileName,'w') as fo:
+            for lineNb, lineStr in enumerate(f, start=1):
                 keepLine,fixedLine = self.__checkCsvLine(lineStr,lineNb)
                 if keepLine:
                     fo.write(fixedLine)
                 if lineNb % 100 == 0:
                     subMp.complete_n(lineNb)
-                lineNb += 1
-        
-        f.close()
-        fo.close()
         
         return newFileName
 
@@ -224,7 +215,7 @@ class CsvFileMgr(AFileMgr):
             if not indexColName:
                 indexColName=paramNamesList[DEFAULT_COL_IDX]
             indexNamesList=[]
-            for i in range(0,len(paramNamesList)):
+            for i in range(len(paramNamesList)):
                 indexNamesList+=[indexColName]
 
         paramIdx=0
@@ -276,7 +267,7 @@ class CsvFileMgr(AFileMgr):
 
                 # Pandas <2.0 has only ns reoslution (and as_unit is not present)
                 try: dfParam.index = dfParam.index.as_unit('ns').view('int64') / 1e9
-                except: dfParam.index = dfParam.index.view('int64') / 1e9
+                except AttributeError: dfParam.index = dfParam.index.view('int64') / 1e9
             
             rst.append(self.finalizeParam(dfParam,
                                             name=requestedFieldname,
@@ -325,7 +316,7 @@ class CsvFileMgrInfluxDb(CsvFileMgr):
                     self.colDataTypes[colIdx]=colType
                 colIdx+=1
 
-        if measColIdx==None:
+        if measColIdx is None:
             raise Exception("missing 'measurement' column")
         
         colsList=[datesColIdx,measColIdx]+list(self.colDataTypes.keys())
@@ -348,7 +339,7 @@ class CsvFileMgrInfluxDb(CsvFileMgr):
             raise Exception(f"Unable to read CSV file {self.getFileName()} (datesColIdx={datesColIdx}): "+str(e))
     
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             if self.df is None:
                 self.loadFile()
 
@@ -393,7 +384,7 @@ class CsvFileMgrInfluxDb(CsvFileMgr):
         if len(paramNamesList)==0:
             raise Exception(self.getBaseName()+": list of params to load is empty")
 
-        if indexNamesList!=None and len(indexNamesList)>0:
+        if indexNamesList is not None and len(indexNamesList)>0:
             raise Exception(f"data index already enforced in InfluxDB-CSV format, cannot set it explicitly as '{indexNamesList}'")
         
         for requestedFieldname in paramNamesList:
@@ -507,7 +498,7 @@ class CsvFileMgrChannels(CsvFileMgr):
         
         
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             if self.df is None:
                 self.loadFile()
 
@@ -554,7 +545,7 @@ class CsvFileMgrChannels(CsvFileMgr):
         if len(paramNamesList)==0:
             raise Exception(self.getBaseName()+": list of params to load is empty")
 
-        if indexNamesList!=None and len(indexNamesList)>0:
+        if indexNamesList is not None and len(indexNamesList)>0:
             raise Exception(f"data index already enforced in Channels-CSV format, cannot set it explicitly as '{indexNamesList}'")
 
         for requestedFieldname in paramNamesList:
@@ -622,14 +613,14 @@ class CsvFileMgrChannelsPcapRecorder(CsvFileMgr):
      
                     
     def getFieldNames(self) -> list:
-        if self._fieldNamesList==None:
+        if self._fieldNamesList is None:
             super().getFieldNames()
             self._fieldNamesList+=[self.paramShortName]
             self._fieldNamesList.remove("")
         return self._fieldNamesList
 
     def getNbEntries(self) -> int:
-        if self._nbEntries==None:
+        if self._nbEntries is None:
             with open(self.getFileName()) as f:
                 self._nbEntries=len(f.readlines())
                 
@@ -664,7 +655,7 @@ class CsvFileMgrChannelsPcapRecorder(CsvFileMgr):
                                                     monitorProgress=monitorProgress.child("load data"),abortEvent=abortEvent)
 
 
-        if replacedParamIdx!=None:
+        if replacedParamIdx is not None:
             dfList[replacedParamIdx].columns=paramNamesList
             dfList[replacedParamIdx].name=self.paramShortName
 
