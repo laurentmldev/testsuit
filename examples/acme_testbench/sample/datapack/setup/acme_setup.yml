@@ -1,0 +1,48 @@
+acme_bench_setup:
+  setup_id: acme_bench
+
+  dictionaries:
+    - globals.dico
+
+  datarepositories:
+    - id: acme_data
+      name: ACME bench data
+      # where datasets are imported
+      path: _K_(testdef.path)/../../../.work/datarepo
+      datasource:
+        - id: calib_store
+          name: ACME calibration store
+          # the datapack importer registered by acme_testbench's plugin
+          importer: acme-archive
+          # the archive store: one <version>.zip or <version>/ folder per dataset version
+          path: _K_(testdef.path)/../archive_store
+          dataset:
+            - id: bench_calib
+              path: _K_(bench_calib_version)
+              postprocess: basickeys.py
+
+  components:
+    component_def:
+      - type: bench_controller
+        configuration:
+          - id: standard
+            input:
+              # evaluated with the keys of the imported dataset (dataset.dico)
+              - template: templates/bench_config.yml
+                method: eval
+                optional: false
+                value: bench_config.yml
+              # copied as is from the imported dataset
+              - template: _K_(bench_calib.path)/calibration.yml
+                method: copy
+                optional: false
+                value: calibration.yml
+
+  configurations:
+    configuration:
+      - id: nominal
+        component:
+          - id: bench_a
+            name: Bench A controller
+            type: bench_controller
+            configuration: standard

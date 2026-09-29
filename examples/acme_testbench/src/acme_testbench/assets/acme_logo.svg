@@ -1,0 +1,23 @@
+<svg class="acme-logo" id="acme-bench-logo" xmlns="http://www.w3.org/2000/svg" width="300" height="76" viewBox="0 0 300 76" role="img" aria-label="ACME Bench">
+  <style>
+    .acme-logo { display:block; margin:0 auto 12px auto; }
+    .acme-logo .gear { fill:#e8a33d; transform-origin:38px 38px; animation:acme-spin 2.4s ease-out 1; }
+    .acme-logo .hub { fill:#fff; }
+    .acme-logo .wave { fill:none; stroke:#2b5d8a; stroke-width:2.5; stroke-linecap:round;
+                       stroke-dasharray:1; stroke-dashoffset:1; animation:acme-draw 1.2s ease-in-out .4s forwards; }
+    .acme-logo .name { font:bold 30px Arial, sans-serif; fill:#2b5d8a; }
+    .acme-logo .sub { font:14px Arial, sans-serif; fill:#666; letter-spacing:3px; }
+    @keyframes acme-spin { from { transform:rotate(-180deg); } to { transform:rotate(0); } }
+    @keyframes acme-draw { to { stroke-dashoffset:0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .acme-logo * { animation:none !important; stroke-dashoffset:0 !important; }
+    }
+  </style>
+  <g class="gear">
+    <path d="M34 6h8l1.5 7 5 2 6-4 5.6 5.6-4 6 2 5 7 1.5v8l-7 1.5-2 5 4 6-5.6 5.6-6-4-5 2-1.5 7h-8l-1.5-7-5-2-6 4-5.6-5.6 4-6-2-5-7-1.5v-8l7-1.5 2-5-4-6 5.6-5.6 6 4 5-2z"/>
+    <circle class="hub" cx="38" cy="38" r="12"/>
+  </g>
+  <path class="wave" pathLength="1" d="M29 38q3-8 6 0t6 0t6 0"/>
+  <text class="name" x="84" y="42">ACME Bench</text>
+  <text class="sub" x="86" y="62">TEST REPORT</text>
+</svg>

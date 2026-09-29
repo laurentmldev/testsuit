@@ -38,7 +38,7 @@ src/testsuit/           the installable package
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
-examples/               sample configuration files
+examples/               sample configuration files, and acme_testbench: a library extending testsuit
 tests/                  pytest suite (*_t.py)
   etc/                  input data, scenarios and configs used by the tests
   ref/                  reference outputs the tests compare against

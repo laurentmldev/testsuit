@@ -12,6 +12,8 @@ from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,evalkeys,eva
 from testsuit.datatools.datapack.evalfiles.evalpath import evalPath
 
 from testsuit.datatools.datapack.GitImporter import GitImporter
+from testsuit.datatools.datapack.importers import create_data_importer
+from testsuit.plugins import load_plugins
 
 from testsuit import misc
 from testsuit.misc.files import checksumFolder
@@ -150,11 +152,10 @@ def loadDataset(repoPath,datasourceImporter,datasourcePath,datasetNode,contextFi
 
     contextFileHdl.write("      [DATASET] "+datasetId+" -> "+datasetPath+"\n")
 
-    dataImporter=None
-    if datasourceImporter.lower()=="git":        
-        dataImporter=GitImporter(datasetFullLocalPath,branch=datasetPath,url=datasourcePath)
-    else:
-        print(Fore.RED+"ERROR: unknown datasource importer '"+datasourceImporter+"' for dataset '"+datasetId+"'"+Style.RESET_ALL)
+    try:
+        dataImporter=create_data_importer(datasourceImporter,datasetFullLocalPath,datasourcePath,datasetPath)
+    except KeyError as e:
+        print(Fore.RED+"ERROR: "+str(e.args[0])+" for dataset '"+datasetId+"'"+Style.RESET_ALL)
         sys.exit(1)
 
     if os.access(datasetFullLocalPath,os.X_OK):   
@@ -344,6 +345,9 @@ def finalizeDatapack(setupId, testId, userId, timestamp, datapackFolder, datapac
     return finalFileName
 
 def datapack(testdef_file,nocheck=False):
+
+    # importers declared by external libraries
+    load_plugins()
 
     testdefFolder=os.path.dirname(testdef_file)
     if len(testdefFolder)==0:

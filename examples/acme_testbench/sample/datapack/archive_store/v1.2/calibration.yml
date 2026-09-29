@@ -1,0 +1,6 @@
+# ACME bench calibration, as published on the (here: fake) calibration server
+bench: bench-A
+temperature:
+  offset_degC: 0.3
+pressure:
+  gain: 1.012

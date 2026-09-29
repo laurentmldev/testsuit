@@ -1,0 +1,3 @@
+# keys shipped with the dataset, merged into the dataset.dico the importer writes
+bench_calib.temp_offset_degC=0.3
+bench_calib.pressure_gain=1.012

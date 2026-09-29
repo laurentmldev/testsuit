@@ -1,0 +1,2 @@
+# where the datapack zip is written (relative to the test definition, for this example)
+datapacks.path=_K_(testdef.path)/../../../.work/datapacks

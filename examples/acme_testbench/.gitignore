@@ -1,0 +1,5 @@
+# outputs of the sample scenario, datapack and tests
+.work/
+sample/datapack/testdef/.current_datapack/
+# the repository ignores dataset.dico files (imported datasets), but this one is sample input
+!sample/datapack/archive_store/*/dataset.dico
