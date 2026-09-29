@@ -1,4 +1,12 @@
+"""Base class of all data file readers ("file managers"), and the DataFrame/Series.pstr() helper.
 
+A file manager lists the parameters (fields) of one data file and loads the requested ones as pandas objects
+indexed by dates in seconds since epoch. Concrete classes implement getFieldNames() and loadParams();
+findParams() and finalizeParam() apply the common logic (regex selection, clock correction, time range, naming).
+
+/!\ importing this module sets pandas' global float display format and adds a 'pstr()' method
+to pandas DataFrame and Series.
+"""
 from __future__ import annotations
 
 import os,math,abc,re
@@ -15,7 +23,9 @@ from testsuit.datatools.datatoolbox import getDfName
 pd.set_option('display.float_format', lambda x: '%.6f' % x)
 
 def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
-    """helper to provided detailed contents of a DataFrame or Series in exploitation logs"""
+    """Detailed description of a parameter for exploitation logs: values, duration, time range, NaN count,
+    average sample rate, origin and, for numeric data, mean/min/max with their dates.
+    Available as df.pstr() on any DataFrame or Series."""
     
     nbNan=0
     if isinstance(self, pd.DataFrame):
@@ -31,7 +41,7 @@ def _pretty_str(self: pd.DataFrame | pd.Series) -> str:
         contentsStr=df_copy.__repr__()    
     else: contentsStr=self.__repr__()
     
-    def _fmt_ts(ts):
+    def _fmt_ts(ts: object) -> str:
         if self.index.dtype == 'float64':
             return pd.to_datetime(ts, unit='s').strftime('%Y-%m-%d %H:%M:%S.%f')
         return str(ts)
@@ -81,9 +91,14 @@ from testsuit.misc.logger import get_logger
 from testsuit.datatools import datatoolbox
 
 class AFileMgr(metaclass=abc.ABCMeta):
-    """Exploitation needs to handle several types of data. This class defines common API."""
-    
+    """Common API of the data file readers (one subclass per file format)."""
+
     def __init__(self,filename: str,fileIdx: int,continueOnError: bool=False) -> None:
+        """
+        :param filename: path of the data file
+        :param fileIdx: position of this file in the caller's file list (used by the Jupyter GUI)
+        :param continueOnError: on a per-parameter error, log it and skip the parameter instead of raising
+        """
         self.__filename=filename
         self._nbEntries=None
         self._fieldNamesList=None
@@ -122,7 +137,8 @@ class AFileMgr(metaclass=abc.ABCMeta):
     def toHtmlTbl(self) -> str:
         """Return HTML table rows describing the file contents (used by Jupyter GUI)"""
         htmlTbl = "<tr><th>"+"Nb Fields"+"</th><td>"+str(len(self.getFieldNames()))+"</td></tr>"
-        htmlTbl += "<tr><th>"+"Nb Entries"+"</th><td>"+str(math.floor(self.getNbEntries())) if self.getNbEntries() is not None else "?"+"</td></tr>"
+        nbEntries=self.getNbEntries()
+        htmlTbl += "<tr><th>"+"Nb Entries"+"</th><td>"+(str(math.floor(nbEntries)) if nbEntries is not None else "?")+"</td></tr>"
         return htmlTbl
 
     def getFieldNames(self) -> list:
@@ -158,7 +174,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
                    dryRun: bool=False,
                    monitorProgress: MonitorProgress | None=None,
                    abortEvent: threading.Event | None=None,
-                   excludeParamsRegex: list | str=["/timestamp"], 
+                   excludeParamsRegex: list | tuple | str | None=("/timestamp",),
                    minDateSec: float | None=None,
                    maxDateSec: float | None=None, 
                    shiftDateSec: float | str | pd.DataFrame | None=None,
@@ -167,26 +183,26 @@ class AFileMgr(metaclass=abc.ABCMeta):
                    silent: bool=False,
                    callback: Callable | None=None) -> list:
         
-        """Try to find a parameter matching provided paramPathRegex (using regex) and returns it as Pandas dataframe.
-        
-        :param paramPathRegex (str): Regex of path or name of the parameter to retrieve inside the file. Can be a regex or a partial path.
-        :param indexPathRegex (str): [optional] path of the parameter to retrieve as index, inside this file. Can be a regex or a partial path.
-        :param dryRun (bool): if true, return real list of params but with empty contents (skip data extraction)
-        :param monitorProgress (misc/MonitorProgress): progress tracker to known if we have time to get a coffee
-        :param abortEvent(threading.Event): thread abort object, to catch some abort request from applicative layer
-        :param excludeParamsRegex (str): regex to exclude params matching them
-        :param minDateSec (float): minimal date in seconds since epoch 1970-01-01
-        :param maxDateSec (float): maximal date in seconds since epoch 1970-01-01
-        :param callback (function): instead of returning the df itself, invoke provided callback(df) and return its result
-        :param silent (bool): minimize log traces
-        :param shiftDateSec (float|str): litteral or param name to apply a date offset.
-                             Interpolation is used to apply proper correction to actual dates of our param, but only on overlapping segment.
-                             Values outside overlapping range are discarded.
-        :param shiftDateRegex (str): regex to select params on which the date offset shall be actually applied
-        :param shiftDateInverted (bool): if True, consider 'shiftDateSec' param has "ref dates" as index, and opposite correction to apply (in seconds) as value. The algo will then transform it as expected (i.e. the opposite).
-            
-        :return: List of matching dataframes (list might be empty if no match), None in case of error. If callback, returns result of callabck for each param
-        """   
+        """Load the parameters of this file matching paramPathRegex.
+
+        :param paramPathRegex: regex (or partial path) of the parameters to load, optionally prefixed by
+            "fileRegex::" (see datatoolbox.getFileParamMatchRegex). None matches every parameter.
+        :param indexPathRegex: regex of the parameters to use as index, one per matching parameter
+        :param dryRun: return the matching parameters with empty contents (no data extraction)
+        :param monitorProgress: progress tracker (required)
+        :param abortEvent: set by the caller to interrupt loading
+        :param excludeParamsRegex: regex, or list of regexes, of parameters to skip
+        :param minDateSec: minimal date in seconds since epoch 1970-01-01
+        :param maxDateSec: maximal date in seconds since epoch 1970-01-01
+        :param shiftDateSec: constant date offset in seconds, or clock drift parameter (already loaded as a DataFrame
+            by FolderParamMgr). A drift is interpolated on the parameter's dates; values outside the overlapping
+            range are discarded.
+        :param shiftDateRegex: "fileRegex::paramRegex" selecting the parameters to which shiftDateSec applies
+        :param shiftDateInverted: the drift parameter is indexed by reference dates and holds the opposite correction
+        :param silent: fewer log messages
+        :param callback: called on each loaded parameter instead of returning it (see _invokeCbIfAny)
+        :return: matching parameters (empty list if none), or the callback results
+        """
     
         paramNamesList=[]
         indexNamesList=[]
@@ -266,7 +282,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
         return rst
         
     def dumpParamsTxt(self,key: str | None=None,item: Any=None,depth: int=0,path: str="") -> str:
-        """return a str list of fieldnames.
+        """Parameter names of this file, one per line (tab-indented). The arguments are only used by H5FileMgr's recursive version.
         TODO: only used by datatoolbox:loadDataframeFromFile, to be removed (applicative code)"""
         strTxt=""
         for fieldname in self.getFieldNames():
@@ -276,9 +292,11 @@ class AFileMgr(metaclass=abc.ABCMeta):
     
 
     def _invokeCbIfAny(self,df: pd.DataFrame,callback: Callable | None,monitorProgress: MonitorProgress) -> Any:
-        """invoke user's cb functions if provided.
-        Exception here: monitorProgress set_total_items shall be done before calling this.
-        Reason is that various usecases dryRun/not dryRun for ex make it a bit harder to respect standard monitorProgress flow"""
+        """Return callback(df) if a callback is provided, else df, and complete one step of monitorProgress.
+
+        A callback declaring a 'monitorProgress' parameter receives a child monitor (which completes the step)
+        instead. monitorProgress.set_total_items() must have been called before: dryRun and real loading
+        count their steps differently."""
         if callback:     
             if 'monitorProgress' in inspect.signature(callback).parameters:                    
                 return callback(df,monitorProgress=monitorProgress.child(f"callback {df.name}", renameIfExist=True))
@@ -294,14 +312,18 @@ class AFileMgr(metaclass=abc.ABCMeta):
                   minDateSec: float | None=None,maxDateSec: float | None=None,
                   shiftDateSec: float | str | pd.DataFrame | None=None,shiftDateRegex: str | None=None,shiftDateInverted: bool | None=None,silent: bool=False,
                   monitorProgress: MonitorProgress | None=None) -> Any:
-        """Once data is loaded, apply common operation to it.
-        
-        min/max date is applied **after** date shifting.
-        
-        See findParams doc for other arguments.
-        
-        :param columns (list[str]): custom names to give to each column
-        :param shiftDateSec (pd.DataFrame|float): if original shiftDateSec is a string, at this stage shall have been already loaded as a DataFrame (see FolderParamMgr).
+        """Common post-processing of a loaded parameter: clock correction, then min/max date, then naming
+        ('tmp_xxx/' path components are removed from names), then callback.
+
+        See findParams for the other arguments.
+
+        :param dfParam: loaded values (None is returned as is)
+        :param name: parameter name, set as dfParam.name
+        :param indexName: index name, set as dfParam.index.name
+        :param origin: unused, dfParam.origin is always this file's name
+        :param columns: names to give to the DataFrame columns
+        :param shiftDateSec: constant offset, or drift DataFrame (a parameter name has already been loaded by FolderParamMgr)
+        :return: the processed parameter (or the callback result), None if clock correction failed with continueOnError
         """
              
         monitorProgress.set_total_items(1)
@@ -393,7 +415,7 @@ class AFileMgr(metaclass=abc.ABCMeta):
         
     @abc.abstractmethod
     def loadParams(self, paramNamesList: list,
-                   indexNamesList: list=[],monitorProgress: MonitorProgress | None=None,
+                   indexNamesList: list | None=None,monitorProgress: MonitorProgress | None=None,
                    abortEvent: threading.Event | None=None,
                    minDateSec: float | None=None,
                    maxDateSec: float | None=None, 
@@ -402,14 +424,11 @@ class AFileMgr(metaclass=abc.ABCMeta):
                    shiftDateRegex: str | None=None,
                    shiftDateInverted: bool | None=None,
                    silent: bool=False) -> list:
-        """Retrieve Dataframe(s) corresponding to given param list (exact names, not regex)
-        
-        See doc of findParams for other arguments.
-        
-        :param paramNamesList (str[]): full names (not regex) of params to retrieve
-        :param indexNamesList (str[]): full names of indices to retrieve for each corresponding param in list index
+        """Load the given parameters (exact names, not regexes). See findParams for the other arguments.
 
-        :return: a list of Pandas dataframes containing requested params
-
+        :param paramNamesList: full names of the parameters to load
+        :param indexNamesList: full name of the index parameter of each parameter, for formats where the time
+            index is a separate field
+        :return: loaded parameters (or callback results), each passed through finalizeParam()
         """
         ...      
