@@ -18,6 +18,11 @@ IPython.OutputArea.prototype._should_scroll = function(lines) {
 }
 """
 
+def showHeader(title: str) -> None:
+    """Show the testsuit logo with the tool name on top of a GUI (the same animated SVG as the HTML reports)."""
+    from testsuit.exploit.runner.report_html import make_report_logo_svg
+    display(HTML(make_report_logo_svg(title)))
+
 def setupDisplay():
     create_logger("JupyterGUI")
     display(HTML("<style>.container { width:100% !important; }</style>"))    

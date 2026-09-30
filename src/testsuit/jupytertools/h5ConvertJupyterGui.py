@@ -227,13 +227,7 @@ def runGUI():
         else:     
             guiComponentsMap["GuiH5Convertion"].update(newFileName="")
 
-    display(Image(
-        value=open(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+"/media/logo.png"), "rb").read(),
-        format='png',
-        width=300,
-        height=400,
-    ))
-    display(HTML("<h2 style='color:green;padding:0;margin:0;font-weight:bold'>[H5-Conv]</h2>"))
+    JupyterGui.showHeader("H5-Conv")
     JupyterGui.GuiFileSelection(guiComponentsMap,fileMgrsList,selectedFilesChanged).show()
     JupyterGui.GuiPrepareFiles(guiComponentsMap,fileMgrsList)
     JupyterGui.GuiChooseFields(guiComponentsMap,fileMgrsList,selectedFieldsChanged)
