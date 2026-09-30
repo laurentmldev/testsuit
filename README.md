@@ -25,6 +25,23 @@ Optional features are installed as extras:
 
 For example `pip install -e ".[plotly,jupyter]"`.
 
+To use testsuit without cloning it, install straight from GitHub (add `@<tag>` to pin a version):
+
+```bash
+pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
+```
+
+## Jupyter GUIs
+
+Three notebook GUIs come with the package: Data-Plot (browse and plot parameters), H5-Conv (convert data files to HDF5) and M-Exploit (run a scenario and view its report). Copy their starter notebooks into a working folder and open Jupyter there:
+
+```bash
+pip install "testsuit[jupyter]"          # or: pip install -e ".[jupyter]" from a clone
+testsuit-notebooks ~/my_analysis --open  # copies data_plot, h5_convert and mexploit .ipynb
+```
+
+The notebooks only call `runGUI()` from the installed package, so upgrading testsuit upgrades the GUIs without copying the notebooks again (`--force` refreshes them). The GUIs need the classic notebook UI (`jupyter nbclassic`, what `--open` starts), and a desktop session for their file dialogs (tkinter).
+
 ## Repository layout
 
 ```
@@ -59,6 +76,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
 | `evalfile`               | resolve includes and keys in a file from dictionaries             |
+| `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
 
 ## Using the library
 

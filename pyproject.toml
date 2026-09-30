@@ -42,7 +42,8 @@ dependencies = [
 
 [project.optional-dependencies]
 plotly = ["plotly>=5"]
-jupyter = ["ipython>=8", "ipywidgets>=8"]
+# nbclassic: the GUIs drive cells through the classic notebook JavaScript API
+jupyter = ["ipython>=8", "ipywidgets>=8", "nbclassic>=1.0"]
 influxdb = ["influxdb-client>=1.40", "influxdb3-python>=0.10", "pyarrow>=15"]
 # what the test suite needs on top of the runtime deps: pip install -e ".[test]"
 test = ["plotly>=5"]
@@ -58,6 +59,7 @@ apply_clock_correction = "testsuit.cli.apply_clock_correction:main"
 mxp = "testsuit.cli.mxp:main"
 exploit_runner = "testsuit.cli.exploit_runner:main"
 datapack = "testsuit.cli.datapack:main"
+testsuit-notebooks = "testsuit.cli.notebooks:main"
 evalfile = "testsuit.cli.evalfile:main"
 
 [project.urls]
@@ -81,6 +83,10 @@ testpaths = ["tests"]
 python_files = ["*_t.py"]
 
 # dynamic way of determining version using git tags (to confirm which version is being infered: "python3 -m setuptools_scm")
+[tool.setuptools.package-data]
+# starter notebooks copied by the testsuit-notebooks command
+"testsuit.jupytertools.notebooks" = ["*.ipynb"]
+
 [tool.setuptools_scm]
 root = "."  # ".git" is in the parent directory
 

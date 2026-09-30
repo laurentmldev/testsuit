@@ -2,6 +2,8 @@ __pycache__
 .ipynb_checkpoints
 *.pyc
 *.ipynb
+# starter notebooks shipped with the package (testsuit-notebooks command)
+!src/testsuit/jupytertools/notebooks/*.ipynb
 demo_data
 *.tmp
 tmp/

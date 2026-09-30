@@ -527,13 +527,7 @@ def runGUI():
     def selectedFieldsChanged(totalNbFields=0,forceUpdate=False):
         guiComponentsMap["GuiPlotFields"].show()       
         
-    display(Image(
-        value=open(os.path.realpath(os.path.dirname( __file__[:-1] if __file__.endswith('.pyc') else __file__ ) +os.sep+"/media/logo.png"), "rb").read(),
-        format='png',
-        width=300,
-        height=400,
-    ))
-    display(HTML("<h2 style='color:green;padding:0;margin:0;font-weight:bold'>[Data-Plot]</h2>"))
+    JupyterGui.showHeader("Data-Plot")
     
     JupyterGui.GuiFileSelection(guiComponentsMap,fileMgrsList,selectedFilesChanged).show()
     GuiDumpH5Tree(guiComponentsMap,fileMgrsList)
