@@ -118,3 +118,17 @@ def test_monitor_progress_shares_one_thread_and_keeps_order():
     mp.close()
     # close() waits until pending updates and the final one are delivered, in order
     assert received == [(50.0, ["first"]), (100.0, ["second"]), (100.0, None)]
+
+
+def test_get_logger_without_create_logger(tmp_path):
+    """A library or unit test using testsuit without calling create_logger() gets a default logger
+    (it used to raise 'no logger defined!')."""
+    import subprocess,sys
+    (tmp_path / "broken.h5").write_text("not an HDF5 file")
+    code = ("from testsuit.misc.logger import get_logger\n"
+            "from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr\n"
+            f"FolderParamMgr({str(tmp_path)!r},ignoreCorruptedFile=True)\n"
+            "assert get_logger().name=='testsuit'\n")
+    proc = subprocess.run([sys.executable,"-c",code],capture_output=True,text=True)
+    assert proc.returncode==0, proc.stderr
+    assert "Unable to load 1/1 file(s)" in proc.stdout
