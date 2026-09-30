@@ -29,13 +29,17 @@ DEFAULT_CONFIG_FILE_ONLY={"fileLevel":logging.DEBUG,
 DEFAULT_CONFIG_DUAL=DEFAULT_CONFIG_CONSOLE_ONLY | DEFAULT_CONFIG_FILE_ONLY
 
 
+DEFAULT_LOGGER_NAME="testsuit"
+
 def get_logger() -> logging.Logger:
     """Return the main logger.
 
-    :raises Exception: if create_logger() was never called
+    When create_logger() was never called (a library or a unit test using testsuit directly),
+    a console logger named "testsuit" is created with DEFAULT_CONFIG_CONSOLE_ONLY and becomes
+    the main logger.
     """
     if MAIN_LOGGER_INST is None:
-        raise Exception("no logger defined!")
+        return create_logger(DEFAULT_LOGGER_NAME,config=DEFAULT_CONFIG_CONSOLE_ONLY)
 
     return MAIN_LOGGER_INST
 
