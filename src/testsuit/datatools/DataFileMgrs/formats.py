@@ -27,6 +27,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+import logging
 
 if TYPE_CHECKING:
     from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
@@ -117,6 +118,9 @@ def register_csv_variant(name: str, detect: Callable[[str], bool], factory: File
         _csvVariants.append(variant)
     else:
         _csvVariants.insert(0, variant)
+    
+    originStr="builtin" if builtin else "extension"
+    logging.getLogger("testsuit").info(f"registered {originStr} CSV variant '{name}'")
     return variant
 
 
@@ -173,8 +177,10 @@ def _firstLine(filename: str) -> str:
 def _csvFactory(filename: str, fileIdx: int) -> AFileMgr:
     variant = find_csv_variant(filename)
     if variant is not None:
+        logging.getLogger("testsuit").info(f"loading file CSV {filename} as {variant}")
         return variant.factory(filename, fileIdx)
     from testsuit.datatools.DataFileMgrs.CsvFileMgr import CsvFileMgr
+    logging.getLogger("testsuit").info(f"loading file CSV {filename} as generic CSV file")
     return CsvFileMgr(filename, fileIdx)
 
 
