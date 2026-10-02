@@ -42,6 +42,24 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Check PyPI token
+        id: check_pypi_token
+        run: |
+          response=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi")
+          token=$(echo "$response" | jq -r .value)
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "::error::OIDC token request failed: $response"
+            exit 1
+          fi
+          # print the claims PyPI checks (not the token itself)
+          echo "$token" | cut -d. -f2 | python -c "
+          import sys, base64, json
+          p = sys.stdin.read().strip(); p += '=' * (-len(p) % 4)
+          c = json.loads(base64.urlsafe_b64decode(p))
+          print({k: c.get(k) for k in ('iss', 'aud', 'sub', 'workflow', 'repository_owner')})
+          "
+          echo "id_token=$token" >> "$GITHUB_OUTPUT"
+
       - name: Get PyPI token
         id: get_pypi_token
         run: |
