@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "testsuit"
-description = "Toolbox for preparing and analysing tests data, based on Pandas mainly."
+description = "This toolbox helps preparing and analysing tests data, based on Pandas mainly."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
