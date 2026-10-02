@@ -30,25 +30,6 @@ jobs:
           name: dist
           path: dist/
 
-  publish-testpypi:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - name: Download dist
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Publish to TestPyPI
-        env:
-          TWINE_NON_INTERACTIVE: 1
-        run: |
-          python -m pip install twine
-          python -m twine upload --repository testpypi dist/*
-
   publish-pypi:
     needs: build
     runs-on: ubuntu-latest
