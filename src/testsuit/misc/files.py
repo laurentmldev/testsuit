@@ -32,13 +32,14 @@ def getAbsFilePath(curPath: str, dirname: str | None = None) -> str:
 
     Paths starting with os.sep, '$', '~' or 'C:' are considered absolute (they are not expanded).
     """
-    if curPath[0]!=os.sep and curPath[0]!='$' and curPath[0]!='~' and not curPath.startswith("C:"):
-        return os.path.realpath(dirname+os.sep+curPath)
-    return os.path.realpath(curPath)
+    curPathStr=str(curPath)
+    if curPathStr[0]!=os.sep and curPathStr[0]!='$' and curPathStr[0]!='~' and not curPathStr.startswith("C:"):
+        return os.path.realpath(dirname+os.sep+curPathStr)
+    return os.path.realpath(curPathStr)
 
 def normalizeFileName(name: str) -> str:
     """Replace whitespace and characters unsafe in file names (,/\\%@!:;<>~&#*$^) by '_'."""
-    return re.sub(r"[\s,/\\%@!:;<>~&#*$^]","_",name)
+    return re.sub(r"[\s,/\\%@!:;<>~&#*$^]","_",str(name))
 
 # from https://stackoverflow.com/questions/1094841/get-a-human-readable-version-of-a-file-size
 def sizeof_fmt(num: float, suffix: str = "B") -> str:

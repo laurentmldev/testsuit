@@ -56,7 +56,7 @@ def load_plugins() -> list[str]:
         try:
             _call(ep.load())
             loaded.append(ep.name)
-            logging.getLogger("testsuit").info(f"testsuit plugin '{ep.name}' ({ep.value}) loaded")
+            logging.getLogger("testsuit").debug(f"testsuit plugin '{ep.name}' ({ep.value}) loaded")
         except Exception as e:
             logging.getLogger("testsuit").warning(f"testsuit plugin '{ep.name}' ({ep.value}) failed to load: {e}")
 
@@ -70,7 +70,7 @@ def load_plugins() -> list[str]:
             mdl = importlib.import_module(mdlName)
             _call(getattr(mdl, funcName) if funcName else getattr(mdl, "register", None))
             loaded.append(spec)
-            logging.getLogger("testsuit").info(f"testsuit plugin '{spec}' ({ENV_VAR}) loaded")
+            logging.getLogger("testsuit").debug(f"testsuit plugin '{spec}' ({ENV_VAR}) loaded")
         except Exception as e:
             logging.getLogger("testsuit").warning(f"testsuit plugin '{spec}' ({ENV_VAR}) failed to load: {e}")
 

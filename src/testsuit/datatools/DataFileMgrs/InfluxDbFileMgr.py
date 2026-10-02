@@ -94,6 +94,23 @@ class InfluxDbV3FileMgr(AFileMgr):
             
             print(f"[connected to {self._host}]")
 
+    def close(self) -> None:
+        """Close the InfluxDB connection if open (idempotent, safe to call several times)."""
+        client = getattr(self, "_client", None)
+        if client is None:
+            return
+        self._client = None
+        try:
+            client.close()
+        except Exception as e:
+            get_logger().warning(f"Failed to close InfluxDB V3 client: {e}")
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+        
     def _get_matching_tables(self) -> list[str]:
         """
         Resolve table name with wildcard support.
@@ -504,6 +521,9 @@ class InfluxDbV3FileMgr(AFileMgr):
                     monitorProgress=subMpBatch.child(f"finalize {paramFinalName}")))
                 processed_params += 1
 
+        # release the connection: the client is re-created lazily by _connect() on next use
+        self.close()
+        
         return rst 
     
 ###############################################################################################################""
@@ -555,6 +575,23 @@ class InfluxDbV2FileMgr(AFileMgr):
             )
             print(f"[connected to {self._host}]")
 
+    def close(self) -> None:
+        """Close the InfluxDB connection if open (idempotent, safe to call several times)."""
+        client = getattr(self, "_client", None)
+        if client is None:
+            return
+        self._client = None
+        try:
+            client.close()
+        except Exception as e:
+            get_logger().warning(f"Failed to close InfluxDB V3 client: {e}")
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+        
     def getFileType(self) -> str:
         return "influxdb-v2"
 
@@ -795,4 +832,7 @@ class InfluxDbV2FileMgr(AFileMgr):
                     "' from InfluxDB V2 bucket '" + self.getFileName() + "': " + str(e)
                 )
 
+        # release the connection: the client is re-created lazily by _connect() on next use
+        self.close()
+        
         return rst

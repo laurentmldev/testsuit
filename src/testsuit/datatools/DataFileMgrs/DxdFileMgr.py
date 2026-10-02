@@ -37,7 +37,7 @@ class DxdFileMgr(AFileMgr):
         with self.dxdlock:
             if filename not in self.filesLock:
                 self.filesLock[filename]= {
-                                            "fileHandle":dw.DWFile(filename,key=lambda channel: channel.name),
+                                            "fileHandle":dw.DWFile(str(filename),key=lambda channel: channel.name),
                                             "lock":threading.Lock()
                                         }
             self.__dxdfile=self.filesLock[filename]["fileHandle"]

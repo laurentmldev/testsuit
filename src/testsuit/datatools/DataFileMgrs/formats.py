@@ -43,7 +43,7 @@ class FileFormat:
     accepts: Callable[[str], bool] | None = None
 
     def matches(self, filename: str) -> bool:
-        lowerName = filename.lower()
+        lowerName = str(filename).lower()
         if not any(lowerName.endswith("." + ext.lower()) for ext in self.extensions):
             return False
         return self.accepts is None or bool(self.accepts(filename))
@@ -120,7 +120,7 @@ def register_csv_variant(name: str, detect: Callable[[str], bool], factory: File
         _csvVariants.insert(0, variant)
     
     originStr="builtin" if builtin else "extension"
-    logging.getLogger("testsuit").info(f"registered {originStr} CSV variant '{name}'")
+    logging.getLogger("testsuit").debug(f"registered {originStr} CSV variant '{name}'")
     return variant
 
 
@@ -177,10 +177,10 @@ def _firstLine(filename: str) -> str:
 def _csvFactory(filename: str, fileIdx: int) -> AFileMgr:
     variant = find_csv_variant(filename)
     if variant is not None:
-        logging.getLogger("testsuit").info(f"loading file CSV {filename} as {variant}")
+        logging.getLogger("testsuit").debug(f"loading file CSV {os.path.basename(filename)} as {variant.name} file")
         return variant.factory(filename, fileIdx)
     from testsuit.datatools.DataFileMgrs.CsvFileMgr import CsvFileMgr
-    logging.getLogger("testsuit").info(f"loading file CSV {filename} as generic CSV file")
+    logging.getLogger("testsuit").debug(f"loading file CSV {os.path.basename(filename)} as generic CSV file")
     return CsvFileMgr(filename, fileIdx)
 
 
@@ -202,7 +202,9 @@ def _csvChannels(filename: str, fileIdx: int) -> AFileMgr:
 def _h5Factory(filename: str, fileIdx: int) -> AFileMgr:
     from testsuit.datatools.DataFileMgrs.H5FileMgr import GetH5FileType, H5FileMgr, H5FileMgrDewesoft, H5FileMgrFES, H5FileMgrChannels
     h5FileType = GetH5FileType(filename)
-    if h5FileType == "Dewesoft":
+    logging.getLogger("testsuit").debug(f"loading file HDF5 {os.path.basename(filename)} as {h5FileType} file")
+        
+    if h5FileType == "Dewesoft":        
         return H5FileMgrDewesoft(filename, fileIdx)
     if h5FileType == "FES":
         return H5FileMgrFES(filename, fileIdx)

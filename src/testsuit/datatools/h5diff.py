@@ -140,14 +140,14 @@ def diff_groups(f1: H5FileMgr,
 
 def diff_h5files_struct(file1: str, file2: str) -> bool:
     """Compare two HDF5 files (see diff_groups). True if no difference was found."""
-    print("Comparing '"+file1+"' and '"+file2+"'")
+    print(f"Comparing '{file1}' and '{file2}'")
     try:
-        f1 = H5FileMgr(file1)
+        f1 = H5FileMgr(str(file1))
     except OSError:
         print(f"Unable to open file '{file1}'")
         return False
     try:
-        f2 = H5FileMgr(file2)
+        f2 = H5FileMgr(str(file2))
     except OSError:
         print(f"Unable to open file '{file2}'")
         return False

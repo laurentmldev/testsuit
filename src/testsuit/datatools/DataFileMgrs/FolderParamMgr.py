@@ -86,6 +86,7 @@ class FolderParamMgr(AFileMgr):
                     # even when several extensions match its name
                     extensions=tuple(ext.lower() for ext in self.getSupportedFileExtensions())
                     for file in files:
+                        file = str(file)
                         if file.lower().endswith(extensions):
                             self.__filesList.append(root+os.sep+file)
 
