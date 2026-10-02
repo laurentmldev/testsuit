@@ -42,6 +42,14 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Get PyPI token               # add this step
+        id: get_pypi_token
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          audience: pypi
+
+
       - name: Publish to PyPI
         env:
           TWINE_NON_INTERACTIVE: 1
