@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Laurent Millet-Lacombe" }]
+authors = [{ name = "Laurent ML" }]
 keywords = ["test data", "hdf5", "tdms", "mdf", "csv", "data analysis", "test campaign"]
 classifiers = [
     "Programming Language :: Python :: 3",
