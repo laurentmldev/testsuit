@@ -45,7 +45,7 @@ jobs:
       - name: Get TestPyPI token
         id: get_testpypi_token
         run: |
-          response=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=test.pypi.org")
+          response=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL/audience=*/audience=test.pypi.org}")
           echo "id_token=$(echo "$response" | jq -r .value)" >> "$GITHUB_OUTPUT"
 
       - name: Publish to TestPyPI
@@ -60,7 +60,7 @@ jobs:
       - name: Get PyPI token
         id: get_pypi_token
         run: |
-          response=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi")
+          response=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL")
           echo "id_token=$(echo "$response" | jq -r .value)" >> "$GITHUB_OUTPUT"
 
       - name: Publish to PyPI
