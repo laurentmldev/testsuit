@@ -2,7 +2,6 @@ name: publish
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -34,7 +33,6 @@ jobs:
   publish-testpypi:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || github.ref_type != 'tag'
     permissions:
       id-token: write
     steps:
@@ -54,7 +52,6 @@ jobs:
   publish-pypi:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref_type == 'tag'
     permissions:
       id-token: write
     steps:
