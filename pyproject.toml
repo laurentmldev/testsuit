@@ -84,6 +84,8 @@ python_files = ["*_t.py"]
 [tool.setuptools.package-data]
 # starter notebooks copied by the testsuit-notebooks command
 "testsuit.jupytertools.notebooks" = ["*.ipynb"]
+# JS/CSS libraries embedded in the HTML report (offline, single file)
+"testsuit.exploit.runner" = ["report_libs/*"]
 
 [tool.setuptools_scm]
 root = "."  # ".git" is in the parent directory

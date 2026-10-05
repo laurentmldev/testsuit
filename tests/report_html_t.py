@@ -100,3 +100,21 @@ def test_svg_figure_texts_are_not_paths(tmp_folder):
     svg=(tmp_folder / "fig.svg").read_text()
     assert ">my title</text>" in svg
     assert "DejaVuSans-" not in svg  # no glyph drawn as path
+
+
+################### single file, offline ###################
+
+@pytest.mark.parametrize("editable",[True,False])
+def test_report_is_self_contained(tmp_folder,editable):
+    exploit_info={"name":"offline test","results_path":tmp_folder,"sessions":{},
+                  "nbSuccess":0,"nbAccepted":0,"nbRejected":0,"nbFailed":0,"nbError":0}
+    html=report_html.generate_report_html(exploit_info,isEditable=editable).read_text(encoding="utf-8")
+
+    assert not re.search(r"""<(script|link|img)[^>]+(src|href)=["']?(https?:)?//""",html)  # nothing loaded from the network
+    libs=dict(re.findall(r"<script type='application/x-gzip-base64' class='embedded-lib' data-kind='\w+' data-name='([^']+)'>([^<]+)</script>",html))
+    if not editable:
+        assert libs=={}  # only the comments editor needs them
+        return
+    assert sorted(libs)==sorted(report_html.REPORT_LIBS)
+    for name,data in libs.items():
+        assert gzip.decompress(base64.b64decode(data))==(report_html.REPORT_LIBS_PATH / name).read_bytes()
