@@ -86,3 +86,14 @@ def test_html_view_links_to_key_origin(tmp_path):
     evalfile.finalizeLines(lines, used, outputFile=str(tmp_path / "out.txt"))
     html = (tmp_path / ".out.txt.html").read_text()
     assert f'<a href="{tmp_path / "d.dico"}#x" title="x" >1</a>' in html
+
+
+def test_dico_html_view_has_key_anchors(tmp_path):
+    (tmp_path / "base.dico").write_text("x=1\n")
+    (tmp_path / "src.dico").write_text("# comment\ny=_K_(x)\n")
+    dicos = [str(tmp_path / "base.dico")]
+    lines, used = evalfile.evalfile(str(tmp_path / "src.dico"), dicos)
+    evalfile.finalizeLines(lines, used, outputFile=str(tmp_path / "gen.dico"))
+    html = (tmp_path / ".gen.dico.html").read_text().splitlines()
+    assert html[0] == "# comment<br/>"
+    assert html[1].startswith('<a id="y"></a>y=<a href=')

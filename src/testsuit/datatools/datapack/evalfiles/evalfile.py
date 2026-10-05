@@ -135,10 +135,14 @@ def _keyLink(key, val, usedkeys):
 
 ## html view of a line returned by evalfile: each replaced value is a link to the origin of its key
 # @param usedkeys {key: origin file} returned by evalfile
-def finalizeHtmlLine(line, usedkeys=None):
+# @param keyAnchor for a dico file: a 'key=value' line starts with an anchor named by its key, target of the links
+def finalizeHtmlLine(line, usedkeys=None, keyAnchor=False):
 	usedkeys=usedkeys or {}
+	anchor=""
+	if keyAnchor and (keyDef:=libdictionary.KEY_DEF_REGEX_OBJ.match(evalkeys.finalizeLine(line))):
+		anchor="<a id=\""+keyDef.group(1)+"\"></a>"
 	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"
-	return re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys),htmlescapedline)
+	return anchor+re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys),htmlescapedline)
 
 ## Used to post-process result when 'partial' option is activated
 # We then restore unknown/not found key refs and includes as original ones
@@ -158,7 +162,7 @@ def restoreUnknownKeysAndLinks(lines) :
 ## write the evaluated lines (without replacement marks)
 # @param evaluatedLines,usedkeys result of evalfile
 # @param restoreUnknownKeys restore unknown keys and includes as they were (for a partial evaluation)
-# @param outputFile file to write, along with its '.<file>.html' and '.<file>.keys' files. If None, lines are written on stdout
+# @param outputFile file to write, along with its '.<file>.html' (with key anchors for a .dico file) and '.<file>.keys' files. If None, lines are written on stdout
 def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile=None) :
 
 	if restoreUnknownKeys :
@@ -169,10 +173,11 @@ def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile
 			sys.stdout.write(evalkeys.finalizeLine(line)+"\n")
 		return
 
+	isDico=outputFile.endswith(libdictionary.DICO_SUFFIX)
 	with open(outputFile, "w") as fileout, open(_getHtmlFileName(outputFile), "w") as filehtml:
 		for line in evaluatedLines:
 			fileout.write(evalkeys.finalizeLine(line)+"\n")
-			filehtml.write(finalizeHtmlLine(line,usedkeys)+"\n")
+			filehtml.write(finalizeHtmlLine(line,usedkeys,keyAnchor=isDico)+"\n")
 
 	with open(libdictionary.getKeysOriginFileName(outputFile), "w") as keysfile:
 		for key,origin in usedkeys.items():

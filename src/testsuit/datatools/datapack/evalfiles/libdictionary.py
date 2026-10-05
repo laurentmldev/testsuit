@@ -38,6 +38,8 @@ def getFileTimestamp(date=None):
     
 
 KEYS_ORIGIN_SUFFIX=".keys"
+# extension of dictionary files (their html view has an anchor per key)
+DICO_SUFFIX=".dico"
 
 # 'key=value' or 'key:value' or 'key:=value', '#' starting a comment
 KEY_DEF_REGEX=r"^\s*([^#=:]+)(=|:=?)\s*([^#]*)\s*"
