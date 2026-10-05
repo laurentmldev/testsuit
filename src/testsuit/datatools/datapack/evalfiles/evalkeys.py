@@ -1,267 +1,190 @@
+"""Replace key references by their value, taken from a dictionary.
 
-##  @package evalkeys
-# Perform keys replacement based on given dictionnaries.
-# @warn A call to 'setDico' routine must be performed prior to execute the 'replaceKeys' routine, in order to set the replacement context.
-# @warn this package is not robust to multithread, because it uses some global variables to store state through replacement recursive calls.
-#
-# @warn lines returned by 'replaceKeys' routine must be post-processed using the 'finalizeLine' in order to have the final result
-# @see replaceKeys
-# @see setDico
-# @see finalizeLine
-#
-# Performs several replacement runs as long as some replacements are done, which means that key value can be a reference to another key.
-#
-# Features undefined keys and circular infinate recursions detection.
-#
+A key reference is ``_K_(name)`` or ``<_key_ src="name"/>``. A value can itself contain key
+references, and a key name can be built from other keys (``_K_(sensor._K_(id).unit)``), so the
+replacement is repeated, run after run, as long as some key was replaced. A key name cannot
+contain parentheses: in a nested reference, the innermost key is replaced first.
 
+Undefined keys are marked ``_K_?(name)`` and circular references ``_K_!(name)``.
 
+Usage::
 
-import os,os.path,getpass,sys,re,socket,argparse
+    setDico(dico, keysorigin)                      # replacement context
+    lines, usedkeys, undefinedKeys = replaceKeys(fileName, lines)
+    text = [finalizeLine(line) for line in lines]
+
+Each replaced value is wrapped as ``_rpl_{key}__value__rpl_``, so that the origin of every piece of
+text can be traced (see the HTML view built by evalfile). finalizeLine() removes this wrapping.
+
+The ``nbUndefined`` and ``nbInfinateRecursion`` counters add up over replaceKeys() calls until
+resetCounters().
+"""
+
+import argparse
+import functools
+import getpass
+import os
+import re
+import socket
+import sys
+from collections import defaultdict
 from pathlib import Path
+
 from testsuit.datatools.datapack.evalfiles import libdictionary
 
-
 ## max runs before arbitrary stop in case of undetected cyclic reference
-MAX_RUNS=15
-
-## Global variable : position of the currently replaced line in the target file
-
-curLineNb=0
-
-## Global variable : total amount of replacements
-nbRpl=0
+MAX_RUNS = 15
 
 # The string used to detect the key refs, i.e. "_K_" in "_K_(myKey)"
-KEYMARK="_K_"
-XMLMARK="_key_"
-KEY_REGEX=r"(\<"+XMLMARK+" src=(\"|\')|"+KEYMARK+r'\('+r')\s*([^())]+)\s*(\)|(\"|\')\s*\/\>)'
-MATCH_GROUP=3 # start from 1
-MATCH_KEYREF_MARKER=re.compile(KEYMARK+r"\(([^)]+)")
-UNKNOWN_KEY_MARKER="?"
-CYCLIC_KEY_MARKER="!"
+KEYMARK = "_K_"
+XMLMARK = "_key_"
+# '_K_(name)' or '<_key_ src="name"/>', the key name being group MATCH_GROUP
+KEY_REGEX = r"(\<" + XMLMARK + " src=(\"|\')|" + KEYMARK + r'\(' + r')\s*([^()]+?)\s*(\)|(\"|\')\s*\/\>)'
+MATCH_GROUP = 3
+KEY_PATTERN = re.compile(KEY_REGEX, re.IGNORECASE)
+# a value starting with a key ref: it is not final yet
+MATCH_KEYREF_MARKER = re.compile(KEYMARK + r"\(([^)]+)")
+UNKNOWN_KEY_MARKER = "?"
+CYCLIC_KEY_MARKER = "!"
 
-# When replacing, we actually do not purely insert the value, but we insert as '_rpl_(key)__the value___rpl_'
-# so that we can keep track of various replacements performed and build values usage traceability.
-# Routine finalizeLine remove this replacement marking to obtain purely the inserted value
-# @see finalizeLine
-RPL_MARKER="_rpl_"
-FINALIZE_RPL_START=re.compile(RPL_MARKER+r"\{[^}]+\}__")
-RPL_MATCH_REGEX=RPL_MARKER+r"\{([^}]+)\}__(.*?)__"+RPL_MARKER
-NEW_LINE_MARKER="__CR__"
+# a replaced value is inserted as '_rpl_{key}__value__rpl_', see finalizeLine
+RPL_MARKER = "_rpl_"
+FINALIZE_RPL_START = re.compile(RPL_MARKER + r"\{[^}]+\}__")
+RPL_MATCH_REGEX = RPL_MARKER + r"\{([^}]+)\}__(.*?)__" + RPL_MARKER
+NEW_LINE_MARKER = "__CR__"
+
+## replacement context, see setDico
+dico = {}
+## origin (dictionary file) of the keys
+keysorigin = {}
+
+## number of undefined keys met (when not ignored)
+nbUndefined = 0
+## number of circular references met
+nbInfinateRecursion = 0
 
 
-## Global variable : our dictionary
-dico ={}
-## Global variable :  for each replacekeys, we want to know the list of the keys actually replaced, and their origin (aka from which dictionary)
-usedkeys={}
-## Global variable :  for each key of the dico, trace from where it comes from
-keysorigin={}
-## Global variable :  remember the successive keys replaced at a given 'line.position'
-rpltraces={}
-## Global variable : name of the currently processed file, for logging purposes only
-processedFile=""
-## Global variable : name of the currently processed file, for logging purposes only
-undefinedKeys=[]
+def resetCounters():
+    """Reset the nbUndefined and nbInfinateRecursion counters."""
+    global nbUndefined, nbInfinateRecursion
+    nbUndefined = 0
+    nbInfinateRecursion = 0
 
-## Global variable :  number of unmatched keys
-nbUndefined=0
-## Global variable :  number of recursion errors
-nbInfinateRecursion=0
 
-## Global variable :  if set to true, just ignore missing keys.
-ignoreMissing=False
+def getUndefinedKeysStr(undefinedKeysData):
+    """Error message listing the undefined keys returned by replaceKeys, with their positions."""
+    return "\n".join(
+        f"undefined key '{key}' :" + "".join(f"\n\t-> {where['file']}:{where['position']}" for where in places)
+        for key, places in undefinedKeysData.items())
+
+
+def finalizeLine(line):
+    """Remove the replacement marks of a line returned by replaceKeys, giving the final text."""
+    return FINALIZE_RPL_START.sub("", line).replace("__" + RPL_MARKER, "").replace(NEW_LINE_MARKER, "\n").rstrip()
+
+
+def replaceKeys(filePath, lines, doIgnoreMissing=False):
+    """Replace the keys of the given lines (in place) by their value in the dictionary set with setDico.
+
+    Returned lines still carry replacement marks: see finalizeLine.
+
+    :param filePath: name of the processed file, for messages only
+    :param lines: lines to process
+    :param doIgnoreMissing: leave undefined keys as they are (used when the keys may be defined later on,
+        e.g. by an include). Otherwise they are marked as undefined and counted in nbUndefined.
+    :return: lines, {used key: origin}, {undefined key: [{'file','position'}]}
+    """
+    usedkeys = {}
+    undefinedKeys = {}
+    # keys replaced so far at each 'line:column', to detect circular references
+    replacedAt = defaultdict(list)
+    nbReplaced = 0
+
+    def substitute(match, lineNb):
+        global nbUndefined, nbInfinateRecursion
+        nonlocal nbReplaced
+        # the key name may hold values of keys already replaced inside it
+        keyname = finalizeLine(match.group(MATCH_GROUP))
+        position = f"{lineNb}:{match.start()}"
+        replacedHere = replacedAt[position]
+
+        if keyname in replacedHere:
+            print(f"WARNING: {filePath}:{position}\t: infinate recursion during replacement. Keys are {replacedHere}")
+            nbInfinateRecursion += 1
+            return f"{KEYMARK}{CYCLIC_KEY_MARKER}({keyname})"
+
+        if keyname not in dico:
+            undefinedKeys.setdefault(keyname, []).append({'file': filePath, 'position': position})
+            if doIgnoreMissing:
+                return f"{KEYMARK}({keyname})"
+            nbUndefined += 1
+            return f"{KEYMARK}{UNKNOWN_KEY_MARKER}({keyname})"
+
+        replacedHere.append(keyname)
+        nbReplaced += 1
+        usedkeys[keyname] = keysorigin.get(keyname, "")
+        value = dico[keyname]
+        # a value which is still a key ref is marked when its own key gets replaced
+        if MATCH_KEYREF_MARKER.match(value):
+            return value
+        return f"{RPL_MARKER}{{{keyname}}}__{value}__{RPL_MARKER}"
+
+    for _ in range(MAX_RUNS + 1):
+        nbReplaced = 0
+        for idx, line in enumerate(lines):
+            lines[idx] = KEY_PATTERN.sub(functools.partial(substitute, lineNb=idx + 1), line)
+        if nbReplaced == 0:
+            break
+
+    return lines, usedkeys, undefinedKeys
+
+
+def _getDefaultKeysDico():
+    """Environment keys, available in any replacement: dico, origins."""
+    defaultKeysDico = {
+        "_ENV_USER_": getpass.getuser(),
+        "_ENV_HOME_": str(Path.home()),
+        "_ENV_USERID_": getpass.getuser(),
+        "_ENV_PWD_": os.getenv("PWD", ""),
+        "_ENV_HOSTNAME_": socket.gethostname(),
+        "_ENV_TIMESTAMP_": libdictionary.getTimestamp(),
+    }
+    return defaultKeysDico, dict.fromkeys(defaultKeysDico, os.path.realpath(__file__))
+
+
+def setDico(replaceDictionary, mykeysorigin=None):
+    """Set the replacement context used by replaceKeys: the given keys plus a few environment keys."""
+    defaultKeysDico, defaultKeysOrigin = _getDefaultKeysDico()
+    # replaceDictionary may be the current dico itself (see getDico)
+    newDico = {**replaceDictionary, **defaultKeysDico}
+    dico.clear()
+    dico.update(newDico)
+    keysorigin.update(mykeysorigin or {})
+    keysorigin.update(defaultKeysOrigin)
+
+
+def getDico():
+    """Current replacement context: dico, keysorigin."""
+    return dico, keysorigin
 
 
 ## check if the given file is accessible
 def _isInputFileReadable(f):
-    if not os.access(f,os.R_OK):
+    if not os.access(f, os.R_OK):
         raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
     return f
+
 
 # override the parsing error message using logger
 class _HelpParser(argparse.ArgumentParser):
     def error(self, message):
-        print("Input Arguments Error : "+message)
+        print("Input Arguments Error : " + message)
         sys.exit(1)
 
 
-def getUndefinedKeysStr(undefinedKeysData) :
-	errorMsg=""
-	for curkey in undefinedKeysData :
-		errorMsg="undefined key '"+curkey+"' :"
-		for missingDetails in undefinedKeysData[curkey] :
-			file=missingDetails['file']
-			position=missingDetails['position']
-			errorMsg+="\n\t-> "+file+":"+position
-	return errorMsg
-
-## called during regex performing substitution based on our dictionary
-# it uses package global variable to keep track of the context (available dico, traces of replacements etc.)
-# @todo find a solution for not needing such global variables
-#
-# @return replaced line and key used to get value. Insert special marks when undefined key or infinate recursion are detected
-def _replaceKeys_substitution(matchObject):
-	global dico
-	global rpltraces
-	global nbRpl
-	global curLineNb
-	global nbInfinateRecursion
-	global nbUndefined
-	global ignoreMissing
-	global processedFile
-
-	value=""
-	
-	
-	# extract _K_(keyname) -> keyname
-	keyname=finalizeLine(matchObject.group(MATCH_GROUP))
-
-	# the ID used to check all the replaced keys at this position
-	# this is used to detect circular infinate references
-	rplpos=str(curLineNb)+":"+str(matchObject.start())
-	if rplpos not in rpltraces:
-		rpltraces[rplpos] = []
-
-	#print(matchObject.group(MATCH_GROUP)+"@"+rplpos)
-	#print("rpltraces:"+str(rpltraces))
-	
-	# if the current key has already been replaced once, that means we are doing infinate replacement, then we leave
-	if keyname in rpltraces[rplpos]:
-		value=KEYMARK+CYCLIC_KEY_MARKER+"("+keyname+")"
-		print("WARNING: "+processedFile+":"+rplpos+"\t: infinate recursion during replacement. Keys are "+str(rpltraces[rplpos]))
-		nbInfinateRecursion+=1
-	else:	
-		if keyname in dico:
-			value=dico[keyname]
-			# add a KEY-replaced marker only if it's a final evaluation, i.e. if value does not contain itself a keyref
-			if not MATCH_KEYREF_MARKER.match(value):
-				value=RPL_MARKER+"{"+keyname+"}__"+dico[keyname]+"__"+RPL_MARKER
-		
-			#print(keyname+" -> "+value)
-			rpltraces[rplpos].append(keyname)
-			nbRpl+=1
-			if keyname in keysorigin:
-				usedkeys[keyname]=keysorigin[keyname]
-			else:
-				usedkeys[keyname]=""
-		else:
-			if keyname not in undefinedKeys :
-				undefinedKeys[keyname]=[]
-			undefinedKeys[keyname].append({'file':processedFile, 'position':rplpos})			
-	
-			if not ignoreMissing:
-				value=KEYMARK+UNKNOWN_KEY_MARKER+"("+keyname+")"	
-				nbUndefined+=1				
-			else:
-				value=KEYMARK+"("+keyname+")"				
-	
-	return value
-
-
-
-## the 'replaceKeys' routine generate lines containing still a reference to the key used for replacement. This method allow to remove this ref and have the purely replaced values
-# @see replaceKeys
-def finalizeLine(line):	
-	return FINALIZE_RPL_START.sub("",line).replace("__"+RPL_MARKER,"").replace(NEW_LINE_MARKER,"\n").rstrip()
-	
-## Replace the keys in the given file by corresponding value defined in the dictionary file(s)
-# @warn The package dictionary must have been populated before in order to build a data context for this replacement. This can be done with a call to 'setDico(mydico)' routine, typically : 'evalkeys.setDico(libdictionary.loadDicos(args.dicos)'
-#
-# @warn in order to keep replacement traceability, returned lines contain also the key used to perform replacement, and so they need to be post-processed with 'finalizeLine' routine for final line result..
-# @see finalizeLine
-# @see setDico
-# @param filePath the processed file name, used for proper log messages
-# @param lines lines to process
-# @param doIgnoreMissing ignore undefined keys, let them as they are. This is used for sections processing when we just replace keys defined in the section scope.
-# @return tuple 'resulting lines list, used keys origin dico', or 'None, None' if error occured. See 'finalizeLine' routine to build final lines from returned lines.
-def  replaceKeys(filePath,lines,doIgnoreMissing=False):
-	global processedFile
-	global dico
-	global ignoreMissing
-	global usedkeys
-	global undefinedKeys
-	processedFile=filePath
-	ignoreMissing=doIgnoreMissing
-
-	#print("		### ignoreMissing="+str(ignoreMissing))
-	# store the list of keys actually used for populating given lines
-	usedkeys={}
-	undefinedKeys={}
-		
-	global nbRpl
-	global curLineNb
-	oldNbRpl=0 # used to detect that no replacement occured during previous run, so no need to start another one
-	nbRuns=0 # the amount of times we did the process
-
-	#print("\n###		<<<Lines replace "+filePath+" >>>")
-	# while replacement are possible we process the file
-	while ((nbRpl==0 or nbRpl!=oldNbRpl) and nbRuns<=MAX_RUNS):
-		oldNbRpl=nbRpl
-		nbRuns+=1
-		curLineNb=0 # curLineNb counter
-		for line in lines:
-				curLineNb+=1
-				lines[curLineNb-1]=re.sub(KEY_REGEX,_replaceKeys_substitution,lines[curLineNb-1],flags=re.IGNORECASE)
-				#print("		### >>> "+lines[curLineNb-1])
-	
-	#print("[Performed "+str(nbRpl)+" replacements over "+str(nbRuns)+" runs, "+str(nbUndefined)+" undefined key(s), "+str(nbInfinateRecursion)+" infinate recursion(s)]")	
-
-	return lines,usedkeys,undefinedKeys
-
-## return a dico,origins with a set of environment keys
-def _getDefaultKeysDico():
-
-	evalkeys_file=os.path.realpath(__file__)
-	defaultKeysDico={}
-	defaultKeysOrigin={}
-
-	defaultKeysDico["_ENV_USER_"]=getpass.getuser()
-	defaultKeysOrigin["_ENV_USER_"]=evalkeys_file
-
-	defaultKeysDico["_ENV_HOME_"]=Path.home()
-	defaultKeysOrigin["_ENV_HOME_"]=evalkeys_file
-	
-
-	userid=defaultKeysDico["_ENV_USER_"]
-	defaultKeysDico["_ENV_USERID_"]=userid
-	defaultKeysOrigin["_ENV_USERID_"]=evalkeys_file
-
-	defaultKeysDico["_ENV_PWD_"]=os.getenv("PWD","")
-	defaultKeysOrigin["_ENV_PWD_"]=evalkeys_file
-	
-	defaultKeysDico["_ENV_HOSTNAME_"]=socket.gethostname()
-	defaultKeysOrigin["_ENV_HOSTNAME_"]=evalkeys_file
-
-	defaultKeysDico["_ENV_TIMESTAMP_"]=libdictionary.getTimestamp()
-	defaultKeysOrigin["_ENV_TIMESTAMP_"]=evalkeys_file
-
-	return defaultKeysDico,defaultKeysOrigin
-
-## Set current replacement context to the given dictionary. This routine must be called prior to invoking 'replaceKeys' routine.
-# Set also few environment keys
-# @see replaceKeys
-def setDico(replaceDictionary, mykeysorigin=None):
-	global dico
-	global nbUndefined
-	global nbInfinateRecursion
-	defaultKeysDico,defaultKeysOrigin=_getDefaultKeysDico()
-	dico.clear()
-	dico.update(replaceDictionary)
-	dico.update(defaultKeysDico)	
-	rpltraces.clear()
-	keysorigin.update(mykeysorigin or {})
-	keysorigin.update(defaultKeysOrigin)
-
-def getDico():
-	global dico
-	global keysorigin
-	return dico,keysorigin
-
-## the main function
-if __name__ == '__main__':
-
-	parser = _HelpParser(description=
-"""Replace in the given file all """+KEYMARK+"""(keyname) by the corresponding value found in given dictionary (declared as "keyname=this is replacement text"). 
+def main():
+    parser = _HelpParser(description=
+"""Replace in the given file all """ + KEYMARK + """(keyname) by the corresponding value found in given dictionary (declared as "keyname=this is replacement text").
 
 This tool can safely handle undefined keys and most of circular infinite recursions.
 
@@ -271,39 +194,31 @@ Return:
 	2 if circular references detected
 	1 if undefined reference detected (and not circular references)
 	0 if okay""",
-	formatter_class=argparse.RawTextHelpFormatter)
-	parser.add_argument('targetfile',help="the text file where to replace keys",type=_isInputFileReadable,metavar="targetfile")
-	parser.add_argument('dicos',nargs='+', help="dictionary file(s) to be used, most important one first",type=_isInputFileReadable)	
-	parser.add_argument('--ignoreundef',action='store_true',help="ignore undefined keys")
-	
-	args = parser.parse_args()		
+    formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('targetfile', help="the text file where to replace keys", type=_isInputFileReadable, metavar="targetfile")
+    parser.add_argument('dicos', nargs='+', help="dictionary file(s) to be used, most important one first", type=_isInputFileReadable)
+    parser.add_argument('--ignoreundef', action='store_true', help="ignore undefined keys")
+    args = parser.parse_args()
 
-	f=open(args.targetfile)
-	lines=f.readlines()
-	f.close()
+    with open(args.targetfile) as f:
+        lines = f.readlines()
 
-	resultDico,keysorigin=libdictionary.loadDicos(args.dicos)
-	setDico(resultDico,keysorigin)
-	rlines, usedkeys, undefinedKeys=replaceKeys(args.targetfile,lines,args.ignoreundef)
+    setDico(*libdictionary.loadDicos(args.dicos))
+    rlines, _, undefinedKeys = replaceKeys(args.targetfile, lines, args.ignoreundef)
 
-	if len(undefinedKeys) > 0 :
-		if not args.ignoreundef :
-			print(getUndefinedKeysStr(undefinedKeys))
-		else :
-			#print("(ignored) "+getUndefinedKeysStr(undefinedKeys))
-			pass
+    if undefinedKeys and not args.ignoreundef:
+        print(getUndefinedKeysStr(undefinedKeys))
 
-	for line in rlines:
-		sys.stdout.write(finalizeLine(line)+"\n")
-	sys.stdout.write("\n")
-	
-	if (nbInfinateRecursion>0):
-		sys.exit(2)
-	if (nbUndefined>0 and not args.ignoreundef):
-		sys.exit(1)
-	sys.exit(0)
+    for line in rlines:
+        sys.stdout.write(finalizeLine(line) + "\n")
+    sys.stdout.write("\n")
+
+    if nbInfinateRecursion > 0:
+        sys.exit(2)
+    if nbUndefined > 0 and not args.ignoreundef:
+        sys.exit(1)
+    sys.exit(0)
 
 
-	# unexpected
-	sys.exit(255)
-
+if __name__ == '__main__':
+    main()

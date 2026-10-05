@@ -481,7 +481,6 @@ def datapack(testdef_file,nocheck=False):
         if not os.access(expandPath(setupFolder+os.sep+dicoFilePath),os.R_OK): 
             print(Fore.RED+"ERROR: Dico file from datapack config '"+str(setupXmlRoot)+"' not reachable: '"+dicoFilePath+"'"+Style.RESET_ALL)
             return False
-        expandPath(setupFolder+os.sep+dicoFilePath,evalTargetFolder=processingFolder,evalDicosList=dicosList)
         dicosList+=[expandPath(setupFolder+os.sep+dicoFilePath,evalTargetFolder=processingFolder,evalDicosList=dicosList) ]
     
     # reevaluate setup file with also local dicos listed inside it
