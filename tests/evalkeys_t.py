@@ -77,3 +77,12 @@ def test_errors_are_counted_per_file(tmp_path):
     assert evalkeys.nbUndefined == 0
     assert [evalkeys.finalizeLine(line) for line in lines] == ["1"]
 
+
+
+def test_html_view_links_to_key_origin(tmp_path):
+    (tmp_path / "d.dico").write_text("x=1\n")
+    (tmp_path / "src.txt").write_text("v=_K_(x)\n")
+    lines, used = evalfile.evalfile(str(tmp_path / "src.txt"), [str(tmp_path / "d.dico")])
+    evalfile.finalizeLines(lines, used, outputFile=str(tmp_path / "out.txt"))
+    html = (tmp_path / ".out.txt.html").read_text()
+    assert f'<a href="{tmp_path / "d.dico"}#x" title="x" >1</a>' in html

@@ -24,9 +24,6 @@ _INCLUDE_WITH_PARAMS_PATTERN=re.compile(evalincludes.INCLUDE_WITH_PARAMS_REGEX)
 
 HTML_SUFFIX=".html"
 
-# store used keys when genertating Html version of evaluated file
-GlobalUsedKeys={}
-
 def _expandPath(pathStr):
 	return os.path.normpath(os.path.expanduser(os.path.expandvars(pathStr)))
 
@@ -128,33 +125,21 @@ def _getHtmlFileName(file):
 	return os.path.abspath(_expandPath(dirname+os.sep+htmlFileName))
 
 
-def _generateHtml(m):
-	global GlobalUsedKeys
-
-	key=m.group(1)
-	val=m.group(2)
+## html link to the origin of the key: the html view of its dico file if there is one, else the dico file itself
+def _keyLink(key, val, usedkeys):
+	origin=usedkeys.get(key,"").split(';')[0]
+	if origin and os.path.exists(_getHtmlFileName(origin)):
+		origin=_getHtmlFileName(origin)
 	val=val.replace(evalkeys.NEW_LINE_MARKER,"<br/>\n")
-	origin=""
-	if key in GlobalUsedKeys:
-		origins=GlobalUsedKeys[key].split(';')		
-		firstoriginfile=origins[0]
-		originhtmlfile=_getHtmlFileName(firstoriginfile)
-		# if an html file exists for this file, we send to the html file,
-		# otherwise we send to the original file
-		if os.path.exists(originhtmlfile):
-			origin=originhtmlfile
-		else:
-			origin=firstoriginfile
-
-
 	return "<a href=\""+origin+"#"+key+"\" title=\""+key+"\" >"+val+"</a>"
 
-## for processing purposes, generated lines keep reference to the used key name
-# this method allow to remove it from line the thus to work on a clean data for furthur processing
-def finalizeHtmlLine(line):	
-	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"	
-	return re.sub(evalkeys.RPL_MATCH_REGEX,_generateHtml,htmlescapedline)
-	
+## html view of a line returned by evalfile: each replaced value is a link to the origin of its key
+# @param usedkeys {key: origin file} returned by evalfile
+def finalizeHtmlLine(line, usedkeys=None):
+	usedkeys=usedkeys or {}
+	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"
+	return re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys),htmlescapedline)
+
 ## Used to post-process result when 'partial' option is activated
 # We then restore unknown/not found key refs and includes as original ones
 _UNKNOWN_KEY_PATTERN=re.compile(re.escape(evalkeys.KEYMARK+evalkeys.UNKNOWN_KEY_MARKER))
@@ -187,7 +172,7 @@ def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile
 	with open(outputFile, "w") as fileout, open(_getHtmlFileName(outputFile), "w") as filehtml:
 		for line in evaluatedLines:
 			fileout.write(evalkeys.finalizeLine(line)+"\n")
-			filehtml.write(finalizeHtmlLine(line)+"\n")
+			filehtml.write(finalizeHtmlLine(line,usedkeys)+"\n")
 
 	with open(libdictionary.getKeysOriginFileName(outputFile), "w") as keysfile:
 		for key,origin in usedkeys.items():
