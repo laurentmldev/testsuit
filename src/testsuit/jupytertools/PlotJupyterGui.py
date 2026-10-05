@@ -7,7 +7,7 @@ from IPython.display import display
 from ipywidgets import *
 
 
-from testsuit.datatools.plotHelpers import plotData, plotData3D
+from testsuit.datatools.plotHelpers import plotData, plotData3D, get_plot_backend, plot_backend_name, plot_backend_names
 
     
 from testsuit.misc.logger import create_logger
@@ -101,6 +101,10 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
                 value="rectilinear",
                 description="Type"
         )
+
+        self.dropdown_backend = Dropdown(options=plot_backend_names(), value=plot_backend_name(), description="Backend")
+        # plotly figures are displayed here (matplotlib ones display themselves)
+        self.out_fig = Output()
 
         self.dropdown_linestyle = Dropdown(
                 options=[("Solid","solid"),
@@ -233,43 +237,48 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
         self.titlesBox=HBox([VBox([self.txt_fig_title,self.txt_plot_title]),VBox([self.txt_plot_xlabel,self.txt_plot_ylabel]),VBox([self.checkbox_legend,self.checkbox_x_is_timestamp])])
         self.box=VBox([self.label_fig,HBox([self.txt_vert_offset,self.vert_offset_help]),
                                       HTML("<hr/>"),
-                                      HBox([self.dropdown_projtype]),
+                                      HBox([self.dropdown_projtype,self.dropdown_backend]),
                                       HBox([self.dropdown_linestyle,self.dropdown_markerstyle,self.dropdown_drawstyle,self.dropdown_color]),
                                       HTML("<hr/>"),
                                       HBox([self.btn_draw,self.btn_clear,self.btn_save_figure,]),
                                       HTML("<hr/>"),
-                                      self.titlesBox])
+                                      self.titlesBox,
+                                      self.out_fig])
 
         display(self.box)
         self.btn_draw.on_click(self.update)        
         self.btn_clear.on_click(self.clearFigure)
         self.btn_save_figure.on_click(self.saveFigure)
-        self.txt_fig_title.observe(self.onTitlesChange)
+        self.txt_fig_title.observe(self.onTitlesChange,names="value")
         self.txt_fig_title.observe(self.onTitleManualChange)
-        self.txt_plot_title.observe(self.onTitlesChange)
-        self.txt_plot_ylabel.observe(self.onTitlesChange)
-        self.txt_plot_xlabel.observe(self.onTitlesChange)
-        self.checkbox_legend.observe(self.toggleLegend)
-        self.dropdown_projtype.observe(self.onProjChange)
+        self.txt_plot_title.observe(self.onTitlesChange,names="value")
+        self.txt_plot_ylabel.observe(self.onTitlesChange,names="value")
+        self.txt_plot_xlabel.observe(self.onTitlesChange,names="value")
+        self.checkbox_legend.observe(self.toggleLegend,names="value")
+        self.dropdown_projtype.observe(self.onProjChange,names="value")
+        self.dropdown_backend.observe(self.onProjChange,names="value")
         self.fig=None
         self.ax=None
         self.hide()
 
+    @property
+    def backend(self):
+        return get_plot_backend(self.dropdown_backend.value)
+
     def onProjChange(self,evt=None):
-        if self.ax is not None:
-            self.ax.remove()
-            self.ax=None
+        # 2D/3D or backend changed: next plot in a new figure
+        self.fig=None
+        self.ax=None
+        self.dataLabels=[]
+        self.dataHandles=[]
 
     def onTitleManualChange(self,evt=None):
         self.titleManuallySet=True
 
     def onTitlesChange(self,evt=None):
-        if self.ax is not None:
-            self.fig.suptitle(self.txt_fig_title.value,fontsize=14)
-            self.ax.set_title(self.txt_plot_title.value)
-            if len(self.txt_plot_xlabel.value)>0:
-                self.ax.set_xlabel(self.txt_plot_xlabel.value)
-            self.ax.set_ylabel(self.txt_plot_ylabel.value)            
+        if self.fig is not None:
+            self.backend.set_titles(self.fig,self.ax,self.txt_fig_title.value,self.txt_plot_title.value,
+                                    self.txt_plot_xlabel.value or None,self.txt_plot_ylabel.value)
 
     def setFigureTitle(self,newTitleValue):
         if not self.titleManuallySet:
@@ -290,34 +299,23 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
         else:
             print("ERROR: unhandled projection type for plot export : '"+self.dropdown_projtype.value+"'")
             return
+        if self.dropdown_backend.value=="plotly":
+            fileTypes.append(("HTML (interactive)","*.html"))
 
         targetFileName = FileDialog.saveFileDialog( title="Export figure as",
                                                     defaultfile=defaultFileName,
                                                     filetypes=fileTypes)
         if targetFileName is None:
             return
-        if targetFileName.lower().endswith("png"):
-            self.fig.savefig(targetFileName)
+        if targetFileName.lower().endswith(("png","html","htm")):
+            self.backend.export_image(self.fig,targetFileName)
             print("saved "+targetFileName)
 
         # only functional for 2D plots
         elif targetFileName.lower().endswith("csv"):
-            x_lim_min,x_lim_max=self.ax.get_xlim()
-            y_lim_min,y_lim_max=self.ax.get_ylim()
-            
-            npArraysList=[]
-            for plotline in self.ax.get_lines():
-                x_data,y_data = plotline.get_data()
-                
-                # Convert datetime64 to numeric timestamps if needed, preserving sub-second precision
-                if x_data.dtype.kind == 'M':  # 'M' indicates datetime64
-                    # datetime64 is stored as int64 nanoseconds since epoch
-                    # divide by 1e9 to get seconds with sub-second precision
-                    x_data = x_data.astype('int64') / 1e9 # returns a float because 1e9 is a float litteral
-                    
-                xy_data=np.stack([x_data,y_data])                
-                npArraysList.append(xy_data)
-                
+            (x_lim_min,x_lim_max),(y_lim_min,y_lim_max)=self.backend.view_limits(self.fig,self.ax)
+            npArraysList=[np.stack([x_data,y_data]) for x_data,y_data in self.backend.lines_data(self.fig,self.ax)]
+
             finalDf=datatoolbox.zoomAndMerge2DData(npArraysList,x_lim_min,x_lim_max,y_lim_min,y_lim_max)
             tmpColNames=[self.txt_plot_xlabel.value]+self.dataLabels
             colNames=[]
@@ -329,20 +327,23 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
             print("saved "+targetFileName)
 
     def clearFigure(self,clickEvt=None):
-        if self.ax is not None:
-            self.ax.clear()
+        if self.fig is not None:
+            self.backend.clear(self.fig,self.ax)
         self.dataLabels=[]
         self.dataHandles=[]
 
     
     def toggleLegend(self,clickEvt=True):
-        if self.ax is not None:
-            if clickEvt==True or clickEvt["owner"].value==True:
-                legendsLabels=self.__cleanLegendLabels(self.dataLabels)
-                self.ax.legend(self.dataHandles,legendsLabels,loc="upper right")
-            elif clickEvt["owner"].value==False and self.ax.get_legend() is not None:
-                self.ax.get_legend().remove()
-            
+        if self.fig is not None:
+            visible = clickEvt if isinstance(clickEvt,bool) else clickEvt["owner"].value==True
+            self.backend.set_legend(self.fig,self.ax,self.dataHandles,self.__cleanLegendLabels(self.dataLabels),visible)
+
+    def showFigure(self):
+        widget=self.backend.display(self.fig)
+        if widget is not None:
+            with self.out_fig:
+                self.out_fig.clear_output(wait=True)
+                display(widget)
 
 
     def createFigure(self):
@@ -422,8 +423,10 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
 
                     dataList.append(paramInfo)
             
+        critConf["rendering_engine"]=self.dropdown_backend.value
         self.fig,self.ax,self.dataHandles,self.dataLabels = plotData(critConf, dataList, interactive=True,fig=self.fig,ax=self.ax,dataHandles=self.dataHandles,legendsLabels=self.dataLabels)            
-        self.toggleLegend()
+        self.toggleLegend(self.checkbox_legend.value)
+        self.showFigure()
 
     def update3dPlot(self, dfList):
         
@@ -436,6 +439,7 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
             "yLabel": self.txt_plot_ylabel.value if self.txt_plot_ylabel.value else "Y",
             "zLabel": "Z",
             "figSize": (12, 7),
+            "rendering_engine": self.dropdown_backend.value,
         }
         
         dataList = []
@@ -463,12 +467,13 @@ class GuiPlotFields(JupyterGui.AGuiComponent):
             fig=self.fig, ax=self.ax,
             dataHandles=self.dataHandles, legendsLabels=self.dataLabels
         )
-        self.toggleLegend()
+        self.toggleLegend(self.checkbox_legend.value)
+        self.showFigure()
         
 
     def update(self,forceUpdate=False, convertSec2Date=None):
           
-        if self.ax is None:
+        if self.fig is None:
             self.createFigure()
 
         self.onTitlesChange()

@@ -17,7 +17,7 @@ Optional features are installed as extras:
 
 | Extra      | Adds                                         |
 |------------|----------------------------------------------|
-| `plotly`   | interactive plots in mexploit reports        |
+| `plotly`   | plotly plot backend (see Plots)              |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
 | `test`     | what the test suite needs                    |
@@ -42,11 +42,25 @@ testsuit-notebooks ~/my_analysis --open  # copies data_plot, h5_convert and mexp
 
 The notebooks only call `runGUI()` from the installed package, so upgrading testsuit upgrades the GUIs without copying the notebooks again (`--force` refreshes them). The GUIs need the classic notebook UI (`jupyter nbclassic`, what `--open` starts), and a desktop session for their file dialogs (tkinter).
 
+## Plots
+
+Figures (Data-Plot GUI, mexploit `plot*` checks, sequence timelines) are drawn by a plot backend:
+
+| Backend | Jupyter | mexploit / exploit_runner report |
+|---|---|---|
+| `matplotlib` (default) | matplotlib figure | SVG (`figure_format: png` also works) |
+| `plotly` (`pip install "testsuit[plotly]"`) | plotly FigureWidget | interactive figure (zoom, hover, 3D rotation), or `svg`/`png` with kaleido |
+
+Pick it per check with `rendering_engine: plotly` in the scenario YAML, per run with `mxp --plot-backend plotly` / `exploit_runner --plot-backend plotly` (or the `PLOT_RENDERING_BACKEND` environment variable), and in the Data-Plot GUI with its Backend menu. The figure format works the same way: `figure_format`, `--figure-format`, `PLOT_FIGURE_FORMAT`.
+
+The exploit_runner HTML report stays a single file that works offline with plotly figures: they are stored as gzipped plotly JSON and drawn by plotly.js, which the report then embeds once (about 2 MB). Reports without plotly figures don't change. Another library can add its own backend with `testsuit.datatools.plotBackends.register_plot_backend()`.
+
 ## Repository layout
 
 ```
 src/testsuit/           the installable package
   datatools/            load data files into pandas, convert to HDF5, push to a DB
+    plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
     DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb)
     datapack/           datapack generation: dictionaries, includes, key replacement
   exploit/

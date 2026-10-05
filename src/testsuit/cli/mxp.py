@@ -4,6 +4,7 @@ import sys,os,re
 
 
 from testsuit.exploit.mexploit.mexploit import mexploit
+from testsuit.datatools.plotBackends import plot_backend_names
 from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit import misc
 
@@ -51,6 +52,8 @@ def main():
     parser.add_argument("--maxDate",nargs="?", help="Keep only data before given maxDate. Example='2027/06/11 12:34:49.654'")
     parser.add_argument("--shiftDateSec",nargs="?", help="Shift dates of loaded params from given amount of seconds")
     parser.add_argument("--shiftDateRegex",nargs="?", help="Apply 'shiftDateSec' only to params matching given <file_name_regex>::<param_name_regex>")
+    parser.add_argument("--plot-backend",choices=plot_backend_names(),help="Plot backend of the figures, unless set by a criterion's rendering_engine (default: matplotlib, or PLOT_RENDERING_BACKEND environment variable)")
+    parser.add_argument("--figure-format",help="Format of the figures, unless set by a criterion's figure_format. matplotlib: svg (default), png. plotly: interactive (default), svg, png")
     args, unknownargs = parser.parse_known_args()
 
     if not args.title:
@@ -58,7 +61,8 @@ def main():
 
     rst = mexploit(args.scenario_folder, args.data_folders,args.output_folder,force=args.force,debug=args.debug, pytestargs=unknownargs,
                                                                                                 minDate=args.minDate,maxDate=args.maxDate,
-                                                                                                shiftDateSec=args.shiftDateSec,shiftDateRegex=args.shiftDateRegex)
+                                                                                                shiftDateSec=args.shiftDateSec,shiftDateRegex=args.shiftDateRegex,
+                                                                                                plot_backend=args.plot_backend,figure_format=args.figure_format)
 
     if rst!=0:
         print("\nERROR: M-Exploit analysis failed")

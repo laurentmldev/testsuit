@@ -102,6 +102,21 @@ register_data_importer("myserver", MyServerImporter)   # an ADataImporter subcla
 
 `remotePath` is the datasource `path`, `versionId` the dataset `path`. After `retrieve()`, the dataset folder must contain a `dataset.dico` file, whose keys the datapack files can use. `git` is the built-in importer.
 
+### Plot backends
+
+```python
+from testsuit.datatools.plotBackends import APlotBackend, register_plot_backend
+
+class MyBackend(APlotBackend):        # draws the FigureSpecs of plotBackends.common
+    name = "mybackend"                # scenario 'rendering_engine: mybackend', mxp --plot-backend mybackend
+    figure_formats = {"svg": ".svg"}  # static figure formats and file suffixes, first one is the default
+    ...                               # lines(), lines3d(), histogram(), timeline(), save(); Jupyter methods for the Data-Plot GUI
+
+register_plot_backend(MyBackend())    # or a factory, called on first use
+```
+
+The exploit_runner report embeds `.svg`, `.png` and `.jpg` figure files, and plotly JSON (`.plotly.json`).
+
 ### Making registrations visible to the command-line tools
 
 The calls above are enough when your code runs testsuit in its own process (`mexploit()`, `exploit_runner()`, `FolderParamMgr`). The command-line tools, and the `mxp` processes that exploit_runner starts for each test run, only see them when they come from a plugin, loaded by `testsuit.plugins.load_plugins()`:
