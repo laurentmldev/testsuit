@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 from testsuit.datatools.datapack.datapack_tools import datapack
+from testsuit.datatools.datapack.GitImporter import GitImporter
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger()
@@ -100,10 +101,15 @@ def compare_dirs_recursively(left, right, patterns):
         ("tests/etc/datapack/testdef/datapack_utest.yml", True, "tests/ref/datapack_test/datapack_utest"),
     ]
 )
-def test_datapack_nominal(testdef_file, ignore_checks, reference_folder):
+def test_datapack_nominal(testdef_file, ignore_checks, reference_folder, monkeypatch):
 
     # needed so that pytest handle some utf8 chars written by datapack tool
     os.environ["PYTHONIOENCODING"]="utf-8"
+
+    # the "not a clean tag" warnings in context.log depend on the git state of
+    # the checkout (absent when CI runs on a release tag), so pin the check
+    # to "not clean" to keep the output identical to the reference
+    monkeypatch.setattr(GitImporter, "isClean", lambda self: False)
     
     # create datapack
     assert(datapack(testdef_file=testdef_file, nocheck=ignore_checks))
