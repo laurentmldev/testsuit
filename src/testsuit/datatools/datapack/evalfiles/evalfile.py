@@ -12,6 +12,7 @@
 import os
 import re
 import sys
+from pathlib import Path
 
 from testsuit.datatools.datapack.evalfiles import evalkeys
 from testsuit.datatools.datapack.evalfiles import evalincludes
@@ -125,24 +126,60 @@ def _getHtmlFileName(file):
 	return os.path.abspath(_expandPath(dirname+os.sep+htmlFileName))
 
 
+# html views of dico files written elsewhere than next to them, by real path of the dico
+_dicoHtmlViews={}
+
+## html view of a dico file: the one written by writeDicoHtmlViews, or the '.<dico>.html' next to it, None if none
+def getDicoHtmlView(dicoFile):
+	htmlView=_dicoHtmlViews.get(os.path.realpath(dicoFile))
+	if htmlView and os.path.exists(htmlView):
+		return htmlView
+	htmlView=_getHtmlFileName(dicoFile)
+	return htmlView if os.path.exists(htmlView) else None
+
+## write an html view, with an anchor per key, of the given dico files which have none yet,
+# so that the links of the html views of evaluated files can jump to the definition of their keys
+# @param dicoFiles dico files
+# @param targetFolder where to write the views
+def writeDicoHtmlViews(dicoFiles, targetFolder):
+	for dicoFile in dicoFiles:
+		if getDicoHtmlView(dicoFile):
+			continue
+		Path(targetFolder).mkdir(parents=True, exist_ok=True)
+		htmlView=os.path.abspath(os.path.join(targetFolder, "."+os.path.basename(dicoFile)+HTML_SUFFIX))
+		n=1
+		while os.path.exists(htmlView):
+			n+=1
+			htmlView=os.path.abspath(os.path.join(targetFolder, "."+os.path.basename(dicoFile)+"."+str(n)+HTML_SUFFIX))
+		# keys of the dico are those of its lines once includes expanded, see libdictionary.loadDicoEntries
+		lines,_,_=evalincludes.expandFileIncludes(dicoFile)
+		with open(htmlView, "w") as filehtml:
+			for line in lines:
+				filehtml.write(finalizeHtmlLine(line,keyAnchor=True)+"\n")
+		_dicoHtmlViews[os.path.realpath(dicoFile)]=htmlView
+
 ## html link to the origin of the key: the html view of its dico file if there is one, else the dico file itself
-def _keyLink(key, val, usedkeys):
+# @param htmlDir folder of the html file of the link: the link to an html view is relative to it, so that it
+# still works once the folder is moved (e.g. a datapack). Absolute if None.
+def _keyLink(key, val, usedkeys, htmlDir=None):
 	origin=usedkeys.get(key,"").split(';')[0]
-	if origin and os.path.exists(_getHtmlFileName(origin)):
-		origin=_getHtmlFileName(origin)
+	htmlView=getDicoHtmlView(origin) if origin else None
+	if htmlView:
+		origin=os.path.relpath(htmlView,htmlDir) if htmlDir else os.path.abspath(htmlView)
 	val=val.replace(evalkeys.NEW_LINE_MARKER,"<br/>\n")
 	return "<a href=\""+origin+"#"+key+"\" title=\""+key+"\" >"+val+"</a>"
 
 ## html view of a line returned by evalfile: each replaced value is a link to the origin of its key
 # @param usedkeys {key: origin file} returned by evalfile
 # @param keyAnchor for a dico file: a 'key=value' line starts with an anchor named by its key, target of the links
-def finalizeHtmlLine(line, usedkeys=None, keyAnchor=False):
+# @param htmlDir folder of the html file, see _keyLink
+def finalizeHtmlLine(line, usedkeys=None, keyAnchor=False, htmlDir=None):
 	usedkeys=usedkeys or {}
 	anchor=""
 	if keyAnchor and (keyDef:=libdictionary.KEY_DEF_REGEX_OBJ.match(evalkeys.finalizeLine(line))):
 		anchor="<a id=\""+keyDef.group(1)+"\"></a>"
 	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"
-	return anchor+re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys),htmlescapedline)
+	return anchor+re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys,htmlDir),htmlescapedline)
 
 ## Used to post-process result when 'partial' option is activated
 # We then restore unknown/not found key refs and includes as original ones
@@ -174,10 +211,11 @@ def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile
 		return
 
 	isDico=outputFile.endswith(libdictionary.DICO_SUFFIX)
-	with open(outputFile, "w") as fileout, open(_getHtmlFileName(outputFile), "w") as filehtml:
+	htmlFile=_getHtmlFileName(outputFile)
+	with open(outputFile, "w") as fileout, open(htmlFile, "w") as filehtml:
 		for line in evaluatedLines:
 			fileout.write(evalkeys.finalizeLine(line)+"\n")
-			filehtml.write(finalizeHtmlLine(line,usedkeys,keyAnchor=isDico)+"\n")
+			filehtml.write(finalizeHtmlLine(line,usedkeys,keyAnchor=isDico,htmlDir=os.path.dirname(htmlFile))+"\n")
 
 	with open(libdictionary.getKeysOriginFileName(outputFile), "w") as keysfile:
 		for key,origin in usedkeys.items():

@@ -8,7 +8,7 @@ import subprocess
 
 from testsuit.datatools.datapack.evalfiles.libdictionary import loadDicos
 from testsuit.datatools.datapack.evalfiles.libdictionary import getkeyval
-from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,evalkeys,evalincludes,finalizeLines
+from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,evalkeys,evalincludes,finalizeLines,writeDicoHtmlViews
 from testsuit.datatools.datapack.evalfiles.evalpath import evalPath
 
 from testsuit.datatools.datapack.GitImporter import GitImporter
@@ -386,6 +386,9 @@ def datapack(testdef_file,nocheck=False):
             print(Fore.RED+"ERROR: Dico file from test dev '"+testdef_file+"'  not reachable: '"+dicoFullPath+"'"+Style.RESET_ALL)
             return False
         dicosList+=[expandPath(dicoFullPath)]
+    # html views of the dicos, target of the links of evaluated files html views
+    dicosHtmlFolder=processingFolder+os.sep+"dicos"
+    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
 
     # evaluate testdef file based on dicos listed inside
     evaluatedTestDefFilePath=processingFolder+os.sep+os.path.basename(testdef_file)
@@ -435,6 +438,7 @@ def datapack(testdef_file,nocheck=False):
     testdefDicoFileHdl.write("testdef.nocheck="+str(nocheck)+"\n")
     testdefDicoFileHdl.close()
     dicosList+=[testdefDico]
+    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
 
     # ensure testdef and Setup folders are clean and tagged
     if nocheck==True:
@@ -495,6 +499,7 @@ def datapack(testdef_file,nocheck=False):
     # path to this dico is returned by the 'loadRepo' function
     for datarepository in setupXmlRoot.get('datarepositories', []):      
         dicosList+=loadRepo(datarepository,contextFileHdl,nocheck)
+    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
     contextFileHdl.write("-----------------------------------"+"\n\n")
 
     # reevaluate setup file with also baseline dicos listed inside it
