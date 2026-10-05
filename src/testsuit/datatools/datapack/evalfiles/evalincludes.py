@@ -38,8 +38,6 @@ INCLUDE_PARAM_REGEX=r"^\s*<param\s+name=(\"|')\s*(.*)\s*(\"|')\s*>\s*(.*)\s*</pa
 MATCH_GROUP_PARAM_NAME=2
 MATCH_GROUP_PARAM_VALUE=4
 
-DETECT_KEY_REGEX=None
-
 # nb of processed includes
 nbIncludes=0
 
@@ -112,7 +110,7 @@ def _includeStep(match,includeOnce,curParametersDico):
 
 	if not os.path.isfile(includedFilePath):
 		includeFoundInLatestEval=False
-		if not DETECT_KEY_REGEX.search(includedFilePath) or partialEval==False:
+		if not evalkeys.MATCH_KEYREF_MARKER.search(includedFilePath) or partialEval==False:
 		#if not evalkeys.MATCH_KEYREF_MARKER.match(includedFilePath) or partialEval==False:	
 			nbNotFoundIncludes+=1
 			#print("##### includedFilePath '"+includedFilePath+"' match ="+str(DETECT_KEY_REGEX.match(includedFilePath)))
@@ -279,7 +277,6 @@ def _processExpandIncludes(curFilePath,lines, parentParamsDico=None):
 # @return list of expanded lines, and errorFlag==True if some fialures are detected
 def expandIncludes(filePath,lines, withPartialEval=False):	
 	global partialEval
-	global DETECT_KEY_REGEX
 	global nbIncludes
 	global nbNotFoundIncludes
 	global nbCircularRecursions
@@ -287,8 +284,6 @@ def expandIncludes(filePath,lines, withPartialEval=False):
 	nbIncludes=0
 	nbNotFoundIncludes=0
 	nbCircularRecursions=0
-
-	DETECT_KEY_REGEX=re.compile(evalkeys.KEYMARK+r"\(([^)]+)")
 
 	partialEval=withPartialEval
 

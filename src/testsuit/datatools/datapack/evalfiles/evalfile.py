@@ -4,191 +4,115 @@
 # This script is based on 'evalkeys.py' and 'evalincludes.py' algorithms.
 #
 # Performs several replacement and includes as long as some replacements are done, which means that key value can be a reference to another key,
-# and and include can contain a key value.
+# and an include can contain a key value.
 #
-# Result lines are displayed on STDOUT.
-#
-#
-# USAGE: evalfile.py [-h] targetfile dico [dico ...]
-#
+# See the 'evalfile' command (testsuit.cli.evalfile).
 #
 
-import argparse
-import os,os.path
-
+import os
+import re
 import sys
+from pathlib import Path
 
 from testsuit.datatools.datapack.evalfiles import evalkeys
 from testsuit.datatools.datapack.evalfiles import evalincludes
 from testsuit.datatools.datapack.evalfiles import libdictionary
 
-import re
-
-global GlobalUsedKeys
-
-# The string used to detect the keys, i.e. "_K_" in "_K_(myKey)"
-pattern_key=None
-pattern_include=None
-pattern_include_with_params=None
-pattern_section=None
-pattern_customsection=None
+# detection of what is left to evaluate (key detection is case-sensitive here, unlike in evalkeys)
+_KEY_PATTERN=re.compile(evalkeys.KEY_REGEX)
+_INCLUDE_PATTERN=re.compile(evalincludes.INCLUDE_REGEX)
+_INCLUDE_WITH_PARAMS_PATTERN=re.compile(evalincludes.INCLUDE_WITH_PARAMS_REGEX)
 
 HTML_SUFFIX=".html"
-
-# store used keys when genertating Html version of evaluated file
-GlobalUsedKeys={}
 
 def _expandPath(pathStr):
 	return os.path.normpath(os.path.expanduser(os.path.expandvars(pathStr)))
 
-## check if the given file is accessible
-def _isInputReadable(f):
-    if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
-    return f
-
-# override the parsing error message using logger
-class _HelpParser(argparse.ArgumentParser):
-    def error(self, message):
-        print("Input Arguments Error : "+message)
-        sys.exit(1)
-
-
-
-def _hasKeysOrIncludesOrCustomSections(lines):	
-	global pattern_key
-	global pattern_include
-	global pattern_include_with_params
-	global pattern_customsection
-
-
-	for line in lines :
+def _hasKeysOrIncludes(lines):
+	"""True if some of the lines still contain a key or an include to evaluate."""
+	for line in lines:
 		finalizedLine=evalkeys.finalizeLine(line)
-
-		#print "### '"+finalizedLine+"'\n\t->containsInclude("+evalincludes.INCLUDE_REGEX+")="+str(pattern_include.search(finalizedLine))
-		if pattern_key.search(finalizedLine) \
-			or pattern_include.search(finalizedLine) \
-			or pattern_include_with_params.search(finalizedLine) :
-			
-			#print "			-> To evaluate! : "+finalizedLine
+		if _KEY_PATTERN.search(finalizedLine) \
+			or _INCLUDE_PATTERN.search(finalizedLine) \
+			or _INCLUDE_WITH_PARAMS_PATTERN.search(finalizedLine):
 			return True
-
 	return False
 
 def dumpLines(lines):
-	linesStr=""
-	for line in lines:
-		linesStr+=evalkeys.finalizeLine(line)+"\n"
-	return linesStr
+	return "".join(evalkeys.finalizeLine(line)+"\n" for line in lines)
 
 def addFileKeys(targetFileName,dico,keysorigin):
+	"""Add the _FILE_xxx_ keys, describing the file being evaluated."""
+	fileKeys={
+		"_FILE_NAME_": targetFileName,
+		"_FILE_BASENAME_": os.path.basename(targetFileName),
+		"_FILE_DIRNAME_": os.path.dirname(targetFileName),
+		"_FILE_EXTENSION_": os.path.splitext(targetFileName)[1],
+		"_FILE_PURENAME_": os.path.splitext(os.path.basename(targetFileName))[0],
+	}
+	dico.update(fileKeys)
+	keysorigin.update(dict.fromkeys(fileKeys,targetFileName))
 
-	# add few keys about file being evaluated
-	dico["_FILE_NAME_"]=targetFileName
-	keysorigin["_FILE_NAME_"]=targetFileName
-	dico["_FILE_BASENAME_"]=os.path.basename(targetFileName)
-	keysorigin["_FILE_BASENAME_"]=targetFileName
-	dico["_FILE_DIRNAME_"]=os.path.dirname(targetFileName)
-	keysorigin["_FILE_DIRNAME_"]=targetFileName
-	dico["_FILE_EXTENSION_"]=os.path.splitext(targetFileName)[1]
-	keysorigin["_FILE_EXTENSION_"]=targetFileName
-	dico["_FILE_PURENAME_"]=os.path.splitext(os.path.basename(targetFileName))[0]
-	keysorigin["_FILE_PURENAME_"]=targetFileName
-
-## perform includes/keys expansion of given file, based on given dictionary
+## perform includes/keys expansion of given lines, based on given dictionary
 #
-# Performs several replacement and includes as long as some replacements are done, 
-# which means that key value can be a reference into another key, and an itself include can contain a key value.
+# Performs several rounds of keys replacement and includes as long as something is left to evaluate,
+# since a key value can reference another key, and an included file can contain keys (or an include path a key).
 #
 # @param targetFile name of processed file, for logging purpose only
 # @param lines lines to process
 # @param dico dictionary object to be used
+# @param dicosFiles unused
 # @param partialEval don't worry if some keys are not defined (yet)
-# @return tuple 'result lines, keys origin', None,None ir error occured
+# @return tuple 'result lines, used keys origin'
 def evallines(targetFile,lines,dico,keysorigin,dicosFiles=None,partialEval=True):
 
-	# contain the list of used keys for evaluation
 	mykeysorigin={}
 
-	# if True, then an undefined key will be let as is, leading to undefined loop
-	# this
-	ignoreMissing=False
+	while _hasKeysOrIncludes(lines):
 
-	nbEvals=0
-
-	# loop on the same file while expansions can be done
-	while(_hasKeysOrIncludesOrCustomSections(lines)):
-		nbEvals+=1
-		#print("\n\n########################### Round "+str(nbEvals)+" ###########################")
-		#print(dumpLines(lines))
-
+		# keys first, since include paths may contain keys
 		evalkeys.setDico(dico,keysorigin)
 		lines,usedkeys,undefinedkeys=evalkeys.replaceKeys(targetFile,lines,True)
 		mykeysorigin.update(usedkeys)
 
-		# includes should be always with partial eval, since they might contain some keys to be evaluated
-		# which might come themselves from the included lines etc. ... 
+		# includes always with partial eval, since they might contain keys
+		# defined only in the included lines
 		lines, errorsDetected, nbIncludes=evalincludes.expandIncludes(targetFile,lines,True)
-		#print("######------- includes --------->>>>>\n"+dumpLines(lines))
-		
+
+		# then keys of included lines
 		evalkeys.setDico(dico,keysorigin)
 		lines,usedkeys,undefinedkeys=evalkeys.replaceKeys(targetFile,lines,partialEval)
 		mykeysorigin.update(usedkeys)
-		#print("######------- post keys --------->>>>>\n"+dumpLines(lines))
-		if len(undefinedkeys) > 0 :
-			if not partialEval :
-				print(evalkeys.getUndefinedKeysStr(undefinedkeys))
-			else :
-				#print("(ignored) "+evalkeys.getUndefinedKeysStr(undefinedkeys))
-				pass
+		if undefinedkeys and not partialEval:
+			print(evalkeys.getUndefinedKeysStr(undefinedkeys))
 
-		# if nothing changed during last round, no use to try again...
+		# nothing changed during this round, no use to try again
 		if len(usedkeys)==0 and nbIncludes==0:
-			#print("QUIT eval of "+targetFile)
-			break			
-
-	#print("		###########################  Final Result ###########################")
-	#for line in lines :
-	#	print("		>>> "+line)
+			break
 
 	return lines,mykeysorigin
 
 ## load dictionnary context and perform file evaluation
 def evalfile(targetFile, dicosNames, partialEval=False):
-
 	dico,keysorigin=libdictionary.loadDicos(dicosNames)
-	
-	#print("#### loaded main dico : "+str(dico))
-
 	return doFileEvaluation(targetFile, dico, keysorigin, dicosNames, partialEval)
 
 
 ## perform includes/keys expansion of given file, based on given dictionary
+# Resets the evalkeys error counters, which are then those of this file.
 # @param targetFile file to process
-# @param dicos list of files to be used as dictionaries (ordered by priority)
+# @param dico, keysorigin dictionary to be used, and keys origins
+# @param dicosNames unused
 # @param partialEval don't worry if some keys are not defined (yet)
-# @return result lines of process, None ir error occured
+# @param targetFileName name of the result file, for the _FILE_xxx_ keys (default: targetFile)
+# @return result lines of process, used keys origin
 def doFileEvaluation(targetFile, dico, keysorigin, dicosNames, partialEval=False, targetFileName=None):
 
-	#print("### doFileEvaluation "+targetFile+" partialEval="+str(partialEval))
-
-	global pattern_key
-	global pattern_include
-	global pattern_include_with_params
-	global pattern_section
-	global pattern_customsection
-
-	if not targetFileName:
-		targetFileName=targetFile
-
 	with open(targetFile,  encoding='utf-8', errors='replace') as f:
-		lines=f.readlines()		
-	
-	pattern_key=re.compile(evalkeys.KEY_REGEX)
-	pattern_include=re.compile(evalincludes.INCLUDE_REGEX)
-	pattern_include_with_params=re.compile(evalincludes.INCLUDE_WITH_PARAMS_REGEX)
-	
-	addFileKeys(targetFileName,dico,keysorigin)
+		lines=f.readlines()
+
+	evalkeys.resetCounters()
+	addFileKeys(targetFileName or targetFile,dico,keysorigin)
 
 	return evallines(targetFile,lines,dico,keysorigin, dicosNames, partialEval)
 
@@ -202,127 +126,97 @@ def _getHtmlFileName(file):
 	return os.path.abspath(_expandPath(dirname+os.sep+htmlFileName))
 
 
-def _generateHtml(m):
-	global GlobalUsedKeys
+# html views of dico files written elsewhere than next to them, by real path of the dico
+_dicoHtmlViews={}
 
-	key=m.group(1)
-	val=m.group(2)
+## html view of a dico file: the one written by writeDicoHtmlViews, or the '.<dico>.html' next to it, None if none
+def getDicoHtmlView(dicoFile):
+	htmlView=_dicoHtmlViews.get(os.path.realpath(dicoFile))
+	if htmlView and os.path.exists(htmlView):
+		return htmlView
+	htmlView=_getHtmlFileName(dicoFile)
+	return htmlView if os.path.exists(htmlView) else None
+
+## write an html view, with an anchor per key, of the given dico files which have none yet,
+# so that the links of the html views of evaluated files can jump to the definition of their keys
+# @param dicoFiles dico files
+# @param targetFolder where to write the views
+def writeDicoHtmlViews(dicoFiles, targetFolder):
+	for dicoFile in dicoFiles:
+		if getDicoHtmlView(dicoFile):
+			continue
+		Path(targetFolder).mkdir(parents=True, exist_ok=True)
+		htmlView=os.path.abspath(os.path.join(targetFolder, "."+os.path.basename(dicoFile)+HTML_SUFFIX))
+		n=1
+		while os.path.exists(htmlView):
+			n+=1
+			htmlView=os.path.abspath(os.path.join(targetFolder, "."+os.path.basename(dicoFile)+"."+str(n)+HTML_SUFFIX))
+		# keys of the dico are those of its lines once includes expanded, see libdictionary.loadDicoEntries
+		lines,_,_=evalincludes.expandFileIncludes(dicoFile)
+		with open(htmlView, "w") as filehtml:
+			for line in lines:
+				filehtml.write(finalizeHtmlLine(line,keyAnchor=True)+"\n")
+		_dicoHtmlViews[os.path.realpath(dicoFile)]=htmlView
+
+## html link to the origin of the key: the html view of its dico file if there is one, else the dico file itself
+# @param htmlDir folder of the html file of the link: the link to an html view is relative to it, so that it
+# still works once the folder is moved (e.g. a datapack). Absolute if None.
+def _keyLink(key, val, usedkeys, htmlDir=None):
+	origin=usedkeys.get(key,"").split(';')[0]
+	htmlView=getDicoHtmlView(origin) if origin else None
+	if htmlView:
+		origin=os.path.relpath(htmlView,htmlDir) if htmlDir else os.path.abspath(htmlView)
 	val=val.replace(evalkeys.NEW_LINE_MARKER,"<br/>\n")
-	origin=""
-	if key in GlobalUsedKeys:
-		origins=GlobalUsedKeys[key].split(';')		
-		firstoriginfile=origins[0]
-		originhtmlfile=_getHtmlFileName(firstoriginfile)
-		# if an html file exists for this file, we send to the html file,
-		# otherwise we send to the original file
-		if os.path.exists(originhtmlfile):
-			origin=originhtmlfile
-		else:
-			origin=firstoriginfile
-
-
 	return "<a href=\""+origin+"#"+key+"\" title=\""+key+"\" >"+val+"</a>"
 
-## for processing purposes, generated lines keep reference to the used key name
-# this method allow to remove it from line the thus to work on a clean data for furthur processing
-def finalizeHtmlLine(line):	
-	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"	
-	return re.sub(evalkeys.RPL_MATCH_REGEX,_generateHtml,htmlescapedline)
-	
+## html view of a line returned by evalfile: each replaced value is a link to the origin of its key
+# @param usedkeys {key: origin file} returned by evalfile
+# @param keyAnchor for a dico file: a 'key=value' line starts with an anchor named by its key, target of the links
+# @param htmlDir folder of the html file, see _keyLink
+def finalizeHtmlLine(line, usedkeys=None, keyAnchor=False, htmlDir=None):
+	usedkeys=usedkeys or {}
+	anchor=""
+	if keyAnchor and (keyDef:=libdictionary.KEY_DEF_REGEX_OBJ.match(evalkeys.finalizeLine(line))):
+		anchor="<a id=\""+keyDef.group(1)+"\"></a>"
+	htmlescapedline=line.replace("<","&lt;").replace(">","&gt;").replace("  ","&nbsp; ")+"<br/>"
+	return anchor+re.sub(evalkeys.RPL_MATCH_REGEX,lambda m: _keyLink(m.group(1),m.group(2),usedkeys,htmlDir),htmlescapedline)
+
 ## Used to post-process result when 'partial' option is activated
 # We then restore unknown/not found key refs and includes as original ones
-def restoreUnknownKeysAndLinks(lines) :
-	# "\\" : need to escape the '?' (UNKNOWN_KEY_MARKER) for regex ...
-	restoreUnknownKeysRegex=re.compile(evalkeys.KEYMARK+"\\"+evalkeys.UNKNOWN_KEY_MARKER) 
-	restoreUnknownIncludesRegex=re.compile(evalincludes.KEYMARK+"\\"+evalincludes.UNKNOWN_INCLUDE_MARKER) 
-	includeSrcWithoutKey=re.compile(evalincludes.KEYMARK+"\\"+evalincludes.UNKNOWN_INCLUDE_MARKER+r"\s+src=(\"|')[^\"']*"+evalkeys.KEYMARK+r"\([^\(\)]+\)[^\"']*(\"|')")
+_UNKNOWN_KEY_PATTERN=re.compile(re.escape(evalkeys.KEYMARK+evalkeys.UNKNOWN_KEY_MARKER))
+_UNKNOWN_INCLUDE_PATTERN=re.compile(re.escape(evalincludes.KEYMARK+evalincludes.UNKNOWN_INCLUDE_MARKER))
+_UNKNOWN_INCLUDE_WITH_KEY_PATTERN=re.compile(re.escape(evalincludes.KEYMARK+evalincludes.UNKNOWN_INCLUDE_MARKER)+r"\s+src=(\"|')[^\"']*"+evalkeys.KEYMARK+r"\([^\(\)]+\)[^\"']*(\"|')")
 
-	for idx in range(len(lines)) :
-		lines[idx]=restoreUnknownKeysRegex.sub(evalkeys.KEYMARK,lines[idx])	
-		
+def restoreUnknownKeysAndLinks(lines) :
+	for idx,line in enumerate(lines):
+		line=_UNKNOWN_KEY_PATTERN.sub(evalkeys.KEYMARK,line)
 		# don't restore includes which have no key : they have no chance to work better later
-		if includeSrcWithoutKey.search(lines[idx]):
-			lines[idx]=restoreUnknownIncludesRegex.sub(evalincludes.KEYMARK,lines[idx])		
-		
+		if _UNKNOWN_INCLUDE_WITH_KEY_PATTERN.search(line):
+			line=_UNKNOWN_INCLUDE_PATTERN.sub(evalincludes.KEYMARK,line)
+		lines[idx]=line
 	return lines
 
-# if outputFile=None then dislay lines on stdout
+## write the evaluated lines (without replacement marks)
+# @param evaluatedLines,usedkeys result of evalfile
+# @param restoreUnknownKeys restore unknown keys and includes as they were (for a partial evaluation)
+# @param outputFile file to write, along with its '.<file>.html' (with key anchors for a .dico file) and '.<file>.keys' files. If None, lines are written on stdout
 def finalizeLines(evaluatedLines, usedkeys, restoreUnknownKeys=False, outputFile=None) :
 
-	GlobalUsedKeys=usedkeys
-	
-	# if partial replace option has been activated, we restore unknown keys and includes as original ones
 	if restoreUnknownKeys :
-		lines=restoreUnknownKeysAndLinks(evaluatedLines)
+		restoreUnknownKeysAndLinks(evaluatedLines)
 
 	if not outputFile:
 		for line in evaluatedLines:
-			sys.stdout.write(evalkeys.finalizeLine(line))
-			sys.stdout.write("\n")
-	else:
-		
-		# generate out and hmtl files
-		htmlfile=_getHtmlFileName(outputFile)
-		fileout=open(outputFile, "w")
-		filehtml=open(htmlfile, "w")	
-		for line in evaluatedLines:	
+			sys.stdout.write(evalkeys.finalizeLine(line)+"\n")
+		return
+
+	isDico=outputFile.endswith(libdictionary.DICO_SUFFIX)
+	htmlFile=_getHtmlFileName(outputFile)
+	with open(outputFile, "w") as fileout, open(htmlFile, "w") as filehtml:
+		for line in evaluatedLines:
 			fileout.write(evalkeys.finalizeLine(line)+"\n")
-			filehtml.write(finalizeHtmlLine(line)+"\n")
-		fileout.close()
-		filehtml.close()
+			filehtml.write(finalizeHtmlLine(line,usedkeys,keyAnchor=isDico,htmlDir=os.path.dirname(htmlFile))+"\n")
 
-		# generate keys file
-		keysfile=libdictionary.getKeysOriginFileName(outputFile)
-		fileout=open(keysfile, "w")
-		for key in usedkeys:
-			fileout.write(key+"="+usedkeys[key]+"\n")
-		fileout.close()	
-
-
-## the main function
-if __name__ == '__main__':
-	parser = _HelpParser(description=
-"""Evaluate given file for includes and keys replacement, based on given dictionnaries.
-This script is based on 'evalkeys' and 'evalincludes' algorithms.
-
-Performs several processing cycles as long as some replacements are done.
-This means that key value can be a reference to another key, and an include can contain a key value.
-
-When option '-o' is used, generates also an HTML view of performed key replacements and a '.<file>.keys' file containing the list of used keys and their provenance.
-Otherwise result lines are displayed on STDOUT by default.
-
-Result is displayed in <stdout>.
-
-Return:
-	3 a problem occured during processing
-	2 if circular inclusion or key reference detected, 
-	1 if unreacheable included file or key referene (and no circular include or key ref. detected)
-	0 if okay""",
-	formatter_class=argparse.RawTextHelpFormatter)
-	parser.add_argument('targetfile',help="the text file to be processed",type=_isInputReadable,metavar="targetfile")
-	parser.add_argument('dico',nargs='+', help="dictionary file(s) to be used for keys replacement, most important one first",type=_isInputReadable)	
-	parser.add_argument('--output', '-o',help="output in the given file, generating also the '.<file>.html' and '.<file>.keys' associated files")
-	parser.add_argument('--partial','-p',action='store_true',help="Partial replace : ignore unknown keys, process only defined ones")
-
-
-	args = parser.parse_args()
-
-	lines, usedkeys=evalfile(args.targetfile, args.dico, args.partial)
-	if not lines :
-		sys.exit(3)
-
-	finalizeLines(lines, usedkeys, args.partial, args.output)
-
-	if args.output is not None:
-		print("generated "+str(args.output)+" and associated 'keys' and 'html' files.")
-
-	if evalkeys.nbInfinateRecursion>0 or evalincludes.nbCircularRecursions>0:
-		sys.exit(2)
-	if evalincludes.nbNotFoundIncludes>0:
-		sys.exit(1)
-	if not args.partial and evalkeys.nbUndefined>0:
-		sys.exit(1)
-
-	sys.exit(0)
-
-
+	with open(libdictionary.getKeysOriginFileName(outputFile), "w") as keysfile:
+		for key,origin in usedkeys.items():
+			keysfile.write(key+"="+origin+"\n")

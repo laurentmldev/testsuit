@@ -38,41 +38,30 @@ def getFileTimestamp(date=None):
     
 
 KEYS_ORIGIN_SUFFIX=".keys"
+# extension of dictionary files (their html view has an anchor per key)
+DICO_SUFFIX=".dico"
 
+# 'key=value' or 'key:value' or 'key:=value', '#' starting a comment
 KEY_DEF_REGEX=r"^\s*([^#=:]+)(=|:=?)\s*([^#]*)\s*"
 KEY_DEF_REGEX_OBJ = re.compile(KEY_DEF_REGEX)
+# a line starting with this char continues the value of the previous key, on a new line
 MULTILINE_START_CHAR=">"
-
-_global_dico=None
-_latest_key=""
-
-def _process_key_def(match):
-	global _global_dico
-	global _latest_key
-	
-	key=match.group(1)
-	val=match.group(3)
-	_global_dico[key]=val
-	_latest_key=key
 
 ## load keys defined in given file (and included dicos)
 def loadDicoEntries(file):
-	global _global_dico
-	global _latest_key
 	# local import: evalkeys imports this module at load time
 	from testsuit.datatools.datapack.evalfiles import evalkeys
-	_global_dico={}
-	
+
+	dico={}
+	latestKey=None
 	lines,errorDetected,nbIncludes=evalincludes.expandFileIncludes(file)
 	for line in lines:
 		if line.startswith(MULTILINE_START_CHAR):
-			_global_dico[_latest_key]+=evalkeys.NEW_LINE_MARKER+line.lstrip(MULTILINE_START_CHAR)
-		else:
-			KEY_DEF_REGEX_OBJ.sub(_process_key_def,line)
-	newdico={}
-	newdico.update(_global_dico)
-
-	return _global_dico
+			dico[latestKey]+=evalkeys.NEW_LINE_MARKER+line.lstrip(MULTILINE_START_CHAR)
+		elif match:=KEY_DEF_REGEX_OBJ.match(line):
+			latestKey=match.group(1)
+			dico[latestKey]=match.group(3)
+	return dico
 
 
 def getKeysOriginFileName(file):
@@ -88,125 +77,83 @@ def getKeysOriginFileName(file):
 # @return dictionary object, keysorigin object
 def loadDico(file):
 	resultDico=loadDicoEntries(file)
-	keysorigin={}
+	keysorigin=dict.fromkeys(resultDico,os.path.abspath(expandPath(file)))
 
-	for key in resultDico:
-		keysorigin[key]=os.path.abspath(expandPath(file))
-
-	# check if given dico has its keysorigin files
+	# a generated dico has its keys origins in a '.<dico>.keys' file
 	keysoriginfile=getKeysOriginFileName(file)
-	if (os.access(keysoriginfile,os.R_OK)):
-		existingkeysorigin=loadDicoEntries(keysoriginfile)
-		for key in existingkeysorigin:
-			keysorigin[key]=existingkeysorigin[key]
-		
+	if os.access(keysoriginfile,os.R_OK):
+		keysorigin.update(loadDicoEntries(keysoriginfile))
+
 	return resultDico,keysorigin
 
 ## load given dico files into a Python dictionary object
-# @return dictionary object
+# The first dico has the priority. A key overriding the value of a key from another dico
+# is traced by the '<key>.overrides.files' and '<key>.overrides.values' keys.
+# @return dictionary object, keysorigin object
 def loadDicos(dicoFiles):
 	mergedKeysValues={}
 	mergedKeysOrigin={}
-	# building merged dictionary
 	for curDicoFile in reversed(dicoFiles):
 		curDico,curKeysOrigin=loadDico(curDicoFile)
 
-		# detect and trace overriden values
-		for curkey in curKeysOrigin.keys():
+		for curkey,curOrigin in curKeysOrigin.items():
+			if curkey not in mergedKeysValues or curkey not in curDico:
+				continue
+			previousValue=mergedKeysValues[curkey]
+			previousOrigin=mergedKeysOrigin.get(curkey,"???")
+			if previousValue == curDico[curkey] or previousOrigin == curOrigin:
+				continue
 
-			# If key already defined, that means it has been overriden by the new dico file
-			# We then add a <key>.overriden=<previous key origin> entry, in order to easily detect this override later on.
-			try:
-				# if entry does not exist, an exception will be raised
-				# hum maybe there is an 'exists' accessor, this owuld be cleaner...
-				previousValue=mergedKeysValues[curkey]
-				
-				try:
-					previousOrigin=mergedKeysOrigin[curkey]
-				except KeyError:
-					previousOrigin="???"
-
-				if previousValue != curDico[curkey] and previousOrigin != curKeysOrigin[curkey]:				
-					try:
-						mergedKeysValues[curkey+".overrides.files"]=previousOrigin+"; "+mergedKeysValues[curkey+".overrides.files"]					
-						mergedKeysValues[curkey+".overrides.values"]=previousValue+"; "+mergedKeysValues[curkey+".overrides.values"]					
-					except KeyError:
-						mergedKeysValues[curkey+".overrides.files"]=previousOrigin
-						mergedKeysValues[curkey+".overrides.values"]=previousValue
-
-								
-					mergedKeysOrigin[curkey+".overrides.files"]=previousOrigin									
-					mergedKeysOrigin[curkey+".overrides.values"]=previousOrigin									
-
-					#print("[overriding with "+curkey+"="+curDico[curkey]+" from "+curKeysOrigin[curkey]+" (previous value was '"+previousValue+"' from "+previousOrigin +"]")
-
-			except KeyError:
-				# no entry defined, this is not a key override, so we can ignore it
-				pass
+			filesKey=curkey+".overrides.files"
+			valuesKey=curkey+".overrides.values"
+			if filesKey in mergedKeysValues and valuesKey in mergedKeysValues:
+				mergedKeysValues[filesKey]=previousOrigin+"; "+mergedKeysValues[filesKey]
+				mergedKeysValues[valuesKey]=previousValue+"; "+mergedKeysValues[valuesKey]
+			else:
+				mergedKeysValues[filesKey]=previousOrigin
+				mergedKeysValues[valuesKey]=previousValue
+			mergedKeysOrigin[filesKey]=previousOrigin
+			mergedKeysOrigin[valuesKey]=previousOrigin
 
 		mergedKeysValues.update(curDico)
 		mergedKeysOrigin.update(curKeysOrigin)
 
-	#print("[Imported "+str(len(mergedKeysValues))+" keys from "+str(dicoFiles)+"]")
 	return mergedKeysValues,mergedKeysOrigin
 
-# return value corresponding to given key
+# return value corresponding to given key, None if undefined
 def getkeyval(key, dico):
-	if key not in dico:
-		#log.warning("unknown key '"+key+"'")
-		return None
-	return dico[key]
+	return dico.get(key)
 
 
 # return index of given str in ';'-separated string of key
-def getIndexIn(searchedStr, key, dico):	
+def getIndexIn(searchedStr, key, dico):
 	strVal = getkeyval(key, dico)
 	if not strVal:
 		return None
-
 	strCols=strVal.split(";")
-	index=0
-	for strCol in strCols:		
-		if strCol==searchedStr :
-			return index
-		index=index+1
-	
-	return None
+	return strCols.index(searchedStr) if searchedStr in strCols else None
 
 # return subkeys defined one step ('.'-separated) deeper of given one
 def getChildrenSubkeys(refkey, dico):
 	subkeys=[]
-	for curkey in dico:
-		if len(curkey)>len(refkey) and refkey in curkey: 
-			curkey=curkey.replace(refkey,"")
-			curSubkey=curkey.split(".")[1]
-			if curSubkey not in subkeys:
-				subkeys.append(curSubkey)
+	for curkey in getChildrenKeys(refkey, dico):
+		curSubkey=curkey.replace(refkey,"").split(".")[1]
+		if curSubkey not in subkeys:
+			subkeys.append(curSubkey)
 	return subkeys
 
 # return all full keys deeper than given one
 def getChildrenKeys(refkey, dico):
-	childkeys=[]
-	for curkey in dico:
-		if len(curkey)>len(refkey) and refkey in curkey: 
-			childkeys.append(curkey)
-	return childkeys
+	return [curkey for curkey in dico if len(curkey)>len(refkey) and refkey in curkey]
 
 # find keys matching given regex
 def findKeys(regexPattern, dico):
-	result=[]
 	regex=re.compile(regexPattern)
-	for curkey in dico:
-		if regex.match(curkey): 
-			result.append(curkey)
-	return result
+	return [curkey for curkey in dico if regex.match(curkey)]
 
 # say if given keybase exists (i.e. if there are some keys containing given string ..)
 def isKeybaseDefined(keybase,dico):
-	for curkey in dico:
-		if keybase in curkey: 
-			return True
-	return False
+	return any(keybase in curkey for curkey in dico)
 
 # return parent key (up one step '.'-separated)
 def getParentKey(key):
@@ -219,28 +166,17 @@ def getParentKey(key):
 # @return true if success, false otherwise
 def createDicoFile(diconame, dicoEntries, dicoKeysOrigin=None,deps=None):
 	dicoKeysOrigin=dicoKeysOrigin or {}
-	deps=deps or []
-	fileout=open(diconame, "w")
-	fileout.write("# This dictionary is a merge from : "+str(deps)+"\n")
-	nbentries=0
-	for key in dicoEntries:
-		fileout.write(key+"="+dicoEntries[key]+"\n")
-		nbentries+=1
-	fileout.close()
+	with open(diconame, "w") as fileout:
+		fileout.write("# This dictionary is a merge from : "+str(deps or [])+"\n")
+		for key,value in dicoEntries.items():
+			fileout.write(key+"="+value+"\n")
 
 	# create keys origin file
-	keysOriginfile=getKeysOriginFileName(diconame)
-	fileout=open(keysOriginfile, "w")
-	for key in dicoEntries:
-		if key not in dicoKeysOrigin:
-			fileout.write(key+"="+diconame+"\n")
-		else:
-			fileout.write(key+"="+dicoKeysOrigin[key]+"\n")	
+	with open(getKeysOriginFileName(diconame), "w") as fileout:
+		for key in dicoEntries:
+			fileout.write(key+"="+dicoKeysOrigin.get(key,diconame)+"\n")
 
-	fileout.close()
-		
-	print("Generated "+diconame+" with "+str(nbentries)+" entries")
-	
+	print("Generated "+diconame+" with "+str(len(dicoEntries))+" entries")
 	return True
 
 ## generate a new dictionary out of the given dicos

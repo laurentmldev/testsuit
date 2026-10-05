@@ -1,59 +1,21 @@
 
-##  @package buildComponentInput
+##  @package evalpath
 # build (evaluate) given target file given source path and evaluation method.
-# This tool is mainly used by maketools/component.mk to generate components inputs from template files.
+# The datapack tool uses it to generate the components input files from their templates.
 #
 
 import argparse
-
-import os,os.path
-from pathlib import Path
-
-
+import glob
+import os
+import shutil
 import sys
+from pathlib import Path
 
 from testsuit.datatools.datapack.evalfiles import evalfile
 from testsuit.datatools.datapack.evalfiles import evalkeys
 from testsuit.datatools.datapack.evalfiles import evalincludes
 from testsuit.datatools.datapack.evalfiles import libdictionary
 
-import glob
-
-import shutil
-import stat
-
-nbTotalFiles=0
-
-# custom version of copytree while python3.8 not available
-# code from https://stackoverflow.com/questions/1868714/how-do-i-copy-an-entire-directory-of-files-into-an-existing-directory-using-pyth
-
-# >=python3.8: shutil.copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder), dirs_exist_ok=True)
-# <python3.8: copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder))
-def copytree(src, dst, symlinks = True, ignore = None):
-  if not os.path.exists(dst):
-    os.makedirs(dst)
-    shutil.copystat(src, dst)
-  lst = os.listdir(src)
-  if ignore:
-    excl = ignore(src, lst)
-    lst = [x for x in lst if x not in excl]
-  for item in lst:
-    s = os.path.join(src, item)
-    d = os.path.join(dst, item)
-    if symlinks and os.path.islink(s):
-      if os.path.lexists(d):
-        os.remove(d)
-      os.symlink(os.readlink(s), d)
-      try:
-        st = os.lstat(s)
-        mode = stat.S_IMODE(st.st_mode)
-        os.lchmod(d, mode)
-      except (AttributeError, NotImplementedError, OSError):
-        pass # lchmod not available
-    elif os.path.isdir(s):
-      copytree(s, d, symlinks, ignore)
-    else:
-      shutil.copy2(s, d)
 
 ## check if the given file is accessible
 def _isInputReadable(f):
@@ -68,156 +30,94 @@ class _HelpParser(argparse.ArgumentParser):
         sys.exit(1)
 
 def evalMultiSourceFiles(method, sourcePaths, targetFolder, dico, keysorigin, dicosNames):
+	"""Evaluate the files and folders matching the given ','-separated glob patterns into targetFolder.
 
-	#print("#### processing multi-paths "+sourcePaths)
+	Evaluation errors of the files are printed, but don't fail (see evalSourceFolder).
 
-	sourceFilesList=[]
-	try:		
+	:return: success (False only if targetFolder cannot be created), list of the source files
+	"""
+	try:
 		Path(targetFolder).mkdir(parents=True, exist_ok=True)
 	except OSError as e:
 		print("ERROR: unable to create target folder '"+targetFolder+"' " + str(e))
-		return False
+		return False,[]
 
-	success=True
-
-	pathslist=sourcePaths.rstrip(",").split(",")
-	
-	for curPath in pathslist:
-		#print("#### processing (multi) path "+curPath)
+	sourceFilesList=[]
+	for curPath in sourcePaths.rstrip(",").split(","):
 		for source in glob.glob(curPath):
+			target=targetFolder+os.sep+os.path.basename(source)
 			if os.path.isdir(source):
-				target=targetFolder+os.sep+os.path.basename(source)
-				#print("adding folder '"+source+"' as '"+target+"'")
-				evalOk,sourcesFiles = evalSourceFolder(method, source, target, dico, keysorigin, dicosNames)				
-				success=success and evalOk
-				sourceFilesList+=sourcesFiles
-			else:			
-				target=targetFolder+os.sep+os.path.basename(source)
-				sourceFilesList+=[source]
-				#print("adding file '"+source+"' as '"+target+"'")
-				success=success and evalSourceFile(method, source, target, dico, keysorigin, dicosNames)
-	
-	#print("#### > "+str(success))	
-	
-	return success, sourceFilesList
+				_,sourceFiles=evalSourceFolder(method, source, target, dico, keysorigin, dicosNames)
+				sourceFilesList+=sourceFiles
+			else:
+				evalSourceFile(method, source, target, dico, keysorigin, dicosNames)
+				sourceFilesList.append(source)
+
+	return True, sourceFilesList
 
 
 def evalSourceFolder(method, sourceFolder, targetFolder, dico, keysorigin, dicosNames):
+	"""Copy the folder (hidden files and empty folders included), then evaluate each of its files.
 
-	#TMP_DIR=expandPath("$HOME/tmp/evalpath_"+getFileTimestamp()+"_"+os.path.basename(targetFolder)+"__tmp"+str(random.randint(1,1000000)))
+	Evaluation errors of the files are printed, but don't fail the folder: exploit_runner relies on it
+	(its test scenarios have an undefined key).
+
+	:return: True, list of the source files
+	"""
+	try:
+		shutil.copytree(sourceFolder, targetFolder, ignore_dangling_symlinks=True, dirs_exist_ok=True)
+	except OSError as e:
+		print("ERROR: unable to create target folder '"+targetFolder+"' " + str(e))
 
 	sourceFilesList=[]
-
-	success=False
-
-	try:
-		Path(targetFolder).mkdir(parents=True, exist_ok=True)
-		#print("### evalSourceFolder "+sourceFolder)
-
-		for fileOrFolder in glob.iglob(os.path.join(sourceFolder, "*")):
-			if os.path.isfile(fileOrFolder):
-				shutil.copy2(fileOrFolder,targetFolder)				
-			elif os.path.isdir(fileOrFolder):			
-				Path(targetFolder+os.sep+os.path.basename(fileOrFolder)).mkdir(parents=True, exist_ok=True)
-				#print("	### cp -r "+fileOrFolder+" "+targetFolder+os.sep+os.path.basename(fileOrFolder))
-				#python3.8
-				#shutil.copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder), dirs_exist_ok=True)
-				copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder))
-				
-		# copy also hidden files and folders
-		for fileOrFolder in glob.iglob(os.path.join(sourceFolder, ".*")):
-			if os.path.isfile(fileOrFolder):
-				shutil.copy2(fileOrFolder,targetFolder)				
-			elif os.path.isdir(fileOrFolder):
-				Path(targetFolder+os.sep+os.path.basename(fileOrFolder)).mkdir(parents=True, exist_ok=True)
-				#print("	### cp -r "+fileOrFolder+" "+targetFolder+os.sep+os.path.basename(fileOrFolder))
-				#python3.8
-				#shutil.copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder),dirs_exist_ok=True)
-				copytree(fileOrFolder,targetFolder+os.sep+os.path.basename(fileOrFolder))				
-		
-	except OSError as e:
-		print("ERROR: unable to create target folder '"+targetFolder+"' " + str(e))		
-
-	success=True
-
 	for subdir, dirs, files in os.walk(sourceFolder):
+		relPath=subdir.replace(sourceFolder,"")
 		for file in files:
-			relPath=subdir.replace(sourceFolder,"")
 			sourceFile=subdir+os.sep+file
-			sourceFilesList+=[sourceFile]
-			targetFile=targetFolder+os.sep+relPath+os.sep+file
-			#print("### evaluating folder file '"+file+"' ("+method+")")	
-			#print("		targetFolder="+targetFolder)
-			#print("		sourceFolder="+sourceFolder)
-			#print("		subdir="+subdir)
-			#print("		file="+file)
-			#print("		targetFile="+targetFile)
-			#print("		"+sourceFile+" -> "+targetFile)
-			success=evalSourceFile(method, sourceFile, targetFile, dico, keysorigin, dicosNames) and success
-	
-	#print("### Folder '"+sourceFolder+"' -> '"+targetFolder+"' deps :  "+str(sourceFilesList))
-	return success,sourceFilesList
+			sourceFilesList.append(sourceFile)
+			evalSourceFile(method, sourceFile, targetFolder+os.sep+relPath+os.sep+file, dico, keysorigin, dicosNames)
+
+	return True,sourceFilesList
 
 
 
 def evalSourceFile(method, sourceFile, targetFile, dico, keysorigin, dicosNames):
+	"""Generate targetFile from sourceFile: 'copy' it, or 'eval' its keys and includes.
 
-	success=False
-
-	#print("### evalSourceFile "+" ("+method+") "+sourceFile+" -> "+targetFile)
-
+	:return: success, list of the source files
+	"""
 	if method=='copy':
-		
 		# if files are the same then nothing to do
-		if os.path.realpath(sourceFile) != os.path.realpath(targetFile) :			
-			Path(os.path.dirname(targetFile)).mkdir(parents=True, exist_ok=True)
-			# copy2 : keeps file metadata identical to orignal one (same than shell command 'cp -p')	
+		if os.path.realpath(sourceFile) != os.path.realpath(targetFile) :
 			if not os.path.isfile(sourceFile) :
-				print("ERROR: source file unreachable : '"+sourceFile+"', unable to copy it as '"+targetFile+"' ")	
+				print("ERROR: source file unreachable : '"+sourceFile+"', unable to copy it as '"+targetFile+"' ")
 				sys.exit(1)
+			Path(os.path.dirname(targetFile)).mkdir(parents=True, exist_ok=True)
+			# copy2 : keeps file metadata identical to orignal one (same than shell command 'cp -p')
 			shutil.copy2(sourceFile,targetFile)
-			success=True
 
-		else :
-			# nothing todo everything is fine
-			success=True
 	elif method=='eval':
-	
-		noPartialEval=False
-		lines, usedkeys = evalfile.doFileEvaluation(libdictionary.expandPath(sourceFile), dico, keysorigin, dicosNames,noPartialEval, targetFile)		
+		lines, usedkeys = evalfile.doFileEvaluation(libdictionary.expandPath(sourceFile), dico, keysorigin, dicosNames,
+			partialEval=False, targetFileName=targetFile)
 		evalfile.finalizeLines(lines, usedkeys, restoreUnknownKeys=False, outputFile=targetFile)
-		
-		#print("### Evaluation of '"+sourceFile+"' : evalkeys.nbUndefined="+str(evalkeys.nbUndefined))
 
-		if evalkeys.nbInfinateRecursion>0 :		
-			print("while evaluating file '"+targetFile+"' : "+str(evalkeys.nbInfinateRecursion)+" infinate recursion(s) detected")
-			return False,[]
-		if evalincludes.nbNotFoundIncludes>0 :
-			print("while evaluating file '"+targetFile+"' : "+str(evalincludes.nbNotFoundIncludes)+" unresolved file include(s) detected")
-			return False,[]
-		if evalkeys.nbUndefined>0 :
-			print("while evaluating file '"+targetFile+"' : "+str(evalkeys.nbUndefined)+" undefined key(s) detected")
-			return False,[]	
+		errors=[(evalkeys.nbInfinateRecursion,"infinate recursion(s)"),
+			(evalincludes.nbNotFoundIncludes,"unresolved file include(s)"),
+			(evalkeys.nbUndefined,"undefined key(s)")]
+		for nbErrors,errorKind in errors:
+			if nbErrors>0:
+				print("while evaluating file '"+targetFile+"' : "+str(nbErrors)+" "+errorKind+" detected")
+				return False,[]
 
-		success=True
-  
 	elif method=='exec':
-	
 		# TODO syscall to run command 'sourceFile' giving it, catch lines from stdout, eval lines and write targetFile
 		print("while evaluating file '"+targetFile+"' : 'exec' method not implemented yet (sorry)")
-		return False,[]	
+		return False,[]
 
-		success=False
-  
 	else:
 		raise Exception(f"unknown file evaluation method '{method}' (copy|eval|exec)")
 
-	#print("### generated file '"+targetFile+"' : "+str(success))
-
-	global nbTotalFiles
-	nbTotalFiles=nbTotalFiles+1
-
-	return success,[sourceFile]
+	return True,[sourceFile]
 
 
 
@@ -256,86 +156,58 @@ def getSourcePathType(sourcepath):
 	print("unable to recognize type of given source-path : '"+sourcepath+"'")
 	sys.exit(1)
 
+## generate targetpath from sourcepath (a file, a folder, or ','-separated glob patterns)
+# and compress the result if targetpath is a .zip/.tgz/.tar.gz
+# @return success, compressed
 def evalPath(targetpath,sourcepath, method, dico, keysorigin, dicosPaths):
 
-	dicosNames=[]
-	for dicoName in dicosPaths:
-		fullName=libdictionary.expandPath(dicoName)
-		dicosNames.append(fullName)
-
+	dicosNames=[libdictionary.expandPath(dicoName) for dicoName in dicosPaths]
 	sourcepath=str(sourcepath)
 	targetpath=str(targetpath)
-  
-	sourceType = getSourcePathType(sourcepath)
-	#print("### targetpath="+targetpath+" from sourcepath="+sourcepath+" and dico:"+str(dicosPaths)+" sourceType="+sourceType)
 
-	success=True
-
-	sourceFilesList=None
-	archive_baseDir=None
-	
 	# 1- evaluate target file(s)
-	if sourceType=="file":
-		success, sourceFilesList = evalSourceFile(method, sourcepath, targetpath, dico, keysorigin, dicosNames)
-
-	elif sourceType=="folder":
-		success, sourceFilesList = evalSourceFolder(method, sourcepath, targetpath, dico, keysorigin, dicosNames)
-
-	elif sourceType=="multi":		
-		success,sourceFilesList = evalMultiSourceFiles(method, sourcepath, targetpath, dico, keysorigin, dicosNames)
-
-	#print("### '"+targetpath+"' deps :  "+str(sourceFilesList))
-	#print("### '"+targetpath+"' from '"+sourcepath+"' =>"+str(success))	
-	
-	compressed=False
+	sourceType=getSourcePathType(sourcepath)
+	evalFunction={"file": evalSourceFile, "folder": evalSourceFolder, "multi": evalMultiSourceFiles}[sourceType]
+	success,_=evalFunction(method, sourcepath, targetpath, dico, keysorigin, dicosNames)
 
 	# 2- compress result if required (i.e. if original source was not already a compressed file)
-	if (targetpath.endswith(".tgz") or targetpath.endswith(".tar.gz")) \
-		and not (sourcepath.endswith(".tgz") or sourcepath.endswith(".tar.gz")):
+	compressed=False
+	for extensions,archiveFormat in ARCHIVE_FORMATS:
+		if targetpath.endswith(extensions) and not sourcepath.endswith(extensions):
+			_archive(targetpath, sourcepath, sourceType, extensions, archiveFormat)
+			compressed=True
+			break
 
-		targetname_withoutext=targetpath.replace(".tgz","").replace(".tar.gz","")
-		shutil.move(targetpath,targetname_withoutext)
-
-		if sourceType=="folder":
-			folder_targetname_withoutext=os.path.dirname(targetname_withoutext)+"/"+os.path.basename(sourcepath.replace(".tgz","").replace(".tar.gz",""))
-			shutil.move(targetname_withoutext,folder_targetname_withoutext)
-			targetname_withoutext=folder_targetname_withoutext
-			arch_rootdir=os.path.dirname(targetname_withoutext)	
-			archive_baseDir=os.path.basename(targetname_withoutext)
-				
-		else:
-			arch_rootdir=targetname_withoutext
-			archive_baseDir=None	
-
-		#print("### building archive "+targetpath+" from "+sourcepath+" : arch_rootdir="+arch_rootdir+" archive_baseDir="+archive_baseDir)
-		shutil.make_archive(targetname_withoutext, 'gztar', arch_rootdir, archive_baseDir)
-		shutil.rmtree(targetname_withoutext)
-		shutil.move(targetname_withoutext+".tar.gz",targetpath)
-		compressed=True		
-
-	elif targetpath.endswith(".zip") and not sourcepath.endswith(".zip") :
-		
-		targetname_withoutext=targetpath.replace(".zip","")
-		shutil.move(targetpath,targetname_withoutext)
-
-		if sourceType=="folder":
-			folder_targetname_withoutext=os.path.dirname(targetname_withoutext)+"/"+os.path.basename(sourcepath.replace(".zip",""))
-			shutil.move(targetname_withoutext,folder_targetname_withoutext)
-			targetname_withoutext=folder_targetname_withoutext
-			arch_rootdir=os.path.dirname(targetname_withoutext)	
-			archive_baseDir=os.path.basename(targetname_withoutext)
-				
-		else:
-			arch_rootdir=targetname_withoutext
-			archive_baseDir=None	
-
-		#print("### building archive "+targetpath+" from "+sourcepath+" : arch_rootdir="+arch_rootdir+" archive_baseDir="+archive_baseDir)
-		shutil.make_archive(targetname_withoutext, 'zip', arch_rootdir, archive_baseDir)
-		shutil.rmtree(targetname_withoutext)
-		shutil.move(targetname_withoutext+".zip",targetpath)
-		compressed=True
-		
 	return success,compressed
+
+
+# target extensions of archives, and shutil.make_archive format
+ARCHIVE_FORMATS=[((".tgz",".tar.gz"),"gztar"), ((".zip",),"zip")]
+
+def _removeExtensions(path, extensions):
+	for extension in extensions:
+		path=path.replace(extension,"")
+	return path
+
+## replace the generated targetpath by an archive of it
+def _archive(targetpath, sourcepath, sourceType, extensions, archiveFormat):
+	targetname_withoutext=_removeExtensions(targetpath,extensions)
+	shutil.move(targetpath,targetname_withoutext)
+
+	if sourceType=="folder":
+		# the archive contains the folder, under its source name
+		folder_targetname_withoutext=os.path.dirname(targetname_withoutext)+"/"+os.path.basename(_removeExtensions(sourcepath,extensions))
+		shutil.move(targetname_withoutext,folder_targetname_withoutext)
+		targetname_withoutext=folder_targetname_withoutext
+		arch_rootdir=os.path.dirname(targetname_withoutext)
+		archive_baseDir=os.path.basename(targetname_withoutext)
+	else:
+		arch_rootdir=targetname_withoutext
+		archive_baseDir=None
+
+	archiveFile=shutil.make_archive(targetname_withoutext, archiveFormat, arch_rootdir, archive_baseDir)
+	shutil.rmtree(targetname_withoutext)
+	shutil.move(archiveFile,targetpath)
 
 ## the main function
 if __name__ == '__main__':
