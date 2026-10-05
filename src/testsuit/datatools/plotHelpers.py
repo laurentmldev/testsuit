@@ -27,6 +27,12 @@ from testsuit.misc import files
 
 from testsuit.misc.logger import get_logger  
 
+def save_svg_figure(fig, filePath: str) -> None:
+    """Save a matplotlib figure as SVG with its texts as <text> elements: matplotlib otherwise draws
+    every glyph as a path (about a quarter of a typical criterion figure, embedded in HTML reports)."""
+    with plt.rc_context({"svg.fonttype": "none"}):
+        fig.savefig(filePath, metadata={"Date": None})
+
 def cleanFigureLegendLabel(label: str) -> str:
         if m:=re.match(r"(.*)::(.*)",label):
             filePath=m.group(1)
@@ -102,7 +108,7 @@ def plotDataHistogram(critConf: dict,
     
     Path(figPath).mkdir(parents=True, exist_ok=True)
     filePath=figPath+os.sep+files.normalizeFileName(critConf["name"])+".svg"
-    fig.savefig(filePath)
+    save_svg_figure(fig, filePath)
 
     plt.clf()
 
@@ -268,7 +274,7 @@ def plotData_matplotlib(critConf: dict,
     figPath=critConf["test_run_config"]["results"]+os.sep+figuresRelPath    
     Path(figPath).mkdir(parents=True, exist_ok=True)
     filePath=figPath+os.sep+files.normalizeFileName(critConf["name"])+".svg"
-    fig.savefig(filePath)
+    save_svg_figure(fig, filePath)
     get_logger().info("created plot figure '"+filePath+"'")
     plt.clf()
     return filePath
@@ -406,7 +412,7 @@ def plotData3D_matplotlib(critConf: dict,
     figPath = critConf["test_run_config"]["results"] + os.sep + figuresRelPath
     Path(figPath).mkdir(parents=True, exist_ok=True)
     filePath = figPath + os.sep + files.normalizeFileName(critConf["name"]) + ".svg"
-    fig.savefig(filePath)
+    save_svg_figure(fig, filePath)
     get_logger().info("created 3D plot figure '" + filePath + "'")
     plt.clf()
     return filePath    
@@ -966,7 +972,7 @@ def plotTimeline_matplotlib(critConf: dict,
         ax.grid(False)
 
         filePath = _get_figure_path(critConf, figuresRelPath)
-        fig.savefig(filePath)
+        save_svg_figure(fig, filePath)
 
         plt.clf()
 
