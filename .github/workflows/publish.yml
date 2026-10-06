@@ -66,6 +66,8 @@ jobs:
           path: dist/
 
       - name: Publish to TestPyPI
+        # a TestPyPI outage must not block the release on PyPI
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
