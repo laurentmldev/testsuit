@@ -55,30 +55,30 @@ def _dataList():
 
 ################### backend selection ###################
 
-def test_default_backend_is_matplotlib(tmp_folder):
+def test_default_backend_is_plotly(tmp_folder):
     filePath=plotHelpers.plotData(_critConf(tmp_folder),_dataList(),interactive=False)
-    assert filePath==str(tmp_folder / "figures" / "my_plot.svg")
-    assert ">my plot</text>" in Path(filePath).read_text()
+    assert filePath==str(tmp_folder / "figures" / ("my_plot"+PLOTLY_JSON_SUFFIX))
 
 
 @pytest.mark.parametrize("how",["critConf","env","default"])
-def test_select_plotly(tmp_folder, how, monkeypatch):
+def test_select_matplotlib(tmp_folder, how, monkeypatch):
     critConf=_critConf(tmp_folder)
-    if how=="critConf": critConf["rendering_engine"]="plotly"
-    elif how=="env": monkeypatch.setenv(BACKEND_ENV_VAR,"plotly")
-    else: set_default_plot_backend("plotly")
+    if how=="critConf": critConf["rendering_engine"]="matplotlib"
+    elif how=="env": monkeypatch.setenv(BACKEND_ENV_VAR,"matplotlib")
+    else: set_default_plot_backend("matplotlib")
     try:
         filePath=plotHelpers.plotData(critConf,_dataList(),interactive=False)
     finally:
-        set_default_plot_backend("matplotlib")
-    assert filePath.endswith("my_plot"+PLOTLY_JSON_SUFFIX)
+        set_default_plot_backend("plotly")
+    assert filePath==str(tmp_folder / "figures" / "my_plot.svg")
+    assert ">my plot</text>" in Path(filePath).read_text()
 
 
 def test_unknown_backend_and_format(tmp_folder):
     with pytest.raises(ValueError,match="unknown rendering engine: 'bokeh' \\(matplotlib\\|plotly"):
         plotHelpers.plotData(_critConf(tmp_folder,rendering_engine="bokeh"),_dataList(),interactive=False)
     with pytest.raises(ValueError,match="figure format 'interactive' not supported by plot backend 'matplotlib'"):
-        plotHelpers.plotData(_critConf(tmp_folder,figure_format="interactive"),_dataList(),interactive=False)
+        plotHelpers.plotData(_critConf(tmp_folder,rendering_engine="matplotlib",figure_format="interactive"),_dataList(),interactive=False)
 
 
 def test_register_external_backend(tmp_folder):
@@ -120,7 +120,7 @@ def test_plotly_3d_single_figure(tmp_folder):
     xyz=pd.DataFrame({"x":np.arange(10.),"y":np.arange(10.)**2,"z":np.arange(10.)**3})
     critConf=_critConf(tmp_folder,rendering_engine="plotly",camera_eye=(1,2,3),zLabel="alt")
     assert plotHelpers.static_figures_are_interactive(critConf)
-    assert not plotHelpers.static_figures_are_interactive(_critConf(tmp_folder))
+    assert not plotHelpers.static_figures_are_interactive(_critConf(tmp_folder,rendering_engine="matplotlib"))
     fig=go.Figure(json.loads(Path(plotHelpers.plotData3D(critConf,[{"data":xyz,"name":"traj"}],interactive=False)).read_text()))
     assert fig.data[0].type=="scatter3d" and list(_array(fig.data[0].z))==list(xyz.z)
     assert (fig.layout.scene.camera.eye.x,fig.layout.scene.camera.eye.y,fig.layout.scene.camera.eye.z)==(1,2,3)
@@ -170,6 +170,13 @@ def test_mexploit_plotly_figures_in_report(tmp_folder):
     # one rotatable 3D figure instead of 3 views
     assert [f for f in figures if f.startswith("traj_3d/")]==["traj_3d/traj_3d"+PLOTLY_JSON_SUFFIX]
     assert "seqcheck/seqcheck"+PLOTLY_JSON_SUFFIX in figures
+
+    # pytest-html report: each figure drawn by a page shown in an iframe, plotly.js shared
+    pages=tmp_folder / "results" / "pytest_report_files"
+    page=(pages / "figures" / "plot_multi" / "plot_multi.html").read_text()
+    assert '<script src="../../plotly.min.js"></script>' in page and '"A Nice multi plot"' in page
+    assert (pages / "plotly.min.js").stat().st_size>1e6
+    assert "iframe src='pytest_report_files/figures/plot_multi/plot_multi.html'" in (tmp_folder / "results" / "pytest_report.html").read_text().replace("&#39;","'")
 
     figFile=tmp_folder / "results" / "figures" / "plot_multi" / ("plot_multi"+PLOTLY_JSON_SUFFIX)
     html=report_html._plotly_figure_html(figFile)

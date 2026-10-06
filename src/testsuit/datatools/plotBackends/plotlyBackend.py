@@ -8,7 +8,10 @@
 """
 from __future__ import annotations
 
+import html
+import os
 from contextlib import nullcontext
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -240,3 +243,30 @@ class PlotlyBackend(APlotBackend):
         else:
             go.Figure(fig).write_image(filePath)
 
+
+
+def write_figure_page(jsonFile: str | os.PathLike, htmlFile: str | os.PathLike, plotlyJsFile: str | os.PathLike) -> None:
+    """HTML page drawing a plotly JSON figure (as saved by PlotlyBackend.save()) with plotly.js loaded from
+    plotlyJsFile, written if missing and shared by the pages: used by mexploit's pytest-html report, which
+    can't run scripts of its own cells but shows these pages in iframes."""
+    from plotly.offline import get_plotlyjs
+
+    htmlFile, plotlyJsFile = Path(htmlFile), Path(plotlyJsFile)
+    if not plotlyJsFile.exists():
+        plotlyJsFile.parent.mkdir(parents=True, exist_ok=True)
+        plotlyJsFile.write_text(get_plotlyjs(), encoding="utf-8")
+    src = Path(os.path.relpath(plotlyJsFile, htmlFile.parent)).as_posix()
+    # the figure is a JS literal inside <script>: "</" would end it
+    figure = Path(jsonFile).read_text(encoding="utf-8").replace("</", "<\\/")
+    htmlFile.parent.mkdir(parents=True, exist_ok=True)
+    htmlFile.write_text(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{html.escape(htmlFile.stem)}</title>
+<script src="{html.escape(src)}"></script>
+<style>html, body {{ margin: 0; height: 100%; }} #figure {{ width: 100%; height: 100%; }}</style>
+</head><body><div id="figure"></div><script>
+const fig = {figure};
+const layout = Object.assign(fig.layout || {{}}, {{ autosize: true }});
+delete layout.width; delete layout.height;
+Plotly.newPlot('figure', fig.data, layout, {{ responsive: true, displaylogo: false }});
+</script></body></html>
+""", encoding="utf-8")

@@ -30,6 +30,7 @@ dependencies = [
     "pytest-html>=4.1",
     "pytest-metadata>=3.1",
     "matplotlib>=3.10",
+    "plotly>=5.24",
     "pytest>=8",
     "PyYAML>=6.0",
     "ruamel.yaml>=0.18",
@@ -39,13 +40,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# plotly plot backend; anywidget: plotly figures updated in place in Jupyter (FigureWidget)
-plotly = ["plotly>=5.24", "anywidget>=0.9"]
+# plotly figures updated in place in Jupyter (FigureWidget); plotly itself is a core dependency
+plotly = ["anywidget>=0.9"]
 # nbclassic: the GUIs drive cells through the classic notebook JavaScript API
 jupyter = ["ipython>=8", "ipywidgets>=8", "nbclassic>=1.0"]
 file_formats = ["influxdb-client>=1.40", "influxdb3-python>=0.10","dwdatareader>=1.3","npTDMS>=1.10","asammdf>=8.7"]
 # what the test suite needs on top of the runtime deps: pip install -e ".[test]"
-test = ["plotly>=5.24","npTDMS>=1.10"]
+test = ["npTDMS>=1.10"]
 # contributor tooling: pip install -e ".[dev]"
 dev = ["testsuit[test]", "build>=1.3", "ruff>=0.6"]
 
