@@ -1,7 +1,7 @@
 """Plots of tests data, for Jupyter notebooks (interactive=True: the figure is returned) and mexploit
 reports (interactive=False: the figure is saved under <results>/<figuresRelPath>).
 
-Drawn by a plot backend, matplotlib (default) or plotly, selected per plot by critConf["rendering_engine"],
+Drawn by a plot backend, plotly (default) or matplotlib, selected per plot by critConf["rendering_engine"],
 else by the PLOT_RENDERING_BACKEND environment variable: see testsuit.datatools.plotBackends.
 """
 from __future__ import annotations

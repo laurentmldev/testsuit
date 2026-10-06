@@ -17,7 +17,7 @@ Optional features are installed as extras:
 
 | Extra      | Adds                                         |
 |------------|----------------------------------------------|
-| `plotly`   | plotly plot backend (see Plots)              |
+| `plotly`   | plotly figures updated in place in Jupyter   |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
 | `test`     | what the test suite needs                    |
@@ -48,12 +48,12 @@ Figures (Data-Plot GUI, mexploit `plot*` checks, sequence timelines) are drawn b
 
 | Backend | Jupyter | mexploit / exploit_runner report |
 |---|---|---|
-| `matplotlib` (default) | matplotlib figure | SVG (`figure_format: png` also works) |
-| `plotly` (`pip install "testsuit[plotly]"`) | plotly FigureWidget | interactive figure (zoom, hover, 3D rotation), or `svg`/`png` with kaleido |
+| `plotly` (default) | plotly FigureWidget (with `pip install "testsuit[plotly]"`) | interactive figure (zoom, hover, 3D rotation), or `svg`/`png` with kaleido |
+| `matplotlib` | matplotlib figure | SVG (`figure_format: png` also works) |
 
-Pick it per check with `rendering_engine: plotly` in the scenario YAML, per run with `mxp --plot-backend plotly` / `exploit_runner --plot-backend plotly` (or the `PLOT_RENDERING_BACKEND` environment variable), and in the Data-Plot GUI with its Backend menu. The figure format works the same way: `figure_format`, `--figure-format`, `PLOT_FIGURE_FORMAT`.
+Pick it per check with `rendering_engine: matplotlib` in the scenario YAML, per run with `mxp --plot-backend matplotlib` / `exploit_runner --plot-backend matplotlib` (or the `PLOT_RENDERING_BACKEND` environment variable), and in the Data-Plot GUI with its Backend menu. The figure format works the same way: `figure_format`, `--figure-format`, `PLOT_FIGURE_FORMAT`.
 
-The exploit_runner HTML report stays a single file that works offline with plotly figures: they are stored as gzipped plotly JSON and drawn by plotly.js, which the report then embeds once (about 2 MB). Reports without plotly figures don't change. Another library can add its own backend with `testsuit.datatools.plotBackends.register_plot_backend()`.
+The exploit_runner HTML report stays a single file that works offline with plotly figures: they are stored as gzipped plotly JSON and drawn by plotly.js, which the report then embeds once (about 2 MB). Reports made with matplotlib only don't embed it. In mxp's own `pytest_report.html`, each plotly figure is drawn in a frame by a page of `pytest_report_files/`, which shares one copy of plotly.js. Another library can add its own backend with `testsuit.datatools.plotBackends.register_plot_backend()`.
 
 ## Repository layout
 

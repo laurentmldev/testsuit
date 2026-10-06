@@ -7,9 +7,10 @@ A backend draws the figures described by plotBackends.common (FigureSpec), for t
 
 Built-in backends:
 
-- ``matplotlib`` (default): static figures as SVG (or PNG)
-- ``plotly`` (``pip install testsuit[plotly]``): static figures are interactive by default (zoom, hover,
-  3D rotation in the HTML report, which then embeds plotly.js, ~2 MB), or SVG/PNG images with kaleido
+- ``plotly`` (default): static figures are interactive by default (zoom, hover, 3D rotation in the HTML
+  report, which then embeds plotly.js, ~2 MB), or SVG/PNG images with kaleido. FigureWidgets in Jupyter
+  need anywidget (``pip install testsuit[plotly]``)
+- ``matplotlib``: static figures as SVG (or PNG)
 
 The backend of a plot is, by priority: the ``rendering_engine`` entry of its critConf (scenario YAML),
 the ``PLOT_RENDERING_BACKEND`` environment variable (set by ``mxp --plot-backend``), the default set with
@@ -103,7 +104,7 @@ class APlotBackend:
 
 
 _backends: dict[str, APlotBackend | Callable[[], APlotBackend]] = {}
-_defaultBackend = "matplotlib"
+_defaultBackend = "plotly"
 
 
 def register_plot_backend(backend: APlotBackend | Callable[[], APlotBackend], name: str | None = None) -> None:
