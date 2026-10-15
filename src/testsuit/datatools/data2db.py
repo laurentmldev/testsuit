@@ -707,7 +707,7 @@ class ClickhouseData2Db(Data2Db):
         }
     """
 
-    DB_TYPE = "clickhouse"
+    DB_TYPE = "ClickHouse"
 
     DATA_CLICKHOUSE_CHUNK_SIZE_API = 20e3
 
@@ -754,12 +754,22 @@ class ClickhouseData2Db(Data2Db):
         m=re.match(r"https?://([^:]+):(\d+)",url)
         host=m.group(1)
         port=int(m.group(2))
+        user=dbconf.get("user","default")
         password=dbconf.get("password") or (token or "")
+  
         return Client(host=host,
                       port=port,
-                      user=dbconf.get("user","default"),
+                      user=user,
                       password=password)
 
+
+    @staticmethod
+    def _chStrLiteral(value) -> str:
+        """Return value as a safely-escaped ClickHouse single-quoted string literal."""
+        s = str(value)
+        s = s.replace("\\", "\\\\").replace("'", "\\'")
+        return "'" + s + "'"
+    
     #######################
     def ensure_db_and_table_if_missing(self,
                                        dbconf: dict,
@@ -781,7 +791,7 @@ class ClickhouseData2Db(Data2Db):
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]
         tsCol=dbconf.get("timestampColumn","ts")
-
+    
         client=self._createClickhouseClient(dbconf,token)
         try:
             # database
@@ -793,7 +803,8 @@ class ClickhouseData2Db(Data2Db):
                 monitorProgress and monitorProgress.msg(msg=f"database '{databaseStr}' already exists")
 
             # table
-            existingTables=[row[0] for row in client.execute("SELECT name FROM system.tables WHERE database = %s",[databaseStr])]
+            existingTables=[row[0] for row in client.execute(
+                "SELECT name FROM system.tables WHERE database = " + self._chStrLiteral(databaseStr))]
             if tableStr not in existingTables:
                 colTypes={}
                 for df in fieldsDfList:
@@ -805,7 +816,8 @@ class ClickhouseData2Db(Data2Db):
                 client.execute(f"CREATE TABLE `{databaseStr}`.`{tableStr}` ({colDefs}) ENGINE = MergeTree() ORDER BY `{tsCol}`")
                 monitorProgress and monitorProgress.msg(msg=f"created new table '{tableStr}' in database '{databaseStr}'")
             else:
-                existingCols={row[0]:row[1] for row in client.execute("SELECT name, type FROM system.columns WHERE database = %s AND table = %s",[databaseStr,tableStr])}
+                existingCols={row[0]:row[1] for row in client.execute(
+                            "SELECT name, type FROM system.columns WHERE database = "+self._chStrLiteral(databaseStr)+" AND table = " + self._chStrLiteral(tableStr))}
                 if tsCol not in existingCols:
                     raise ValueError(f"existing table '{databaseStr}.{tableStr}' has no timestamp column '{tsCol}' (rename it, or set dbconf['timestampColumn'])")
                 for df in fieldsDfList:
