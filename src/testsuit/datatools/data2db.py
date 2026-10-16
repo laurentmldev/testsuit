@@ -791,7 +791,10 @@ class ClickhouseData2Db(Data2Db):
         databaseStr=dbconf["database"]
         tableStr=dbconf["table"]
         tsCol=dbconf.get("timestampColumn","ts")
-    
+        # per-org S3 routing / read access (injected by ProcDbUpload)
+        storagePolicy=dbconf.get("storagePolicy")
+        readerUser=dbconf.get("readerUser")
+        
         client=self._createClickhouseClient(dbconf,token)
         try:
             # database
@@ -813,7 +816,8 @@ class ClickhouseData2Db(Data2Db):
                         baseType=self._clickhouseColumnType(series.dtype)
                         colTypes[col]=f"Nullable({baseType})" if series.isna().any() else baseType
                 colDefs=", ".join([f"`{tsCol}` DateTime64(6)"]+[f"`{col}` {chType}" for col,chType in colTypes.items()])
-                client.execute(f"CREATE TABLE `{databaseStr}`.`{tableStr}` ({colDefs}) ENGINE = MergeTree() ORDER BY `{tsCol}`")
+                policyStr=f" SETTINGS storage_policy = {self._chStrLiteral(storagePolicy)}" if storagePolicy else ""
+                client.execute(f"CREATE TABLE `{databaseStr}`.`{tableStr}` ({colDefs}) ENGINE = MergeTree() ORDER BY `{tsCol}`{policyStr}")                
                 monitorProgress and monitorProgress.msg(msg=f"created new table '{tableStr}' in database '{databaseStr}'")
             else:
                 existingCols={row[0]:row[1] for row in client.execute(
@@ -828,6 +832,16 @@ class ClickhouseData2Db(Data2Db):
                         client.execute(f"ALTER TABLE `{databaseStr}`.`{tableStr}` ADD COLUMN `{col}` {chType}")
                         monitorProgress and monitorProgress.msg(msg=f"added missing column '{col}' to table '{tableStr}'")
                 monitorProgress and monitorProgress.msg(msg=f"table '{tableStr}' already exists in database '{databaseStr}'")
+                
+            if readerUser:
+                userExists=client.execute("SELECT 1 FROM system.users WHERE name = "+self._chStrLiteral(readerUser))
+                if userExists:
+                    client.execute(f"GRANT SELECT ON `{databaseStr}`.* TO `{readerUser}`")
+                    monitorProgress and monitorProgress.msg(msg=f"GRANT SELECT on '{databaseStr}'.* to user '{readerUser}'")
+                else:
+                    monitorProgress and monitorProgress.msg(msg=f"WARNING: user '{readerUser}' not found in system.users; "
+                                                                f"skipping GRANT on '{databaseStr}'.* "
+                                                                f"(per-org reader user is provisioned separately)")               
         finally:
             client.disconnect()
 
