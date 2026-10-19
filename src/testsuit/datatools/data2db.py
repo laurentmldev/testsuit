@@ -707,7 +707,7 @@ class ClickhouseData2Db(Data2Db):
         }
     """
 
-    DB_TYPE = "ClickHouse"
+    DB_TYPE = "clickhouse"
 
     DATA_CLICKHOUSE_CHUNK_SIZE_API = 20e3
 
