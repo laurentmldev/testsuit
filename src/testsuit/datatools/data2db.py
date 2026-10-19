@@ -735,6 +735,15 @@ class ClickhouseData2Db(Data2Db):
             return list(df.items())
         return [(df.name,df)]
 
+    def _effectiveFieldColumns(self, conf: dict, df) -> list:
+        """List of (columnName, series) pairs using the column names as they will be
+        written by the upload worker (i.e., after prepare_df_for_db_upload), so that
+        the columns created/checked here match the INSERT column names."""
+        prepared=self.prepare_df_for_db_upload(conf,df)
+        if isinstance(prepared,pd.DataFrame):
+            return [(col,prepared[col]) for col in prepared.columns]
+        return [(prepared.name,prepared)]
+    
     @staticmethod
     def _cleanClickhouseValue(val):
         """Normalize a value for ClickHouse insertion (numpy scalars to python types, NaN/None to None)."""
@@ -811,7 +820,7 @@ class ClickhouseData2Db(Data2Db):
             if tableStr not in existingTables:
                 colTypes={}
                 for df in fieldsDfList:
-                    for col,series in self._clickhouseFieldColumns(df):
+                    for col,series in self._effectiveFieldColumns(dbconf,df):   # was: self._clickhouseFieldColumns(df)
                         if col in colTypes: continue
                         baseType=self._clickhouseColumnType(series.dtype)
                         colTypes[col]=f"Nullable({baseType})" if series.isna().any() else baseType
@@ -825,11 +834,12 @@ class ClickhouseData2Db(Data2Db):
                 if tsCol not in existingCols:
                     raise ValueError(f"existing table '{databaseStr}.{tableStr}' has no timestamp column '{tsCol}' (rename it, or set dbconf['timestampColumn'])")
                 for df in fieldsDfList:
-                    for col,series in self._clickhouseFieldColumns(df):
+                    for col,series in self._effectiveFieldColumns(dbconf,df):
                         if col in existingCols: continue
                         baseType=self._clickhouseColumnType(series.dtype)
                         chType=f"Nullable({baseType})" if series.isna().any() else baseType
                         client.execute(f"ALTER TABLE `{databaseStr}`.`{tableStr}` ADD COLUMN `{col}` {chType}")
+                        existingCols[col]=chType
                         monitorProgress and monitorProgress.msg(msg=f"added missing column '{col}' to table '{tableStr}'")
                 monitorProgress and monitorProgress.msg(msg=f"table '{tableStr}' already exists in database '{databaseStr}'")
                 
