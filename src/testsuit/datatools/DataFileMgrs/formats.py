@@ -238,6 +238,11 @@ def _influxDbV2Factory(filename: str, fileIdx: int) -> AFileMgr:
     return InfluxDbV2FileMgr(filename, fileIdx)
 
 
+def _clickhouseFactory(filename: str, fileIdx: int) -> AFileMgr:
+    from testsuit.datatools.DataFileMgrs.ClickhouseFileMgr import ClickhouseFileMgr
+    return ClickhouseFileMgr(filename, fileIdx)
+
+
 def _udbfFactory(filename: str, fileIdx: int) -> AFileMgr:
     from testsuit.datatools.DataFileMgrs.UdbfFileMgr import UdbfFileMgr
     return UdbfFileMgr(filename, fileIdx)
@@ -254,6 +259,7 @@ register_file_format("tdms", ["tdms"], _tdmsFactory, builtin=True)
 register_file_format("mdf", ["mdf", "mf4"], _mdfFactory, builtin=True)
 register_file_format("influxdbV3", ["influxdbV3.yml", "influxdbV3.yaml"], _influxDbV3Factory, builtin=True)
 register_file_format("influxdbV2", ["influxdbV2.yml", "influxdbV2.yaml"], _influxDbV2Factory, builtin=True)
+register_file_format("clickhouse", ["clickhouse.yml", "clickhouse.yaml"], _clickhouseFactory, builtin=True)
 # Gantner .dat files
 register_file_format("gantner-udbf", ["dat"], _udbfFactory, accepts=_isGantnerDatFile, builtin=True)
 

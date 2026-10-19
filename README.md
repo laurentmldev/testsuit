@@ -1,6 +1,6 @@
 # testsuit
 
-Toolbox for preparing and analysing test data: load measurement files (CSV, TDMS, MDF, Dewesoft DXD, UDBF, HDF5, InfluxDB) into pandas, convert them to HDF5 or push them to a database, check results against YAML scenarios, and package test inputs into datapacks.
+Toolbox for preparing and analysing test data: load measurement files (CSV, TDMS, MDF, Dewesoft DXD, UDBF, HDF5, InfluxDB, ClickHouse) into pandas, convert them to HDF5 or push them to a database, check results against YAML scenarios, and package test inputs into datapacks.
 
 ## Installation
 
@@ -61,7 +61,7 @@ The exploit_runner HTML report stays a single file that works offline with plotl
 src/testsuit/           the installable package
   datatools/            load data files into pandas, convert to HDF5, push to a DB
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
-    DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb)
+    DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb, Clickhouse)
     datapack/           datapack generation: dictionaries, includes, key replacement
   exploit/
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
