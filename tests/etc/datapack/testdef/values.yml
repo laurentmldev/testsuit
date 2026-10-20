@@ -1,0 +1,17 @@
+my_dataset:
+  param1:
+    default: 3.1415
+    metadata:
+      rawUnit: m3/s
+  param2:
+    value: 5
+    meco_min: 0.1
+    meco_max: 0.3
+    metadata:
+      rawUnit: "{{ my_dataset.param1.metadata.rawUnit }}"
+value:
+  alpha: 3.4
+  beta: Hello world
+  # a single expression keeps its type: a list here
+  sensors: "{{ ['s1', 's2'] + extra_sensors }}"
+extra_sensors: [s3]

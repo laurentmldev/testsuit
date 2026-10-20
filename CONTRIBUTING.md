@@ -41,7 +41,7 @@ A scenario entry `type: foo` runs the criterion `foo`, a function `crit_foo(crit
 
 ## Extending testsuit from another library
 
-An application built on testsuit can add formats, criteria, datapack importers and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`. `examples/acme_testbench` is a complete example project using all of them, with its own tests run by CI.
+An application built on testsuit can add formats, criteria, datapack importers and processors, and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`. `examples/acme_testbench` is a complete example project using all of them, with its own tests run by CI.
 
 ### Data file formats
 
@@ -100,7 +100,18 @@ from testsuit.datatools.datapack.importers import register_data_importer
 register_data_importer("myserver", MyServerImporter)   # an ADataImporter subclass
 ```
 
-`remotePath` is the datasource `path`, `versionId` the dataset `path`. After `retrieve()`, the dataset folder must contain a `dataset.dico` file, whose keys the datapack files can use. `git` is the built-in importer.
+`remotePath` is the datasource `source`, `versionId` the dataset `version`. The datapack tool provides the keys `<dataset id>.path` and `<dataset id>.version`; after `retrieve()`, the dataset folder can also hold a `dataset.yml` file whose keys the datapack files can use. `git` is the built-in importer.
+
+### datapack processors
+
+```python
+from testsuit.datatools.datapack.processors import register_processor
+
+# 'postprocess: ["mystep arg1 arg2"]' on a dataset or a component input of a setup file
+register_processor("mystep", lambda target, *args: ...)   # target: the dataset folder or the generated input
+```
+
+`finalize` and `replace` are built in; a name that is not registered is run as a script, relative to the setup folder.
 
 ### Plot backends
 

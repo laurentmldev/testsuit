@@ -1,45 +1,51 @@
 
 import argparse
-import os
 import sys
 
 from colorama import Fore, Style
 
 from testsuit import misc
-from testsuit.datatools.datapack.datapack_tools import datapack
+from testsuit.datatools.datapack.datapack_tools import DatapackError, datapack, verify_datapack
 
-## check if the given file is accessible
-def _isInputReadable(f):
-    if not os.access(misc.files.expandPath(f),os.R_OK):
-        raise argparse.ArgumentTypeError(f"{misc.files.expandPath(f)} does not exist or is not reachable")
-    return f
 
 # override the parsing error message using logger
 class _HelpParser(argparse.ArgumentParser):
     def error(self, message):
         print(Fore.RED+"ERROR: Input Arguments Error : "+message+Style.RESET_ALL)
         sys.exit(1)
-    
+
+
 ## the main function
 def main():
     parser = _HelpParser(description=
-    """Generate datapack from given test definition file.
+    """Generate the datapack of a test definition file: the input files of every component of its setup,
+rendered with Jinja2 from YAML dictionaries, packaged as a zip (BagIt layout).
 
-       Dictionaries listed in test definition are applied to the test definition file itself and also to pointed datapack config.
-       Dictionaries listed in datapack config are applied to datapack config itself, but *not* to test definition.
-    
-    Return 1 if something went wrong, 0 otherwise
+With --verify, check the checksums of an existing datapack zip instead.
+
+Return 1 if something went wrong, 0 otherwise
     """,
     formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('testdef_file',nargs='?',default="datapack.xml",help="the YAML file containing datapack definition",type=_isInputReadable)
-    parser.add_argument('--nocheck',action='store_true',help="Ignore warnings and consistency checks (git tags etc.) for test procedure and Setup folders.")
+    parser.add_argument('file',help="the test definition YAML file (or, with --verify, the datapack zip)")
+    parser.add_argument('--nocheck',action='store_true',help="Ignore warnings and consistency checks (git tags etc.) for test definition and setup folders.")
+    parser.add_argument('--output-dir','-o',help="where to write the datapack zip (default: key 'datapack.output_dir')")
+    parser.add_argument('--verify',action='store_true',help="check the checksums of the given datapack zip")
     args = parser.parse_args()
 
-    success = datapack(misc.files.expandPath(args.testdef_file),args.nocheck)
-    if success:
-        sys.exit(0)
-    else:
+    if args.verify:
+        problems = verify_datapack(misc.files.expandPath(args.file))
+        for problem in problems:
+            print(Fore.RED+"ERROR: "+problem+Style.RESET_ALL)
+        if not problems:
+            print(Fore.LIGHTGREEN_EX+"datapack is intact"+Style.RESET_ALL)
+        sys.exit(1 if problems else 0)
+
+    try:
+        datapack(misc.files.expandPath(args.file), args.nocheck, args.output_dir)
+    except DatapackError as e:
+        print(Fore.RED+"ERROR: "+str(e)+Style.RESET_ALL)
         sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

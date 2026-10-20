@@ -1,0 +1,3 @@
+# the test definition dictionaries override the setup ones
+platform:
+  name: test platform

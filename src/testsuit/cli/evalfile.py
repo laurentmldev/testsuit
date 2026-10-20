@@ -1,35 +1,10 @@
-
-
-##  @package evalfile
-# Evaluate given file both for includes and keys replacement, based on given dictionaries.
-# This script is based on 'evalkeys.py' and 'evalincludes.py' algorithms.
-#
-# Performs several replacement and includes as long as some replacements are done, which means that key value can be a reference to another key,
-# and include can contain a key value.
-#
-# Result lines are displayed on STDOUT.
-#
-#
-# USAGE: evalfile.py [-h] targetfile dico [dico ...]
-#
-#
-import sys,os
-
-
-
+"""Render a template file (or every file of a folder) with Jinja2, using YAML dictionaries."""
 import argparse
-import os.path
+import sys
+from pathlib import Path
 
-from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,finalizeLines
-from testsuit.datatools.datapack.evalfiles import evalkeys
-from testsuit.datatools.datapack.evalfiles import evalincludes
+from testsuit.datatools.datapack.templating import Keys, TemplateError, expand_dotted_keys
 
-
-## check if the given file is accessible
-def _isInputReadable(f):
-    if not os.access(f,os.R_OK):
-        raise argparse.ArgumentTypeError(f"{f} does not exist or is not readable")
-    return f
 
 # override the parsing error message using logger
 class _HelpParser(argparse.ArgumentParser):
@@ -37,51 +12,48 @@ class _HelpParser(argparse.ArgumentParser):
         print("Input Arguments Error : "+message)
         sys.exit(1)
 
+
+def _key_value(text):
+    key, sep, value = text.partition("=")
+    if not sep or not key:
+        raise argparse.ArgumentTypeError(f"expected key=value, got '{text}'")
+    return key, value
+
+
 ## the main function
 def main():
-	parser = _HelpParser(description=
-"""Evaluate given file for includes and keys replacement, based on given dictionnaries.
-This script is based on 'evalkeys' and 'evalincludes' algorithms.
+    parser = _HelpParser(description=
+"""Render a template file, or every file of a folder, with Jinja2.
 
-Performs several processing cycles as long as some replacements are done.
-This means that key value can be a reference to another key, and an include can contain a key value.
+Keys come from the given YAML dictionaries, later ones overriding earlier ones, then from --set.
+Includes ('{% include "x" %}') are looked up in the folder of the rendered file, then in --include-dir folders.
+Without --output, the rendered file is printed on STDOUT.
 
-When option '-o' is used, generates also an HTML view of performed key replacements and a '.<file>.keys' file containing the list of used keys and their provenance.
-Otherwise result lines are displayed on STDOUT by default.
+Return 1 if a key is undefined or a template invalid, 0 otherwise""",
+    formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('template',help="the file or folder to render",type=Path)
+    parser.add_argument('dictionaries',nargs='*',help="YAML dictionary files",type=Path)
+    parser.add_argument('--set','-s',action='append',default=[],type=_key_value,metavar="KEY=VALUE",help="a key (dotted name) and its value")
+    parser.add_argument('--include-dir','-I',action='append',default=[],type=Path,help="folder where to look for included files")
+    parser.add_argument('--output','-o',type=Path,help="output file (or folder, when rendering a folder)")
+    args = parser.parse_args()
 
-Result is displayed in <stdout>.
-
-Return:
-	3 a problem occured during processing
-	2 if circular inclusion or key reference detected, 
-	1 if unreacheable included file or key referene (and no circular include or key ref. detected)
-	0 if okay""",
-	formatter_class=argparse.RawTextHelpFormatter)
-	parser.add_argument('targetfile',help="the text file to be processed",type=_isInputReadable,metavar="targetfile")
-	parser.add_argument('dico',nargs='+', help="dictionary file(s) to be used for keys replacement, most important one first",type=_isInputReadable)	
-	parser.add_argument('--output', '-o',help="output in the given file, generating also the '.<file>.html' and '.<file>.keys' associated files")
-	parser.add_argument('--partial','-p',action='store_true',help="Partial replace : ignore unknown keys, process only defined ones")
-
-
-	args = parser.parse_args()
-
-	lines, usedkeys=evalfile(args.targetfile, args.dico, args.partial)
-	if not lines :
-		sys.exit(3)
-
-	finalizeLines(lines, usedkeys, args.partial, args.output)
-
-	if args.output is not None:
-		print("generated "+str(args.output)+" and associated 'keys' and 'html' files.")
-
-	if evalkeys.nbInfinateRecursion>0 or evalincludes.nbCircularRecursions>0:
-		sys.exit(2)
-	if evalincludes.nbNotFoundIncludes>0:
-		sys.exit(1)
-	if not args.partial and evalkeys.nbUndefined>0:
-		sys.exit(1)
-
-	sys.exit(0)
+    try:
+        keys = Keys()
+        for dictionary in args.dictionaries:
+            keys.add_file(dictionary)
+        if args.set:
+            keys.add(expand_dotted_keys(dict(args.set)), origin="--set")
+        if args.output is not None:
+            keys.render_tree(args.template, args.output, args.include_dir)
+        elif args.template.is_file():
+            text, _ = keys.render_file(args.template, args.include_dir)
+            sys.stdout.write(text)
+        else:
+            parser.error("--output is required to render a folder")
+    except TemplateError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

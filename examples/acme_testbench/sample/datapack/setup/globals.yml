@@ -1,0 +1,3 @@
+datapack:
+  # where the datapack zip is written (relative to the test definition, for this example)
+  output_dir: "{{ testdef.path }}/../../../.work/datapacks"
