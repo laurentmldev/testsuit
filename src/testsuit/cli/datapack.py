@@ -4,7 +4,7 @@ import sys
 
 from colorama import Fore, Style
 
-from testsuit import misc
+from testsuit.misc.files import expandPath
 from testsuit.datatools.datapack.datapack_tools import DatapackError, datapack, verify_datapack
 
 
@@ -33,7 +33,7 @@ Return 1 if something went wrong, 0 otherwise
     args = parser.parse_args()
 
     if args.verify:
-        problems = verify_datapack(misc.files.expandPath(args.file))
+        problems = verify_datapack(expandPath(args.file))
         for problem in problems:
             print(Fore.RED+"ERROR: "+problem+Style.RESET_ALL)
         if not problems:
@@ -41,7 +41,7 @@ Return 1 if something went wrong, 0 otherwise
         sys.exit(1 if problems else 0)
 
     try:
-        datapack(misc.files.expandPath(args.file), args.nocheck, args.output_dir)
+        datapack(expandPath(args.file), args.nocheck, args.output_dir)
     except DatapackError as e:
         print(Fore.RED+"ERROR: "+str(e)+Style.RESET_ALL)
         sys.exit(1)
