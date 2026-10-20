@@ -4,8 +4,9 @@ import subprocess
 import zipfile
 
 import pytest
+import yaml
 
-from testsuit.datatools.datapack.datapack_tools import datapack
+from testsuit.datatools.datapack.datapack_tools import datapack, verify_datapack
 from testsuit.datatools.datapack.importers import create_data_importer, get_data_importers
 from testsuit.plugins import load_plugins
 
@@ -46,9 +47,9 @@ def test_import_and_check(tmp_path, archive):
     importer = AcmeArchiveImporter(str(target), str(store), "v1.2")
     assert importer.retrieve()
 
-    dico = (target / "dataset.dico").read_text()
-    assert "bench_calib.version=v1.2" in dico
-    assert "bench_calib.pressure_gain=1.012" in dico
+    keys = yaml.safe_load((target / "dataset.yml").read_text())
+    assert keys["bench_calib"]["version"] == "v1.2"
+    assert keys["bench_calib"]["pressure_gain"] == 1.012
     assert importer.checkVersion("v1.2")
     assert not importer.checkVersion("v1.3")
 
@@ -63,13 +64,14 @@ def test_missing_version(tmp_path):
 
 def test_sample_datapack(sample_copy):
     testdef = sample_copy / "sample" / "datapack" / "testdef" / "acme_testdef.yml"
-    assert datapack(str(testdef), nocheck=True)
+    zip_path = datapack(str(testdef), nocheck=True)
 
-    generated = testdef.parent / ".current_datapack" / "bench_a" / "input"
+    generated = testdef.parent / ".current_datapack" / "data" / "bench_a" / "input"
     config = (generated / "bench_config.yml").read_text()
     assert "version: v1.2" in config and "pressure_gain: 1.012" in config
     assert (generated / "calibration.yml").read_text() == (STORE / "v1.2" / "calibration.yml").read_text()
-    assert len(list((sample_copy / ".work" / "datapacks").glob("acme_acceptance_acme_bench_*.zip"))) == 1
+    assert list((sample_copy / ".work" / "datapacks").glob("acme_acceptance_acme_bench_*.zip")) == [zip_path]
+    assert verify_datapack(zip_path) == []
 
     # second run: the dataset is already there, its version is checked instead
     assert datapack(str(testdef), nocheck=True)

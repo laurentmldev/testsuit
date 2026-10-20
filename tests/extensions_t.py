@@ -1,6 +1,6 @@
 """Extension points used by external libraries: data file formats, mexploit criteria, report logo,
 datapack importers, plugins."""
-import io,os,shutil,logging
+import os,shutil,logging
 from pathlib import Path
 
 import pytest
@@ -15,6 +15,7 @@ from testsuit.exploit.runner import report_html
 from testsuit.datatools.datapack import datapack_tools,importers
 from testsuit.datatools.datapack.ADataImporter import ADataImporter
 from testsuit.datatools.datapack.GitImporter import GitImporter
+from testsuit.datatools.datapack.model import Dataset,Datasource
 from testsuit import plugins
 
 logging.basicConfig(level=logging.DEBUG)
@@ -213,13 +214,13 @@ def test_invalid_logo():
 ################### datapack importers ###################
 
 class FakeImporter(ADataImporter):
-    """Imports a dataset by writing its dataset.dico, the version being in a VERSION file."""
+    """Imports a dataset by writing its dataset.yml, the version being in a VERSION file."""
     retrieved=[]
 
     def retrieve(self):
         os.makedirs(self._targetDir,exist_ok=True)
         Path(self._targetDir,"VERSION").write_text(self._versionId)
-        Path(self._targetDir,"dataset.dico").write_text(f"fake.remote={self._remotePath}\n")
+        Path(self._targetDir,"dataset.yml").write_text(f"fake:\n  remote: {self._remotePath}\n")
         FakeImporter.retrieved.append(self._versionId)
         return True
 
@@ -245,17 +246,18 @@ def test_register_data_importer(tmp_folder):
     FakeImporter.retrieved.clear()
     importers.register_data_importer("fake",FakeImporter)
     try:
-        dataset={"id":"my_dataset","path":"v1"}
-        dicos=datapack_tools.loadDataset(str(tmp_folder),"FAKE","my/remote",dataset,io.StringIO())
-        assert dicos==[str(tmp_folder / "my_dataset" / "v1" / "dataset.dico")]
-        assert Path(dicos[0]).read_text()=="fake.remote=my/remote\n"
+        datasource=Datasource(id="src",importer="FAKE",source="my/remote")
+        dataset=Dataset(id="my_dataset",version="v1")
+        record=datapack_tools.import_dataset(tmp_folder,datasource,dataset,tmp_folder)
+        assert record["path"]==(tmp_folder / "my_dataset" / "v1").as_posix()
+        assert Path(record["path"],"dataset.yml").read_text()=="fake:\n  remote: my/remote\n"
         # already imported: only its version is checked
-        datapack_tools.loadDataset(str(tmp_folder),"fake","my/remote",dataset,io.StringIO())
+        datapack_tools.import_dataset(tmp_folder,datasource,dataset,tmp_folder)
         assert FakeImporter.retrieved==["v1"]
     finally:
         importers.unregister_data_importer("fake")
-    with pytest.raises(SystemExit):
-        datapack_tools.loadDataset(str(tmp_folder),"fake","my/remote",{"id":"other","path":"v1"},io.StringIO())
+    with pytest.raises(datapack_tools.DatapackError,match="unknown datasource importer"):
+        datapack_tools.import_dataset(tmp_folder,datasource,Dataset(id="other",version="v1"),tmp_folder)
 
 
 ################### plugins ###################

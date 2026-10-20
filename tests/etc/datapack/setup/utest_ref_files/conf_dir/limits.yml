@@ -1,0 +1,5 @@
+param2:
+  min: {{ my_dataset.param2.meco_min }}
+  value: {{ my_dataset.param2.value }}
+  max: {{ my_dataset.param2.meco_max }}
+  unit: {{ my_dataset.param2.metadata.rawUnit }}

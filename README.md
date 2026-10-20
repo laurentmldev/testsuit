@@ -55,6 +55,21 @@ Pick it per check with `rendering_engine: matplotlib` in the scenario YAML, per 
 
 The exploit_runner HTML report stays a single file that works offline with plotly figures: they are stored as gzipped plotly JSON and drawn by plotly.js, which the report then embeds once (about 2 MB). Reports made with matplotlib only don't embed it. In mxp's own `pytest_report.html`, each plotly figure is drawn in a frame by a page of `pytest_report_files/`, which shares one copy of plotly.js. Another library can add its own backend with `testsuit.datatools.plotBackends.register_plot_backend()`.
 
+## Datapacks
+
+The `datapack` command builds the input files of every component of a test setup and packs them in a zip. A test definition names a setup and its configuration; the setup declares data repositories (datasets imported by importers such as `git`), component types with their input files, and configurations listing the components:
+
+```yaml
+# testdef.yml
+id: acme_acceptance
+name: ACME bench acceptance
+setup_file: ../setup/acme_setup.yml
+setup_config: nominal
+dictionaries: [versions.yml]
+```
+
+Input files are Jinja2 templates (`{{ bench_calib.pressure_gain }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --verify <zip>` checks its checksums. `examples/acme_testbench/sample/datapack` is a complete example, and `testsuit.datatools.datapack.model` documents the file formats.
+
 ## Repository layout
 
 ```
@@ -62,7 +77,7 @@ src/testsuit/           the installable package
   datatools/            load data files into pandas, convert to HDF5, push to a DB
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
     DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb, Clickhouse)
-    datapack/           datapack generation: dictionaries, includes, key replacement
+    datapack/           datapack generation: YAML dictionaries, Jinja2 templates, BagIt zip
   exploit/
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
@@ -89,7 +104,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `mxp`                    | run a mexploit scenario folder against data folders               |
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
-| `evalfile`               | resolve includes and keys in a file from dictionaries             |
+| `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |
 | `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
 
 ## Using the library

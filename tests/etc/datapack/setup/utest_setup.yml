@@ -1,0 +1,39 @@
+# setup of the datapack unit tests: no data repository, every key is in local dictionaries
+id: my_setup
+name: "Setup for {{ testdef.name }}"
+
+dictionaries:
+  - globals.yml
+
+component_types:
+  comp1:
+    configurations:
+      standard:
+        inputs:
+          - source: utest_ref_files/ref1.txt
+            target: MyRef1.txt
+          - source: utest_ref_files/ref2.txt
+            target: MyRef2.txt
+            method: copy
+          - source: utest_ref_files/conf_dir
+            target: conf
+          - source: utest_ref_files/missing.txt
+            target: missing.txt
+            optional: true
+          - source: local_ref_files/*.txt
+            target: local
+            method: copy
+          - source: utest_ref_files/ref1.txt
+            target: replaced.txt
+            postprocess: ["replace s/sample/replaced/g"]
+    # not read by datapack: kept as is for the test sequencer
+    commands:
+      start: {run: "start {{ component.id }}"}
+
+configurations:
+  nominal:
+    components:
+      mycmp1: {name: Comp One, type: comp1, configuration: standard}
+      mycmp2: {name: Comp Two, type: comp1, configuration: standard}
+  other:
+    components: {}

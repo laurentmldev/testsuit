@@ -115,7 +115,7 @@ Extensions can contain dots (`"sim.yml"`), and `accepts=lambda filename: ...` na
 
 **A criterion.** A function `crit_<type>(critConf)` that raises (usually with `assert`) when the check fails. `critConf` is the scenario entry, with its `name` and `type`. Load data with testsuit's `param()` helper, or read an earlier `computed_param` entry, as `criteria.signal()` does. Register a whole module with `register_criteria_module("mylib.criteria")`, or single functions with `@register_criterion`. A docstring with a `<TEMPLATE>` block, as in testsuit's own criteria, documents the scenario syntax.
 
-**A datapack importer.** Subclass `ADataImporter` (`retrieve()`, `checkVersion()`, `getChanges()`, `getTag()`) and register the class, or any factory `(targetDir, remotePath, versionId)`: `register_data_importer("acme-archive", AcmeArchiveImporter)`. After `retrieve()`, the dataset folder must hold a `dataset.dico` file with the keys the datapack files can use.
+**A datapack importer.** Subclass `ADataImporter` (`retrieve()`, `checkVersion()`, `getChanges()`, `getTag()`) and register the class, or any factory `(targetDir, remotePath, versionId)`: `register_data_importer("acme-archive", AcmeArchiveImporter)`. The datapack tool provides `<dataset id>.path` and `<dataset id>.version`; after `retrieve()`, the dataset folder can also hold a `dataset.yml` file with more keys for the datapack files (`{{ bench_calib.pressure_gain }}`).
 
 **The report logo.** `set_default_report_logo(svg=...)` takes SVG markup or a file path; `title="..."` keeps testsuit's animated logo with your name in it. For one run only, use `exploit_runner --report-logo logo.svg` or `--report-logo-title "ACME Bench"`.
 

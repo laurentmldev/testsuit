@@ -8,9 +8,6 @@ demo_data
 *.tmp
 tmp/
 .current_datapack
-# for testing datapack import
-dataset.dico
-.dataset.dico
 tests/etc/mexploit/scenarii/*/conftest.py
 .venv
 .current_datapack

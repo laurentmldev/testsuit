@@ -5,11 +5,13 @@ fetches each dataset of the datasource into a local folder and checks its versio
 It is created by a factory ``factory(targetDir, remotePath, versionId) -> ADataImporter``:
 
 - ``targetDir``: local folder of the dataset (where to import it)
-- ``remotePath``: the datasource ``path`` (a URL, a server, a folder...)
-- ``versionId``: the dataset ``path`` (a branch, a tag, a version...)
+- ``remotePath``: the datasource ``source`` (a URL, a server, a folder...)
+- ``versionId``: the dataset ``version`` (a branch, a tag, a version...)
 
-After ``retrieve()``, the dataset folder must contain a ``dataset.dico`` file (written by the importer
-or by the dataset ``postprocess`` scripts): its keys are then usable in the datapack files.
+The datapack tool provides the keys ``<dataset id>.path`` (the local folder) and
+``<dataset id>.version``. After ``retrieve()``, the dataset folder may also hold a ``dataset.yml``
+file (written by the importer or by the dataset ``postprocess`` processors): its keys are then
+usable in the datapack files too.
 
 Example, from an external library::
 

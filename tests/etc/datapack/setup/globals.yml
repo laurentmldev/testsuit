@@ -1,0 +1,5 @@
+datapack:
+  output_dir: "{{ testdef.path }}/../../../tmp/datapacks"
+platform:
+  name: setup platform
+  vendor: ACME

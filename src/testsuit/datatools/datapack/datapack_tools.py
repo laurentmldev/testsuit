@@ -1,569 +1,520 @@
+"""Generation of a datapack: the input files of every component of a test setup, packaged in a zip.
 
-import sys,os,getpass,stat,traceback
+Steps, from a test definition file (see model for the file formats, templating for the keys):
+
+1. the dictionaries of the test definition are loaded; the test definition is rendered with them;
+2. the setup file it points to is loaded, with its own dictionaries;
+3. the datasets of the setup data repositories are imported (or their version is checked when
+   already there) and their keys added;
+4. every key is resolved; the input files of each component of the chosen setup configuration are
+   rendered (or copied) into ``data/<component>/input/``;
+5. everything is written as a BagIt bag (RFC 8493) and zipped::
+
+       <name>/
+         bagit.txt, bag-info.txt
+         manifest-sha256.txt         checksums of data/
+         tagmanifest-sha256.txt      checksums of the other files
+         datapack.yml                what the datapack was built from: ids, git state, datasets,
+                                     components and the keys used by each generated file
+         context.yml                 every key, resolved: the datapack needs no dictionary to be used
+         definition/                 test definition, setup and dictionaries, as written
+         data/<component>/input/     generated files
+         data/<component>/output/    empty, for the test results
+
+Keys always available (they override dictionary keys of the same name):
+
+- ``testdef.{id, name, file, path, setup_file, setup_config}``
+- ``setup.{id, name, file, path, configuration}``
+- ``datapack.{name, user, host, timestamp, nocheck}``
+- ``<dataset id>.{path, version}`` for every imported dataset
+- ``component.{id, name, type, configuration}`` while rendering the files of a component
+
+``datapack.output_dir`` (from a dictionary, or the ``output_dir`` argument) is where the zip is written.
+"""
+from __future__ import annotations
+
+import getpass
+import glob
+import hashlib
+import os
+import shutil
+import socket
+import stat
+import zipfile
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+import git
 import yaml
+from colorama import Fore, Style
+from pydantic import ValidationError
 
-import subprocess
-
-from testsuit.datatools.datapack.evalfiles.libdictionary import loadDicos
-from testsuit.datatools.datapack.evalfiles.libdictionary import getkeyval
-from testsuit.datatools.datapack.evalfiles.evalfile import evalfile,evalkeys,evalincludes,finalizeLines,writeDicoHtmlViews
-from testsuit.datatools.datapack.evalfiles.evalpath import evalPath
-
-from testsuit.datatools.datapack.GitImporter import GitImporter
 from testsuit.datatools.datapack.importers import create_data_importer
+from testsuit.datatools.datapack.model import DataRepository, Setup, Testdef
+from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
+from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping
 from testsuit.plugins import load_plugins
 
-from testsuit import misc
-from testsuit.misc.files import checksumFolder
+WORK_FOLDER = ".current_datapack"
+FORMAT_VERSION = 1
 
-import socket
-from datetime import datetime
 
-import shutil
-from colorama import Fore, Style
-from colorama import init as colorama_init
-colorama_init()
+class DatapackError(Exception):
+    """The datapack cannot be generated."""
 
-PROCESSORS_PATH=Path(os.path.dirname(os.path.realpath(__file__))+os.sep+"processors")
-if not PROCESSORS_PATH.exists():
-    raise Exception(f"processors folder not reachable: {PROCESSORS_PATH}")
 
-def _yaml_root(data):
-    """Extract the single root dictionary from a YAML file structure."""
-    if isinstance(data, dict) and len(data) == 1:
-        return list(data.values())[0]
-    return data
+def _info(text: str) -> None:
+    print(text + Style.RESET_ALL)
 
-def runScript(path,argsTbl):
 
-    cmdsTbl=argsTbl
+def _warn(text: str) -> None:
+    print(Fore.YELLOW + "WARNING: " + text + Style.RESET_ALL)
 
-    if path.name.endswith(".py"):
-        cmdsTbl=["python",str(path)]+cmdsTbl
-    elif path.name.endswith(".sh"):        
-        cmdsTbl=["bash",str(path)]+cmdsTbl
 
-    #print("running cmd: "+str(cmdsTbl))
-    
+def _validate(model, data: Any, what: str):
     try:
-        rst = subprocess.run(cmdsTbl,check=False)
-        if rst.returncode!=0:
-            print(Fore.RED+"ERROR: error (exit status = "+str(rst.returncode)+") while running command :"+str(path)+"'"+Style.RESET_ALL+", with args:")
-            print(argsTbl)
-            sys.exit(1)
-    except Exception as e:
-        traceback.print_stack()
-        print(Fore.RED+"ERROR: unable to run cmd '"+str(path)+"' :"+str(e)+Style.RESET_ALL)
-        sys.exit(1)
+        return model.model_validate(data)
+    except ValidationError as e:
+        raise DatapackError(f"invalid {what}:\n{e}") from e
 
-    colorama_init() # call to subprocess breaks shell colors. TODO: find better wau to fix it ...
-    
 
-def evalFile(srcFile,targetFile,dicosListTbl,partialOk=True):
+def _expand(path: str, base: Path) -> Path:
+    """Path relative to base, '~' expanded."""
+    p = Path(os.path.expanduser(str(path)))
+    return (p if p.is_absolute() else base / p).resolve()
 
-    lines,usedkeys=evalfile(srcFile, dicosListTbl,partialEval=partialOk)
 
-    if lines is None:
-        print(Fore.RED+"ERROR: unable to eval file : '"+srcFile+"'"+Style.RESET_ALL)        
-        sys.exit(3)
-    
-    finalizeLines(lines, usedkeys, outputFile=targetFile)
-
-    if evalkeys.nbInfinateRecursion>0 or evalincludes.nbCircularRecursions>0:
-        print(Fore.RED+"ERROR: infinate recursion while evaluating file : '"+srcFile+"'"+Style.RESET_ALL)
-        sys.exit(2)
-    if evalincludes.nbNotFoundIncludes>0:
-        print(Fore.RED+"ERROR: unreachable include while evaluating file : '"+srcFile+"'"+Style.RESET_ALL)
-        sys.exit(1)
-    if not partialOk and evalkeys.nbUndefined>0:
-        print(Fore.RED+"ERROR: some undefined keys while evaluating file : '"+srcFile+"'"+Style.RESET_ALL)
-        sys.exit(1)
-
-    #print(Fore.LIGHTBLACK_EX+"[Generated "+targetFile+"]"+Style.RESET_ALL)
-            
-# expand given file path, and if options given, also evaluate contents
-# against given dictionaries
-# Optionally eval target file, putting result file into 'evalTargetFolder' folder
-def expandPath(path,evalTargetFolder=None,evalDicosList=None,evalPartialOk=False):
-
-    respath=misc.files.expandPath(path)    
-    if evalTargetFolder is not None:
-        assert(evalDicosList is not None)
-        evalFileName=evalTargetFolder+os.sep+os.path.basename(respath)
-        #print("         3> "+respath)        
-        evalFile(respath,evalFileName,evalDicosList,partialOk=evalPartialOk)
-        return evalFileName
-    
-    return respath
-    
-def runDataprocessor(arguments, processorName):
-
-    if not isinstance(arguments, list):
-        arguments = [arguments]
-
-    # retrieve some potential specific extra arguments for the processor
-    if len(processorName.split(" ")) > 1:
-        procNameAndArgs = processorName.split(" ")
-        processorName = procNameAndArgs.pop(0)
-        extraArgs = procNameAndArgs
-        arguments += extraArgs
-    # arguments: first argument must be targetFolder, other ones are free
-    print(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + processorName + Style.RESET_ALL)
-
-    # Direct import and execution of known Python processors
-    processorModule = processorName.replace(".py", "")
-    knownProcessors = ["filterkeys", "finalize", "replace", "basickeys"]
-
-    if processorModule in knownProcessors:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            processorModule, PROCESSORS_PATH / processorName
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        module.main(arguments)
-    else:
-        runScript(PROCESSORS_PATH / processorName, arguments)
-
-    
-def normalizeDatasetPath(path):
-    normalizedPath= path.replace("/",".").replace("@","_").replace(" ","_")
-    if normalizedPath.startswith("."):
-        normalizedPath=normalizedPath[1:]
-    if normalizedPath.endswith("."):
-        normalizedPath=normalizedPath[:-1]
-
-    return normalizedPath
-
-def loadDataset(repoPath,datasourceImporter,datasourcePath,datasetNode,contextFileHdl,nocheck=False):
-
-    datasetId=datasetNode["id"]
-    datasetPath=datasetNode["path"]
-    datasetPostscript=datasetNode.get("postprocess", "").split(",")   
-    datasetFullLocalPath=repoPath+os.sep+datasetId+os.sep+normalizeDatasetPath(datasetPath)
-    Path(repoPath+os.sep+datasetId).mkdir(parents=True, exist_ok=True)
-
-    if len(datasetPath)==0:
-        contextFileHdl.write("      [DATASET] "+datasetId+" -> skipped\n")
-        print(Fore.YELLOW+"     [DATASET] "+Style.RESET_ALL+datasetId+Fore.LIGHTBLACK_EX+" -> "+Style.RESET_ALL+"'' ["+Fore.RED+"skipped"+Style.RESET_ALL+"]")
-        return []
-
-    contextFileHdl.write("      [DATASET] "+datasetId+" -> "+datasetPath+"\n")
-
+def git_state(folder: Path) -> dict | None:
+    """Commit, tag and cleanliness of the git work tree holding folder (None if not in a work tree)."""
     try:
-        dataImporter=create_data_importer(datasourceImporter,datasetFullLocalPath,datasourcePath,datasetPath)
-    except KeyError as e:
-        print(Fore.RED+"ERROR: "+str(e.args[0])+" for dataset '"+datasetId+"'"+Style.RESET_ALL)
-        sys.exit(1)
-
-    if os.access(datasetFullLocalPath,os.X_OK):   
-        print(Fore.LIGHTBLUE_EX+"     [DATASET] "+Style.RESET_ALL+datasetId+Fore.LIGHTBLACK_EX+" -> "+Fore.CYAN+datasetPath+Style.RESET_ALL +" ["+Fore.GREEN+"found"+Style.RESET_ALL+"]")
-        if not dataImporter.checkVersion(datasetPath):
-            if nocheck:
-                print(Fore.YELLOW+"WARNING: for dataset '"+datasetId+"', could not confirm compliance with expected version '"+datasetPath+"'"+Style.RESET_ALL+", ignored.")
-                contextFileHdl.write("WARNING: for dataset '"+datasetId+"', could not confirm compliance with expected version '"+datasetPath+"'\n")
-                changesList=dataImporter.getChanges()
-                if len(changesList)>0:
-                    print("Following unexpected changes have been detected:")
-                    for change in changesList:
-                        print("  - "+change)
-            else:
-                print(Fore.RED+"ERROR: for dataset '"+datasetId+"', could not confirm compliance with expected version '"+datasetPath+"'"+Style.RESET_ALL)
-                sys.exit(1)
-        
-    else:
-        print(Fore.LIGHTBLUE_EX+"     [DATASET] "+Style.RESET_ALL+datasetId+Fore.LIGHTBLACK_EX+" -> "+Fore.CYAN+datasetPath+Style.RESET_ALL +" ["+Fore.LIGHTYELLOW_EX+"importing"+Style.RESET_ALL+"]")
-        if not dataImporter.retrieve():
-            print(Fore.RED+"ERROR: unable to import data, aborting."+Style.RESET_ALL)
-            sys.exit(1)
-        
-        for postscriptName in datasetPostscript:
-            if len(postscriptName)>0:
-                runDataprocessor(datasetFullLocalPath,postscriptName)
-         
-    return [datasetFullLocalPath+os.sep+"dataset.dico"]
-
-def loadDatasource(repoPath,datasourceNode,contextFileHdl,nocheck=False):
-
-    datasourceId=datasourceNode["id"]
-    datasourceName=datasourceNode["name"]
-    datasourceImporter=datasourceNode["importer"]
-    datasourcePath=datasourceNode["path"]
-    print(Fore.BLUE+" [DATASOURCE] "+Style.RESET_ALL+datasourceId+Fore.LIGHTBLACK_EX+" ("+datasourceImporter+") -> "+Fore.CYAN+datasourcePath+Style.RESET_ALL)
-    contextFileHdl.write("  [DATASOURCE] "+datasourceId+" ("+datasourceImporter+") -> "+datasourcePath+"\n")
-    dicosList=[]
-    # import related datasets (if missing)
-    for dataset in datasourceNode.get('dataset', []):
-        dicosList+=loadDataset(repoPath,datasourceImporter,datasourcePath,dataset,contextFileHdl,nocheck)
-
-    return dicosList
-
-def loadRepo(repositoryNode,contextFileHdl,nocheck=False):
-
-    # create folder
-    repoId=repositoryNode["id"]
-    repoName=repositoryNode["name"]
-    repoPath=expandPath(repositoryNode["path"])
-    print("\n"+Fore.BLUE+"[REPO] "+Style.RESET_ALL+repoId+Fore.LIGHTBLACK_EX+" -> "+Fore.CYAN+repoPath+Style.RESET_ALL)
-    contextFileHdl.write("[REPO] "+repoId+" -> "+repoPath+"\n")
-
-    Path(repoPath).mkdir(parents=True, exist_ok=True)
-    
-    dicosList=[]
-
-    # import related datasources (if missing)
-    for datasource in repositoryNode.get('datasource', []):
-        dicosList+=loadDatasource(repoPath,datasource,contextFileHdl,nocheck)
-
-    return dicosList
-
-def getEvaluatedFileName(fileName):
-    return os.path.dirname(fileName)+os.sep+"."+os.path.basename(fileName)
-
-def findRefFile(testdefFolder,targetCompsFolder,setupFolder,templateFileName,optional):
-
-    #print("testdefFolder="+testdefFolder)
-    #print("targetCompsFolder="+targetCompsFolder)
-    #print("setupFolder="+setupFolder)
-    #print("templateFileName="+templateFileName)
-
-    templateFileNameOri=templateFileName
-    if '*' in templateFileName:
-        templateFileName=templateFileName.split('*')[0]
-        
-    datapackLocation=expandPath(targetCompsFolder+os.sep+"..")
-
-    # relative from testdef
-    if os.access(testdefFolder+os.sep+templateFileName,os.R_OK): 
-        return testdefFolder+os.sep+templateFileNameOri
-    # relative from setup folder
-    if os.access(setupFolder+os.sep+templateFileName,os.R_OK):
-        return setupFolder+os.sep+templateFileNameOri
-    # relative from testdef folder
-    if os.access(datapackLocation+os.sep+templateFileName,os.R_OK):
-        return datapackLocation+os.sep+templateFileNameOri
-    # absolute path or relative from PWD
-    if  os.access(expandPath(templateFileName),os.R_OK): 
-        return expandPath(templateFileNameOri)
-    
-    if optional==True:
+        repo = git.Repo(folder, search_parent_directories=True)
+        commit = repo.head.commit.hexsha
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError, ValueError):
         return None
-    print(Fore.RED+"ERROR: template file required in component conf is not reachable: '"+templateFileName+"'"+Style.RESET_ALL)
-    print("Tried following solutions:")
-    print(" - relative path from testdef folder: "+testdefFolder)
-    print(" - relative path from setup folder: "+setupFolder)
-    print(" - relative path from datapack location: "+datapackLocation)
-    print(" - absolute path or relative to current user directory")
-    sys.exit(1)
-
-def genDataPackComponent(targetCompsFolder,componentNode,componentTypeDesc,dico,keysorigin,dicosList,setupFolder,testdefFolder,nocheck):
-    
-    compId=componentNode["id"]
-    compName=componentNode["name"]
-    compType=componentNode["type"]
-    compConfig=componentNode["configuration"]
-
-    print(Fore.LIGHTBLUE_EX+"\n["+compId+"] "+Fore.LIGHTBLACK_EX+" config '"+Style.RESET_ALL+compConfig+Fore.LIGHTBLACK_EX+"'"+Style.RESET_ALL)
-
-    Path(targetCompsFolder+os.sep+compId).mkdir(parents=True, exist_ok=False)
-    Path(targetCompsFolder+os.sep+compId+os.sep+"input").mkdir(parents=True, exist_ok=False)
-    Path(targetCompsFolder+os.sep+compId+os.sep+"output").mkdir(parents=True, exist_ok=False)
-
-    compConfigNode = next((c for c in componentTypeDesc.get('configuration', []) if c["id"] == compConfig), None)
-    if compConfigNode is None:
-        print(Fore.RED+"ERROR: no such config '"+compConfig+"' for component type '"+compType+"."+Style.RESET_ALL)
-        for config in componentTypeDesc.get('configuration', []):
-            print(config)
-        sys.exit(1)
-   
-    for inputFile in compConfigNode.get('input', []):
-        targetPath=targetCompsFolder+os.sep+compId+os.sep+"input"+os.sep+inputFile["value"]
-        templateFileSearch=inputFile["template"]
-        method=inputFile["method"]
-        postscripts=[]
-        if "postprocess" in inputFile:
-            postscripts=inputFile["postprocess"].split(",")
-        optional=False
-        if inputFile.get("optional", False):
-            optional=True
-        templateFile=findRefFile(testdefFolder,targetCompsFolder,setupFolder,templateFileSearch,optional)        
-        
-        if templateFile is None:
-            assert(optional==True)
-            print(Fore.YELLOW+"    [OPTIONAL] "+Fore.LIGHTBLACK_EX+templateFileSearch+Style.RESET_ALL+" --> "\
-                +Fore.LIGHTBLACK_EX+compId+os.sep+"input/"+inputFile["value"]+" "+Fore.LIGHTRED_EX+"X"+Style.RESET_ALL)
-            continue
-            
-        if method=="copy":
-            print(Fore.MAGENTA+"    [COPY] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
-        elif method=="eval":
-            print(Fore.LIGHTMAGENTA_EX+"    [EVAL] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
-        elif method=="exec":
-            print(Fore.LIGHTMAGENTA_EX+"    [EXEC] "+Fore.LIGHTBLACK_EX+templateFile+Style.RESET_ALL+" --> "\
-                +Fore.WHITE+compId+os.sep+"input"+os.sep+inputFile["value"]+" "+Fore.LIGHTGREEN_EX+'\u2713'+Style.RESET_ALL)
-        else:
-            raise Exception(f"unknown file evaluation method '{method}' (copy|eval|exec)")
-        
-        success,compressed=evalPath(targetPath,templateFile, method, dico, keysorigin, dicosList)                
-        if not success:
-            print(Fore.RED+"ERROR: unable to generate properly datapack entries for '"+compId+"', sorry."+Style.RESET_ALL)
-            print("Maybe ensure that your setup files are consistent ("+setupFolder+") and all required keys are available in used dictionaries:")
-            print(dicosList)
-            sys.exit(1)
-
-        for postscriptName in postscripts:
-            if len(postscriptName)>0:
-                runDataprocessor([targetPath],postscriptName)
-    
-
-
-def finalizeDatapack(setupId, testId, userId, timestamp, datapackFolder, datapacks,nochecks=False):
-
-    datatpackName=testId+"_"+setupId+"_"+userId+"_"+timestamp
-    if nochecks==True:
-        datatpackName=datatpackName+"_DRAFT"
-    
-    print(Fore.LIGHTBLACK_EX+"[generating datapack folder]"+Style.RESET_ALL)
-    shutil.copytree(datapackFolder,datapacks+os.sep+datatpackName)    
-    print(Fore.LIGHTBLACK_EX+"[computing checksums and dups]"+Style.RESET_ALL)
-    checksumFolder(datapacks+os.sep+datatpackName)
-    #runScript(CHECKSUM_TOOL,["-u","-s", datapacks+os.sep+datatpackName])
-    shutil.copytree(datapacks+os.sep+datatpackName,datapacks+os.sep+datatpackName+os.sep+".ori")
-    shutil.move(datapacks+os.sep+datatpackName+".sha256",datapacks+os.sep+datatpackName+os.sep+".inputs.sha256")    
-
-    finalFileName=shutil.make_archive(datapacks+os.sep+datatpackName, 'zip', root_dir=datapacks,base_dir=datatpackName)
-
     try:
-        shutil.rmtree(datapacks+os.sep+datatpackName,onerror=del_rw)
-    except OSError:
-        print(Fore.YELLOW+f"WARNING: unable to clean temporary folder {datapacks+os.sep+datatpackName}."+Style.RESET_ALL)            
-    
-    return finalFileName
+        tag = repo.git.describe("--tags", "--exact-match", "HEAD")
+    except git.GitCommandError:
+        tag = None
+    rel = os.path.relpath(folder, repo.working_tree_dir)
+    dirty = bool(repo.git.status("--porcelain", "--", rel))
+    return {"commit": commit, "tag": tag, "clean": not dirty}
 
-def datapack(testdef_file,nocheck=False):
 
-    # importers declared by external libraries
-    load_plugins()
+def normalize_dataset_path(version: str) -> str:
+    """Folder name of a dataset version ('a/b@c' -> 'a.b_c')."""
+    return version.replace("/", ".").replace("@", "_").replace(" ", "_").strip(".")
 
-    testdefFolder=os.path.dirname(testdef_file)
-    if len(testdefFolder)==0:
-        testdefFolder="."
-    targetDatapackFolder=testdefFolder+os.sep+".current_datapack"
-    datapackContextFile=targetDatapackFolder+os.sep+"context.log"
 
-    # create/clean temporary datapack folder
-    if os.access(targetDatapackFolder,os.R_OK): 
-        print(Fore.LIGHTBLACK_EX+"[cleaning existing '"+targetDatapackFolder+"' folder]"+Style.RESET_ALL)
-        shutil.rmtree(targetDatapackFolder,onerror=del_rw)        
-        
-    Path(targetDatapackFolder).mkdir(parents=True, exist_ok=True)
-    
-    # create folder where to store config files evaluated based on provided dicos
-    # (it is inside datapack so that we can keep track of with which data exactly it has been generated)
-    processingFolder=targetDatapackFolder+os.sep+".processing"
-    if os.access(processingFolder,os.R_OK): 
-        shutil.rmtree(processingFolder,onerror=del_rw)
-    Path(processingFolder).mkdir(parents=True, exist_ok=False)  
-    print(Fore.LIGHTBLACK_EX+"[processing files located in '"+processingFolder+"']"+Style.RESET_ALL)
+def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, nocheck: bool = False) -> dict | None:
+    """Import a dataset of a datasource into repo_path (or check its version if already there).
 
-    # list of all dicos involved in files evaluation
-    # this list is enriched as the config files are loaded
-    dicosList=[]
+    :return: what the datapack records about it (None if its version is empty: skipped)
+    """
+    if not dataset.version:
+        _info(Fore.YELLOW + "     [DATASET] " + Style.RESET_ALL + dataset.id + " -> skipped (no version)")
+        return None
 
-    # load original test definition YAML file to get dicos list
-    # import testdef dicos data
-    with open(testdef_file) as f:
-        testdefData = yaml.safe_load(f)
-    testdefRoot = _yaml_root(testdefData)
-    for dicofileNode in testdefRoot.get('dictionary', []):
-        dicoFilePath=dicofileNode    
-        dicoFullPath=expandPath(testdefFolder+os.sep+dicoFilePath)
-        if not os.access(dicoFullPath,os.R_OK): 
-            print(Fore.RED+"ERROR: Dico file from test dev '"+testdef_file+"'  not reachable: '"+dicoFullPath+"'"+Style.RESET_ALL)
-            return False
-        dicosList+=[expandPath(dicoFullPath)]
-    # html views of the dicos, target of the links of evaluated files html views
-    dicosHtmlFolder=processingFolder+os.sep+"dicos"
-    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
+    local_path = repo_path / dataset.id / normalize_dataset_path(dataset.version)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        importer = create_data_importer(datasource.importer, str(local_path), datasource.source, dataset.version)
+    except KeyError as e:
+        raise DatapackError(f"dataset '{dataset.id}': {e.args[0]}") from e
 
-    # evaluate testdef file based on dicos listed inside
-    evaluatedTestDefFilePath=processingFolder+os.sep+os.path.basename(testdef_file)
-    evalFile(testdef_file,evaluatedTestDefFilePath,dicosList)
-
-    # load contents of evaluated testdef file
-    with open(evaluatedTestDefFilePath) as f:
-        testdefData = yaml.safe_load(f)
-    testdefRoot = _yaml_root(testdefData)
-
-    # read basic infos of testdef    
-    testId=testdefRoot["id"]
-    testName=testdefRoot["name"]
-    setupFile=expandPath(testdefFolder+os.sep+testdefRoot["setup_file"])
-    setupFolder=os.path.dirname(setupFile)
-    setupConfig=testdefRoot["setup_config"]
-    testDate=datetime.now()
-
-    # start log file summarizing testdef infos
-    contextFileHdl=open(datapackContextFile, "w+")
-    contextFileHdl.write("--- Datapack Generation Context ---"+"\n")
-    contextFileHdl.write("Date: "+testDate.strftime("%Y-%m-%d %H:%M:%S")+"\n")
-    contextFileHdl.write("User: "+getpass.getuser()+"\n")
-    contextFileHdl.write("Host: "+socket.gethostname()+"\n")
-    contextFileHdl.write("PWD: "+os.getenv("PWD","")+"\n")
-    contextFileHdl.write("Test Procedure: "+expandPath(testdef_file)+"\n")
-    contextFileHdl.write("setup: "+expandPath(setupFile)+"\n")
-    contextFileHdl.write("tools: "+expandPath(__file__)+"\n")    
-    contextFileHdl.write("nocheck: "+str(nocheck)+"\n")        
-    contextFileHdl.write("-----------------------------------"+"\n\n")
-
-    # create a dictionary with testdef infos, to be potentially used by other 
-    # files to be evaluated later
-    testdefDico=processingFolder+os.sep+"testdef.dico"
-    testdefDicoFileHdl=open(testdefDico, "w+")
-    testdefDicoFileHdl.write("# dico generated by msp_datapack.py tool, from datapack.xml"+"\n")
-    testdefDicoFileHdl.write("testdef.id="+testId+"\n")
-    testdefDicoFileHdl.write("testdef.path="+expandPath(testdefFolder)+"\n")
-    testdefDicoFileHdl.write("testdef.name="+testName+"\n")
-    testdefDicoFileHdl.write("testdef.setup.file="+setupFile+"\n")
-    testdefDicoFileHdl.write("testdef.setup.path="+setupFolder+"\n")
-    testdefDicoFileHdl.write("testdef.setup.conf="+setupConfig+"\n")
-    testdefDicoFileHdl.write("testdef.timestamp="+testDate.strftime("%Y-%m-%d %H:%M:%S")+"\n")
-    testdefDicoFileHdl.write("testdef.pwd="+os.getenv("PWD","")+"\n")
-    testdefDicoFileHdl.write("testdef.host="+socket.gethostname()+"\n")
-    testdefDicoFileHdl.write("testdef.tools="+expandPath(__file__)+"\n")
-    testdefDicoFileHdl.write("testdef.nocheck="+str(nocheck)+"\n")
-    testdefDicoFileHdl.close()
-    dicosList+=[testdefDico]
-    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
-
-    # ensure testdef and Setup folders are clean and tagged
-    if nocheck==True:
-        print(Fore.YELLOW+"\n/!\\ *** WARNING *** 'Ignore Checks' options activated : checks and tags inconsistencies will be ignored /!\\"+"\n"+Style.RESET_ALL)
-        print(Fore.LIGHTBLACK_EX+"\n"+"Test Definition folder: "+Style.RESET_ALL+testdefFolder)
-        if not GitImporter(testdefFolder).isClean():
-            print(Fore.YELLOW+"WARNING: testdef folder is not a clean tag: '"+testdefFolder+"'"+Style.RESET_ALL)
-            contextFileHdl.write("WARNING: testdef folder is not a clean tag\n")
-        print(Fore.LIGHTBLACK_EX+"\n"+"Setup folder: "+Style.RESET_ALL+setupFolder)
-        if not GitImporter(setupFolder).isClean():
-            print(Fore.YELLOW+"WARNING: Setup folder is not a clean tag: '"+setupFolder+"'"+Style.RESET_ALL)
-            contextFileHdl.write("WARNING: Setup folder is not a clean tag\n")
+    label = Fore.LIGHTBLUE_EX + "     [DATASET] " + Style.RESET_ALL + dataset.id + Fore.LIGHTBLACK_EX + " -> " + Fore.CYAN + dataset.version + Style.RESET_ALL
+    if local_path.is_dir():
+        _info(label + " [" + Fore.GREEN + "found" + Style.RESET_ALL + "]")
+        if not importer.checkVersion(dataset.version):
+            message = f"dataset '{dataset.id}': could not confirm it matches version '{dataset.version}'"
+            if not nocheck:
+                raise DatapackError(message)
+            _warn(message + ", ignored (nocheck)")
+            for change in importer.getChanges() or []:
+                print("  - " + change)
     else:
-        print(Fore.LIGHTBLACK_EX+"\n"+"Test Definition folder: "+Style.RESET_ALL+testdefFolder)
-        if not GitImporter(testdefFolder).isClean():
-            print(Fore.RED+"ERROR: aborting, env is not clean. Try again with option '--nocheck' to force."+Style.RESET_ALL)
-            return False
-        print(Fore.LIGHTBLACK_EX+"\n"+"Setup folder: "+Style.RESET_ALL+setupFolder)
-        if not GitImporter(setupFolder).isClean():
-            print(Fore.RED+"ERROR: aborting, env is not clean. Try again with option '--nocheck' to force."+Style.RESET_ALL)
-            return False
-    
+        _info(label + " [" + Fore.LIGHTYELLOW_EX + "importing" + Style.RESET_ALL + "]")
+        if not importer.retrieve():
+            raise DatapackError(f"dataset '{dataset.id}': import failed")
+        for spec in dataset.postprocess:
+            _info(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + spec)
+            try:
+                run_processor(spec, local_path, scripts_folder)
+            except ProcessorError as e:
+                raise DatapackError(str(e)) from e
 
-    # test access to setup file
-    if not os.access(setupFile,os.R_OK): 
-        print(Fore.RED+"ERROR: Datapacks Setup file from test dev '"+testdef_file+"' not reachable: '"+setupFile+"'"+Style.RESET_ALL)
-        return False
-    
-    # preeval Setup file and load dicos listed in it
-    setupFileEval=expandPath(setupFolder+os.sep+os.path.basename(setupFile),\
-                                evalTargetFolder=processingFolder,\
-                                evalDicosList=dicosList,\
-                                evalPartialOk=True)    
+    return {"id": dataset.id, "datasource": datasource.id, "importer": datasource.importer,
+            "source": datasource.source, "version": dataset.version, "path": local_path.as_posix()}
+
+
+def _find_sources(source: str, folders: list[Path]) -> list[Path]:
+    """Files or folders matching source (absolute, or relative to one of folders, first match wins)."""
+    candidates = [Path(os.path.expanduser(source))]
+    if not candidates[0].is_absolute():
+        candidates = [folder / source for folder in folders]
+    for candidate in candidates:
+        if glob.has_magic(str(candidate)):
+            matches = sorted(Path(p) for p in glob.glob(str(candidate), recursive=True))
+            if matches:
+                return matches
+        elif candidate.exists():
+            return [candidate]
+    return []
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe(data: Any) -> Any:
+    """Data that yaml.safe_dump accepts."""
+    if isinstance(data, dict):
+        return {str(k): _safe(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple, set)):
+        return [_safe(v) for v in data]
+    if data is None or isinstance(data, (str, int, float, bool)):
+        return data
+    return str(data)
+
+
+def _dump_yaml(path: Path, data: Any, header: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(header + yaml.safe_dump(_safe(data), sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def _on_rm_error(function, path, excinfo):
+    # datasets made read-only by 'finalize', or files of a previous run
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+    function(path)
+
+
+def write_bag(bag: Path, name: str, software: str) -> None:
+    """Write the BagIt declaration and manifests of the bag folder (payload in bag/data)."""
+    payload = sorted(p for p in (bag / "data").rglob("*") if p.is_file())
+    (bag / "bagit.txt").write_text("BagIt-Version: 1.0\nTag-File-Character-Encoding: UTF-8\n", encoding="utf-8")
+    size = sum(p.stat().st_size for p in payload)
+    (bag / "bag-info.txt").write_text(
+        f"Bagging-Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"Bag-Software-Agent: {software}\n"
+        f"External-Identifier: {name}\n"
+        f"Payload-Oxum: {size}.{len(payload)}\n", encoding="utf-8")
+    (bag / "manifest-sha256.txt").write_text(
+        "".join(f"{_sha256(p)}  {p.relative_to(bag).as_posix()}\n" for p in payload), encoding="utf-8")
+    tags = sorted(p for p in bag.rglob("*") if p.is_file() and p.relative_to(bag).parts[0] != "data"
+                  and p.name != "tagmanifest-sha256.txt")
+    (bag / "tagmanifest-sha256.txt").write_text(
+        "".join(f"{_sha256(p)}  {p.relative_to(bag).as_posix()}\n" for p in tags), encoding="utf-8")
+
+
+def zip_folder(folder: Path, zip_path: Path, root_name: str) -> Path:
+    """Zip folder as '<root_name>/...' (empty folders included)."""
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(root_name + "/", "")
+        for path in sorted(folder.rglob("*")):
+            arcname = f"{root_name}/{path.relative_to(folder).as_posix()}"
+            if path.is_dir():
+                archive.writestr(arcname + "/", "")
+            else:
+                archive.write(path, arcname)
+    return zip_path
+
+
+def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
+    """Check the checksums of a datapack zip against its manifests.
+
+    :return: the problems found (empty if the datapack is intact)
+    """
+    problems = []
+    with zipfile.ZipFile(zip_path) as archive:
+        names = [n for n in archive.namelist() if not n.endswith("/")]
+        roots = {n.split("/", 1)[0] for n in archive.namelist()}
+        if len(roots) != 1:
+            return [f"expected a single root folder, found {sorted(roots)}"]
+        root = roots.pop()
+        files = {n[len(root) + 1:]: n for n in names}
+        listed = set()
+        for manifest in ("manifest-sha256.txt", "tagmanifest-sha256.txt"):
+            if manifest not in files:
+                problems.append(f"missing {manifest}")
+                continue
+            for line in archive.read(files[manifest]).decode("utf-8").splitlines():
+                checksum, _, path = line.partition("  ")
+                listed.add(path)
+                if path not in files:
+                    problems.append(f"missing file: {path}")
+                elif hashlib.sha256(archive.read(files[path])).hexdigest() != checksum:
+                    problems.append(f"checksum mismatch: {path}")
+        for path in files:
+            if path.startswith("data/") and path not in listed:
+                problems.append(f"file not in manifest: {path}")
+    return problems
+
+
+class _Builder:
+
+    def __init__(self, testdef_file: Path, nocheck: bool) -> None:
+        self.testdef_file = testdef_file
+        self.testdef_dir = testdef_file.parent
+        self.nocheck = nocheck
+        self.now = datetime.now()
+        self.work = self.testdef_dir / WORK_FOLDER
+        self.manifest: dict[str, Any] = {}
+        self.dictionaries: list[tuple[str, Path]] = []   # (layer, file)
+        self.datasets: list[dict] = []
+        self.dataset_keys: list[tuple[dict, str]] = []   # (keys, origin)
+        self.builtin: dict[str, Any] = {
+            "datapack": {"user": getpass.getuser(), "host": socket.gethostname(),
+                         "timestamp": self.now.strftime("%Y-%m-%d %H:%M:%S"), "nocheck": nocheck},
+            "testdef": {"file": testdef_file.as_posix(), "path": self.testdef_dir.as_posix()},
+        }
+
+    def keys(self, with_setup: bool = True, with_datasets: bool = True) -> Keys:
+        """Keys, lowest precedence first: setup dictionaries, datasets, test definition dictionaries, built-in keys."""
+        keys = Keys()
+        order = (["setup"] if with_setup else []) + (["datasets"] if with_datasets else []) + ["testdef"]
+        for layer in order:
+            if layer == "datasets":
+                for mapping, origin in self.dataset_keys:
+                    keys.add(mapping, origin)
+            else:
+                for file_layer, path in self.dictionaries:
+                    if file_layer == layer:
+                        keys.add_file(path)
+        keys.add(self.builtin, origin="<datapack>")
+        return keys
+
+    def _load_dictionaries(self, layer: str, files: list[str], base: Path) -> None:
+        for name in files:
+            path = _expand(name, base)
+            if not path.is_file():
+                raise DatapackError(f"{layer} dictionary not reachable: '{path}'")
+            self.dictionaries.append((layer, path))
+
+    def _check_git(self, label: str, folder: Path) -> dict | None:
+        state = git_state(folder)
+        _info(Fore.LIGHTBLACK_EX + f"{label} folder: " + Style.RESET_ALL + folder.as_posix())
+        if state is None or not state["clean"] or not state["tag"]:
+            why = "not in a git work tree" if state is None else ("has local changes" if not state["clean"] else "is not a git tag")
+            if not self.nocheck:
+                raise DatapackError(f"{label} folder {why}: '{folder}'. Try again with option '--nocheck' to force.")
+            _warn(f"{label} folder {why}")
+        return state
+
+    # ── steps ────────────────────────────────────────────────────────────
+
+    def load_testdef(self) -> Testdef:
+        raw = load_yaml_mapping(self.testdef_file)
+        keys = Keys()
+        keys.add(self.builtin, origin="<datapack>")
+        self._load_dictionaries("testdef", keys.render_data(raw.get("dictionaries", []), where="dictionaries"), self.testdef_dir)
+
+        keys = self.keys(with_setup=False, with_datasets=False)
+        pipeline = raw.pop("pipeline", None)
+        testdef = _validate(Testdef, {**keys.render_data(raw), "pipeline": pipeline}, f"test definition '{self.testdef_file}'")
+        self.setup_file = _expand(testdef.setup_file, self.testdef_dir)
+        self.builtin["testdef"].update({"id": testdef.id, "name": testdef.name,
+                                        "setup_file": self.setup_file.as_posix(), "setup_config": testdef.setup_config})
+        return testdef
+
+    def load_setup(self, testdef: Testdef) -> Setup:
+        if not self.setup_file.is_file():
+            raise DatapackError(f"setup file not reachable: '{self.setup_file}'")
+        setup_dir = self.setup_file.parent
+        raw = load_yaml_mapping(self.setup_file)
+        self.setup_git = self._check_git("Setup", setup_dir)
+
+        keys = self.keys(with_datasets=False)
+        self._load_dictionaries("setup", keys.render_data(raw.get("dictionaries", []), where="dictionaries"), setup_dir)
+        keys = self.keys(with_datasets=False)
+        self.builtin["setup"] = {"id": keys.render_string(raw.get("id", ""), where="id"),
+                                 "name": keys.render_string(raw.get("name", ""), where="name"),
+                                 "file": self.setup_file.as_posix(), "path": setup_dir.as_posix(),
+                                 "configuration": testdef.setup_config}
+
+        _info(Fore.GREEN + "\n *** [1] Importing datasets ***")
+        keys = self.keys(with_datasets=False)
+        repositories = [_validate(DataRepository, keys.render_data(r, where=f"datarepositories[{i}]"),
+                                  f"data repository in '{self.setup_file}'")
+                        for i, r in enumerate(raw.get("datarepositories", []))]
+        for repository in repositories:
+            repo_path = _expand(repository.path, setup_dir)
+            _info("\n" + Fore.BLUE + "[REPO] " + Style.RESET_ALL + repository.id + Fore.LIGHTBLACK_EX + " -> " + Fore.CYAN + repo_path.as_posix())
+            repo_path.mkdir(parents=True, exist_ok=True)
+            for datasource in repository.datasources:
+                _info(Fore.BLUE + " [DATASOURCE] " + Style.RESET_ALL + datasource.id + Fore.LIGHTBLACK_EX + f" ({datasource.importer}) -> " + Fore.CYAN + datasource.source)
+                for dataset in datasource.datasets:
+                    record = import_dataset(repo_path, datasource, dataset, setup_dir, self.nocheck)
+                    if record is None:
+                        continue
+                    self.datasets.append(record)
+                    keys_file = Path(record["path"]) / DATASET_KEYS_FILE
+                    if keys_file.is_file():
+                        self.dataset_keys.append((load_yaml_mapping(keys_file), keys_file.as_posix()))
+                        self.dictionaries.append(("datasets", keys_file))
+                    self.dataset_keys.append(({dataset.id: {"path": record["path"], "version": dataset.version}}, "<datapack>"))
+
+        keys = self.keys()
+        rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "component_types"}),
+                    "component_types": {
+                        type_id: {**keys.render_data({k: v for k, v in type_def.items() if k != "commands"}, where=f"component_types.{type_id}"),
+                                  "commands": type_def.get("commands", {})}
+                        for type_id, type_def in (raw.get("component_types") or {}).items()}}
+        setup = _validate(Setup, rendered, f"setup '{self.setup_file}'")
+        if testdef.setup_config not in setup.configurations:
+            raise DatapackError(f"no configuration '{testdef.setup_config}' in setup '{self.setup_file}' "
+                                f"(available: {', '.join(setup.configurations)})")
+        return setup
+
+    def generate_components(self, setup: Setup, testdef: Testdef, keys: Keys) -> dict:
+        _info(Fore.GREEN + f"\n *** [2] Generating files for setup '{setup.id}' in configuration '{testdef.setup_config}' ***")
+        setup_dir = self.setup_file.parent
+        components = {}
+        for comp_id, component in setup.configurations[testdef.setup_config].components.items():
+            if component.type not in setup.component_types:
+                raise DatapackError(f"component '{comp_id}': no component type '{component.type}' in setup '{self.setup_file}'")
+            comp_type = setup.component_types[component.type]
+            if component.configuration not in comp_type.configurations:
+                raise DatapackError(f"component '{comp_id}': no configuration '{component.configuration}' for type "
+                                    f"'{component.type}' (available: {', '.join(comp_type.configurations)})")
+            _info("\n" + Fore.LIGHTBLUE_EX + f"[{comp_id}] " + Fore.LIGHTBLACK_EX + f"{component.type} / {component.configuration}")
+
+            input_dir = self.work / "data" / comp_id / "input"
+            input_dir.mkdir(parents=True)
+            (self.work / "data" / comp_id / "output").mkdir()
+            extra = {"component": {"id": comp_id, "name": component.name, "type": component.type,
+                                   "configuration": component.configuration}}
+            inputs = []
+            for input_file in comp_type.configurations[component.configuration].inputs:
+                sources = _find_sources(input_file.source, [self.testdef_dir, setup_dir])
+                target = input_dir / input_file.target
+                if not sources:
+                    if input_file.optional:
+                        _info(Fore.YELLOW + "    [OPTIONAL] " + Fore.LIGHTBLACK_EX + f"{input_file.source} not found, skipped")
+                        continue
+                    raise DatapackError(f"component '{comp_id}': input '{input_file.source}' not found (absolute, or "
+                                        f"relative to '{self.testdef_dir}' or '{setup_dir}')")
+                used: dict[str, dict[str, str]] = {}
+                for source in sources:
+                    # a glob pattern always gives a folder, even when it matches one file
+                    destination = target / source.name if glob.has_magic(input_file.source) else target
+                    if input_file.method == "copy":
+                        if source.is_dir():
+                            shutil.copytree(source, destination)
+                        else:
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(source, destination)
+                    else:
+                        try:
+                            rendered = keys.render_tree(source, destination, [self.testdef_dir, setup_dir], extra)
+                        except TemplateError as e:
+                            raise DatapackError(f"component '{comp_id}': {e}") from e
+                        prefix = destination.relative_to(input_dir)
+                        used.update({(prefix / name if source.is_dir() else prefix.parent / name).as_posix(): k
+                                     for name, k in rendered.items()})
+                    _info(Fore.MAGENTA + f"    [{input_file.method.upper()}] " + Fore.LIGHTBLACK_EX + source.as_posix()
+                          + Style.RESET_ALL + " --> " + Fore.WHITE + destination.relative_to(self.work / "data").as_posix())
+                for spec in input_file.postprocess:
+                    _info(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + spec)
+                    try:
+                        run_processor(spec, target, setup_dir)
+                    except ProcessorError as e:
+                        raise DatapackError(f"component '{comp_id}': {e}") from e
+                inputs.append({"source": input_file.source, "target": input_file.target, "method": input_file.method,
+                               "files": [s.as_posix() for s in sources],
+                               "keys": {name: dict(k) for name, k in sorted(used.items())}})
+            components[comp_id] = {"name": component.name, "type": component.type,
+                                   "configuration": component.configuration, "inputs": inputs}
+        return components
+
+    def write_definition(self) -> None:
+        definition = self.work / "definition"
+        definition.mkdir()
+        shutil.copy2(self.testdef_file, definition / "testdef.yml")
+        shutil.copy2(self.setup_file, definition / "setup.yml")
+        for layer, path in self.dictionaries:
+            target = definition / "dictionaries" / layer / path.name
+            if layer == "datasets":
+                target = definition / "dictionaries" / layer / f"{path.parent.parent.name}.yml"
+            n = 2
+            while target.exists():
+                target = target.with_name(f"{target.stem}_{n}{target.suffix}")
+                n += 1
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+            target.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH)
+
+    def build(self, output_dir: str | os.PathLike | None) -> Path:
+        if self.work.exists():
+            _info(Fore.LIGHTBLACK_EX + f"[cleaning existing '{self.work}' folder]")
+            shutil.rmtree(self.work, onerror=_on_rm_error)
+        self.work.mkdir(parents=True)
+
+        testdef = self.load_testdef()
+        testdef_git = self._check_git("Test definition", self.testdef_dir)
+        setup = self.load_setup(testdef)
+
+        name = f"{testdef.id}_{setup.id}_{getpass.getuser()}_{self.now.strftime('%Y%m%d_%H%M%S')}" + ("_DRAFT" if self.nocheck else "")
+        self.builtin["datapack"]["name"] = name
+        keys = self.keys()
+        try:
+            context = keys.resolve_all()
+        except TemplateError as e:
+            raise DatapackError(str(e)) from e
+
+        components = self.generate_components(setup, testdef, keys)
+
+        _info(Fore.GREEN + "\n *** [3] Packaging ***\n")
+        if output_dir is None:
+            output_dir = context.get("datapack", {}).get("output_dir")
+            if not output_dir:
+                raise DatapackError("no output folder: set key 'datapack.output_dir' in a dictionary, or give one explicitly")
+        output_dir = _expand(str(output_dir), self.testdef_dir)
+
+        from testsuit import __version__
+        self.write_definition()
+        _dump_yaml(self.work / "context.yml", context, "# every key of the datapack, resolved\n")
+        _dump_yaml(self.work / "datapack.yml", {
+            "format": FORMAT_VERSION,
+            "name": name,
+            "created": self.builtin["datapack"]["timestamp"],
+            "user": self.builtin["datapack"]["user"],
+            "host": self.builtin["datapack"]["host"],
+            "nocheck": self.nocheck,
+            "software": f"testsuit {__version__}",
+            "testdef": {"id": testdef.id, "name": testdef.name, "file": self.testdef_file.as_posix(), "git": testdef_git},
+            "setup": {"id": setup.id, "name": setup.name, "configuration": testdef.setup_config,
+                      "file": self.setup_file.as_posix(), "git": self.setup_git},
+            "datasets": self.datasets,
+            "components": components,
+        })
+        write_bag(self.work, name, f"testsuit {__version__} datapack")
+        zip_path = zip_folder(self.work, output_dir / f"{name}.zip", name)
+
+        _info(Fore.LIGHTBLACK_EX + "\nGenerated Datapack: " + Style.RESET_ALL + zip_path.as_posix() + "\n")
+        if self.nocheck:
+            _warn("option 'nocheck' was activated, this datapack shall not be used for a production run.")
+        return zip_path
+
+
+def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None) -> Path:
+    """Generate the datapack of a test definition file.
+
+    The datapack contents are left in '.current_datapack' next to the test definition file.
+
+    :param nocheck: accept test definition and setup folders that are not clean git tags, and datasets
+        whose version cannot be confirmed (the datapack is then named '..._DRAFT')
+    :param output_dir: where to write the zip (default: key 'datapack.output_dir')
+    :return: path of the zip
+    :raises DatapackError: if the datapack cannot be generated
+    """
+    # importers and processors declared by external libraries
+    load_plugins()
     try:
-        with open(setupFileEval) as f:
-            setupData = yaml.safe_load(f)
-        setupXmlRoot = _yaml_root(setupData)
-    except Exception as e:
-        print(Fore.RED+"ERROR: while parsing file '"+setupFile+"' : "+str(e)+Style.RESET_ALL)
-        sys.exit(1)
-
-    for dicofileNode in setupXmlRoot.get('dictionaries', []):
-        dicoFilePath=dicofileNode
-        if not os.access(expandPath(setupFolder+os.sep+dicoFilePath),os.R_OK): 
-            print(Fore.RED+"ERROR: Dico file from datapack config '"+str(setupXmlRoot)+"' not reachable: '"+dicoFilePath+"'"+Style.RESET_ALL)
-            return False
-        dicosList+=[expandPath(setupFolder+os.sep+dicoFilePath,evalTargetFolder=processingFolder,evalDicosList=dicosList) ]
-    
-    # reevaluate setup file with also local dicos listed inside it
-    setupFileEval=expandPath(setupFolder+os.sep+os.path.basename(setupFile),\
-                                        evalTargetFolder=processingFolder,\
-                                        evalDicosList=dicosList,\
-                                        evalPartialOk=True)    
-    
-    print(Fore.GREEN+"\n *** [1] Building Baseline ***"+Style.RESET_ALL)
-    contextFileHdl.write("--------------Baseline-------------"+"\n")
-    # each repo has its "dataset.dico" file generated during import process
-    # path to this dico is returned by the 'loadRepo' function
-    for datarepository in setupXmlRoot.get('datarepositories', []):      
-        dicosList+=loadRepo(datarepository,contextFileHdl,nocheck)
-    writeDicoHtmlViews(dicosList,dicosHtmlFolder)
-    contextFileHdl.write("-----------------------------------"+"\n\n")
-
-    # reevaluate setup file with also baseline dicos listed inside it
-    setupFileEval=expandPath(setupFolder+os.sep+os.path.basename(setupFile),evalTargetFolder=processingFolder,evalDicosList=dicosList)    
-    with open(setupFileEval) as f:
-        setupData = yaml.safe_load(f)
-    setupXmlRoot = _yaml_root(setupData)        
-    setupId=setupXmlRoot["setup_id"]
-
-    colorama_init() # call to subprocess breaks shell colors. TODO: find better way to fix it ...
-    print(Fore.GREEN+"\n *** [2] Generating Files for Setup '"+Fore.LIGHTGREEN_EX+setupId+Fore.GREEN+"' in conf '"+Fore.LIGHTGREEN_EX+setupConfig+Fore.GREEN+"' ***"+Style.RESET_ALL)
-    contextFileHdl.write("--------------Setup-------------"+"\n")
-    contextFileHdl.write("setup_id: "+setupId+"\n")
-    contextFileHdl.write("setup_conf: "+setupConfig+"\n")
-    contextFileHdl.write("-----------------------------------"+"\n\n")
-        
-    # evaluate and load components YAML files based on dictionaries contents
-    componentsDefs={}
-    for cmptDefNode in setupXmlRoot.get('components', {}).get('component_def', []):
-        componentsDefs[cmptDefNode["type"]]=cmptDefNode
-    
-    # generate corresponding data       
-    configs = setupXmlRoot.get('configurations', {}).get('configuration', [])
-    setupConfigNode = next((c for c in configs if c["id"] == setupConfig), None)
-    if setupConfigNode is None:
-        print(Fore.RED+"ERROR: no such config '"+setupConfig+"' in given file '"+setupFile+"'."+Style.RESET_ALL)
-        for config in configs:
-            print(config)
-        return False    
-    
-    # loading dicos contents, expected by our "evalTargetFolder" tool (called by genDataPackComponent)
-    dico,keysorigin=loadDicos(dicosList)
-    # here are actually generated all input files of our datapack, for each declared component
-    for component in setupConfigNode.get('component', []):
-        compType=component["type"]
-        if compType not in componentsDefs:
-            print(Fore.RED+"ERROR: no such component type '"+compType+"' declared. Please check your components files listed in setup '"+setupFile+"'."+Style.RESET_ALL)
-            return False
-        genDataPackComponent(targetDatapackFolder,component,componentsDefs[compType],dico,keysorigin,dicosList,setupFolder,testdefFolder,nocheck)
-
-    contextFileHdl.close()
-
-    
-    print(Fore.GREEN+"\n *** [3] Packaging ***\n"+Style.RESET_ALL)
-        
-    datapacksPath=getkeyval("datapacks.path",dico)
-    if not datapacksPath:
-        print(Fore.RED+"ERROR: key 'datapacks.path' undefined, don't know where to generate resulting datapack"+Style.RESET_ALL)
-        return False
-
-    datapacks_path=expandPath(datapacksPath)
-
-    datapackFullName=finalizeDatapack(setupId, testId,getpass.getuser(), testDate.strftime("%Y%m%d_%H%M%S"), targetDatapackFolder, datapacks_path,nochecks=nocheck)
-    
-    print(Fore.LIGHTBLACK_EX+"\nGenerated Datapack: "+Style.RESET_ALL+datapackFullName+"\n")
-    
-    if nocheck==True:
-        print(Fore.YELLOW+"Be careful, option 'nocheck' was activated, this datapack shall not be used for a production run."+Style.RESET_ALL)
-    
-    print(Fore.LIGHTGREEN_EX+"Done"+Style.RESET_ALL+", bye bye ^^\n")
-
-    return True
-
-# from https://stackoverflow.com/questions/2656322/shutil-rmtree-fails-on-windows-with-access-is-denied
-def del_rw(action, name, exc):
-    os.chmod(name, stat.S_IWRITE)
-    shutil.rmtree(name)#,onerror=del_rw)
+        return _Builder(Path(testdef_file).resolve(), nocheck).build(output_dir)
+    except TemplateError as e:
+        raise DatapackError(str(e)) from e

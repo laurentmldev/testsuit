@@ -1,25 +1,25 @@
 """Datapack importer for the ACME archive store (``importer: acme-archive`` in a datapack setup).
 
-A stand-in for a data server: the datasource ``path`` is a folder holding one archive per dataset
-version, either ``<version>.zip`` or a plain ``<version>/`` folder. The dataset ``path`` is the
+A stand-in for a data server: the datasource ``source`` is a folder holding one archive per dataset
+version, either ``<version>.zip`` or a plain ``<version>/`` folder. The dataset ``version`` is the
 version to import::
 
     datarepositories:
       - id: acme_data
         name: ACME bench data
         path: ~/acme/datarepo                    # where datasets are imported
-        datasource:
+        datasources:
           - id: calib_store
             name: ACME calibration store
             importer: acme-archive
-            path: /shared/acme/calibrations       # the archive store
-            dataset:
+            source: /shared/acme/calibrations     # the archive store
+            datasets:
               - id: bench_calib
-                path: _K_(bench_calib_version)    # ex: v1.2 -> /shared/acme/calibrations/v1.2.zip
+                version: "{{ bench_calib_version }}"   # ex: v1.2 -> /shared/acme/calibrations/v1.2.zip
 
-The importer copies the archive, records a checksum of every file, and writes ``dataset.dico``
-(``<dataset id>.version``, ``.path``, ``.source``, plus the lines of the archive's own
-``dataset.dico`` if it has one), whose keys the datapack files can then use.
+The importer copies the archive, records a checksum of every file, and writes ``dataset.yml``
+(``<dataset id>.version``, ``.path``, ``.source``, merged over the archive's own ``dataset.yml``
+if it has one), whose keys the datapack files can then use.
 On the next datapack run the dataset is not imported again: its version and checksums are checked.
 """
 from __future__ import annotations
@@ -31,10 +31,12 @@ import shutil
 import zipfile
 from pathlib import Path
 
+import yaml
+
 from testsuit.datatools.datapack.ADataImporter import ADataImporter
 
 MARKER_FILE = ".acme_import.json"
-DICO_FILE = "dataset.dico"
+KEYS_FILE = "dataset.yml"
 
 
 def _sha256(path: Path) -> str:
@@ -62,7 +64,7 @@ class AcmeArchiveImporter(ADataImporter):
         """Checksums of the imported files, by path relative to the dataset folder."""
         root = Path(self._targetDir)
         return {p.relative_to(root).as_posix(): _sha256(p) for p in sorted(root.rglob("*"))
-                if p.is_file() and p.name not in (MARKER_FILE, DICO_FILE)}
+                if p.is_file() and p.name not in (MARKER_FILE, KEYS_FILE)}
 
     def retrieve(self) -> bool:
         source = self._source()
@@ -82,14 +84,14 @@ class AcmeArchiveImporter(ADataImporter):
         (target / MARKER_FILE).write_text(json.dumps(
             {"version": self._versionId, "source": str(source), "files": self._dataFiles()}, indent=2))
 
-        dicoFile = target / DICO_FILE
-        archiveDico = dicoFile.read_text() if dicoFile.is_file() else ""
-        dicoFile.write_text(
-            f"# written by the acme-archive datapack importer\n"
-            f"{self._datasetName}.version={self._versionId}\n"
-            f"{self._datasetName}.path={target.resolve().as_posix()}\n"
-            f"{self._datasetName}.source={source.resolve().as_posix()}\n"
-            + archiveDico)
+        keysFile = target / KEYS_FILE
+        keys = (yaml.safe_load(keysFile.read_text()) or {}) if keysFile.is_file() else {}
+        keys.setdefault(self._datasetName, {}).update({
+            "version": self._versionId,
+            "path": target.resolve().as_posix(),
+            "source": source.resolve().as_posix(),
+        })
+        keysFile.write_text("# written by the acme-archive datapack importer\n" + yaml.safe_dump(keys, sort_keys=False))
         return True
 
     def getTag(self, testTag: bool = False) -> str | bool:
