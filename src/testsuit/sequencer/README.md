@@ -10,23 +10,74 @@ The sequencer runs real tests on test means made of several components (computer
 Status: architecture proposal, nothing is implemented yet. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
 
 Contents:
-1. [Vocabulary](#1-vocabulary)
-2. [Principles](#2-principles)
-3. [Overview](#3-overview)
-4. [Datapack generation refinements](#4-datapack-generation-refinements)
-5. [Lab inventory: test means, stages, components](#5-lab-inventory-test-means-stages-components)
-6. [Datapack side: stages needed, commands, pipeline](#6-datapack-side-stages-needed-commands-pipeline)
-7. [Scheduling and locking](#7-scheduling-and-locking)
-8. [Running a datapack](#8-running-a-datapack)
-9. [Abort and kill](#9-abort-and-kill)
-10. [Extension points](#10-extension-points)
-11. [Interfaces: CLI, REST API, UI, GitLab runner](#11-interfaces-cli-rest-api-ui-gitlab-runner)
-12. [Building blocks and dependencies](#12-building-blocks-and-dependencies)
-13. [Package layout](#13-package-layout)
-14. [Implementation plan](#14-implementation-plan)
-15. [Open points](#15-open-points)
+1. [Functional requirements](#1-functional-requirements)
+2. [Vocabulary](#2-vocabulary)
+3. [Principles](#3-principles)
+4. [Overview](#4-overview)
+5. [Datapack generation refinements](#5-datapack-generation-refinements)
+6. [Lab inventory: test means, stages, components](#6-lab-inventory-test-means-stages-components)
+7. [Datapack side: stages needed, commands, pipeline](#7-datapack-side-stages-needed-commands-pipeline)
+8. [Scheduling and locking](#8-scheduling-and-locking)
+9. [Running a datapack](#9-running-a-datapack)
+10. [Abort and kill](#10-abort-and-kill)
+11. [Extension points](#11-extension-points)
+12. [Interfaces: CLI, REST API, UI, GitLab runner](#12-interfaces-cli-rest-api-ui-gitlab-runner)
+13. [Building blocks and dependencies](#13-building-blocks-and-dependencies)
+14. [Package layout](#14-package-layout)
+15. [Implementation plan](#15-implementation-plan)
+16. [Open points](#16-open-points)
 
-## 1. Vocabulary
+## 1. Functional requirements
+
+What the product shall do, gathered from the specifications discussed so far. The last column points to the section of this document that answers each requirement.
+
+### 1.1 Datapack generation
+
+The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 templates, self-sufficient BagIt zip), with these refinements:
+
+| Id | Requirement | Section |
+|---|---|---|
+| DG-1 | The definition of each component (its input files) comes from the YAML setup files the datapack tool already reads; they can be enlarged to describe the test run (commands, pipeline, stages) and still be usable for a plain datapack. | 5, 7 |
+| DG-2 | Generating a component's inputs can involve processing specific to that component, beyond rendering templates and copying files. | 5.1 |
+| DG-3 | A component can need other components' inputs to generate its own. | 5.2 |
+| DG-4 | A datapack is self-sufficient: it can be run from its zip contents only (inputs, resolved keys, test definition with its pipeline). | 9 |
+
+### 1.2 Queue and resources
+
+| Id | Requirement | Section |
+|---|---|---|
+| SQ-1 | Accept and queue a datapack containing everything about the test to execute: component inputs and the commands pipeline. | 9 |
+| SQ-2 | When the resources a datapack needs are available, dequeue it and activate it on the chosen resources. | 8 |
+| SQ-3 | Manage several instances of test means, and activate datapacks on the available ones. | 6, 8 |
+| SQ-4 | A test mean is made of stages; a stage is made of components. Some components are shared by several stages, others are specific to one stage. | 6 |
+| SQ-5 | The definition of a stage includes the list of its components and possible overrides of the commands, for example a specific configuration deployment. | 6, 7.2 |
+| SQ-6 | When a datapack is activated, the components it actually needs are reserved (locked); the granularity of reservation is the stage. | 8 |
+| SQ-7 | A single datapack can lock several stages. | 7.1, 8 |
+| SQ-8 | Components can be of any type (computer, switch, clock...): mainly Linux based, no Windows. | 11 |
+| SQ-9 | Visibility of the queued datapacks (and what they wait for) and of the state of test means, stages and components. | 8, 12 |
+
+### 1.3 Pipeline execution
+
+| Id | Requirement | Section |
+|---|---|---|
+| SQ-10 | Run a commands pipeline that deploys configuration data, runs startup commands, feeds the system and retrieves the results into the outputs of the datapack. | 7.3, 9 |
+| SQ-11 | Commands can run in parallel or wait for each other (rendez-vous points), depending on their configuration; they can be grouped in named phases to make the pipeline clearer. | 7.3 |
+| SQ-12 | Readiness of a component is either checked objectively (port, log, file, command) or approximated with a plain delay. | 7.3 |
+| SQ-13 | Default commands exist (for example scp to a standard target folder, with SSH keys configured so that no password is asked); they can be overridden for specific components (non standard push/pull or run commands). | 7.2 |
+| SQ-14 | The sequencer itself is a component like the others; the exploit phase (exploit_runner/mexploit analysis of the retrieved data) is a phase of the pipeline on its own component, the outputs of the test run becoming its inputs. | 2, 7.3 |
+| SQ-15 | A test run can be forced to stop, killing the remote processes (`kill -9` or similar), while the cleanup and result retrieval still run. | 10 |
+
+### 1.4 Interfaces and integration
+
+| Id | Requirement | Section |
+|---|---|---|
+| SQ-16 | The product works from the command line, without any UI. | 12 |
+| SQ-17 | An optional UI to navigate and control pipelines can be added on top of the kernel later. | 12 |
+| SQ-18 | The product can act as a GitLab runner, for a future CI integration. | 12 |
+| SQ-19 | Simple and modular, built on well-known open-source languages and libraries. | 3, 13 |
+| SQ-20 | A single-team lab is enough for a first version: no access control in the kernel. | 12 |
+
+## 2. Vocabulary
 
 | Term | Meaning |
 |---|---|
@@ -40,7 +91,7 @@ Contents:
 | **phase / step** | the pipeline of a run: named phases (`test_run`, `exploit`) made of steps (commands), run in parallel or waiting for each other (`needs`). |
 | **sequencer component** | the sequencer host itself, a component like the others (`transport: local`), for steps that run there (exploit analysis, archiving). |
 
-## 2. Principles
+## 3. Principles
 
 1. **Kernel first, headless.** Everything is available from a CLI and a REST API; a UI is only another API client.
 2. **One YAML family, one template language.** The datapack test definition and setup (already on YAML + Jinja2) gain optional sections; a datapack without them is still a plain datapack. The lab inventory uses the standard Ansible YAML inventory format.
@@ -48,7 +99,7 @@ Contents:
 4. **Safe by construction.** Locks are taken all at once and released by the kernel only. Every phase has a `finally` that always runs. Every remote process is started so that it can be killed with its whole process tree.
 5. **Few, boring dependencies**, each replaceable.
 
-## 3. Overview
+## 4. Overview
 
 ```
               user / CI job (gitlab-runner) / future UI
@@ -73,11 +124,11 @@ Contents:
 
 One process (`tsqd`) runs an asyncio loop. There is no broker and no worker fleet: steps are mostly remote calls, so the work is I/O bound and one loop drives dozens of components. A dev mode (`tsq run --local`) runs one datapack in the foreground without a daemon.
 
-## 4. Datapack generation refinements
+## 5. Datapack generation refinements
 
 The `datapack` tool (`testsuit.datatools.datapack`, YAML dictionaries + Jinja2 templates + BagIt zip) stays the way to prepare a datapack. Two refinements cover the generation needs.
 
-### 4.1 Component-specific processing to generate inputs
+### 5.1 Component-specific processing to generate inputs
 
 Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile a scenario to a binary format, compute a calibration table, build a network configuration from a topology file.
 
@@ -96,7 +147,7 @@ component_types:
 
 A generator is a Python callable registered like processors (`register_generator(name, fn)`), called as `fn(source, target, keys, options, component)`. When the name is not registered, it is run as a script relative to the setup folder, with the source, the target and a JSON file of the resolved keys. The keys a generator reads are recorded in `datapack.yml` like those of templates.
 
-### 4.2 Components needing other components' inputs
+### 5.2 Components needing other components' inputs
 
 A component can declare `needs: [other_component, ...]`. Components are then generated in dependency order (topological sort, cycles reported), and a dependent component sees the inputs already generated:
 - `components.<id>.input_dir`: path of the other component's generated inputs, usable in templates and generators;
@@ -116,7 +167,7 @@ configurations:
 
 Both refinements keep the datapack self-sufficient: what a component needed from another one is already in the zip.
 
-## 5. Lab inventory: test means, stages, components
+## 6. Lab inventory: test means, stages, components
 
 The lab inventory follows the [Ansible YAML inventory](https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html) format. It is a well-known standard, and the same file can be used with `ansible` for ad-hoc operations, but Ansible is not a dependency: the sequencer reads it with its own loader. The format maps naturally onto the topology:
 - a **group** per test mean, whose child groups are its stages;
@@ -177,9 +228,9 @@ all:
   - `none`: never locked, for the sequencer component.
 - Components are kept out of scheduling by state, not by editing the file: `tsq maintenance <component>`, or a failed health check.
 
-## 6. Datapack side: stages needed, commands, pipeline
+## 7. Datapack side: stages needed, commands, pipeline
 
-### 6.1 Stages a datapack needs
+### 7.1 Stages a datapack needs
 
 The setup configuration (datapack side) names the **logical stages** it needs and puts each logical component in one of them with a **role**. At activation, each logical stage is bound to a concrete stage of the requested type on one test mean, and each logical component to the host with the same role in that stage.
 
@@ -199,7 +250,7 @@ configurations:
 
 One datapack can therefore lock several stages. All of them are taken on the same test mean by default; `same_test_mean: false` allows spreading them over several test means.
 
-### 6.2 Default commands per component type
+### 7.2 Default commands per component type
 
 Component types (already in the datapack setup) declare default `commands`, kept as written in the datapack and rendered by the sequencer at run time:
 
@@ -239,7 +290,7 @@ Override order, last wins:
 
 The lab has the last word over the datapack on purpose: a stage with a special way of deploying overrides the generic command for every datapack.
 
-### 6.3 Pipeline (test definition)
+### 7.3 Pipeline (test definition)
 
 The pipeline lives in the test definition (already kept as is in the datapack). Its syntax is close to GitLab CI so that it reads familiar.
 
@@ -287,7 +338,7 @@ Templates in commands are rendered with Jinja2, the same environment as the data
 - the datapack's frozen keys from `context.yml`;
 - run-time keys: `run.{id, dir}`, `phase.id`, `component.{id, type, host, stage, role, input_dir, ...}`, `components.<id>.*`, `stage.<id>.*`, `test_mean.id`, `remote_root`.
 
-## 7. Scheduling and locking
+## 8. Scheduling and locking
 
 **Queue.** Submitted runs are ordered by priority, then FIFO, with aging so that a run needing many stages is not starved by small ones.
 
@@ -311,14 +362,14 @@ Locks are recorded per run and per stage, with who holds them and since when.
 - `tsq queue` shows each waiting run and what it waits for (stage type X busy on all test means, held by runs A and B).
 - `tsq means` shows test means, stages and components, with their states and holders.
 
-## 8. Running a datapack
+## 9. Running a datapack
 
 1. **Submit**: `tsq submit pack.zip [--priority N] [--test-mean bench1]`.
    - Intake verifies the BagIt checksums (`datapack --verify`) and unzips into `runs/<run_id>/`.
    - It reads the pipeline, commands, stages and `context.yml` from the zip only.
    - It validates them against the lab inventory: stage types, roles, commands.
    - The run state is `queued`.
-2. **Activate**: binding, locking and health checks (section 7). The state goes `waiting_resources → reserved → running`.
+2. **Activate**: binding, locking and health checks (section 8). The state goes `waiting_resources → reserved → running`.
 3. **Phases**:
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.
    - Each step's output goes to `runs/<id>/logs/<phase>/<step>[<component>].log` and to the event bus.
@@ -331,7 +382,7 @@ State machines:
 - run: `queued → waiting_resources → reserved → running → cleaning → succeeded | failed | aborted | error`;
 - step: `pending → ready → running → ok | failed | skipped | timeout | killed`.
 
-## 9. Abort and kill
+## 10. Abort and kill
 
 - **`tsq cancel <run>`**: a queued run leaves the queue. On a running one, pending steps are cancelled and running steps get their `stop` command; after a grace period, the kill below follows.
 - **`tsq kill <run>`**: no grace. The `kill` command of every running step, then the `finally` steps (at least `collect`, to keep the logs), then the locks are released.
@@ -342,7 +393,7 @@ State machines:
 - **Special components** override `kill`: reset a PLC through its protocol, `virsh destroy` a VM, reload a switch configuration.
 - **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <component>` is the audited manual escape hatch.
 
-## 10. Extension points
+## 11. Extension points
 
 Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the existing registrations:
 
@@ -352,11 +403,11 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_component_type(name, defaults)` | Python-provided default commands for a type | none |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `tcp`, `http`, `file`, `log`, `cmd` |
-| `register_generator(name, fn)` | datapack `method: generate` (section 4.1) | none |
+| `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
 
 This is how components of any type are handled: a switch through a `switch-rest` or SNMP transport, a clock through its HTTP management API, a board through a `labgrid` transport, a component managed by playbooks through an `ansible` step type. A package such as `examples/acme_testbench` ships its file formats, criteria, importers and its bench's transports and commands in the same `plugin.py`.
 
-## 11. Interfaces: CLI, REST API, UI, GitLab runner
+## 12. Interfaces: CLI, REST API, UI, GitLab runner
 
 **CLI** (`tsq`), working against a local or remote daemon:
 
@@ -390,7 +441,7 @@ Results zips become job artifacts. Runner tags can name test means or stage type
 
 **Auth.** None in the kernel for the first version (single-team lab, behind the lab network or a reverse proxy). OIDC can come later.
 
-## 12. Building blocks and dependencies
+## 13. Building blocks and dependencies
 
 | Layer | Choice | Why | Alternative |
 |---|---|---|---|
@@ -409,7 +460,7 @@ Results zips become job artifacts. Runner tags can name test means or stage type
 
 New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `sqlalchemy`, `fastapi`, `uvicorn`, `rich`), so datapack and exploit users are not affected. Jinja2 and Pydantic are already dependencies.
 
-## 13. Package layout
+## 14. Package layout
 
 ```
 src/testsuit/sequencer/
@@ -426,7 +477,7 @@ src/testsuit/sequencer/
   daemon.py       # tsqd entry point
   gitlab/         # Custom executor scripts (config, prepare, run, cleanup)
 src/testsuit/cli/tsq.py
-src/testsuit/datatools/datapack/   # + generators (4.1) and component needs (4.2)
+src/testsuit/datatools/datapack/   # + generators (5.1) and component needs (5.2)
 ```
 
 Tests:
@@ -434,7 +485,7 @@ Tests:
 - the ssh transport against a local `sshd` container in CI;
 - an end-to-end example in `examples/acme_testbench` with two stages on `localhost`.
 
-## 14. Implementation plan
+## 15. Implementation plan
 
 1. **Datapack refinements**: `method: generate` with registered generators, and component `needs`. Small, independent, testable on their own.
 2. **Models and validation**:
@@ -448,7 +499,7 @@ Tests:
 8. **GitLab Custom executor** scripts.
 9. **UI** (separate, later).
 
-## 15. Open points
+## 16. Open points
 
 Defaults are proposed for each; none blocks the start.
 
