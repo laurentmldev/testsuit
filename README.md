@@ -81,6 +81,7 @@ src/testsuit/           the installable package
   exploit/
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
+  sequencer/            test sequencer: architecture proposal and benchmark (not implemented yet)
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
