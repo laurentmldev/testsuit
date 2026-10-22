@@ -16,8 +16,8 @@ From the sequencer specification, the product combines these capabilities. Each 
 | C4 | **Remote execution**, mostly over SSH on Linux hosts: push/pull files, start/stop processes, commands overridable per component and per stage | Ansible, Fabric, labgrid |
 | C5 | **Forced abort**: kill a run, including remote processes (`kill -9`), and always run cleanup | CI (`after_script`, `post { always }`), Ansible `always` |
 | C6 | **Headless kernel, optional UI**: CLI and API first | most servers with a REST API |
-| C7 | **Several test means**, each made of **stages** (sets of components); components may be shared between stages or specific to one; a datapack may lock several stages | lab managers |
-| C8 | **GitLab runner integration** later: a CI job can run a datapack on the test means | GitLab Runner executors |
+| C7 | One lab made of **stages** (sets of components) and **ad hoc components**; components may be shared between stages or specific to one; a datapack may lock several stages; several datapacks run at once on different stages | lab managers |
+| C8 | **GitLab runner integration** later: a CI job can run a datapack on the lab | GitLab Runner executors |
 | C9 | **Heterogeneous components**: computers, switches, clocks; mainly Linux, no Windows | Ansible (network modules), labgrid (drivers) |
 
 Constraints: simple and modular, well-known open-source dependencies, reuse of the testsuit datapack (YAML setup, Jinja2 templates, BagIt zip) and of exploit_runner/mexploit.
@@ -60,7 +60,7 @@ Constraints: simple and modular, well-known open-source dependencies, reuse of t
 
 **labgrid** (Python, Pengutronix)
 - Library + coordinator for embedded labs. **Places** (named sets of resources) can be **acquired/locked** and **reserved** (reservation queue with priorities and tags, `labgrid-client reserve --wait`), **drivers** for SSH (`SSHDriver` with `run`, `put`, `get`), serial, power, USB; **strategies** = state machines to bring a target to a state (off → shell). Used from pytest via a plugin. Pure Python, pip-installable, well maintained, coordinator now gRPC-based.
-- Why not as the kernel: no pipeline DSL, no job queue with datapack semantics, no UI; the coordinator manages places, not pipelines. **Why consider it as a backend**: if test means include boards needing power cycling/serial consoles, labgrid's drivers and its reservation coordinator can be plugged as the resource/transport layer later instead of rewriting them.
+- Why not as the kernel: no pipeline DSL, no job queue with datapack semantics, no UI; the coordinator manages places, not pipelines. **Why consider it as a backend**: if the lab includes boards needing power cycling/serial consoles, labgrid's drivers and its reservation coordinator can be plugged as the resource/transport layer later instead of rewriting them.
 
 **OpenTAP** (Keysight, open source core, C#/.NET): test sequencer for instruments with test plans, parallel steps, resources (instruments/DUTs) opened/locked by plan, plugins, CLI + (proprietary) GUI. Domain is right (test sequencing, resources), but .NET-centric, test-plan XML, instruments rather than Linux hosts; the useful GUI is commercial. Not retained. NI TestStand: same domain, proprietary, Windows: excluded.
 
@@ -102,13 +102,13 @@ Constraints: simple and modular, well-known open-source dependencies, reuse of t
 | Rundeck / StackStorm | ✓ | ✗/~ | ~ | ✓ | ~ | ✓ | heavy | no |
 | AsyncSSH / Fabric | - | - | - | ✓✓ | ✓ | - | lib | **transport** |
 
-## 4. Stages, test means and GitLab
+## 4. Stages, ad hoc components and GitLab
 
 **Stages and shared components (C7).** The lock granularity asked for is the stage, a named set of components, with components that can belong to several stages.
 - Jenkins Lockable Resources has labels (a resource can carry several) and `lock(label: ..., quantity: ...)`, but no notion of "this lock implies those other locks".
 - LAVA multinode jobs reserve several devices of given types, which is close to "several stages per job", but its devices are boards, not sets of components.
 - labgrid **places** are the best match: a place groups resources, a resource can be shared, and the coordinator handles acquire/release and reservations with priorities. It has no pipeline or datapack notion, though.
-- The **Ansible inventory** expresses exactly the topology: a group per stage, a host in several groups for a shared component, group variables for stage overrides, a parent group per test mean. It is a description format, without any locking.
+- The **Ansible inventory** expresses exactly the topology: a group per stage, a host in several groups for a shared component, group variables for stage overrides, ungrouped hosts for ad hoc components. It is a description format, without any locking.
 
 The proposal therefore takes the Ansible inventory format for the topology, and implements stage locks itself as "lock the set of components of the stage", with shared components locked once per datapack and an optional shared (read-only) lock mode for components such as clocks.
 
