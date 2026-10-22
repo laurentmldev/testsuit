@@ -1,0 +1,8 @@
+# AU configuration ({{ testdef.id }}): piezo sensors on GPIO, contact events published on the train network.
+network:
+  local_address: {{ net.acquisition }}
+  contacts: {group: {{ net.multicast_group }}, port: {{ net.contact_port }}}
+sensors:
+  front: {gpio: {{ gpio.piezo_front }}, edge: rising, debounce_ms: 5}
+  back:  {gpio: {{ gpio.piezo_back }}, edge: rising, debounce_ms: 5}
+log: {file: ../output/app.log, level: info}

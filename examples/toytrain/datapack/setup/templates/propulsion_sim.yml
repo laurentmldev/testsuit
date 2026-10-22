@@ -1,0 +1,11 @@
+# Simulated propulsion controller ({{ testdef.id }}): receives the pilot commands and sends the speed
+# feedback in place of the real propulsion unit, on the real unit's address.
+listen: {address: {{ net.propulsion }}, port: {{ net.propulsion_cmd_port }}}
+feedback: {group: {{ net.multicast_group }}, port: {{ net.speed_port }}, rate_hz: 20}
+model:
+  max_speed_mps: {{ train.physical_max_mps }}   # physical limit, above the software limit on purpose
+  acceleration_mps2: 0.5
+  braking_mps2: 2.0
+  step_mps: {{ train.pilot_profile.step_mps }}  # speed change of one up/down command
+record: {file: ../output/propulsion.csv}       # commands received and speed sent, for the exploitation
+log: {file: ../output/sim.log}

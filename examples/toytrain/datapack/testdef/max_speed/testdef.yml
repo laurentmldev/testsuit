@@ -1,0 +1,59 @@
+# Max speed test: let the train accelerate with its nominal profile and check that the speed
+# never gets over the maximum speed allowed (0.5 m/s), although the propulsion could reach 1 m/s.
+id: toytrain_max_speed
+name: Max speed
+description: The speed never exceeds the speed limit while the pilot accelerates.
+setup_file: ../../setup/toytrain_setup.yml
+setup_config: sim_bench
+dictionaries:
+  - scenario.yml
+
+# Pipeline run by the sequencer (README section 8.3), kept as is in the datapack.
+# Same pipeline for every toy-train test; the scenario dictionary makes the difference.
+pipeline:
+  timeout: 15m
+  phases:
+
+    - id: test_run
+      stages: [train]                            # CALC-Pilot, CALC-TM, AU, switch: locked as one stage
+      components: [propulsion, piezo]            # ad hoc components on the lab server
+      steps:
+        # deploy every input in parallel (default linux_system deploy: scp to <remote_root>/<component>/input)
+        - {id: deploy, for_each: components, do: deploy}
+        - {id: flash_pilot, component: pilot, do: install, needs: [deploy]}
+
+        # the simulation first: the calculators must find their peers when they start
+        - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
+        - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
+
+        - {id: start_tm, component: telemetry, do: start, needs: [deploy]}
+        - {id: tm_ready, component: telemetry, do: ready, needs: [start_tm]}
+        - {id: start_au, component: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: au_ready, component: acquisition, do: ready, needs: [start_au]}
+
+        # rendez-vous: the pilot starts the train only when everything listens
+        - {id: start_pilot, component: pilot, do: start, needs: [flash_pilot, sims_ready, tm_ready, au_ready]}
+        - {id: pilot_running, wait_for: {state: running, component: pilot, timeout: 20s}, needs: [start_pilot]}
+
+        # the scenario runs by itself (pilot profile, simulated contacts): just let it run
+        - {id: run, delay: "{{ scenario.duration_s }}s", needs: [pilot_running]}
+
+        # stop the pilot first (it stops the train), then the recorders and the simulation
+        - {id: stop_pilot, component: pilot, do: stop, needs: [run]}
+        - {id: stop_all, for_each: [acquisition, telemetry, propulsion, piezo], do: stop, needs: [stop_pilot]}
+      finally:                                   # always, even on cancel or kill
+        - {id: kill_leftovers, for_each: components, do: kill, if: "not succeeded('stop_all')"}
+        - {id: collect, for_each: components, do: collect}
+
+    - id: exploit
+      needs: [test_run]
+      components: [analysis]                     # the lab server (role sequencer), never locked
+      inputs:                                    # outputs of the test run become exploitation inputs
+        - {from: "test_run:telemetry/output/telemetry.csv", to: "analysis/input/data/"}
+        - {from: "test_run:propulsion/output/propulsion.csv", to: "analysis/input/data/"}
+        - {from: "test_run:piezo/output/piezo.csv", to: "analysis/input/data/"}
+      steps:
+        - {id: deploy, component: analysis, do: deploy}
+        - {id: analyse, component: analysis, do: start, needs: [deploy]}   # exit 0: criteria ok, else failed
+      finally:
+        - {id: collect, component: analysis, do: collect}

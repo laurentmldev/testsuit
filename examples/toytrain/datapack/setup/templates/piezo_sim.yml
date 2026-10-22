@@ -1,0 +1,14 @@
+# Simulated piezo sensors ({{ testdef.id }}): pulses on the AU GPIO inputs, through the USB GPIO adapter
+# of the lab server. Events come from the test scenario (dictionary scenario.yml of the test definition).
+outputs:
+  front: {adapter_pin: C0, au_gpio: {{ gpio.piezo_front }}}
+  back:  {adapter_pin: C1, au_gpio: {{ gpio.piezo_back }}}
+speed_feedback: {group: {{ net.multicast_group }}, port: {{ net.speed_port }}}   # for speed-triggered events
+events:{% if not scenario.contacts %} []{% endif %}
+{%- for contact in scenario.contacts %}
+  - sensor: {{ contact.sensor }}
+    trigger: {speed_at_least_mps: {{ contact.trigger.speed_at_least_mps }}, hold_s: {{ contact.trigger.hold_s }}}
+    pulse_ms: {{ contact.pulse_ms }}
+{%- endfor %}
+record: {file: ../output/piezo.csv}
+log: {file: ../output/sim.log}

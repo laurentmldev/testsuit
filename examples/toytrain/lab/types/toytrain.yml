@@ -1,0 +1,67 @@
+# Lab component types of the toy-train lab (sequencer README, section 7).
+# They say how to drive and monitor each kind of hardware, whatever the test.
+# What a given test deploys and starts is in the datapack setup (component_types extending these).
+#
+# Assumed on the targets (prepared once by the lab operators, not by the tests):
+# - an account 'tsq' with the lab key, and sudo rights limited to the commands below;
+# - the toy-train software installed as systemd services, configured from <remote_root>/<component>/input/.
+
+component_types:
+
+  arduino_unoq:
+    # Arduino UNO Q: Debian on its MPU (reached over SSH like any Linux system) and a microcontroller
+    # running the real-time part of the application. Ethernet through a W5500 module.
+    extends: linux_system
+    commands:
+      # flash the microcontroller part from the deployed inputs (assumed helper of the toy-train software)
+      install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
+      start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
+      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
+      kill:    {run: "sudo systemctl kill --signal=KILL toytrain-{{ component.role }}; sudo /usr/local/bin/toytrain-install --halt-mcu"}
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
+      version: {run: "/usr/local/bin/toytrain-install --version"}   # recorded in the results baseline
+    status:
+      probe: {run: "systemctl is-active toytrain-{{ component.role }}; cat /run/toytrain/state 2>/dev/null"}
+      interval: 10s
+      states:
+        broken:     {regex: "FAULT"}
+        running:    {regex: "^active"}
+        configured: {regex: "^inactive[\\s\\S]*CONFIGURED"}
+        idle:       {regex: "^inactive"}
+
+  rpi5:
+    # Raspberry Pi 5, Raspberry Pi OS: plain Linux system with the toy-train services.
+    extends: linux_system
+    commands:
+      start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
+      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
+      kill:    {run: "sudo systemctl kill --signal=KILL toytrain-{{ component.role }}"}
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
+      version: {run: "toytrain-{{ component.role }} --version"}
+    status:
+      probe: {run: "systemctl is-active toytrain-{{ component.role }}"}
+      interval: 10s
+      states:
+        running: {regex: "^active"}
+        broken:  {regex: "^failed"}
+        idle:    {regex: "^inactive"}
+
+  auvidea_m82:
+    # Auvidea M82 Ethernet switch: not configured by the tests, only monitored.
+    # Probed from the sequencer host, so its transport is local.
+    extends: component
+    transport: local
+    status:
+      probe: {run: "ping -c 1 -W 1 {{ component.host }}"}
+      interval: 30s
+      states:
+        running: {exit: 0}
+        offline: {exit: nonzero}
+
+  toytrain_sim:
+    # Simulation processes on the lab server (python, from the toy-train test repository).
+    # Each one runs as a transient systemd unit started by the sequencer (README, section 11).
+    extends: linux_system
+    commands:
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/sim.log", regex: "READY"}, timeout: 20s}}
+      version: {run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}

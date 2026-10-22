@@ -1,0 +1,78 @@
+# Toy-train lab: one stage (the train's calculators and switch) and one Linux server
+# hosting the sequencer and the simulation.
+# Ansible YAML inventory format (sequencer README, section 6). Owned by the lab operators.
+#
+#              Linux server lab-srv (ad hoc components)
+#        ┌────────────────────────────────────────────────┐
+#        │ sequencer (tsqd)   simulated propulsion   simulated piezo sensors   exploit_runner
+#        └────────┬──────────────────┬───────────────────────┬──────────────────┘
+#     eth0 10.42.0.1         alias 10.42.0.20           USB GPIO adapter
+#     (+ 10.42.0.20:         (address of the real       (FT232H), wired to
+#      propulsion address)    propulsion controller)    AU GPIO 17 / 27
+#                 │                                          │
+#   stage train_1 │                                          │
+#   ┌─────────────┴────── switch Auvidea M82 (10.42.0.2) ────┼───────────┐
+#   │  CALC-Pilot 10.42.0.10   CALC-TM 10.42.0.11   AU 10.42.0.12 ◄──────┘
+#   │  (Arduino UNO Q, W5500)  (Raspberry Pi 5)     (Raspberry Pi 5)
+#   └────────────────────────────────────────────────────────────────────┘
+#
+# The simulated propulsion controller answers on the real controller's address (10.42.0.20),
+# so the calculators run with the same configuration as on the real train.
+
+all:
+  vars:
+    ansible_user: tsq                              # account created on every calculator for the sequencer
+    ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based only: no password prompt
+    tsq_type: linux_system
+    tsq_remote_root: /opt/testrun                  # <root>/<component>/{input,output}
+    tsq_types: [types/]                            # lab component types (types/toytrain.yml)
+
+  hosts:                                           # ad hoc components (no stage)
+    lab_srv:                                       # the sequencer component
+      ansible_host: localhost
+      tsq_transport: local
+      tsq_role: sequencer
+      tsq_lock: none
+      tsq_label: lab-srv (sequencer, exploitation)
+    sim_propulsion:                                # simulation processes on the same server
+      ansible_host: localhost
+      tsq_transport: local
+      tsq_type: toytrain_sim
+      tsq_role: propulsion_sim
+      tsq_remote_root: /srv/toytrain-sim
+      tsq_label: Simulated propulsion controller
+      tsq_sim_address: 10.42.0.20                  # alias of eth0, address of the real propulsion controller
+    sim_piezo:
+      ansible_host: localhost
+      tsq_transport: local
+      tsq_type: toytrain_sim
+      tsq_role: piezo_sim
+      tsq_remote_root: /srv/toytrain-sim
+      tsq_label: Simulated piezo sensors
+      tsq_gpio_adapter: /dev/serial/by-id/usb-FTDI_FT232H_TT01-if00   # wired to AU GPIO 17 (front), 27 (back)
+
+  children:
+    train_1:                                       # the stage
+      vars:
+        tsq_stage_type: toytrain                   # what datapacks ask for
+      hosts:
+        calc_pilot:
+          ansible_host: 10.42.0.10
+          tsq_type: arduino_unoq
+          tsq_role: pilot
+          tsq_label: CALC-Pilot
+        calc_tm:
+          ansible_host: 10.42.0.11
+          tsq_type: rpi5
+          tsq_role: telemetry
+          tsq_label: CALC-TM
+        au:
+          ansible_host: 10.42.0.12
+          tsq_type: rpi5
+          tsq_role: acquisition
+          tsq_label: AU
+        switch:
+          ansible_host: 10.42.0.2
+          tsq_type: auvidea_m82
+          tsq_role: switch
+          tsq_label: Switch Auvidea M82

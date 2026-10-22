@@ -1,0 +1,105 @@
+# Setup of the toy-train tests on the lab (datapack side, sequencer README section 8).
+# It says what each component gets as inputs and how this test drives it; the lab inventory says
+# where the components are.
+#
+# The sequencer fields (extends, commands, stages, stage, role) are kept as is in the datapack
+# and used by the sequencer at run time.
+
+id: toytrain_lab_setup
+name: Toy train on the lab (simulated propulsion and sensors)
+
+dictionaries:
+  - globals.yml
+
+datarepositories:
+  - id: toytrain
+    path: "{{ setup.path }}/../../.work/datarepo"
+    datasources:
+      - id: software
+        name: Toy-train software (system under test)
+        importer: git
+        source: git@forge.example:toytrain/toytrain-sw.git
+        datasets:
+          - id: toytrain_sw                   # keys: toytrain_sw.path, toytrain_sw.version
+            version: "{{ toytrain_sw_version }}"
+      - id: simulation
+        name: Toy-train lab simulation
+        importer: git
+        source: git@forge.example:toytrain/toytrain-sim.git
+        datasets:
+          - id: toytrain_sim
+            version: "{{ toytrain_sim_version }}"
+
+component_types:
+
+  pilot_app:                                  # CALC-Pilot application
+    extends: arduino_unoq                     # lab type: binds only to an Arduino UNO Q
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sw.path }}/pilot/", target: app/, method: copy}   # MPU app + MCU firmware
+          - {source: templates/pilot.yml, target: pilot.yml}
+
+  telemetry_app:                              # CALC-TM application
+    extends: rpi5
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sw.path }}/telemetry/", target: app/, method: copy}
+          - {source: templates/telemetry.yml, target: telemetry.yml}
+
+  acquisition_app:                            # AU application
+    extends: rpi5
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sw.path }}/acquisition/", target: app/, method: copy}
+          - {source: templates/acquisition.yml, target: acquisition.yml}
+
+  network_switch:                             # nothing deployed: only monitored, and locked with the stage
+    extends: auvidea_m82
+    configurations:
+      passive: {inputs: []}
+
+  propulsion_sim:
+    extends: toytrain_sim
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sim.path }}/", target: sim/, method: copy}
+          - {source: templates/propulsion_sim.yml, target: propulsion_sim.yml}
+    commands:
+      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml --out {{ component.output_dir }}", detach: true}
+
+  piezo_sim:
+    extends: toytrain_sim
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sim.path }}/", target: sim/, method: copy}
+          - {source: templates/piezo_sim.yml, target: piezo_sim.yml}
+    commands:
+      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim piezo --config {{ component.input_dir }}/piezo_sim.yml --gpio {{ component.vars.tsq_gpio_adapter }} --out {{ component.output_dir }}", detach: true}
+
+  exploit:                                    # exploitation with testsuit's exploit_runner
+    extends: linux_system
+    configurations:
+      standard:
+        inputs:
+          - {source: templates/exploit.yml, target: exploit.yml}
+          - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
+    commands:
+      start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m, expect: {exit: [0]}}
+
+configurations:
+  sim_bench:                                  # real calculators, simulated propulsion and sensors
+    stages:
+      train: {type: toytrain}                 # bound to train_1 (the only stage of this type)
+    components:
+      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
+      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage: train, role: telemetry}
+      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage: train, role: acquisition}
+      switch:      {name: Switch M82, type: network_switch, configuration: passive, stage: train, role: switch}
+      propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
+      piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
+      analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}

@@ -1,0 +1,4 @@
+# Scenario of the max speed test.
+scenario:
+  duration_s: 30                 # profile reaches the limit after about 10 s, then holds it
+  contacts: []                   # no obstacle

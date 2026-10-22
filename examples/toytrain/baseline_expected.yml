@@ -1,0 +1,16 @@
+# Expected baseline of the toy-train campaign (sequencer README, section 5.3).
+# Checked at submission (tsq submit --baseline baseline_expected.yml) and, for the components,
+# before the first phase. A mismatch does not reject the datapack: the run is flagged non-conform.
+sources:
+  - {role: testdef, repo: git@forge.example:toytrain/toytrain-tests.git, tag: "v1.*", clean: true}
+  - {role: setup, repo: git@forge.example:toytrain/toytrain-tests.git, tag: "v1.*", clean: true}
+  - {role: dataset, id: toytrain_sw, version: v0.3.0}
+  - {role: dataset, id: toytrain_sim, version: "v1.1.*"}
+tools:
+  - {name: testsuit, version: ">=3.2"}
+run:
+  lab: {repo: git@forge.example:toytrain/toytrain-lab.git, tag: "lab-*"}
+  components:                     # read with each lab type's 'version' command
+    calc_pilot: {version: "toytrain-pilot 0.3.0"}
+    calc_tm:    {version: "toytrain-telemetry 0.3.0"}
+    au:         {version: "toytrain-acquisition 0.3.0"}

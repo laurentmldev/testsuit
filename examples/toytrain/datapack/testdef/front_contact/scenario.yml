@@ -1,0 +1,12 @@
+# Scenario of the front contact test.
+scenario:
+  duration_s: 25
+  contacts:                      # rendered into the piezo simulation configuration
+    - sensor: front
+      trigger:                   # closed loop: 3 s after the speed feedback reaches full speed
+        speed_at_least_mps: "{{ train.speed_limit_mps - 0.005 }}"
+        hold_s: 3
+      pulse_ms: 50
+expected:
+  stop_command_within_s: 0.2     # from the contact to the pilot 'stop' command
+  standstill_within_s: 1.0       # from the contact to zero speed

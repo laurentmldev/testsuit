@@ -1,0 +1,19 @@
+# CALC-Pilot configuration ({{ testdef.id }}), rendered by the datapack tool.
+# Format assumed for this example: it belongs to the toy-train software.
+network:
+  local_address: {{ net.pilot }}
+  propulsion: {address: {{ net.propulsion }}, port: {{ net.propulsion_cmd_port }}}   # commands: up/down/stop/keep
+  speed_feedback: {group: {{ net.multicast_group }}, port: {{ net.speed_port }}}
+  contacts: {group: {{ net.multicast_group }}, port: {{ net.contact_port }}}
+  state_publish: {group: {{ net.multicast_group }}, port: {{ net.pilot_state_port }}}
+direction: forward
+speed_limit_mps: {{ train.speed_limit_mps }}
+profile:                         # 0.25 m/s for 5 s, then +0.1 m/s steps up to the speed limit
+  start_speed_mps: {{ train.pilot_profile.start_speed_mps }}
+  start_hold_s: {{ train.pilot_profile.start_hold_s }}
+  step_mps: {{ train.pilot_profile.step_mps }}
+  step_period_s: {{ train.pilot_profile.step_period_s }}
+on_contact:
+  front: stop
+  back: stop
+log: {file: ../output/app.log, level: info}

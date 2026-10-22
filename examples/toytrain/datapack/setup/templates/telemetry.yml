@@ -1,0 +1,12 @@
+# CALC-TM configuration ({{ testdef.id }}): records the system data into a local file.
+network:
+  local_address: {{ net.telemetry }}
+subscribe:
+  speed:   {group: {{ net.multicast_group }}, port: {{ net.speed_port }}}
+  contact: {group: {{ net.multicast_group }}, port: {{ net.contact_port }}}
+  pilot:   {group: {{ net.multicast_group }}, port: {{ net.pilot_state_port }}}
+record:
+  file: ../output/telemetry.csv   # collected by the sequencer, input of the exploitation
+  period_ms: 10
+  columns: [Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back]
+log: {file: ../output/app.log, level: info}

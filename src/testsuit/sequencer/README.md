@@ -13,6 +13,8 @@ One sequencer manages one lab: the whole set of components and the stages they b
 
 Status: architecture proposal, nothing is implemented yet. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
 
+A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
+
 Contents:
 1. [Functional requirements](#1-functional-requirements)
 2. [Vocabulary](#2-vocabulary)
