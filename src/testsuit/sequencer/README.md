@@ -46,6 +46,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | DG-2 | Generating a component's inputs can involve processing specific to that component, beyond rendering templates and copying files. | 5.1 |
 | DG-3 | A component can need other components' inputs to generate its own. | 5.2 |
 | DG-4 | A datapack is self-sufficient: it can be run from its zip contents only (inputs, resolved keys, test definition with its pipeline). | 10 |
+| DG-5 | A datapack carries a **baseline**: where each of its contents comes from (git path, commit and tag of the original inputs, the processing tools and their versions, and, for results, the sequencer and the lab), so that the identity of the produced data can be controlled and checked against an expected baseline. | 5.3, 10 |
 
 ### 1.2 Queue and resources
 
@@ -177,6 +178,42 @@ configurations:
 ```
 
 Both refinements keep the datapack self-sufficient: what a component needed from another one is already in the zip.
+
+### 5.3 Baseline
+
+Each datapack carries a `baseline.yml`, the synthesis of where its contents come from. Since it is covered by the BagIt tag manifest, it cannot be changed without `datapack --verify` noticing.
+
+The datapack tool already records part of it in `datapack.yml` (git commit, tag and cleanliness of the test definition and setup folders; source and version of each dataset). The baseline completes it and puts it in one place:
+
+```yaml
+# baseline.yml
+datapack: {name: acme_nominal_20261022T1012, format: 2, conform: true}
+sources:                          # every original input, by git origin
+  - {role: testdef, path: tests/nominal/testdef.yml, repo: git@forge:acme/tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: setup, path: setups/acme/setup.yml, repo: git@forge:acme/setups.git, commit: 81bd04e, tag: v2.0.1, clean: true}
+  - {role: dictionary, path: setups/acme/globals.yml, repo: git@forge:acme/setups.git, commit: 81bd04e, tag: v2.0.1, clean: true}
+  - {role: dataset, id: scenarios, importer: git, source: git@forge:acme/data.git, version: scen@v7, commit: c09e7d2}
+tools:                            # what processed them
+  - {name: testsuit, version: 3.2.0}
+  - {name: acme_testbench, kind: plugin, version: 1.1.0}          # generators, processors, importers
+  - {name: jinja2, version: 3.1.6}
+files:                            # each generated file and what produced it
+  data/bench_a/input/bench_config.yml: {from: [setup/templates/bench_config.yml.j2], method: template, sha256: 9e1f...}
+  data/plc_1/input/plc.bin: {from: [datasets/scenarios/plc.src], method: generate, generator: acme_plc_build, sha256: 44ab...}
+```
+
+When the sequencer produces the results zip (section 10), it extends the baseline with a `run` part:
+- the sequencer version and its plugins;
+- the git commit and tag of the lab inventory and of the component type library;
+- the concrete stages and components the run was bound to;
+- the software version of each component, when its type defines a `version` command (for example `bench_ctl --version`, a PLC firmware id), read before the first phase.
+
+**Conformity.** A baseline is **conform** when every source is a clean, tagged git state and every dataset version was confirmed. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
+- by `datapack --check-baseline expected.yml pack.zip`, and when building with `datapack ... --baseline expected.yml`;
+- by the sequencer at submission (`tsq submit --baseline expected.yml`, or `pipeline.baseline` in the test definition), which rejects a non-conform datapack;
+- before the first phase for the `run` part (component versions), so that a run on a bench with unexpected software ends in `error` before anything is deployed.
+
+The differences are listed, one line per mismatch, and kept in the run record.
 
 ## 6. Lab inventory: stages and components
 
@@ -463,7 +500,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
    - `error`: at least one step crashed or could not complete (section 8.3), or the run was cancelled or killed. The test outcome is then unknown, not negative.
 
    The status of each phase and step is kept.
-6. **Results**: the run folder is zipped as `<datapack>_results.zip`, a valid datapack whose manifest now covers the outputs too. The run record stays in the database as history.
+6. **Results**: the run folder is zipped as `<datapack>_results.zip`, a valid datapack whose manifest now covers the outputs too, and whose baseline gets the `run` part (section 5.3). The run record stays in the database as history.
 
 State machines:
 - run: `queued → waiting_resources → reserved → running → cleaning → done`, or `cancelled` while still queued; a done run carries its verdict, and an aborted run (`tsq cancel`, `tsq kill`) gets the verdict `error`;
@@ -583,7 +620,7 @@ Tests:
 
 ## 16. Implementation plan
 
-1. **Datapack refinements**: `method: generate` with registered generators, and component `needs`. Small, independent, testable on their own.
+1. **Datapack refinements**: `method: generate` with registered generators, component `needs`, and the baseline with its check against an expected baseline. Small, independent, testable on their own.
 2. **Models and validation**:
    - Pydantic models for the lab inventory, component types, resources needed and pipeline;
    - `tsq validate` printing the binding candidates and every command fully expanded (the main debugging tool for YAML authors).
