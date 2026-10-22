@@ -2,8 +2,8 @@
 # It says what each component gets as inputs and how this test drives it; the lab inventory says
 # where the components are.
 #
-# The sequencer fields (extends, commands, stages, stage, role) are kept as is in the datapack
-# and used by the sequencer at run time.
+# The sequencer fields (extends, commands, stages, stage, role) are kept in the datapack as
+# written, for the sequencer to use at run time (commands are not rendered by the datapack tool).
 
 id: toytrain_lab_setup
 name: Toy train on the lab (simulated propulsion and sensors)
@@ -17,15 +17,15 @@ datarepositories:
     datasources:
       - id: software
         name: Toy-train software (system under test)
-        importer: git
-        source: git@forge.example:toytrain/toytrain-sw.git
+        importer: toytrain-release            # the toytrain package's importer; 'git' for a git repository
+        source: "{{ setup.path }}/../release_store/toytrain-sw"
         datasets:
           - id: toytrain_sw                   # keys: toytrain_sw.path, toytrain_sw.version
             version: "{{ toytrain_sw_version }}"
       - id: simulation
         name: Toy-train lab simulation
-        importer: git
-        source: git@forge.example:toytrain/toytrain-sim.git
+        importer: toytrain-release
+        source: "{{ setup.path }}/../release_store/toytrain-sim"
         datasets:
           - id: toytrain_sim
             version: "{{ toytrain_sim_version }}"

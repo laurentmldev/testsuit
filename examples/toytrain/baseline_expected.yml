@@ -4,8 +4,8 @@
 sources:
   - {role: testdef, repo: git@forge.example:toytrain/toytrain-tests.git, tag: "v1.*", clean: true}
   - {role: setup, repo: git@forge.example:toytrain/toytrain-tests.git, tag: "v1.*", clean: true}
-  - {role: dataset, id: toytrain_sw, version: v0.3.0}
-  - {role: dataset, id: toytrain_sim, version: "v1.1.*"}
+  - {role: dataset, id: toytrain_sw, importer: toytrain-release, version: v0.3.0}
+  - {role: dataset, id: toytrain_sim, importer: toytrain-release, version: "v1.1.*"}
 tools:
   - {name: testsuit, version: ">=3.2"}
 run:

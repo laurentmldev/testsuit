@@ -7,5 +7,5 @@ model:
   acceleration_mps2: 0.5
   braking_mps2: 2.0
   step_mps: {{ train.pilot_profile.step_mps }}  # speed change of one up/down command
-record: {file: ../output/propulsion.csv}       # commands received and speed sent, for the exploitation
+record: {file: ../output/propulsion.propj}     # commands received and speed sent (JSON, toytrain plugin format)
 log: {file: ../output/sim.log}

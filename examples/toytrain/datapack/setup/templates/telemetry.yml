@@ -7,6 +7,7 @@ subscribe:
   pilot:   {group: {{ net.multicast_group }}, port: {{ net.pilot_state_port }}}
 record:
   file: ../output/telemetry.csv   # collected by the sequencer, input of the exploitation
-  period_ms: 10
+  period_ms: 50                   # 20 Hz
+  header: "#TOYTRAIN-TM v1;unit=CALC-TM;train=TT-01"   # read by the toytrain-telemetry CSV variant
   columns: [Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back]
 log: {file: ../output/app.log, level: info}

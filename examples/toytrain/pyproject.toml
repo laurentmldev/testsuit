@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toytrain-testenv"
+version = "0.1.0"
+description = "Example test environment of a toy train, built on testsuit: data file formats, mexploit criteria, a datapack importer, a report logo, and a sequencer configuration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    # outside this repo: "testsuit @ git+https://github.com/laurentmldev/testsuit"
+    "testsuit",
+    "numpy",
+    "pandas",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+toytrain = "toytrain.cli:main"
+
+# how testsuit finds this package's registrations, in every process and command-line tool
+[project.entry-points."testsuit.plugins"]
+toytrain = "toytrain.plugin:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+toytrain = ["assets/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

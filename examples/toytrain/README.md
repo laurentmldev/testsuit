@@ -1,6 +1,10 @@
-# Toy train: sample test environment for the sequencer
+# Toy train: a test environment built on testsuit
 
-A sample configuration of the [sequencer](../../src/testsuit/sequencer/README.md) around a small system. Only the test environment is shown, and nothing here runs yet: the sequencer is not implemented, and the toy-train software and its simulation are assumed to exist in their own git repositories.
+The example project of testsuit: the test environment of a small system, a toy train. Everything here is example code, configuration and sample data you can copy as a starting point. The system itself is not implemented, only the tools and configuration around it.
+
+It has two parts:
+- **the `toytrain` package**, a Python library extending testsuit without changing it: file formats for the train's recordings, mexploit criteria, a datapack importer for its software releases, a report logo and a command-line tool;
+- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, component types, datapack setup, test definitions with their pipeline, and exploitation criteria. The sequencer is not implemented yet, but the datapacks build and the criteria run on sample recordings today.
 
 ## The system under test
 
@@ -49,6 +53,14 @@ Both tests share the setup and the pipeline. Only their scenario dictionary and 
 ## Files
 
 ```
+pyproject.toml                         package, entry point: [project.entry-points."testsuit.plugins"]
+src/toytrain/
+  plugin.py                            register(): every registration, in one place
+  filemgrs.py                          file managers (readers)
+  criteria.py, checks.py               mexploit criteria
+  importer.py                          datapack importer
+  cli.py                               the toytrain command
+  assets/toytrain_logo.svg             report logo
 lab/                                   owned by the lab operators
   toytrain_lab.yml                     inventory: stage train_1, ad hoc components on lab-srv
   types/toytrain.yml                   lab types: arduino_unoq, rpi5, auvidea_m82, toytrain_sim
@@ -59,10 +71,97 @@ datapack/                              owned by the test authors
   testdef/<test>/testdef.yml           test definition and pipeline
   testdef/<test>/scenario.yml          scenario keys
   testdef/<test>/criteria/<test>/      exploitation criteria (mexploit)
+  release_store/                       stand-in for the release server (toytrain-release importer)
 baseline_expected.yml                  expected baseline of the campaign
+sample/
+  data/<test>/                         recordings of a nominal run: telemetry.csv, propulsion.propj
+  exploit_<test>.yml                   exploit_runner session: the test's criteria on its recording
+  make_runs.py                         how the recordings were made
+tests/                                 pytest suite, runs everything end to end
 ```
 
-## A run
+## What the package adds to testsuit
+
+| What | Where | Used as |
+|------|-------|---------|
+| a new data file format, the JSON record of the propulsion controller | `filemgrs.PropulsionJsonFileMgr` | `*.propj` files |
+| a fake format whose signals are generated, not measured | `filemgrs.SimulatedFileMgr` | `*.sim.yml` files |
+| a CSV syntax, the CALC-TM telemetry (a `#TOYTRAIN-TM` line on top of a CSV file) | `filemgrs.TelemetryCsvFileMgr` | `*.csv` files starting with `#TOYTRAIN-TM` |
+| mexploit criteria registered as a module | `criteria.py` | `type: within_range`, `max_slope`, `settles` |
+| mexploit criteria registered one by one (`@register_criterion`) | `checks.py` | `type: no_dropout`, `mean_close_to` |
+| a datapack importer | `importer.ReleaseImporter` | `importer: toytrain-release` in datapack setups |
+| its own logo on the exploit_runner HTML report | `assets/toytrain_logo.svg` | every report |
+| a command-line tool | `cli.py` | `toytrain` |
+
+All of it is registered in one function, `plugin.register()`, which `pyproject.toml` declares as a `testsuit.plugins` entry point. Once the package is installed, testsuit calls it by itself: in your scripts, in the command-line tools (`data2h5`, `mxp`, `exploit_runner`, `datapack`...), and in the `mxp` processes exploit_runner starts for each test run.
+
+## Install
+
+From the root of the testsuit repository:
+
+```bash
+pip install -e .                               # testsuit
+pip install -e "examples/toytrain[test]"       # this example
+```
+
+Outside this repository, install testsuit from Git instead: `pip install "testsuit @ git+https://github.com/laurentmldev/testsuit"`.
+
+Check that testsuit sees the plugin:
+
+```bash
+python -c "from testsuit.plugins import load_plugins; print(load_plugins())"    # ['toytrain']
+```
+
+## Try it
+
+Commands below run from `examples/toytrain`. Outputs go to `.work/`, which Git ignores.
+
+**Load the recordings** like any other testsuit format:
+
+```bash
+data2h5 sample/data/max_speed -l                                # the parameters of every file
+data2h5 sample/data/max_speed .work/max_speed.h5 -p ".*"        # all of them into an HDF5 file
+```
+
+```python
+from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
+from testsuit.misc.MonitorProgress import MonitorProgress
+
+scanner = FolderParamMgr("sample/data/max_speed")
+[speed] = scanner.findParams("^speed_mps", monitorProgress=MonitorProgress(name="demo"))
+```
+
+**Run the criteria of a test** on its sample recording, as the exploit phase of the pipeline would. The report, `.work/exploit_max_speed/exploit_synthesis.html`, starts with the toy-train logo:
+
+```bash
+exploit_runner sample/exploit_max_speed.yml
+exploit_runner sample/exploit_front_contact.yml
+```
+
+A single test run works with mxp too: `mxp datapack/testdef/max_speed/criteria/max_speed sample/data/max_speed -o .work/mxp -f`.
+
+**Build a datapack.** The software and simulation datasets come from the release store (`datapack/release_store`). `--nocheck` is needed because the example folders are not a tagged Git checkout:
+
+```bash
+datapack datapack/testdef/max_speed/testdef.yml --nocheck
+```
+
+The datasets are imported into `.work/datarepo`, the templates of `datapack/setup/templates` are rendered for each component, and the zip lands in `.work/datapacks`, ready for `tsq submit`. Run it again and the datasets are checked (version and checksums) instead of being imported again.
+
+**Use the `toytrain` command**, installed with the package (`[project.scripts]` in pyproject.toml):
+
+```bash
+toytrain info sample/data/max_speed                 # data files, the reader of each one, their parameters
+toytrain criteria --templates                       # the criteria this package adds, with their scenario syntax
+toytrain check sample/data/max_speed max_slope "^speed_mps" max_per_sec=0.55     # one criterion, no scenario needed
+toytrain import datapack/release_store/toytrain-sw v0.3.0 .work/toytrain_sw/v0.3.0
+```
+
+`check` runs any criterion registered by a plugin on one parameter (a regex matching a single one), with the criterion settings given as `key=value`. It prints `OK` or `FAILED` with the reason and exits with 0, 1, or 2 on a usage error, so it fits in shell scripts. `import` fetches a dataset version like datapack does; on a folder already imported, it checks the version and checksums instead.
+
+**Run the tests**: `pytest`.
+
+## A run on the lab (sequencer)
 
 ```
 datapack datapack/testdef/front_contact/testdef.yml        # build the zip (inputs, keys, pipeline, baseline)
@@ -77,7 +176,7 @@ The pipeline has two phases.
 3. starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
 4. lets the scenario run for its duration;
 5. stops the pilot first, then the rest;
-6. finally collects every output (`telemetry.csv`, `propulsion.csv`, `piezo.csv`, logs), even after a kill.
+6. finally collects every output (`telemetry.csv`, `propulsion.propj`, `piezo.csv`, logs), even after a kill.
 
 **exploit** runs on the lab server. It receives these outputs as inputs and runs `exploit_runner` on the criteria. Exit code 0 means the verdict is `succeeded`; any other exit code means `failed`.
 
@@ -89,7 +188,8 @@ Interfaces assumed for this example, all belonging to the toy-train software:
 - each calculator runs a systemd service `toytrain-<role>`, configured from `<remote_root>/<component>/input/`, that logs `READY` when listening;
 - CALC-Pilot has an `install` helper that flashes its microcontroller;
 - messages are UDP. Commands go to the propulsion controller on port 5000. Speed feedback (20 Hz), contact events and pilot state are multicast on 239.42.0.1, ports 5001 to 5003;
-- the telemetry file is a CSV with columns `Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back`, read by testsuit's generic CSV reader;
+- the telemetry file is a CSV with a `#TOYTRAIN-TM` first line and columns `Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back` (`pilot_cmd`: 0 keep, 1 up, 2 down, 3 stop; `pilot_state`: 0 idle, 1 running, 2 stopped);
+- the propulsion controller and its simulation record what they receive and send as `*.propj` JSON files;
 - the switch is unmanaged: it is only monitored (ping), and locked with its stage.
 
 This sample also uses a few details that the sequencer README leaves open:
@@ -98,4 +198,24 @@ This sample also uses a few details that the sequencer README leaves open:
 - `install` and `version` are ordinary named commands;
 - `wait_for: {state: ...}` names its component.
 
-Today's `datapack` tool cannot build these datapacks yet: its setup schema doesn't accept the sequencer fields (`extends`, `stages`, `stage`, `role`). Those fields are part of the sequencer work (README, section 16, step 2).
+The datapack tool keeps the sequencer fields (`extends`, `stages`, `stage`, `role`, `commands`, `pipeline`) in the datapack as written, for the sequencer to use.
+
+## Writing your own
+
+**A file format.** Subclass `AFileMgr`: `getFieldNames()` lists the parameters of a file, `loadParams()` returns the requested ones as pandas objects indexed by seconds since epoch, each passed through `self.finalizeParam(...)`. When your format can be read whole, `filemgrs.ChannelsFileMgr` shows the shortest path: implement `readChannels()` only. Then register it:
+
+```python
+register_file_format("propulsion-json", ["propj"], PropulsionJsonFileMgr)
+```
+
+Extensions can contain dots (`"sim.yml"`), and `accepts=lambda filename: ...` narrows a format to some of the files with its extensions. For a CSV dialect, subclass `CsvFileMgr` and register a detector instead: `register_csv_variant("toytrain-telemetry", isTelemetryCsv, TelemetryCsvFileMgr)`.
+
+**A criterion.** A function `crit_<type>(critConf)` that raises (usually with `assert`) when the check fails. `critConf` is the scenario entry, with its `name` and `type`. Load data with testsuit's `param()` helper, or read an earlier `computed_param` entry, as `criteria.signal()` does. Register a whole module with `register_criteria_module("mylib.criteria")`, or single functions with `@register_criterion`. A docstring with a `<TEMPLATE>` block, as in testsuit's own criteria, documents the scenario syntax.
+
+**A datapack importer.** Subclass `ADataImporter` (`retrieve()`, `checkVersion()`, `getChanges()`, `getTag()`) and register the class, or any factory `(targetDir, remotePath, versionId)`: `register_data_importer("toytrain-release", ReleaseImporter)`. The datapack tool provides `<dataset id>.path` and `<dataset id>.version`; after `retrieve()`, the dataset folder can also hold a `dataset.yml` file with more keys for the datapack files (`{{ toytrain_sw.pilot_version }}`).
+
+**The report logo.** `set_default_report_logo(svg=...)` takes SVG markup or a file path; `title="..."` keeps testsuit's animated logo with your name in it. For one run only, use `exploit_runner --report-logo logo.svg` or `--report-logo-title "Toy Train"`.
+
+**A command.** Declare it in `[project.scripts]` (`toytrain = "toytrain.cli:main"`) and call `testsuit.plugins.load_plugins()` before using testsuit, so that your command sees the same formats and criteria as testsuit's own commands.
+
+Without installing your package, `TESTSUIT_PLUGINS=toytrain.plugin` in the environment does the same as the entry point. See the "Extending testsuit from another library" section of testsuit's CONTRIBUTING.md for the reference.

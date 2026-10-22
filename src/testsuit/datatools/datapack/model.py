@@ -1,47 +1,51 @@
 """Schemas of the datapack files: test definition and setup.
 
 Strings of these files may contain Jinja2 expressions (see templating); the models validate the
-files once rendered. Unknown fields are errors, to catch typos.
+files once rendered. Unknown fields are errors, to catch typos. Fields marked "for the test
+sequencer" are kept in the datapack as written, for the sequencer to use at run time.
 
 Test definition::
 
-    id: acme_acceptance
-    name: ACME bench acceptance
-    setup_file: ../setup/acme_setup.yml
-    setup_config: nominal
-    dictionaries: [versions.yml]          # relative to this file
-    pipeline: ...                         # for the test sequencer, kept as is in the datapack
+    id: toytrain_max_speed
+    name: Max speed
+    setup_file: ../../setup/toytrain_setup.yml
+    setup_config: sim_bench
+    dictionaries: [scenario.yml]          # relative to this file
+    pipeline: ...                         # for the test sequencer, not rendered
 
 Setup::
 
-    id: acme_bench
+    id: toytrain_lab_setup
     dictionaries: [globals.yml]           # relative to this file
     datarepositories:
-      - id: acme_data
-        path: "{{ testdef.path }}/../.work/datarepo"     # where datasets are imported
+      - id: toytrain
+        path: "{{ setup.path }}/../../.work/datarepo"   # where datasets are imported
         datasources:
-          - id: calib_store
-            importer: acme-archive
-            source: "{{ testdef.path }}/../archive_store"
+          - id: software
+            importer: toytrain-release
+            source: "{{ setup.path }}/../release_store/toytrain-sw"
             datasets:
-              - id: bench_calib
-                version: "{{ bench_calib_version }}"
+              - id: toytrain_sw
+                version: "{{ toytrain_sw_version }}"
                 postprocess: [finalize]
     component_types:
-      bench_controller:
+      pilot_app:
+        extends: arduino_unoq             # for the test sequencer: the lab type it derives from
         configurations:
           standard:
             inputs:
-              - source: templates/bench_config.yml       # rendered with Jinja2 (method: template)
-                target: bench_config.yml
-              - source: "{{ bench_calib.path }}/calibration.yml"
-                target: calibration.yml
+              - source: templates/pilot.yml               # rendered with Jinja2 (method: template)
+                target: pilot.yml
+              - source: "{{ toytrain_sw.path }}/pilot/"
+                target: app/
                 method: copy
-        commands: ...                     # for the test sequencer, kept as is in the datapack
+        commands: ...                     # for the test sequencer, not rendered
     configurations:
-      nominal:
+      sim_bench:
+        stages:                           # for the test sequencer: logical stages needed
+          train: {type: toytrain}
         components:
-          bench_a: {name: Bench A controller, type: bench_controller, configuration: standard}
+          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
 """
 from __future__ import annotations
 
@@ -103,6 +107,8 @@ class ComponentConfiguration(_Model):
 
 class ComponentType(_Model):
     configurations: dict[str, ComponentConfiguration]
+    # for the test sequencer
+    extends: str = ""
     commands: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -110,10 +116,15 @@ class Component(_Model):
     name: str = ""
     type: str
     configuration: str
+    # for the test sequencer: logical stage and role it is bound by
+    stage: str = ""
+    role: str = ""
 
 
 class SetupConfiguration(_Model):
     components: dict[str, Component]
+    # for the test sequencer: logical stages needed, by id
+    stages: dict[str, Any] = Field(default_factory=dict)
 
 
 class Setup(_Model):

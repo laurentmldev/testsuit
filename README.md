@@ -61,14 +61,14 @@ The `datapack` command builds the input files of every component of a test setup
 
 ```yaml
 # testdef.yml
-id: acme_acceptance
-name: ACME bench acceptance
-setup_file: ../setup/acme_setup.yml
-setup_config: nominal
-dictionaries: [versions.yml]
+id: toytrain_max_speed
+name: Max speed
+setup_file: ../../setup/toytrain_setup.yml
+setup_config: sim_bench
+dictionaries: [scenario.yml]
 ```
 
-Input files are Jinja2 templates (`{{ bench_calib.pressure_gain }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --verify <zip>` checks its checksums. `examples/acme_testbench/sample/datapack` is a complete example, and `testsuit.datatools.datapack.model` documents the file formats.
+Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --verify <zip>` checks its checksums. `examples/toytrain/datapack` is a complete example, and `testsuit.datatools.datapack.model` documents the file formats.
 
 ## Repository layout
 
@@ -85,7 +85,7 @@ src/testsuit/           the installable package
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
-examples/               sample configuration files, and acme_testbench: a library extending testsuit
+examples/toytrain/      the example project: a toy train's test environment (library extending testsuit, sequencer configuration)
 tests/                  pytest suite (*_t.py)
   etc/                  input data, scenarios and configs used by the tests
   ref/                  reference outputs the tests compare against

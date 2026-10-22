@@ -41,7 +41,7 @@ A scenario entry `type: foo` runs the criterion `foo`, a function `crit_foo(crit
 
 ## Extending testsuit from another library
 
-An application built on testsuit can add formats, criteria, datapack importers and processors, and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`. `examples/acme_testbench` is a complete example project using all of them, with its own tests run by CI.
+An application built on testsuit can add formats, criteria, datapack importers and processors, and its own report logo without changing this repo. The extension points are tested in `tests/extensions_t.py`. `examples/toytrain` is a complete example project using all of them, with its own tests run by CI.
 
 ### Data file formats
 
@@ -82,14 +82,14 @@ Criteria can use the mexploit fixtures and helpers exactly like the ones in `cri
 The exploit_runner report starts with an animated "M-Exploit" logo (`report_html.make_report_logo_svg()`). To use your own:
 
 ```python
-exploit_runner(conf_file, report_logo_title="ACME Bench")        # same animated logo, your title
+exploit_runner(conf_file, report_logo_title="Toy Train")        # same animated logo, your title
 exploit_runner(conf_file, report_logo_svg="path/to/logo.svg")    # your SVG (file or markup), "" for none
 
 from testsuit.exploit.runner.report_html import set_default_report_logo
-set_default_report_logo(svg="path/to/logo.svg")    # or title="ACME Bench": every report of the process
+set_default_report_logo(svg="path/to/logo.svg")    # or title="Toy Train": every report of the process
 ```
 
-From the command line: `exploit_runner --report-logo logo.svg` or `--report-logo-title "ACME Bench"`.
+From the command line: `exploit_runner --report-logo logo.svg` or `--report-logo-title "Toy Train"`.
 
 ### datapack importers
 

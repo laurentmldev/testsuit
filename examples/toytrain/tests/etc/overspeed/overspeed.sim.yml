@@ -1,0 +1,11 @@
+# A faulty pilot, simulated (read by toytrain.filemgrs.SimulatedFileMgr): the train accelerates
+# past the speed limit, up to 0.8 m/s. Nothing is measured: values are generated when the file is read.
+start: 2026-10-22T10:00:00Z
+duration_sec: 30
+rate_hz: 20
+signals:
+  speed_mps:      {kind: ramp, from: 0.01, to: 0.8}
+  speed_sent_mps: {kind: ramp, from: 0.01, to: 0.8}
+  pilot_state:    {kind: const, value: 1}
+  contact_front:  {kind: const, value: 0}
+  contact_back:   {kind: const, value: 0}

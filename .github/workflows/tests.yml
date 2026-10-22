@@ -39,7 +39,7 @@ jobs:
         run: python -m pytest -q
 
   example:
-    # examples/acme_testbench: a separate package extending testsuit through its plugin entry point
+    # examples/toytrain: a separate package extending testsuit through its plugin entry point
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,9 +52,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install -e "examples/acme_testbench[test]"
+          python -m pip install -e "examples/toytrain[test]"
       - name: Run the example's tests
-        working-directory: examples/acme_testbench
+        working-directory: examples/toytrain
         run: python -m pytest -q
 
   build:

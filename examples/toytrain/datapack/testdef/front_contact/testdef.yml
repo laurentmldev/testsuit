@@ -50,7 +50,7 @@ pipeline:
       components: [analysis]                     # the lab server (role sequencer), never locked
       inputs:                                    # outputs of the test run become exploitation inputs
         - {from: "test_run:telemetry/output/telemetry.csv", to: "analysis/input/data/"}
-        - {from: "test_run:propulsion/output/propulsion.csv", to: "analysis/input/data/"}
+        - {from: "test_run:propulsion/output/propulsion.propj", to: "analysis/input/data/"}
         - {from: "test_run:piezo/output/piezo.csv", to: "analysis/input/data/"}
       steps:
         - {id: deploy, component: analysis, do: deploy}

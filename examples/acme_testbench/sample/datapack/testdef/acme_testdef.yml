@@ -1,7 +1,0 @@
-id: acme_acceptance
-name: ACME bench acceptance
-setup_file: ../setup/acme_setup.yml
-setup_config: nominal
-
-dictionaries:
-  - versions.yml
