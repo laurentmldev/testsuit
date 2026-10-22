@@ -46,7 +46,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | DG-2 | Generating a component's inputs can involve processing specific to that component, beyond rendering templates and copying files. | 5.1 |
 | DG-3 | A component can need other components' inputs to generate its own. | 5.2 |
 | DG-4 | A datapack is self-sufficient: it can be run from its zip contents only (inputs, resolved keys, test definition with its pipeline). | 10 |
-| DG-5 | A datapack carries a **baseline**: where each of its contents comes from (git path, commit and tag of the original inputs, the processing tools and their versions, and, for results, the sequencer and the lab), so that the identity of the produced data can be controlled and checked against an expected baseline. | 5.3, 10 |
+| DG-5 | A datapack carries a **baseline**: where each of its contents comes from (git path, commit and tag of the original inputs, the processing tools and their versions, and, for results, the sequencer and the lab), so that the identity of the produced data can be controlled and checked against an expected baseline. A non-conform datapack is accepted but flagged as such, up to its results. | 5.3, 10 |
 
 ### 1.2 Queue and resources
 
@@ -210,10 +210,15 @@ When the sequencer produces the results zip (section 10), it extends the baselin
 
 **Conformity.** A baseline is **conform** when every source is a clean, tagged git state and every dataset version was confirmed. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
 - by `datapack --check-baseline expected.yml pack.zip`, and when building with `datapack ... --baseline expected.yml`;
-- by the sequencer at submission (`tsq submit --baseline expected.yml`, or `pipeline.baseline` in the test definition), which rejects a non-conform datapack;
-- before the first phase for the `run` part (component versions), so that a run on a bench with unexpected software ends in `error` before anything is deployed.
+- by the sequencer at submission (`tsq submit --baseline expected.yml`, or `pipeline.baseline` in the test definition);
+- before the first phase for the `run` part (component versions).
 
-The differences are listed, one line per mismatch, and kept in the run record.
+A non-conform datapack is **accepted but flagged**, never rejected. This covers both kinds: a datapack that is not conform in itself (`conform: false`), and one that does not match its expected baseline. The run proceeds normally, and its verdict is unchanged, but:
+- the run is flagged `non-conform` in the queue, in `tsq runs` and `tsq show`, in the REST API and the UI, and in the GitLab job trace;
+- the differences are listed, one line per mismatch, kept in the run record and written to the results baseline (`run.conform: false` with the mismatches);
+- the results zip is named with a `_NONCONFORM` suffix, like the `_DRAFT` suffix the datapack tool already gives to `--nocheck` datapacks.
+
+So the identity of produced data can always be checked afterwards, and non-conform results can't be mistaken for baseline results.
 
 ## 6. Lab inventory: stages and components
 
