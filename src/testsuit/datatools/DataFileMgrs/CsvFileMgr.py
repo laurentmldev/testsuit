@@ -21,6 +21,9 @@ MAX_CSV_COLS=512
 
 DEFAULT_COL_IDX=0
 
+# exact float parsing: pandas' default parser may differ in the last digit between versions
+CSV_FLOAT_PRECISION="round_trip"
+
 def GetCsvFileType(fileName: str) -> str:
     """Name of the registered CSV variant detecting given file (see formats.register_csv_variant), "Generic" if none."""
     from testsuit.datatools.DataFileMgrs.formats import find_csv_variant
@@ -240,6 +243,7 @@ class CsvFileMgr(AFileMgr):
                 'encoding': 'utf-8',
                 'sep': self.getSeparator(),
                 'comment': '#',
+                'float_precision': CSV_FLOAT_PRECISION,
             }
             
             dfParam = pd.read_csv(self.getFileName(),**read_csv_kwargs)            
@@ -319,7 +323,8 @@ class CsvFileMgrInfluxDb(CsvFileMgr):
                 usecols=colsList,
                 encoding='utf-8',
                 sep=self.getSeparator(),
-                comment='#')
+                comment='#',
+                float_precision=CSV_FLOAT_PRECISION)
             if date_parser_func is not None and not isinstance(self.df.index, pd.DatetimeIndex):
                 self.df.index = self.df.index.map(date_parser_func)
         except Exception as e:            
@@ -479,7 +484,8 @@ class CsvFileMgrChannels(CsvFileMgr):
             encoding='utf-8',
             sep=self.getSeparator(),
             skiprows=[1],
-            comment='#')
+            comment='#',
+            float_precision=CSV_FLOAT_PRECISION)
         if date_parser_func is not None and not isinstance(self.df.index, pd.DatetimeIndex):
             self.df.index = self.df.index.map(date_parser_func)
         
