@@ -1,0 +1,5 @@
+# keys shipped with the release, merged into the dataset.yml the importer writes
+toytrain_sw:
+  pilot_version: toytrain-pilot 0.3.0
+  telemetry_version: toytrain-telemetry 0.3.0
+  acquisition_version: toytrain-acquisition 0.3.0

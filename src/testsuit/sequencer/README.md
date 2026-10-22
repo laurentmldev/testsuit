@@ -100,7 +100,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | **ad hoc component** | a component that belongs to no stage, reserved on its own (for example a server running exploitation tools). |
 | **lab inventory** | the file describing the stages and components of the lab, owned by the lab operators. |
 | **datapack** | the self-sufficient zip built by `datapack`: component inputs, every resolved key, and the test definition and setup (pipeline included). It says *what* to run; the lab inventory says *where*. |
-| **logical stage / component** | what a datapack needs ("a HIL stage with a controller and a PLC", "an exploitation server"); bound to a concrete stage or ad hoc component at activation. |
+| **logical stage / component** | what a datapack needs ("a toy-train stage with its pilot, telemetry and acquisition units", "the simulated propulsion"); bound to a concrete stage or ad hoc component at activation. |
 | **run** | one activation of a datapack. |
 | **phase / step** | the pipeline of a run: named phases (`test_run`, `exploit`...) made of steps (commands), run in parallel or waiting for each other (`needs`). |
 | **sequencer component** | the sequencer host itself: an ad hoc component like the others (`transport: local`), never locked. |
@@ -144,19 +144,19 @@ The `datapack` tool (`testsuit.datatools.datapack`, YAML dictionaries + Jinja2 t
 
 ### 5.1 Component-specific processing to generate inputs
 
-Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile a scenario to a binary format, compute a calibration table, build a network configuration from a topology file.
+Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile the pilot's speed profile into the table its microcontroller reads, compute a calibration table, build a network configuration from a topology file.
 
 ```yaml
 component_types:
-  data_feeder:
+  pilot_app:
     configurations:
       standard:
         inputs:
-          - source: scenarios/nominal.yml
-            target: scenario.bin
+          - source: templates/profile.yml
+            target: profile.bin
             method: generate
-            generator: acme-scenario-compiler      # registered by a plugin
-            options: {rate_hz: "{{ feeder.rate_hz }}"}
+            generator: toytrain-profile-compiler   # registered by a plugin
+            options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
 ```
 
 A generator is a Python callable registered like processors (`register_generator(name, fn)`), called as `fn(source, target, keys, options, component)`. When the name is not registered, it is run as a script relative to the setup folder, with the source, the target and a JSON file of the resolved keys. The keys a generator reads are recorded in `datapack.yml` like those of templates.
@@ -170,13 +170,14 @@ A component can declare `needs: [other_component, ...]`. Components are then gen
 
 ```yaml
 configurations:
-  nominal:
+  sim_bench:
     components:
-      switch_1: {type: network_switch, configuration: standard}
-      bench_a:
-        type: bench_controller
+      pilot:       {type: pilot_app, configuration: standard}
+      acquisition: {type: acquisition_app, configuration: standard}
+      telemetry:
+        type: telemetry_app
         configuration: standard
-        needs: [switch_1]          # bench_a's network config is built from the switch's port map
+        needs: [pilot, acquisition]   # records what they publish, read from their configurations
 ```
 
 Both refinements keep the datapack self-sufficient: what a component needed from another one is already in the zip.
@@ -189,26 +190,26 @@ The datapack tool already records part of it in `datapack.yml` (git commit, tag 
 
 ```yaml
 # baseline.yml
-datapack: {name: acme_nominal_20261022T1012, format: 2, conform: true}
+datapack: {name: toytrain_max_speed_toytrain_lab_setup_20261022T1012, format: 2, conform: true}
 sources:                          # every original input, by git origin
-  - {role: testdef, path: tests/nominal/testdef.yml, repo: git@forge:acme/tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
-  - {role: setup, path: setups/acme/setup.yml, repo: git@forge:acme/setups.git, commit: 81bd04e, tag: v2.0.1, clean: true}
-  - {role: dictionary, path: setups/acme/globals.yml, repo: git@forge:acme/setups.git, commit: 81bd04e, tag: v2.0.1, clean: true}
-  - {role: dataset, id: scenarios, importer: git, source: git@forge:acme/data.git, version: scen@v7, commit: c09e7d2}
+  - {role: testdef, path: datapack/testdef/max_speed/testdef.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: setup, path: datapack/setup/toytrain_setup.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: dictionary, path: datapack/setup/globals.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: dataset, id: toytrain_sw, importer: toytrain-release, source: releases/toytrain-sw, version: v0.3.0}
 tools:                            # what processed them
   - {name: testsuit, version: 3.2.0}
-  - {name: acme_testbench, kind: plugin, version: 1.1.0}          # generators, processors, importers
+  - {name: toytrain-testenv, kind: plugin, version: 0.1.0}        # generators, processors, importers
   - {name: jinja2, version: 3.1.6}
 files:                            # each generated file and what produced it
-  data/bench_a/input/bench_config.yml: {from: [setup/templates/bench_config.yml.j2], method: template, sha256: 9e1f...}
-  data/plc_1/input/plc.bin: {from: [datasets/scenarios/plc.src], method: generate, generator: acme_plc_build, sha256: 44ab...}
+  data/pilot/input/pilot.yml: {from: [datapack/setup/templates/pilot.yml], method: template, sha256: 9e1f...}
+  data/pilot/input/profile.bin: {from: [datapack/setup/templates/profile.yml], method: generate, generator: toytrain-profile-compiler, sha256: 44ab...}
 ```
 
 When the sequencer produces the results zip (section 10), it extends the baseline with a `run` part:
 - the sequencer version and its plugins;
 - the git commit and tag of the lab inventory and of the component type library;
 - the concrete stages and components the run was bound to;
-- the software version of each component, when its type defines a `version` command (for example `bench_ctl --version`, a PLC firmware id), read before the first phase.
+- the software version of each component, when its type defines a `version` command (for example `toytrain-install --version` on CALC-Pilot, the firmware id of the propulsion controller), read before the first phase.
 
 **Conformity.** A baseline is **conform** when every source is a clean, tagged git state and every dataset version was confirmed. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
 - by `datapack --check-baseline expected.yml pack.zip`, and when building with `datapack ... --baseline expected.yml`;
@@ -232,41 +233,44 @@ The lab inventory follows the [Ansible YAML inventory](https://docs.ansible.com/
 
 Sequencer settings use the `tsq_` prefix, the convention for tool-specific inventory variables.
 
+The examples of this document use the toy train of [examples/toytrain](../../../examples/toytrain/README.md), whose lab has one stage. Here it has a second, identical one, to show concurrent runs and a shared component:
+
 ```yaml
-# lab/acme_lab.yml (Ansible YAML inventory format)
+# lab/toytrain_lab.yml (Ansible YAML inventory format)
 all:
   vars:
-    ansible_user: testops                          # standard names, reused by the sequencer
-    ansible_ssh_private_key_file: ~/.ssh/id_acme   # key-based auth only, no password prompt
+    ansible_user: tsq                              # standard names, reused by the sequencer
+    ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based auth only, no password prompt
     tsq_type: linux_system                         # default component type
     tsq_remote_root: /opt/testrun                  # default target: <root>/<component>/{input,output}
     tsq_types: [types/]                            # component type library, relative to this file (section 7.2)
 
   hosts:                                           # ad hoc components: in no stage
-    exploit_srv: {ansible_host: 10.0.0.50, tsq_role: exploit}
-    tsq_local:   {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
+    lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
+    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: propulsion_sim}
+    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: piezo_sim}
 
   children:
-    hil_1:                                         # a stage
+    train_1:                                       # a stage
       vars:
-        tsq_stage_type: hil                        # what datapacks ask for
-        tsq_commands:                              # stage override: deploy differently on this stage
-          deploy: {run: "/opt/hil1/bin/push_config {{ component.input_dir }}"}
+        tsq_stage_type: toytrain                   # what datapacks ask for
       hosts:
-        ctrl_1: {ansible_host: 10.0.1.11, tsq_type: bench_controller, tsq_role: controller}
-        plc_1:  {ansible_host: 10.0.1.31, tsq_type: acme_plc, tsq_role: plc}
-        clock:  {ansible_host: 10.0.0.2,  tsq_type: ptp_clock, tsq_role: clock, tsq_lock: shared}
-    hil_2:                                         # a second stage of the same type
-      vars: {tsq_stage_type: hil}
+        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_type: arduino_unoq, tsq_role: pilot}
+        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_type: rpi5, tsq_role: telemetry}
+        au_1:         {ansible_host: 10.42.1.12, tsq_type: rpi5, tsq_role: acquisition}
+        switch_1:     {ansible_host: 10.42.1.2, tsq_type: auvidea_m82, tsq_role: switch}
+        lab_switch:   {ansible_host: 10.42.0.2, tsq_type: auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
+    train_2:                                       # a second stage of the same type
+      vars:
+        tsq_stage_type: toytrain
+        tsq_commands:                              # stage override: this train's pilot has no flashing helper
+          install: {run: "arduino-cli upload --input-dir {{ component.input_dir }}/app"}
       hosts:
-        ctrl_2: {ansible_host: 10.0.2.11, tsq_type: bench_controller, tsq_role: controller}
-        plc_2:  {ansible_host: 10.0.2.31, tsq_type: acme_plc, tsq_role: plc}
-        clock: {}                                  # shared with hil_1
-    feed_1:
-      vars: {tsq_stage_type: feeder}
-      hosts:
-        feeder_1: {ansible_host: 10.0.3.21, tsq_type: data_feeder, tsq_role: feeder}
-        switch_1: {ansible_host: 10.0.3.1, tsq_type: acme_switch, tsq_role: switch}
+        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_type: arduino_unoq, tsq_role: pilot}
+        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_type: rpi5, tsq_role: telemetry}
+        au_2:         {ansible_host: 10.42.2.12, tsq_type: rpi5, tsq_role: acquisition}
+        switch_2:     {ansible_host: 10.42.2.2, tsq_type: auvidea_m82, tsq_role: switch}
+        lab_switch: {}                             # shared with train_1: joins both trains to lab_srv
 ```
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
@@ -274,7 +278,7 @@ all:
 - `tsq_type` assigns a component type to each component (section 7).
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
-  - `shared`: several datapacks at once, for passive references such as a clock. In the example, `hil_1` and `hil_2` can run two datapacks at the same time although they share the clock;
+  - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `train_1` and `train_2` can run two datapacks at the same time although they share `lab_switch`;
   - `none`: never locked, for the sequencer component.
 - Components are taken out of scheduling by state, not by editing the file: a `broken` state (section 7.4), or `tsq maintenance <component>`.
 
@@ -294,46 +298,51 @@ A component type gives a kind of component its commands and the way to monitor i
 Types are YAML, in the lab's **type library** (the `tsq_types` folders of the inventory). Plugins can also register them in Python (`register_component_type`).
 
 ```yaml
-# lab/types/acme.yml
+# lab/types/toytrain.yml
 component_types:
-  bench_controller:
+  rpi5:
     extends: linux_system
     commands:
-      start: {run: "{{ remote_root }}/bin/bench_ctl start --config input/bench_config.yml", detach: true}
-      ready: {wait_for: {state: running, timeout: 60s}}
-      stop:  {run: "{{ remote_root }}/bin/bench_ctl stop", timeout: 30s}
+      start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
+      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
+      version: {run: "toytrain-{{ component.role }} --version"}
     status:
-      probe: {run: "{{ remote_root }}/bin/bench_ctl status"}
+      probe: {run: "systemctl is-active toytrain-{{ component.role }}"}
       states:                              # first match wins, on the probe output
-        running:    {regex: "^RUNNING"}
-        configured: {regex: "^LOADED"}
-        idle:       {regex: "^STOPPED"}
-        broken:     {regex: "^FAULT"}
+        running: {regex: "^active"}
+        broken:  {regex: "^failed"}
+        idle:    {regex: "^inactive"}
 
-  acme_plc:
-    extends: component                     # not a Linux system: own transport
-    transport: acme-ftp                    # plugin (section 12)
+  arduino_unoq:
+    extends: linux_system                  # Debian on the MPU, plus a microcontroller to flash
     commands:
-      deploy: {push: {from: input/, to: /config/}}
-      start:  {run: "RUN"}
-      stop:   {run: "STOP"}
-      kill:   {run: "RESET"}
-    status:
-      probe: {run: "STATUS"}
-      states: {running: {regex: RUN}, idle: {regex: STOP}, broken: {regex: ERR}}
+      install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
+      start:   {run: "sudo systemctl start toytrain-{{ component.role }}"}
+      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}"}
 
-  ptp_clock:
-    extends: component
-    transport: http
+  auvidea_m82:
+    extends: component                     # an unmanaged switch: only monitored
+    transport: local                       # probed from the sequencer host
     status:
-      probe: {http: {url: "http://{{ component.host }}/api/status", json: lock_state}}
-      states: {running: {equals: LOCKED}, broken: {equals: FREERUN}}
+      probe: {run: "ping -c 1 -W 1 {{ component.host }}"}
+      states: {running: {exit: 0}, offline: {exit: nonzero}}
+
+  propulsion_controller:                   # the real one, on the real train
+    extends: component                     # not a Linux system: its own protocol
+    transport: toytrain-udp                # plugin (section 12)
+    commands:
+      stop:  {run: "stop"}
+      kill:  {run: "stop"}
+    status:
+      probe: {run: "speed"}
+      states: {running: {regex: "^[1-9]"}, idle: {regex: "^0"}}
 ```
 
 ### 7.3 Where commands come from
 
 A datapack component type (setup file, section 8.2) can extend a lab type to add test-specific commands. The command used for a component is resolved in this order, last wins:
-1. the chain of its lab type, from the base type down (`component` → `linux_system` → `bench_controller`);
+1. the chain of its lab type, from the base type down (`component` → `linux_system` → `arduino_unoq`);
 2. the datapack component type (setup file `component_types.<type>.commands`);
 3. the datapack component instance (setup configuration);
 4. the stage `tsq_commands` (lab inventory);
@@ -374,18 +383,19 @@ The setup configuration (datapack side) names the **logical stages** it needs, b
 ```yaml
 # setup file (datapack)
 configurations:
-  nominal:
+  sim_bench:
     stages:
-      hil:  {type: hil}                  # bound to hil_1 or hil_2, whichever is free
-      feed: {type: feeder}
+      train: {type: toytrain}            # bound to train_1 or train_2, whichever is free
     components:
-      bench_a:  {type: bench_test, configuration: standard, stage: hil, role: controller}
-      plc_1:    {type: plc_test, configuration: standard, stage: hil, role: plc}
-      feeder:   {type: feeder_test, configuration: standard, stage: feed, role: feeder}
-      analysis: {type: exploit, configuration: standard, role: exploit}   # ad hoc: exploit_srv
+      pilot:       {type: pilot_app, configuration: standard, stage: train, role: pilot}
+      telemetry:   {type: telemetry_app, configuration: standard, stage: train, role: telemetry}
+      acquisition: {type: acquisition_app, configuration: standard, stage: train, role: acquisition}
+      propulsion:  {type: propulsion_sim, configuration: standard, role: propulsion_sim}   # ad hoc
+      piezo:       {type: piezo_sim, configuration: standard, role: piezo_sim}             # ad hoc
+      analysis:    {type: exploit, configuration: standard, role: sequencer}               # ad hoc: lab_srv
 ```
 
-A datapack can therefore lock several stages and ad hoc components. To run the analysis on the sequencer host instead, use `role: sequencer`.
+A datapack can therefore lock several stages and ad hoc components. Here the analysis runs on the sequencer host (`role: sequencer`); a separate exploitation server would be an ad hoc component with its own role.
 
 ### 8.2 Datapack component types
 
@@ -393,16 +403,27 @@ Datapack component types (already in the setup file) declare the inputs. They ca
 
 ```yaml
 component_types:
-  bench_test:
-    extends: bench_controller           # lab type: binds only to bench controllers
-    configurations: {standard: {inputs: [...]}}
+  pilot_app:
+    extends: arduino_unoq               # lab type: binds only to an Arduino UNO Q
+    configurations:
+      standard:
+        inputs:
+          - {source: "{{ toytrain_sw.path }}/pilot/", target: app/, method: copy}
+          - {source: templates/pilot.yml, target: pilot.yml}
+  propulsion_sim:
+    extends: toytrain_sim
+    configurations: {standard: {inputs: [{source: templates/propulsion_sim.yml, target: propulsion_sim.yml}]}}
     commands:
-      start: {run: "{{ remote_root }}/bin/bench_ctl start --config input/bench_config.yml --trace", detach: true}
+      start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
   exploit:
     extends: linux_system
-    configurations: {standard: {inputs: [{source: exploit/exploit.yml, target: exploit.yml}]}}
+    configurations:
+      standard:
+        inputs:
+          - {source: templates/exploit.yml, target: exploit.yml}
+          - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
     commands:
-      start: {run: "exploit_runner input/exploit.yml", timeout: 1h}
+      start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m}
 ```
 
 Commands are kept as written in the datapack and rendered by the sequencer at run time.
@@ -413,34 +434,41 @@ The pipeline lives in the test definition (already kept as is in the datapack). 
 
 ```yaml
 pipeline:
-  timeout: 2h
+  timeout: 15m
   phases:
     - id: test_run
-      stages: [hil, feed]                  # logical stages locked for this phase
+      stages: [train]                      # logical stage locked for this phase
+      components: [propulsion, piezo]      # ad hoc logical components locked for this phase
       steps:
-        - {id: deploy, for_each: components, do: deploy}            # fan-out, in parallel
-        - {id: start_plc, component: plc_1, do: start, needs: [deploy]}
-        - {id: start_bench, component: bench_a, do: start, needs: [deploy]}
-        - {id: bench_ready, component: bench_a, do: ready, needs: [start_bench]}
-        - {id: plc_settle, delay: 20s, needs: [start_plc]}          # no objective ready state
-        - id: feed                                                  # rendez-vous of both branches
-          component: feeder
-          run: "feeder --scenario input/scenario.bin --target {{ components.bench_a.host }}"
-          needs: [bench_ready, plc_settle]
-          timeout: 45m
-        - {id: stop_all, for_each: [bench_a, plc_1], do: stop, needs: [feed]}
-      finally:                                                      # always runs, even on abort
+        - {id: deploy, for_each: components, do: deploy}                    # fan-out, in parallel
+        - {id: flash_pilot, component: pilot, do: install, needs: [deploy]}
+        - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
+        - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
+        - {id: start_tm, component: telemetry, do: start, needs: [deploy]}
+        - {id: tm_ready, component: telemetry, do: ready, needs: [start_tm]}
+        - {id: start_au, component: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: au_ready, component: acquisition, do: ready, needs: [start_au]}
+        - id: start_pilot                                                   # rendez-vous
+          component: pilot
+          do: start
+          needs: [flash_pilot, sims_ready, tm_ready, au_ready]
+        - {id: pilot_running, wait_for: {state: running, component: pilot, timeout: 20s}, needs: [start_pilot]}
+        - {id: run, delay: "{{ scenario.duration_s }}s", needs: [pilot_running]}   # no objective end
+        - {id: stop_pilot, component: pilot, do: stop, needs: [run]}
+        - {id: stop_all, for_each: [acquisition, telemetry, propulsion, piezo], do: stop, needs: [stop_pilot]}
+      finally:                                                              # always runs, even on abort
         - {id: kill_leftovers, for_each: components, do: kill, if: "not succeeded('stop_all')"}
         - {id: collect, for_each: components, do: collect}
 
     - id: exploit
       needs: [test_run]
-      components: [analysis]               # an ad hoc component, locked for this phase
+      components: [analysis]               # an ad hoc component (the sequencer host)
       inputs:                              # outputs of earlier phases become inputs
-        - {from: "test_run:*/output/", to: "analysis/input/data/"}
+        - {from: "test_run:telemetry/output/telemetry.csv", to: "analysis/input/data/"}
+        - {from: "test_run:propulsion/output/propulsion.propj", to: "analysis/input/data/"}
       steps:
         - {id: deploy, component: analysis, do: deploy}
-        - {id: analyse, component: analysis, do: start, needs: [deploy]}
+        - {id: analyse, component: analysis, do: start, needs: [deploy]}   # exit 0: criteria ok, else failed
       finally:
         - {id: collect, component: analysis, do: collect}
 ```
@@ -474,7 +502,7 @@ Templates in commands are rendered with Jinja2, the same environment as the data
 
 A lower-priority run may start while a higher-priority one waits, but only on resources the waiting run cannot use (backfilling), so priority is respected without leaving the lab idle. Among several free candidates, the stage used last by the same test definition is preferred, then the least used one.
 
-**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, two HIL datapacks run together on `hil_1` and `hil_2`, sharing the clock, while a third one waits for either stage.
+**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, a toy-train datapack runs on `train_1` and holds the two simulations of `lab_srv`. A second one can only bind `train_2` once simulations are free too: with a second pair (two more ad hoc components with the same roles), both run together, sharing `lab_switch`, while a third one waits for a stage.
 
 **Locking.**
 - The granularity is the **stage** for components that belong to a stage, and the **component** for ad hoc components.
@@ -485,7 +513,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
 **Per phase.** At the end of a phase, the resources the next phase doesn't use are released, and those it does use stay held. Optionally, a run can pre-reserve the resources of all its phases at activation (`reserve: all`), so it isn't stuck between phases.
 
 **Visibility.**
-- `tsq queue` shows each waiting run with its priority and what it waits for (no free `hil` stage: `hil_1` held by run A, `hil_2` broken).
+- `tsq queue` shows each waiting run with its priority and what it waits for (no free `toytrain` stage: `train_1` held by run A, `train_2` broken).
 - `tsq stages` and `tsq components` show stages and components with their monitored state, lock state and holder.
 
 ## 10. Running a datapack
@@ -521,7 +549,7 @@ State machines:
   - `systemd-run --user --unit=tsq-<run>-<step>-<component> --collect ...`;
   - `systemctl --user kill --signal=KILL tsq-<run>-*` kills whole process trees, even when the ssh session is gone;
   - fallback without systemd: `setsid` + pid file under `<remote_root>/.tsq/<run>/` and `kill -9 -<pgid>`.
-- **Other component types** override `kill`: reset a PLC through its protocol, `virsh destroy` a VM, reload a switch configuration.
+- **Other component types** override `kill`: stop the propulsion controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
 - **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <stage | component>` is the audited manual escape hatch.
 
 ## 12. Extension points
@@ -537,7 +565,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
 
-Components of any type are handled this way. A switch is driven through an SSH, REST or SNMP transport and its own type, a clock through its HTTP management API, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/acme_testbench` ships, in its `plugin.py`, its file formats, criteria and importers, together with its bench's transports and component types.
+Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own type, the propulsion controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports and component types the same way.
 
 ## 13. Interfaces: CLI, REST API, UI, GitLab runner
 
@@ -623,7 +651,7 @@ src/testsuit/datatools/datapack/   # + generators (5.1) and component needs (5.2
 Tests:
 - engine, scheduler and monitor against a fake transport (pure asyncio, no network);
 - the ssh transport against a local `sshd` container in CI;
-- an end-to-end example in `examples/acme_testbench` with two stages and an ad hoc component on `localhost`.
+- an end-to-end example in `examples/toytrain` with its stage and its simulations as ad hoc components on `localhost`.
 
 ## 16. Implementation plan
 

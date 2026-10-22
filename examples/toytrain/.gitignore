@@ -1,1 +1,5 @@
+# outputs of the samples and tests
 .work/
+datapack/testdef/*/.current_datapack/
+src/*.egg-info/
+__pycache__/

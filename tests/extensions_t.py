@@ -35,7 +35,7 @@ def tmp_folder(request):
 
 @pytest.fixture(autouse=True)
 def no_installed_plugins(monkeypatch):
-    """Ignore the plugins installed in the environment (examples/acme_testbench for instance),
+    """Ignore the plugins installed in the environment (examples/toytrain for instance),
     and whatever report logo one of them set before."""
     monkeypatch.setattr(plugins,"entry_points",lambda group: [])
     report_html.set_default_report_logo()
@@ -175,11 +175,11 @@ def test_logo_title_is_escaped():
 
 @pytest.mark.parametrize("kind",["default","title","markup","file","none"])
 def test_report_logo(tmp_folder,kind):
-    customSvg='<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" id="acme-logo"><text>ACME</text></svg>'
+    customSvg='<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" id="tt-logo"><text>TT</text></svg>'
     svgFile=tmp_folder / "logo.svg"
     svgFile.write_text(customSvg)
     kwargs={"default":{},
-            "title":{"logo_title":"ACME Bench"},
+            "title":{"logo_title":"Toy Train"},
             "markup":{"logo_svg":customSvg},
             "file":{"logo_svg":svgFile},
             "none":{"logo_svg":""}}[kind]
@@ -187,17 +187,17 @@ def test_report_logo(tmp_folder,kind):
     html=report_html.generate_report_html(_minimal_exploit_info(tmp_folder),**kwargs).read_text()
 
     assert ("M-Exploit</text>" in html)==(kind=="default")
-    assert ("ACME Bench</text>" in html)==(kind=="title")
-    assert ('id="acme-logo"' in html)==(kind in ("markup","file"))
+    assert ("Toy Train</text>" in html)==(kind=="title")
+    assert ('id="tt-logo"' in html)==(kind in ("markup","file"))
     assert "<?xml" not in html
     assert ("<svg" in html)==(kind!="none")
 
 
 def test_set_default_report_logo(tmp_folder):
-    report_html.set_default_report_logo(title="ACME Bench")
+    report_html.set_default_report_logo(title="Toy Train")
     try:
         html=report_html.generate_report_html(_minimal_exploit_info(tmp_folder)).read_text()
-        assert "ACME Bench</text>" in html
+        assert "Toy Train</text>" in html
         # an explicit logo still wins
         html=report_html.generate_report_html(_minimal_exploit_info(tmp_folder),logo_title="Other").read_text()
         assert "Other</text>" in html
