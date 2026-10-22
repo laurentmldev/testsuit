@@ -74,6 +74,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-15 | Default commands are given by a base component type, for example "Linux system": scp to a standard target folder, with SSH keys configured so that no password is asked. A new component type can extend another one and override some of its commands, and each component instance is assigned a type. | 7 |
 | SQ-16 | The sequencer itself is a component like the others. The exploit phase (exploit_runner/mexploit analysis of the retrieved data) is a phase of the pipeline like any other, with the outputs of earlier phases becoming its inputs. | 2, 8.3 |
 | SQ-17 | A test run can be forced to stop, killing the remote processes (`kill -9` or similar), while the cleanup and result retrieval still run. | 11 |
+| SQ-24 | Each run ends with a verdict: `succeeded`; `failed` when a command did not give its expected result, typically an unexpected return status; or `error` when a command crashed or could not complete (signal, timeout, unreachable component). | 8.3, 10 |
 
 ### 1.4 Interfaces and integration
 
@@ -405,7 +406,9 @@ Phase fields: `id`, `needs`, `stages` (logical stages), `components` (ad hoc log
 Step fields:
 - target: `component`, or `for_each` (a list of components, `components` for all the components of the phase, or a role);
 - action, one of: `do` (a named command), `run` (inline shell), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
-- options: `needs`, `if`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
+- options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
+
+`expect` gives the expected result of a step: `exit` (exit codes, default `[0]`), and optionally `stdout` or `stderr` (regex). A step that ran but did not give the expected result is `failed`. A step that could not run or did not finish normally is `error`: a crash (killed by a signal), a timeout, a transport failure, an unreachable or broken component, or an internal sequencer error.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.4), `tcp`, `http` (status or regex), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -454,12 +457,17 @@ A lower-priority run may start while a higher-priority one waits, but only on re
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.
    - Each step's output goes to `runs/<id>/logs/<phase>/<step>[<component>].log` and to the event bus.
 4. **Finally**: the `finally` steps of each phase always run, with their own timeout. The phase's resources are released afterwards, unless the next phase uses them.
-5. **Verdict**: `succeeded` when every phase succeeded, `failed` otherwise. The status of each phase and step is kept.
+5. **Verdict**, one of three, computed from the steps (those with `continue_on_error` excepted):
+   - `succeeded`: every step gave its expected result;
+   - `failed`: at least one step ran but did not give its expected result, typically an unexpected exit status, and no step is in `error`;
+   - `error`: at least one step crashed or could not complete (section 8.3), or the run was cancelled or killed. The test outcome is then unknown, not negative.
+
+   The status of each phase and step is kept.
 6. **Results**: the run folder is zipped as `<datapack>_results.zip`, a valid datapack whose manifest now covers the outputs too. The run record stays in the database as history.
 
 State machines:
-- run: `queued → waiting_resources → reserved → running → cleaning → succeeded | failed | aborted | error`;
-- step: `pending → ready → running → ok | failed | skipped | timeout | killed`.
+- run: `queued → waiting_resources → reserved → running → cleaning → done`, or `cancelled` while still queued; a done run carries its verdict, and an aborted run (`tsq cancel`, `tsq kill`) gets the verdict `error`;
+- step: `pending → ready → running → succeeded | failed | error | skipped`, with the reason of an `error` kept (crash, timeout, killed, transport).
 
 ## 11. Abort and kill
 
@@ -503,7 +511,7 @@ tsq stages | tsq components                                 # monitored state, l
 tsq hold | release | maintenance | resume <stage | component>
 ```
 
-`--wait` returns the run verdict as exit code (0 success, 1 failed, 2 aborted or error), and `--follow` streams the logs: what scripts and CI need.
+`--wait` returns the run verdict as exit code (0 succeeded, 1 failed, 2 error), and `--follow` streams the logs: what scripts and CI need.
 
 **REST API** (FastAPI, OpenAPI generated):
 - `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill`, `GET /runs/{id}/logs/{step}`;
