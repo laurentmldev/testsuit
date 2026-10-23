@@ -39,7 +39,7 @@ pipeline:
   phases:
 
     - id: test_run
-      stages: [train]                            # CALC-Pilot, CALC-TM, AU, switch: locked as one stage
+      stages: [train]                            # CALC-Pilot, CALC-TM, AU, switch: locked as one stage (the lab)
       components: [propulsion, piezo]            # ad hoc components on the lab server
       steps:
         - {id: up, uses: bring_up}

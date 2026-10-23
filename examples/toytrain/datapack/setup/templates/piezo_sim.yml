@@ -3,6 +3,7 @@
 outputs:
   front: {adapter_pin: C0, au_gpio: {{ gpio.piezo_front }}}
   back:  {adapter_pin: C1, au_gpio: {{ gpio.piezo_back }}}
+local_address: {{ net.lab_server }}
 speed_feedback: {group: {{ net.multicast_group }}, port: {{ net.speed_port }}}   # for speed-triggered events
 events:{% if not scenario.contacts %} []{% endif %}
 {%- for contact in scenario.contacts %}

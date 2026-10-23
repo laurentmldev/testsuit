@@ -10,11 +10,13 @@ train:
     step_mps: 0.1
     step_period_s: 2
 
-net:                             # addresses on the train network (same on the real train and in the lab)
+net:                             # addresses on the train network (same on the real train and in the lab;
+                                 # the emulated mode changes them: platforms/emulated.yml)
   pilot: 10.42.0.10
   telemetry: 10.42.0.11
   acquisition: 10.42.0.12
   propulsion: 10.42.0.20         # real propulsion controller, or its simulation on the lab server
+  lab_server: 10.42.0.1          # lab server (simulations), not on the real train
   propulsion_cmd_port: 5000      # UDP, commands to the propulsion controller
   multicast_group: 239.42.0.1
   speed_port: 5001               # UDP multicast, speed feedback from the propulsion controller (20 Hz)

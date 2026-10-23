@@ -1,0 +1,59 @@
+# Emulated toy-train lab: the whole platform on one dev host (sequencer README, section 6.2).
+# Same shape as the lab (lab/toytrain_lab.yml): one stage of type toytrain with the pilot, telemetry
+# and acquisition roles, and the simulations and the sequencer as ad hoc components, but every
+# component is a local process, with an address of its own on the loopback interface.
+#
+#                            dev host (loopback interface)
+#   ┌──────────────────────────────────────────────────────────────────────────────┐
+#   │ sequencer, exploit_runner     propulsion sim 127.0.0.20    piezo sim 127.0.0.30 │
+#   │                                                                    │ UDP 5017   │
+#   │ stage train_emu:                                                   ▼            │
+#   │   CALC-Pilot 127.0.0.10     CALC-TM 127.0.0.11     AU 127.0.0.12 (GPIO over UDP) │
+#   └──────────────────────────────────────────────────────────────────────────────┘
+#
+# Build the datapacks with the matching setup configuration: datapack <testdef.yml> --setup-config emulated
+
+all:
+  vars:
+    ansible_host: localhost
+    tsq_transport: local                           # no SSH: commands run as the user running the sequencer
+    tsq_type: linux_system
+    tsq_remote_root: ~/.toytrain-emu/run           # <root>/<component>/{input,output}
+    tsq_types: [types_emulated/]                   # the emulated type library, with the lab's type names
+
+  hosts:                                           # ad hoc components
+    dev_host:
+      tsq_role: sequencer
+      tsq_lock: none
+      tsq_label: dev host (sequencer, exploitation)
+    sim_propulsion:
+      tsq_type: toytrain_sim
+      tsq_role: propulsion_sim
+      tsq_remote_root: ~/.toytrain-emu/sim         # with venv/: pip install of the simulation release
+      tsq_label: Simulated propulsion controller
+    sim_piezo:
+      tsq_type: toytrain_sim
+      tsq_role: piezo_sim
+      tsq_remote_root: ~/.toytrain-emu/sim
+      tsq_label: Simulated piezo sensors
+      tsq_gpio_adapter: udp://127.0.0.12:5017      # in place of the USB GPIO adapter: AU's emulated inputs
+
+  children:
+    train_emu:
+      vars:
+        tsq_stage_type: toytrain
+      hosts:
+        calc_pilot:
+          tsq_type: arduino_unoq
+          tsq_role: pilot
+          tsq_label: CALC-Pilot (emulated)
+          tsq_start_args: --mcu host               # microcontroller replaced by its host stub
+        calc_tm:
+          tsq_type: rpi5
+          tsq_role: telemetry
+          tsq_label: CALC-TM (emulated)
+        au:
+          tsq_type: rpi5
+          tsq_role: acquisition
+          tsq_label: AU (emulated)
+          tsq_start_args: --gpio-backend udp://127.0.0.12:5017   # GPIO 17 / 27 edges sent by the piezo simulation

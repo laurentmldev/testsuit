@@ -1,0 +1,17 @@
+# Main configuration of a sequencer on a dev host, for the emulated toy train (sequencer README, sections 4.1 and 6.2).
+# Use it with --config tsq.dev.yml (or TSQ_CONFIG), from this folder.
+lab:
+  folder: lab                          # this example's lab/ folder, as checked out (relative to this file)
+  inventory: toytrain_emulated.yml
+  require_tag: false                   # a working copy: no warning when not on a tag
+storage:
+  root: ~/.toytrain-emu/tsq
+  min_free_space: 2GB
+  max_run_output: 1GB
+server:
+  listen: 127.0.0.1:8640               # local only
+  ui: true
+  editor: true
+  workspaces: [datapack]               # this example's datapack/ folder
+selftest: {before_each_run: true, timeout: 30s, max_attempts: 1}
+plugins: [toytrain]

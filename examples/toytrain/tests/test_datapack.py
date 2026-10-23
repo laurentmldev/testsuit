@@ -67,7 +67,7 @@ def test_sample_datapack(sample_copy, test):
     testdef = sample_copy / "datapack" / "testdef" / test / "testdef.yml"
     zip_path = datapack(str(testdef), nocheck=True)
     assert verify_datapack(zip_path) == []
-    assert list((sample_copy / ".work" / "datapacks").glob(f"toytrain_{test}_toytrain_lab_setup_*.zip")) == [zip_path]
+    assert list((sample_copy / ".work" / "datapacks").glob(f"toytrain_{test}_toytrain_setup_*.zip")) == [zip_path]
 
     pack = testdef.parent / ".current_datapack"
     pilot = yaml.safe_load((pack / "data" / "pilot" / "input" / "pilot.yml").read_text())
@@ -89,3 +89,19 @@ def test_sample_datapack(sample_copy, test):
 
     # second run: the datasets are already there, their version is checked instead
     assert datapack(str(testdef), nocheck=True)
+
+
+def test_emulated_datapack(sample_copy):
+    """setup configuration 'emulated': the same components, on loopback addresses of the dev host"""
+    testdef = sample_copy / "datapack" / "testdef" / "front_contact" / "testdef.yml"
+    assert verify_datapack(datapack(str(testdef), nocheck=True, setup_config="emulated")) == []
+
+    inputs = testdef.parent / ".current_datapack" / "data"
+    manifest = yaml.safe_load((testdef.parent / ".current_datapack" / "datapack.yml").read_text())
+    assert manifest["setup"]["configuration"] == "emulated"
+    assert sorted(manifest["components"]) == ["acquisition", "analysis", "piezo", "pilot", "propulsion", "telemetry"]
+    pilot = yaml.safe_load((inputs / "pilot" / "input" / "pilot.yml").read_text())
+    assert pilot["network"]["local_address"] == "127.0.0.10"
+    assert pilot["network"]["propulsion"] == {"address": "127.0.0.20", "port": 5000}
+    assert pilot["network"]["contacts"] == {"group": "239.42.0.1", "port": 5002}   # unchanged
+    assert yaml.safe_load((inputs / "piezo" / "input" / "piezo_sim.yml").read_text())["local_address"] == "127.0.0.30"

@@ -15,7 +15,7 @@ Test definition::
 
 Setup::
 
-    id: toytrain_lab_setup
+    id: toytrain_setup
     dictionaries: [globals.yml]           # relative to this file
     datarepositories:
       - id: toytrain
