@@ -11,7 +11,7 @@ Several datapacks run at the same time when they use different stages.
 
 One sequencer manages one lab: the whole set of components and the stages they belong to, however complex. Another lab, for example on another site, gets its own sequencer instance.
 
-Status: the kernel is implemented (everything but the UI and its Editor mode, section 13.1 and 13.2): `tsqd`, the REST API, the `tsq` command line, the datapack refinements and the GitLab executor scripts. [Implementation status](#18-implementation-status) lists where the code differs from this document and what is left. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
+Status: implemented: `tsqd`, the REST API, the `tsq` command line, the datapack refinements, the GitLab executor scripts, and the web UI with its Editor mode (sections 13.1 and 13.2). [Implementation status](#18-implementation-status) lists where the code differs from this document and what is left. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
 
 A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
 
@@ -83,10 +83,19 @@ datapack --verify <run>_results.zip
 
 They are kept in `storage.results/<run>/<datapack>_results.zip`, with `_NONCONFORM` when the baseline does not match.
 
-**Web UI**: http://127.0.0.1:8640/ui/ once `tsqd` runs (section 13.1):
+**Web UI** (section 13.1): build it once, then start `tsqd` with the Editor on and open http://127.0.0.1:8640/ui/:
+
+```bash
+(cd ../../ui && npm ci && npm run build)      # once, Node 22: builds the UI into src/testsuit/sequencer/ui/ (already done by Install above)
+tsqd &                                        # serves it: tsq.dev.yml has server.ui and server.editor on; on the lab, set them in tsq.yml
+xdg-open http://127.0.0.1:8640/ui/            # Queue, Runs, Lab, Editor
+tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from another host (behind a reverse proxy with authentication)
+(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run dev)   # UI development: hot reload on http://127.0.0.1:5173, API proxied to tsqd
+(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run e2e)   # every page and editor view rendered in a headless Chrome (CHROMIUM=<path> if needed)
+```
+
 - **Queue**, **Runs** and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
-- **Editor** (`server.editor: true`, as in `tsq.dev.yml`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, component types, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
-- UI development: `cd ui && TSQ_URL=http://127.0.0.1:8640 npm run dev` (hot reload, API proxied to the running `tsqd`); `npm run e2e` renders every page and editor view in a headless Chrome against it.
+- **Editor** (`server.editor: true`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, component types, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
 
 **Lab operations:**
 
@@ -197,6 +206,55 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | **phase / step** | the pipeline of a run: named phases (`test_run`, `exploit`...) made of steps (commands), run in parallel or waiting for each other (`needs`). |
 | **sequencer component** | the sequencer host itself: an ad hoc component like the others (`transport: local`), never locked. |
 
+**Lab side** (the lab repository, owned by the lab operators):
+
+| Term | Meaning |
+|---|---|
+| **lab component type** | a component type of the lab's type library (`lab/types/*.yml`), assigned to a component with `tsq_type`. It gives the commands, status probe and self-test of every component of that kind. |
+| **built-in base type** | `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every lab type ends up extending (section 7.1). |
+| **`extends`** | the parent of a type: a type inherits its parent's commands, status and self-test, and overrides or adds some. The chain of parents is the type's **inheritance chain**. |
+| **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a type adds (`install`, `feed`...). A command is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
+| **where a command comes from** | resolved in this order, last wins: the lab type and its parents, the datapack type, the setup component, the stage `tsq_commands`, the host `tsq_commands`, and an inline `run:` in a step (section 7.3). The Editor shows the source of each command. |
+| **role** | the job of a component in a stage (`pilot`, `telemetry`, `lab_network`...), set with `tsq_role`; logical components are bound to concrete ones by role. |
+| **stage type** | the kind of a stage (`toytrain`, `counter_bench`...): a datapack asks for a stage type, and any free stage of that type can be bound. |
+| **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
+| **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
+| **transport** | how the sequencer reaches a component: `ssh`, `local`, or a plugin's (`tsq_transport`). |
+| **state** and **state probe** | the monitored state of a component (`offline`, `idle`, `configured`, `running`, `broken`, `unknown`), computed by its type's `status` command or a plugin's state probe. |
+| **self-test** | the checks of each component a run uses, done before the run starts (section 7.5). |
+| **maintenance / hold** | taking a component or stage out of scheduling, for repair (`tsq maintenance`) or for one's own use (`tsq hold`). |
+| **reload** | `tsq lab reload [--pull <rev>]`: the running lab takes a new inventory and type library, from the lab folder or a pushed revision. |
+
+**Tests side** (the tests repositories, owned by the test authors):
+
+| Term | Meaning |
+|---|---|
+| **test definition** (`testdef.yml`) | what one test is: its setup file and setup configuration, its dictionaries and its pipeline. `datapack testdef.yml` builds a datapack from it. |
+| **setup file** and **setup configuration** | the setup describes the components a test needs and their inputs; a setup has several named configurations (`sim_bench`, `emulated`...), each listing its logical stages and components. |
+| **datapack component type** | a type defined in a setup (`component_types`), extending a lab type: it adds the inputs of a component (by configuration) and can add or override commands. |
+| **dictionary** | a YAML file of keys (`globals.yml`...) the templates and the pipeline can use. |
+| **template** | an input file rendered with Jinja2 and the datapack keys (`{{ key }}`), one per component. |
+| **input methods** | how an input file is made: `template`, `copy`, or `generate` (a registered **generator**), optionally followed by `postprocess` **processors** (section 5.1). An **importer** fetches the datasets of a datasource (`importer: git`, a release store...). |
+| **pipeline** | the phases and steps of a test definition; **`needs`** are the edges between steps, and each phase has **`finally`** steps that always run. |
+| **step type** | what a step does: a component command (`do`), `run`, `delay`, `wait_for`, `uses` (a sub-pipeline) or a plugin step type. A **ready check** is one condition of `wait_for` (port, log, file, command, or a plugin's). |
+| **sub-pipeline** | a reusable group of steps with parameters, in the test definition or in a shared file, called with `uses` (section 8.4). |
+| **baseline** | where each content of a datapack comes from (revisions, tags, tool versions) and, for results, the run; checked against an expected baseline, a mismatch makes the datapack **non-conform**. |
+| **verdict** | the outcome of a run: `succeeded`, `failed` or `error`. |
+| **results datapack** | the run folder packed as a datapack, with the collected outputs, logs and completed baseline (section 10.1). |
+| **plugin** | a Python package registered through `testsuit.plugins`: it can add transports, step types, ready checks, state probes, importers, generators and processors (section 12). |
+
+**Web UI and Editor:**
+
+| Term | Meaning |
+|---|---|
+| **Editor mode** | the part of the web UI that edits the lab and tests repositories (`server.editor`, section 13.2). |
+| **editing session** | a scratch git clone of one repository, on one branch, where the Editor writes: a **lab session** edits the inventory and types, a **workspace session** (one of `server.workspaces`) edits setups, test definitions, sub-pipelines, dictionaries and templates. |
+| **context** | what the Editor's menus and help are built from: the types with their commands, roles, stage types, setups, test definitions and installed plugins, read again after each save. A lab session uses its own files; a workspace session uses the running lab. |
+| **palette** | in the pipeline graph, what a step can do on each logical component: its commands, with where each comes from, plus the generic and plugin step types. |
+| **flattened view** | the whole pipeline with sub-pipelines expanded and every command resolved for a setup configuration, as the run will see it. |
+| **draft datapack** | a datapack generated from uncommitted files of a session: the queue accepts it, its report says so. |
+| **push** | committing a session's changes in the user's name, optionally tagged, and pushing them with credentials used for that request only. |
+
 ## 3. Principles
 
 1. **Kernel first, headless.** Everything is available from a CLI and a REST API; a UI is only another API client.
@@ -207,26 +265,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 
 ## 4. Overview
 
-```
-            user / CI job (gitlab-runner) / future UI (posts datapacks too)
-                     │ CLI (tsq)              │ REST + SSE
-                     ▼                        ▼
-   ┌───────────────────────────── sequencer daemon (tsqd) ─────────────────────────────┐
-   │                                                                                     │
-   │  Intake ──► Queue ──────► Scheduler ─────────► Run engine ──► Executors ──► Transports│
-   │  (zip,      (priority,    (bind logical       (pipeline DAG,  (run, push,  (ssh,     │
-   │  verify,    FIFO, DB)     stages and ad hoc   phases, steps,  pull, wait,  local,    │
-   │  validate)                components, lock)   finally, kill)  delay, ...)  plugins)  │
-   │                              ▲                       │                               │
-   │       Lab inventory ─────────┤                  Event bus ──► State store (SQLite)   │
-   │       (stages, components,   │                  (states, logs)  + run folders on disk│
-   │       types)                 │                                                       │
-   │                         State monitor (polls each component's status command)        │
-   └─────────────────────────────────────────────────────────────────────────────────────┘
-          │ ssh / sftp / setsid / kill / status ...                   │ local
-          ▼                                                           ▼
-   stage and ad hoc components (computers, switches, clocks)  sequencer component
-```
+![Overview of the sequencer daemon](../../../docs/diagrams/overview.svg)
 
 One process (`tsqd`) runs an asyncio loop. There is no broker and no worker fleet: steps and state probes are mostly remote calls, so the work is I/O bound and one loop drives dozens of components. A dev mode (`tsq run --local`) runs one datapack in the foreground without a daemon.
 
@@ -262,6 +301,26 @@ plugins: [toytrain]                    # in addition to the installed entry poin
 ```
 
 `tsq config` prints the settings in use, with where each one comes from (file or default).
+
+### 4.2 Main use cases
+
+**Build a datapack, post it and follow it** (sections 9 and 10, cheat sheet):
+
+![Build a datapack, post it and follow it](../../../docs/diagrams/seq_submit.svg)
+
+**Activate a run and execute its pipeline** (sections 9, 10 and 7.5):
+
+![Activate a run and execute its pipeline](../../../docs/diagrams/seq_run.svg)
+
+**Edit the lab or a test definition in the Editor, try it and push it** (section 13.2):
+
+![Edit, try and push in the Editor](../../../docs/diagrams/seq_editor.svg)
+
+**Cancel or kill a run** (section 11):
+
+![Cancel or kill a run](../../../docs/diagrams/seq_cancel.svg)
+
+The figures of this document are PlantUML sources in [docs/diagrams](../../../docs/diagrams/), rendered to SVG with `sh docs/diagrams/render.sh path/to/plantuml.jar`.
 
 ## 5. Datapack generation refinements
 
@@ -962,6 +1021,7 @@ ui/                    # web UI sources (React, TypeScript): npm run build write
   src/pages/           # queue, runs, run (pipeline graph, logs, files), lab, configuration
   src/editor/          # sessions, forms per file kind, pipeline graph editor, templates, wizards, push
   e2e/smoke.mjs        # every page and editor view rendered in a headless Chrome against a running tsqd
+docs/diagrams/         # the figures of this document: PlantUML sources (*.puml), rendered SVG, render.sh
 ```
 
 Tests (`tests/sequencer_t.py`):

@@ -22,19 +22,7 @@ The pilot runs at 0.25 m/s for 5 s, then goes up by steps of +0.1 m/s until it r
 
 ## The lab
 
-```
-             Linux server lab-srv (ad hoc components)
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │ sequencer   simulated propulsion   simulated piezo sensors   exploit_runner
-       └───────┬─────────────────┬──────────────────────┬───────────────────┘
-          10.42.0.1       alias 10.42.0.20         USB GPIO adapter
-                          (address of the real     wired to AU GPIO 17 / 27
-                          propulsion controller)        │
-  stage train_1│                                        │
-  ┌────────────┴──────── switch Auvidea M82 ────────────┼────────────┐
-  │ CALC-Pilot 10.42.0.10   CALC-TM 10.42.0.11   AU 10.42.0.12 ◄─────┘
-  └──────────────────────────────────────────────────────────────────┘
-```
+![The toy-train lab](../../docs/diagrams/toytrain_lab.svg)
 
 - **One stage**, `train_1`, holds CALC-Pilot, CALC-TM, AU and the switch. They are locked together.
 - **The Linux server** hosts three ad hoc components: the sequencer itself, never locked, which also runs the exploitation, and the two simulations.

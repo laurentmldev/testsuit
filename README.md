@@ -85,6 +85,7 @@ src/testsuit/           the installable package
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
+docs/diagrams/          PlantUML figures of the READMEs (sources and rendered SVG)
 examples/toytrain/      the example project: a toy train's test environment (library extending testsuit, sequencer configuration)
 tests/                  pytest suite (*_t.py)
   etc/                  input data, scenarios and configs used by the tests

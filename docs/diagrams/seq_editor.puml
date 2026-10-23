@@ -1,0 +1,46 @@
+@startuml seq_editor
+title Edit the lab or a test definition in the Editor, try it, push it
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor "User" as user
+participant "Web UI\n(Editor)" as ui
+participant "tsqd: Editor" as ed
+participant "Scratch clone\n(editing session)" as clone
+database "git remote\n(lab or tests)" as git
+participant "Lab folder\n(running lab)" as lab
+
+user -> ui : open a session on the lab or a tests repository
+ui -> ed : POST /edit/sessions
+ed -> git : clone the branch
+ed --> ui : session id
+ui -> ed : GET context, schemas
+ed --> ui : types and commands, roles, stage types,\nsetups, plugins (menu choices and help)
+loop editing
+  user -> ui : fill a form, the graph or the YAML view
+  ui -> ed : PUT files/<path> (merged, comments kept)
+  ed -> clone : write file
+  ed --> ui : problems (validated as tsq validate)
+  ui -> ed : GET context (menus refreshed)
+end
+opt try a test definition
+  ui -> ed : POST datapack (generate)
+  ed --> ui : contents, baseline (draft)
+  ui -> ed : POST datapack/<name>/submit
+end
+user -> ui : Review and push: message, tag, credentials
+ui -> ed : POST push (credentials for this request only)
+ed -> clone : commit as the user, tag
+ed -> git : push
+alt rejected
+  ed --> ui : why; Rebase and push again
+else pushed
+  ed --> ui : commit, tag
+  opt lab session
+    user -> ui : Pull and reload the lab now
+    ui -> ed : POST /lab/reload {pull, revision}
+    ed -> lab : fetch the tag, validate, apply\nto the next activations
+  end
+end
+@enduml

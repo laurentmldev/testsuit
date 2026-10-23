@@ -1,0 +1,28 @@
+@startuml seq_cancel
+title Cancel or kill a running run
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor "Operator" as user
+participant "tsq / web UI" as cli
+participant "Run engine" as engine
+participant "Transport" as tr
+participant "Components" as comp
+database "State store" as store
+
+user -> cli : tsq cancel <run>  (or tsq kill <run>)
+cli -> engine : POST /runs/<id>/cancel | kill
+engine -> engine : cancel pending steps
+alt cancel
+  engine -> tr : stop command of each running step
+  tr -> comp : stop
+  engine -> engine : wait for the grace period
+end
+engine -> tr : kill: signal every pid file of the run
+tr -> comp : kill -KILL -<pgid>\n(whole process trees)
+engine -> tr : finally steps (at least collect, to keep the logs)
+tr -> comp : pull outputs
+engine -> store : verdict "error", locks released
+engine --> cli : run done
+@enduml

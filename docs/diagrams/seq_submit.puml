@@ -1,0 +1,33 @@
+@startuml seq_submit
+title Build a datapack, post it and follow it
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor "Test author" as user
+participant "datapack tool" as dp
+participant "tsq (CLI)\nor web UI" as cli
+participant "tsqd: Intake" as intake
+participant "Queue" as queue
+database "State store" as store
+
+user -> dp : datapack testdef.yml
+dp -> dp : read setup, dictionaries, templates;\nrender inputs; record baseline
+dp --> user : <testdef>_<date>.zip (BagIt)
+user -> cli : tsq submit pack.zip --priority 70 --follow
+cli -> intake : POST /runs (zip, priority)
+intake -> intake : verify checksums, unzip to runs/<id>/
+intake -> intake : validate against the lab inventory\n(stage types, roles, types, commands)
+alt invalid
+  intake --> cli : 400 + problems
+else valid
+  intake -> store : run "queued" (conform or not)
+  intake -> queue : insert by priority, then FIFO
+  intake --> cli : run id
+  cli -> intake : GET /events (SSE)
+  loop until the run is done
+    intake --> cli : state changes, step logs
+  end
+  cli --> user : verdict as exit code\n(0 succeeded, 1 failed, 2 error)
+end
+@enduml

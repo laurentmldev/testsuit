@@ -1,0 +1,47 @@
+@startuml overview
+!pragma layout smetana
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam ArrowColor #555555
+
+actor "user / CI job\n(gitlab-runner)" as user
+component "web UI\n(Queue, Runs, Lab, Editor)" as ui
+
+package "sequencer daemon (tsqd)" {
+  component "Intake\n(zip, verify, validate)" as intake
+  component "Queue\n(priority, FIFO)" as queue
+  component "Scheduler\n(bind logical stages and\nad hoc components, lock)" as sched
+  component "Run engine\n(pipeline DAG, phases,\nsteps, finally, kill)" as engine
+  component "Executors\n(run, push, pull,\nwait, delay...)" as exec
+  component "Transports\n(ssh, local, plugins)" as transports
+  component "Lab inventory\n(stages, components, types)" as lab
+  component "State monitor\n(status command polling)" as monitor
+  component "Event bus\n(states, logs)" as bus
+  database "State store (SQLite)\n+ run folders" as store
+  component "Editor\n(scratch clones, push)" as editor
+}
+
+node "stage and ad hoc components\n(computers, switches, clocks)" as remote
+node "sequencer component" as local
+database "lab and tests\ngit repositories" as git
+
+user --> intake : CLI (tsq)
+user --> ui
+ui --> intake : REST + SSE
+ui --> editor : REST (Editor mode)
+intake --> queue
+queue --> sched
+sched --> engine
+engine --> exec
+exec --> transports
+lab --> sched
+lab --> monitor
+monitor --> transports
+engine --> bus
+bus --> store
+editor --> git : clone, push
+git --> lab : tsq lab reload --pull
+transports --> remote : ssh / sftp / setsid / kill
+transports --> local : local
+@enduml
