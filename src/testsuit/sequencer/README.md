@@ -804,6 +804,8 @@ Results zips become job artifacts. Runner tags can name stage types, and CI vari
 
 ## 14. Building blocks and dependencies
 
+Checked against every requirement on 2026-10-23: [benchmark](benchmark.md#6-last-check-2026-10-23), section 6.
+
 | Layer | Choice | Why | Alternative |
 |---|---|---|---|
 | Language | Python ≥ 3.10 | same as testsuit; reuse of datapack, exploit_runner, plugins | - |
@@ -817,9 +819,15 @@ Results zips become job artifacts. Runner tags can name stage types, and CI vari
 | API | FastAPI + uvicorn, SSE | REST + OpenAPI for UI and CI | Flask |
 | CLI | argparse (like the other testsuit tools), rich for tables and live views | consistent with existing CLIs | Typer |
 | CI integration | gitlab-runner Custom executor | official runner, no protocol to implement | - |
-| Optional backends | ansible-runner, labgrid | as plugins only | - |
+| DAG ordering | `graphlib.TopologicalSorter` (standard library) | cycles detected, ready steps in order | networkx |
+| Git (lab folder, Editor) | GitPython (already a dependency) | git state, scratch clones, commit and push with per-push credentials (`GIT_ASKPASS`) | pygit2, dulwich |
+| YAML written back | ruamel.yaml (already a dependency) | keeps comments and key order when the Editor saves a file | - |
+| Large results | `stream-zip` (zip64, streaming), BagIt `fetch.txt`, Starlette range requests | results zips beyond 4 GB without loading them; downloads that resume | zipfile with `force_zip64` |
+| UI and Editor (separate build) | React, React Flow with ELK.js, Monaco with monaco-yaml, react-jsonschema-form | pipeline graph, YAML with schema validation, forms from the Pydantic JSON Schemas, diff view | htmx with server templates, for a lighter monitoring-only UI |
+| Authentication | a reverse proxy (for example oauth2-proxy) | no access control in the kernel (SQ-22) | - |
+| Optional backends | ansible-runner, labgrid, Jumpstarter | as plugins only | - |
 
-New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `sqlalchemy`, `fastapi`, `uvicorn`, `rich`), so datapack and exploit users are not affected. Jinja2 and Pydantic are already dependencies.
+New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `sqlalchemy`, `fastapi`, `uvicorn`, `sse-starlette`, `stream-zip`, `rich`), so datapack and exploit users are not affected. Jinja2 and Pydantic are already dependencies.
 
 ## 15. Package layout
 

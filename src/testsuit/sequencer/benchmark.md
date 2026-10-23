@@ -2,7 +2,7 @@
 
 Preliminary study behind the [sequencer architecture](README.md): which well-established open-source tools already cover significant parts of the needs, and why the proposal reuses their designs and libraries rather than one of them as a whole.
 
-Date: 2026-10-21. Nothing here is implemented yet.
+Date: 2026-10-21, last checked 2026-10-23 against requirements SQ-1 to SQ-31 (section 6). Nothing here is implemented yet.
 
 ## 1. What the needs boil down to
 
@@ -131,3 +131,61 @@ The hard parts are small and well understood; the rest is plumbing that well-kno
 - **keep doors open**: an `ansible` command type for components already managed by playbooks, a `labgrid` transport for boards with power or serial control, and the gitlab-runner Custom executor for CI.
 
 Fallback if the team prefers adopting a platform rather than owning a kernel: Prefect 3, with each phase compiled to a flow and components mapped to global concurrency limits. It brings the UI and the queue, and costs a server dependency and an API that moves fast.
+
+## 6. Last check (2026-10-23)
+
+Since the first study, requirements SQ-23 to SQ-31 were added:
+- maintenance;
+- verdicts;
+- baseline and conformity;
+- the lab folder as a git clone;
+- self-test;
+- large results;
+- sub-pipelines;
+- UI and Editor mode;
+- the main configuration file;
+- the emulated lab.
+
+This section checks again whether a tool now covers the whole, then gives the building block for each requirement.
+
+### 6.1 Tools looked at again
+
+| Tool | What it is (checked 2026-10) | Against our needs | Verdict |
+|---|---|---|---|
+| **Testflinger** (Canonical) | device test queue: jobs posted to a `job_queue`, served by one agent per device, run in fixed phases (setup, provision, firmware update, test, allocate, reserve, cleanup), with multi-device jobs through `allocate` | close to C1 and to the self-test (setup phase), but one agent per device, fixed phases instead of a pipeline, no stage of shared components, no rendez-vous across devices | reference for phases and agent configuration |
+| **Jumpstarter** (Red Hat community) | Python hardware-in-the-loop framework: exporters on the hosts wired to the devices, drivers, leases by label selector with pre- and post-lease hooks, a Kubernetes controller for shared labs, plus local and direct modes without Kubernetes | strong on leases (C2) and drivers (C9); no queue of datapacks, no pipeline DSL; the shared mode needs Kubernetes | possible later as a transport plugin, like labgrid |
+| **labgrid** 25.0 / 26.0 | the coordinator is now a standalone gRPC service (25.0); 26.0 (June 2026) fixes reservation locking and supports Python 3.14 | unchanged verdict, and a sounder coordinator | optional backend, as before |
+| **Kestra** | Java workflow orchestrator, Apache-2.0, YAML flows edited in a web UI with git integration; needs a JVM and a database (PostgreSQL) | its YAML-plus-UI editing with git is the Editor mode we want, but no hardware resource model, no stage locks, and a heavy server | reference for the Editor's YAML/form round trip |
+| GitLab CI, Prefect 3, LAVA, Ansible | no change that affects the first study | | as in section 3 |
+
+None of them covers the combination either, so the conclusion of section 5 stands: a thin Python kernel, with the libraries below.
+
+### 6.2 Building block for each requirement
+
+| Req | Need | Building block | Status in testsuit |
+|---|---|---|---|
+| DG-1..5 | datapack, baseline, conformity | existing `datapack` tool (Jinja2, Pydantic, BagIt), GitPython for the git state of sources | in place; baseline file to add |
+| SQ-1..4 | queue, priorities, backfilling, concurrent runs | own scheduler on SQLite (SQLAlchemy 2), `BEGIN IMMEDIATE` transactions for atomic locking | new |
+| SQ-5..9 | stages, ad hoc components, overrides, locks, component types | Ansible YAML inventory format read by PyYAML, own lock model and type library (section 4), transports as plugins | new |
+| SQ-10, 11 | state monitoring, visibility | status probes run by the engine on a timer, states in SQLite, `tsq` tables with rich and SSE events for the UI | new |
+| SQ-12..14 | pipeline DAG, rendez-vous, delays, ready checks, timeouts | asyncio `TaskGroup` with `graphlib.TopologicalSorter` (standard library) for the DAG, Pydantic for validation | new |
+| SQ-15..17 | default commands, sequencer as a component, exploit phase, abort and kill | AsyncSSH and the `local` transport, `systemd-run` transient units with a `setsid` fallback, existing exploit_runner | exploit_runner in place |
+| SQ-23 | maintenance | lock state in SQLite, nothing external | new |
+| SQ-24 | verdicts and exit codes | own step results; `expect` on exit codes and regex | new |
+| SQ-25 | lab folder as a git clone, warnings, reload on demand | GitPython (already a dependency) | new |
+| SQ-26 | self-test before each datapack | type commands run by the engine; `pytest-testinfra` possible for richer checks, in a plugin | new |
+| SQ-27 | retrieved data, large raw data (pcap) | SFTP streaming (AsyncSSH), `stream-zip` (MIT, zip64, streaming) to write large results zips without loading them, BagIt `fetch.txt` for the external mode; Starlette `FileResponse` with HTTP range requests (since 0.39) to serve large files; captures with `tcpdump`/`dumpcap` as ordinary components | new |
+| SQ-28 | sub-pipelines | own expansion before validation, same models | new |
+| SQ-18, 19, 22 | CLI first, optional UI, no access control | argparse and rich for the CLI; FastAPI with SSE (`sse-starlette`) for the API; authentication left to a reverse proxy (for example oauth2-proxy) | new |
+| SQ-29 | Editor mode | front end: React with TypeScript; **React Flow** (xyflow, MIT) with ELK.js layout for the pipeline graph; **Monaco** with **monaco-yaml** for YAML views validated against the JSON Schemas Pydantic generates; **react-jsonschema-form** (or JSON Forms) for the forms; Monaco's diff view for the diff before commit. Back end: **ruamel.yaml** (already a dependency) to write YAML without losing comments and key order; GitPython for scratch clones, commit and push, with the user's credentials passed through `GIT_ASKPASS` or an SSH agent started for the push, never written to disk | new |
+| SQ-20 | GitLab runner | gitlab-runner Custom executor scripts | new |
+| SQ-21 | simple, well-known open source | every block above is a common, maintained library; none needs a server besides the sequencer | |
+| SQ-30 | main configuration file | Pydantic settings model, loaded from YAML | new |
+| SQ-31 | emulated lab on a dev host | the `local` transport and loopback addresses (127.0.0.0/8, multicast included, no root: checked); for platforms that need their real addresses, unprivileged network namespaces (`unshare -rn`) or containers (Podman, Docker Compose) as the next step | example in place (configuration only) |
+
+### 6.3 Points to watch
+
+- **Editor round trip.** Forms and graph edit the YAML through ruamel.yaml, so that comments and layout survive. A Jinja2 expression in a field is edited as text, never evaluated by the UI.
+- **Credentials.** Credentials are passed to git for one push only, through an askpass helper, and are never stored, logged or put in a URL.
+- **UI build.** The UI is the only part outside Python. It is a separate build served as static files by FastAPI, so the kernel stays installable with pip alone.
+- **Network namespaces.** Some distributions restrict unprivileged user namespaces (Ubuntu 24.04 does through AppArmor), which is why the toy-train emulation uses loopback addresses rather than namespaces.
