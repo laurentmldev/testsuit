@@ -17,11 +17,13 @@ TYPE_KEYS = {"extends", "transport", "commands", "status", "selftest", "collect"
 
 BUILTIN_TYPES: dict[str, dict] = {
     "component": {
+        "description": "Abstract root: anything the sequencer drives or only monitors (no built-in command).",
         "commands": {},
         "selftest": [{"id": "status", "builtin": "status"}],
     },
     "linux_system": {
         "extends": "component",
+        "description": "A Linux computer reachable over SSH (or local): deploy, collect and kill built in.",
         "commands": {
             "deploy": {"builtin": "deploy"},
             "collect": {"builtin": "collect"},
@@ -46,6 +48,7 @@ class TypeDef:
     selftest: list[dict] = field(default_factory=list)
     collect: dict | None = None
     source: str = "<builtin>"
+    description: str = ""
 
     @classmethod
     def from_dict(cls, name: str, data: dict, source: str) -> "TypeDef":
@@ -65,7 +68,7 @@ class TypeDef:
             raise SequencerError(f"{source}: component type '{name}': 'selftest' must be a list of checks with an 'id'")
         return cls(name=name, extends=str(data.get("extends") or ""), transport=data.get("transport"),
                    commands=dict(commands), status=data.get("status"), selftest=list(selftest),
-                   collect=data.get("collect"), source=source)
+                   collect=data.get("collect"), source=source, description=str(data.get("description") or ""))
 
 
 @dataclass

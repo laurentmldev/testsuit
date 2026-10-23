@@ -22,6 +22,7 @@ The main operations, on the toy-train sample in emulated mode (section 6.2): eve
 **Install** (from the root of the repository):
 
 ```bash
+(cd ui && npm ci && npm run build)            # the web UI (Node 22), served by tsqd; skip it for the CLI only
 pip install -e ".[sequencer]"                 # testsuit with tsq and tsqd
 pip install -e "examples/toytrain[test]"      # the toy-train plugin: importer, criteria, formats
 cd examples/toytrain
@@ -81,6 +82,11 @@ datapack --verify <run>_results.zip
 ```
 
 They are kept in `storage.results/<run>/<datapack>_results.zip`, with `_NONCONFORM` when the baseline does not match.
+
+**Web UI**: http://127.0.0.1:8640/ui/ once `tsqd` runs (section 13.1):
+- **Queue**, **Runs** and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
+- **Editor** (`server.editor: true`, as in `tsq.dev.yml`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, component types, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
+- UI development: `cd ui && TSQ_URL=http://127.0.0.1:8640 npm run dev` (hot reload, API proxied to the running `tsqd`); `npm run e2e` renders every page and editor view in a headless Chrome against it.
 
 **Lab operations:**
 
@@ -827,7 +833,13 @@ tsq config                                                  # settings in use, a
 - `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
 - `POST /selftest`, `GET /lab` (inventory, types, git state), `POST /lab/reload`;
 - `GET /events` (Server-Sent Events: run and component state changes, log lines);
-- Editor mode only: `POST /edit/sessions` (scratch clone of a repository), `GET|PUT /edit/sessions/{id}/files/{path}`, `POST /edit/sessions/{id}/validate`, `POST /edit/sessions/{id}/datapack`, `POST /edit/sessions/{id}/push` (credentials in the request body, never stored), and `POST /lab/reload` with a revision (section 13.2).
+- `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`: the run graph of the UI);
+- Editor mode only (section 13.2):
+  - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository), `GET|DELETE /edit/sessions/{id}`;
+  - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `PUT` of `data` merges it into the file, keeping its comments), `POST .../rename`;
+  - helpers: `GET .../context` (lab types, roles, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
+  - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
+  - `GET .../diff`, `POST .../push` (credentials in the request body, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
 
 The kernel never depends on the UI below: it is a web front end on the REST API, served by `tsqd` when `server.ui` is set.
 
@@ -862,6 +874,13 @@ An optional mode of the same UI, enabled with `server.editor` (off by default, s
 - a palette of what a step can do on each logical component, built from the commands its component type offers (`deploy`, `start`, `ready`, `install`...), plus `run`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's logical stages and components;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
+
+**Help while filling the files.** Defining types, inventories, pipelines and templates takes knowing a lot of names, so every form helps with them:
+- each field shows its help in the panel on the right when pointed at or focused, written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
+- every name field proposes the values that make sense where it is, each with what it is: the component types with their commands and users, the roles of the stages of a type, the stage types with the stages that have them, the commands a step can run on the components it targets (with the type each command comes from), the keys a template can use with their values and the file each comes from;
+- what the tests ask of the lab and the lab does not have yet (a role, a stage type) is listed in the inventory form and offered when creating a component;
+- wizards start from what exists: a new stage copies another with its components renamed; **Add from the lab** creates a setup's logical components and datapack types for every role of a stage type; a new test definition comes with a pipeline that deploys, starts and waits for each component of its setup configuration in the order of their `needs`, and stops and collects them in `finally`;
+- the YAML view has completion and hover help from the schemas (monaco-yaml) and the server's problems as markers; templates complete the datapack keys after `{{` and show a preview rendered for a component.
 
 **Applying a modification.** The same for the three kinds of edits:
 1. The UI shows the diff against the branch and asks for a commit message, and optionally a tag.
@@ -899,10 +918,10 @@ Checked against every requirement on 2026-10-23: [benchmark](benchmark.md#6-last
 | CLI | argparse (like the other testsuit tools), plain text tables, requests | consistent with existing CLIs, no new dependency | rich, Typer |
 | CI integration | gitlab-runner Custom executor | official runner, no protocol to implement | - |
 | DAG ordering | `graphlib.TopologicalSorter` (standard library) | cycles detected, ready steps in order | networkx |
-| Git (lab folder, Editor) | GitPython (already a dependency) | git state, scratch clones, commit and push with per-push credentials (`GIT_ASKPASS`) | pygit2, dulwich |
+| Git (lab folder, Editor) | the `git` command (subprocess) | git state, scratch clones, commit and push with per-push credentials (`GIT_ASKPASS`, `SSH_ASKPASS`) | GitPython, pygit2, dulwich |
 | YAML written back | ruamel.yaml (already a dependency) | keeps comments and key order when the Editor saves a file | - |
 | Large results | `zipfile` (zip64, files streamed from disk), BagIt `fetch.txt`, Starlette range requests | results zips beyond 4 GB without loading them; downloads that resume | `stream-zip` |
-| UI and Editor (separate build) | React, React Flow with ELK.js, Monaco with monaco-yaml, react-jsonschema-form | pipeline graph, YAML with schema validation, forms from the Pydantic JSON Schemas, diff view | htmx with server templates, for a lighter monitoring-only UI |
+| UI and Editor (separate build, `ui/`) | React 19 and Vite, React Flow (@xyflow/react) with ELK.js, Monaco with monaco-yaml | pipeline graph, YAML with schema completion and validation, diff view; forms written for each file kind, with help and choices from the JSON Schemas | htmx with server templates, for a lighter monitoring-only UI |
 | Authentication | a reverse proxy (for example oauth2-proxy) | no access control in the kernel (SQ-22) | - |
 | Optional backends | ansible-runner, labgrid, Jumpstarter; OpenHTF as a step type for measurements with instruments | as plugins only | - |
 
@@ -928,22 +947,33 @@ src/testsuit/sequencer/
   sequencer.py        # intake, scheduling loop, run lifecycle, per-phase locking, abort, restart recovery
   results.py          # results datapack, large files, fetch.txt
   transports/         # local, ssh (AsyncSSH, SFTP), process groups and pid files
-  api.py              # FastAPI app
+  api.py              # FastAPI app; serves the web UI under /ui
+  editor.py           # Editor mode: sessions on scratch clones, file kinds, checks, helpers, generate, push, rebase
+  editor_api.py       # its REST routes (server.editor)
+  editor_schemas.py   # JSON Schemas of the files, with help, filled with the lab's choices
+  yamledit.py         # YAML written back keeping comments, key order and layout
+  ui/                 # the built web UI (not in git: built from ui/ at the root of the repository)
   daemon.py           # tsqd entry point
   gitlab/             # Custom executor scripts (config, prepare, run, cleanup)
 src/testsuit/cli/tsq.py
 src/testsuit/datatools/datapack/   # + generators.py (5.1), component needs (5.2), baseline.py (5.3)
+ui/                    # web UI sources (React, TypeScript): npm run build writes src/testsuit/sequencer/ui
+  src/pages/           # queue, runs, run (pipeline graph, logs, files), lab, configuration
+  src/editor/          # sessions, forms per file kind, pipeline graph editor, templates, wizards, push
+  e2e/smoke.mjs        # every page and editor view rendered in a headless Chrome against a running tsqd
 ```
 
 Tests (`tests/sequencer_t.py`):
 - end-to-end runs on a bench of local processes: verdicts, queue and parallel stages, backfilling, cancel, kill, self-test failure and requeue, maintenance, restart recovery, shared locks between `tsqd` and `tsq run --local`;
 - `tsqd` on a free port, driven by `tsq` (`submit --follow`, files with range requests, stages, self-test);
 - the ssh transport against an in-process AsyncSSH server (commands, SFTP, killing a process tree);
+- the Editor (`tests/editor_t.py`): comment-keeping YAML edits, sessions on clones of a bench repository with a bare upstream (checks, palette, flattened pipeline, keys, template preview, generate, push with a tag, a rejected push then rebase, an invalid lab refused), and its REST routes;
+- the web UI (`ui/e2e/smoke.mjs`, CI job `ui`): typecheck, build, and every page and editor view rendered without error against `tsqd` on the emulated toy train;
 - still to do: an end-to-end run of `examples/toytrain` in emulated mode (section 6.2), once host builds of the toy-train applications exist (the release store only holds placeholders).
 
 ## 16. Implementation plan
 
-Steps 1 to 9 are done (section 18); the UI is next.
+Steps 1 to 10 are done (section 18).
 
 1. **Datapack refinements**: `method: generate` with registered generators, component `needs`, and the baseline with its check against an expected baseline. Small, independent, testable on their own.
 2. **Models and validation**:
@@ -984,12 +1014,13 @@ Where the code differs from this document, and why:
 | Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: sequencer`) |
 | `finally` steps without `needs` | run in the order written | a `kill` before a `collect` is the usual intent |
 | Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
+| Editor saves | every change is saved in the session's clone as typed, valid or not, with its problems listed; an invalid lab is refused at push | a half-typed file is a normal state while editing; the clone never reaches the running lab |
+| Editor forms | written for each file kind, not generated from the schemas (react-jsonschema-form) | the help needs the lab's names in context: types with their commands, roles per stage type, commands per component |
 | Generator scripts (5.1) | get every resolved key in their JSON file, so no key is recorded for them in `datapack.yml` | only a registered generator's reads can be tracked |
 
 The main operations are in the [cheat sheet](#cheat-sheet).
 
 Not done yet:
-- the UI and its Editor mode (sections 13.1 and 13.2);
 - `collect` resuming an interrupted transfer, checksums computed during the transfer, and `collect: {max_size}` (`include` and `exclude` work);
 - the `http` transport;
 - the end-to-end emulated toy-train run in CI (section 15).

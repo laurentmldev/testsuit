@@ -1,0 +1,29 @@
+{
+  "name": "testsuit-sequencer-ui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Web UI of the testsuit sequencer (tsqd): monitoring and Editor mode",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/smoke.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.9.3",
+    "elkjs": "0.11.0",
+    "monaco-editor": "0.52.2",
+    "monaco-yaml": "5.5.1",
+    "react": "19.1.10",
+    "react-dom": "19.1.10"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.2.0",
+    "playwright-core": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

@@ -81,7 +81,7 @@ src/testsuit/           the installable package
   exploit/
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
-  sequencer/            test sequencer: tsqd daemon, REST API, run engine (tsq command line in cli/)
+  sequencer/            test sequencer: tsqd daemon, REST API, run engine, web UI and Editor (tsq command line in cli/, UI sources in ui/)
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
@@ -106,7 +106,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
 | `tsq`                    | test sequencer client: submit datapacks, follow runs, manage the lab (`pip install "testsuit[sequencer]"`) |
-| `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API ([sequencer README](src/testsuit/sequencer/README.md)) |
+| `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API, web UI at `/ui` ([sequencer README](src/testsuit/sequencer/README.md)) |
 | `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |
 | `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
 

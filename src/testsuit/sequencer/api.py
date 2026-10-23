@@ -23,6 +23,36 @@ from testsuit.sequencer.util import SequencerError
 STEP_FILES = ("datapack.yml", "context.yml", "baseline.yml", "run.yml", "selftest.yml")
 
 
+def zip_entry(zip_path: Path, path: str):
+    archive = zipfile.ZipFile(zip_path)
+    root = archive.namelist()[0].split("/")[0]
+    prefix = f"{root}/{path}".rstrip("/")
+    names = archive.namelist()
+    if prefix in names and not prefix.endswith("/"):
+        info = archive.getinfo(prefix)
+
+        def stream():
+            with archive, archive.open(info) as f:
+                while chunk := f.read(1 << 20):
+                    yield chunk
+        return StreamingResponse(stream(), media_type=mimetypes.guess_type(prefix)[0] or "application/octet-stream",
+                                 headers={"Content-Length": str(info.file_size)})
+    children = {}
+    for name in names:
+        if name.startswith(prefix + "/") and name != prefix + "/":
+            rest = name[len(prefix) + 1:]
+            head = rest.split("/")[0]
+            is_dir = "/" in rest
+            rel = f"{path.strip('/')}/{head}".strip("/")
+            if head and head not in children:
+                children[head] = {"name": head, "path": rel, "dir": is_dir,
+                                  "size": None if is_dir else archive.getinfo(name).file_size}
+    archive.close()
+    if not children and prefix + "/" not in names and path:
+        raise HTTPException(404, f"no '{path}' in {zip_path.name}")
+    return sorted(children.values(), key=lambda c: c["name"])
+
+
 def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     app = FastAPI(title="testsuit sequencer", version="1", lifespan=lifespan)
     app.state.seq = seq
@@ -64,6 +94,29 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         if execution is not None and execution.ctx is not None:
             run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
         return run
+
+    @app.get("/runs/{run_id}/pipeline")
+    async def pipeline(run_id: str):
+        """The run's pipeline as it runs: phases, steps after sub-pipeline expansion, their needs (the UI graph)."""
+        from testsuit.sequencer.intake import load_datapack
+        run = run_or_404(run_id)
+        if not Path(run["dir"]).is_dir():
+            raise HTTPException(404, f"run {run['id']}: the run folder is gone (retention), only its records remain")
+        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]))
+        phases = []
+        for flat in dp.phases:
+            steps = []
+            for part, items in (("steps", flat.steps), ("finally", flat.finally_)):
+                for fs in items:
+                    s = fs.step
+                    steps.append({"id": fs.id, "part": part, "needs": fs.needs, "group": fs.group, "action": s.action,
+                                  "do": s.do, "component": s.component, "for_each": s.for_each,
+                                  "if": s.if_, "label": s.do or s.run or s.uses or s.action})
+            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stages": flat.phase.stages,
+                           "components": flat.phase.components, "groups": flat.groups, "steps": steps})
+        return {"phases": phases, "stages": dp.needs.stages,
+                "components": {c.id: {"type": c.type, "role": c.role, "stage": c.stage, "name": c.name}
+                               for c in dp.needs.components.values()}}
 
     @app.patch("/runs/{run_id}")
     async def patch(run_id: str, body: dict):
@@ -134,35 +187,6 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             return FileResponse(run["results"], media_type="application/zip", filename=Path(run["results"]).name)
         return zip_entry(Path(run["results"]), path)
 
-    def zip_entry(zip_path: Path, path: str):
-        archive = zipfile.ZipFile(zip_path)
-        root = archive.namelist()[0].split("/")[0]
-        prefix = f"{root}/{path}".rstrip("/")
-        names = archive.namelist()
-        if prefix in names and not prefix.endswith("/"):
-            info = archive.getinfo(prefix)
-
-            def stream():
-                with archive, archive.open(info) as f:
-                    while chunk := f.read(1 << 20):
-                        yield chunk
-            return StreamingResponse(stream(), media_type=mimetypes.guess_type(prefix)[0] or "application/octet-stream",
-                                     headers={"Content-Length": str(info.file_size)})
-        children = {}
-        for name in names:
-            if name.startswith(prefix + "/") and name != prefix + "/":
-                rest = name[len(prefix) + 1:]
-                head = rest.split("/")[0]
-                is_dir = "/" in rest
-                rel = f"{path.strip('/')}/{head}".strip("/")
-                if head and head not in children:
-                    children[head] = {"name": head, "path": rel, "dir": is_dir,
-                                      "size": None if is_dir else archive.getinfo(name).file_size}
-        archive.close()
-        if not children and prefix + "/" not in names and path:
-            raise HTTPException(404, f"no '{path}' in {zip_path.name}")
-        return sorted(children.values(), key=lambda c: c["name"])
-
     # ── lab resources ────────────────────────────────────────────────────
     def resources(kind: str) -> list[dict]:
         inv = seq.lab.inventory
@@ -218,7 +242,13 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
 
     @app.get("/lab")
     async def lab():
-        return seq.lab.describe()
+        described = seq.lab.describe()
+        editor = getattr(app.state, "editor", None)
+        if editor is not None and "lab" in editor.published:
+            published = editor.published["lab"]
+            current = (seq.lab.git or {}).get("commit")
+            described["published"] = {**published, "newer": published["commit"] != current}
+        return described
 
     @app.post("/lab/reload")
     async def reload(body: dict | None = None):
@@ -264,4 +294,31 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 seq.subscribers.discard(queue)
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
+    if seq.config.server.editor:
+        from testsuit.sequencer.editor_api import add_editor_routes
+        add_editor_routes(app, seq)
+    if seq.config.server.ui:
+        add_ui(app)
     return app
+
+
+UI_DIR = Path(__file__).parent / "ui"
+
+
+def add_ui(app: FastAPI) -> None:
+    """The web UI (README section 13.1), a static build served under /ui (built from the repository's ui/ folder)."""
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+
+    if (UI_DIR / "index.html").is_file():
+        app.mount("/ui", StaticFiles(directory=UI_DIR, html=True), name="ui")
+    else:
+        @app.get("/ui/", include_in_schema=False)
+        async def no_ui():
+            return HTMLResponse("<h1>testsuit sequencer</h1><p>The web UI is not built in this installation: "
+                                "<code>cd ui && npm ci && npm run build</code> in the testsuit repository, then "
+                                "reinstall. The REST API is at <a href='../docs'>/docs</a>.</p>")
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return RedirectResponse("ui/")

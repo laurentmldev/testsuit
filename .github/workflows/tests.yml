@@ -58,6 +58,53 @@ jobs:
         working-directory: examples/toytrain
         run: python -m pytest -q
 
+  ui:
+    # the web UI: typecheck and build, then every page and editor view rendered in Chrome against a tsqd
+    # running the toy-train example (emulated lab), with the Editor on
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Typecheck and build
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Install testsuit and the toy-train example
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[sequencer]" -e examples/toytrain
+      - name: Start tsqd
+        run: |
+          mkdir -p "$RUNNER_TEMP/tsq"
+          cat > "$RUNNER_TEMP/tsq/tsq.yml" <<EOF
+          lab: {folder: $GITHUB_WORKSPACE/examples/toytrain/lab, inventory: toytrain_emulated.yml, require_tag: false}
+          storage: {root: $RUNNER_TEMP/tsq/storage, min_free_space: 100MB}
+          server: {listen: 127.0.0.1:8640, editor: true, workspaces: [$GITHUB_WORKSPACE/examples/toytrain/datapack]}
+          plugins: [toytrain]
+          EOF
+          nohup tsqd --config "$RUNNER_TEMP/tsq/tsq.yml" > "$RUNNER_TEMP/tsq/tsqd.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8640/health > /dev/null && break; sleep 1; done
+      - name: Render every view
+        working-directory: ui
+        env:
+          TSQ_URL: http://127.0.0.1:8640
+          CHROMIUM: /usr/bin/google-chrome
+        run: npm run e2e
+      - name: tsqd log
+        if: always()
+        run: cat "$RUNNER_TEMP/tsq/tsqd.log"
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +114,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the web UI (into src/testsuit/sequencer/ui, packaged with the sequencer)
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
       - name: Build sdist and wheel
         run: |
           python -m pip install build
           python -m build
+          python -m zipfile -l dist/*.whl | grep -q "testsuit/sequencer/ui/index.html"
