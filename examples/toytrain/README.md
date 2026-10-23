@@ -73,6 +73,7 @@ datapack/                              owned by the test authors
   testdef/<test>/criteria/<test>/      exploitation criteria (mexploit)
   release_store/                       stand-in for the release server (toytrain-release importer)
 baseline_expected.yml                  expected baseline of the campaign
+tsq.yml                                main configuration of the lab's sequencer
 sample/
   data/<test>/                         recordings of a nominal run: telemetry.csv, propulsion.propj
   exploit_<test>.yml                   exploit_runner session: the test's criteria on its recording
@@ -168,19 +169,19 @@ datapack datapack/testdef/front_contact/testdef.yml        # build the zip (inpu
 tsq submit .work/datapacks/toytrain_front_contact_*.zip --baseline baseline_expected.yml --wait --follow
 ```
 
-The pipeline has two phases.
+Before anything else, the sequencer self-tests every bound component: SSH, target folders, disk space and clock for the Linux systems, plus the microcontroller link of CALC-Pilot, the simulation's address and GPIO adapter on lab-srv, and a ping of the switch. A failure puts the datapack back in the queue.
+
+The pipeline then has two phases, the first one built from two sub-pipelines.
 
 **test_run** locks the stage `train_1` and the two simulations, then:
-1. deploys every input in parallel, and flashes the CALC-Pilot microcontroller;
-2. starts the simulations, then CALC-TM and AU, each waiting for its `READY` log line;
-3. starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
-4. lets the scenario run for its duration;
-5. stops the pilot first, then the rest;
-6. finally collects every output (`telemetry.csv`, `propulsion.propj`, `piezo.csv`, logs), even after a kill.
+1. `bring_up`: deploys every input in parallel, and flashes the CALC-Pilot microcontroller; starts the simulations, then CALC-TM and AU, each waiting for its `READY` log line; starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
+2. lets the scenario run for its duration;
+3. `shut_down`: stops the pilot first, then the rest;
+4. finally collects every output (`telemetry.csv`, `propulsion.propj`, `piezo.csv`, logs), even after a kill.
 
 **exploit** runs on the lab server. It receives these outputs as inputs and runs `exploit_runner` on the criteria. Exit code 0 means the verdict is `succeeded`; any other exit code means `failed`.
 
-The results zip carries the baseline with the git tags of the software and simulation, the lab inventory version, and the software version read on each calculator. A mismatch with `baseline_expected.yml` flags the run as non-conform.
+Everything collected joins the results datapack, next to the inputs. Its baseline carries the git tags of the software and simulation, the lab inventory version, and the software version read on each calculator. A mismatch with `baseline_expected.yml` flags the run as non-conform.
 
 ## Assumptions
 

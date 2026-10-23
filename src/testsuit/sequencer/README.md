@@ -66,6 +66,8 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-10 | The state of each component is monitored (for example idle, configured, running, broken), and broken components are not used. | 7.4 |
 | SQ-23 | A stage or a component can be declared temporarily disabled, for example for maintenance: no new datapack is activated on it until it is enabled again. | 7.4, 9, 13 |
 | SQ-11 | Visibility of the queued datapacks (with their priority and what they wait for), and of the state of stages and components. | 9, 13 |
+| SQ-25 | The folder holding the lab inventory is configurable. The sequencer expects it to be a git clone, and warns when it is not under git or not on a clean tag. | 4.1, 6.1 |
+| SQ-26 | Before each datapack, a platform self-test checks that every component involved can be reached and used properly. | 7.5, 10 |
 
 ### 1.3 Pipeline execution
 
@@ -77,6 +79,8 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-15 | Default commands are given by a base component type, for example "Linux system": scp to a standard target folder, with SSH keys configured so that no password is asked. A new component type can extend another one and override some of its commands, and each component instance is assigned a type. | 7 |
 | SQ-16 | The sequencer itself is a component like the others. The exploit phase (exploit_runner/mexploit analysis of the retrieved data) is a phase of the pipeline like any other, with the outputs of earlier phases becoming its inputs. | 2, 8.3 |
 | SQ-17 | A test run can be forced to stop, killing the remote processes (`kill -9` or similar), while the cleanup and result retrieval still run. | 11 |
+| SQ-27 | The data retrieved from the components after a run is added to the datapack contents. It can be large raw data, such as pcap files. | 10.1 |
+| SQ-28 | A pipeline can be built as a sequence of sub-pipelines, to keep complex pipelines manageable. | 8.4 |
 | SQ-24 | Each run ends with a verdict: `succeeded`; `failed` when a command did not give its expected result, typically an unexpected return status; or `error` when a command crashed or could not complete (signal, timeout, unreachable component). | 8.3, 10 |
 
 ### 1.4 Interfaces and integration
@@ -84,7 +88,9 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | Id | Requirement | Section |
 |---|---|---|
 | SQ-18 | The product works from the command line, without any UI. | 13 |
-| SQ-19 | An optional UI can be added on top of the kernel later, to post new datapacks and to navigate and control the queue and the pipelines. | 13 |
+| SQ-19 | An optional UI can be added on top of the kernel later. It covers posting a datapack; managing and monitoring components, queued datapacks and running datapacks; and accessing the contents of a datapack before, during and after its run. | 13.1 |
+| SQ-29 | The UI has an optional **Editor** mode: edit the lab inventory, with helpers (for example the available component types when creating a component), and create a new datapack definition and generate a datapack from it. | 13.2 |
+| SQ-30 | One overall YAML file defines the main configuration settings: storage folders (datapacks, runs, results), lab inventory folder, server, queue, self-test and monitoring defaults. | 4.1 |
 | SQ-20 | The product can act as a GitLab runner, for a future CI integration. | 13 |
 | SQ-21 | Simple and modular, built on well-known open-source languages and libraries. | 3, 14 |
 | SQ-22 | A single-team lab is enough for a first version: no access control in the kernel. | 13 |
@@ -137,6 +143,39 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 ```
 
 One process (`tsqd`) runs an asyncio loop. There is no broker and no worker fleet: steps and state probes are mostly remote calls, so the work is I/O bound and one loop drives dozens of components. A dev mode (`tsq run --local`) runs one datapack in the foreground without a daemon.
+
+### 4.1 Main configuration file
+
+One YAML file, `tsq.yml`, holds the main settings of a sequencer instance. It is read from `--config`, else `$TSQ_CONFIG`, else `/etc/testsuit/tsq.yml`. Relative paths are relative to `storage.root`. Every setting has a default, so a minimal file only gives the lab folder.
+
+```yaml
+# tsq.yml
+lab:
+  folder: /srv/tsq/lab                 # git clone of the lab repository (section 6.1)
+  inventory: toytrain_lab.yml          # inventory file in that folder
+  require_tag: true                    # warn unless the clone is on a clean tag
+storage:
+  root: /srv/tsq
+  incoming: incoming                   # datapacks posted, waiting in the queue
+  runs: runs                           # run folders, while running and until cleaned
+  results: results                     # results datapacks (section 10.1)
+  database: tsq.sqlite
+  min_free_space: 20GB                 # a run is not activated below this
+  max_run_output: 50GB                 # a run's collected outputs above this end it in error
+  large_files: {threshold: 200MB, mode: zip}   # or 'external' (section 10.1)
+  retention: {runs: 30d, results: forever}
+server:
+  listen: 0.0.0.0:8640
+  ui: true
+  editor: false                        # Editor mode of the UI (section 13.2)
+  workspaces: [/srv/tsq/tests]         # git clones the Editor creates datapack definitions in
+queue: {default_priority: 50, priority_aging: off}
+selftest: {before_each_run: true, timeout: 60s, max_attempts: 3}   # section 7.5
+monitor: {interval: 30s}
+plugins: [toytrain]                    # in addition to the installed entry points
+```
+
+`tsq config` prints the settings in use, with where each one comes from (file or default).
 
 ## 5. Datapack generation refinements
 
@@ -282,6 +321,15 @@ all:
   - `none`: never locked, for the sequencer component.
 - Components are taken out of scheduling by state, not by editing the file: a `broken` state (section 7.4), or `tsq maintenance <component>`.
 
+### 6.1 Where the inventory lives
+
+The inventory and its type library live in the folder `lab.folder` of the main configuration (section 4.1), which the sequencer expects to be a **git clone** of the lab repository. The lab then has a history, and every run can name the exact lab definition it ran on.
+
+- At startup and on `tsq lab reload`, the sequencer reads the git state of the folder: commit, tag on that commit, and whether the work tree is clean.
+- A **warning** is shown when the folder is not a git work tree, has local changes, or is not on a tag (with `require_tag: true`, the default). It appears at startup, in `tsq lab status`, as a banner in the UI, and in the record of every run activated meanwhile.
+- The warning does not stop the sequencer. The git state is written to the `run` part of each results baseline (section 5.3), so a run on an untagged lab is flagged non-conform when its expected baseline names a lab tag.
+- The inventory is loaded at startup and reloaded only on `tsq lab reload` (or from the Editor, section 13.2), never on its own. A reload is validated first and refused if invalid. Running datapacks keep the components they are bound to; the new inventory applies to the next activations.
+
 ## 7. Component types and state monitoring
 
 A component type gives a kind of component its commands and the way to monitor its state. Types form a hierarchy: a type `extends` another one and overrides only what differs.
@@ -370,6 +418,30 @@ Each component has a monitored **state**:
 - A `broken` or `offline` component is not used for new runs. A stage is unavailable while one of its components is. A component that recovers becomes available again, unless an operator put it in `maintenance`.
 
 This is distinct from the **lock state** (free or held by a run), shown next to it.
+
+### 7.5 Platform self-test
+
+Before each datapack, once its resources are locked and before anything is deployed, the sequencer runs a **self-test** of every component bound to the run, in parallel. It checks that each one can be reached and used, so that a run does not fail halfway because of the platform.
+
+A component type gives its checks in `selftest`, and a derived type adds to its parent's checks:
+
+| Type | Checks |
+|---|---|
+| `component` | its `status` probe answers, and the state is not `broken` or `offline` |
+| `linux_system` | the above, plus: SSH login with the lab key, `<remote_root>/<component>/` writable, free disk space above `min_free_space`, clock offset with the sequencer host under `max_clock_offset` (default 1 s) |
+| lab types | anything specific, for example `toytrain-install --check` on CALC-Pilot, or a ping of the switch |
+
+```yaml
+component_types:
+  arduino_unoq:
+    extends: linux_system
+    selftest:
+      - {id: mcu_link, run: "sudo /usr/local/bin/toytrain-install --check", timeout: 20s}
+```
+
+- **When it passes**, the run goes on, and the results are kept in the run record and in the results datapack (`selftest.yml`).
+- **When a check fails**, nothing is deployed. The failing component is marked `offline` or `broken`, the run's locks are released, and the run goes back to the head of the queue for its priority: it can then bind another stage, or wait. After `selftest.max_attempts` failed attempts (default 3), the run ends with the verdict `error`.
+- `tsq selftest [<stage | component>]` runs the same checks on demand, for example after maintenance, without any datapack.
 
 ## 8. Datapack side: resources needed and pipeline
 
@@ -492,6 +564,51 @@ Templates in commands are rendered with Jinja2, the same environment as the data
 - the datapack's frozen keys from `context.yml`;
 - run-time keys: `run.{id, dir, priority}`, `phase.id`, `component.{id, type, host, stage, role, state, input_dir, ...}`, `components.<id>.*`, `stages.<id>.*`, `remote_root`.
 
+### 8.4 Sub-pipelines
+
+A pipeline can be built from **sub-pipelines**: named groups of steps, declared once under `pipeline.subpipelines` and used as a single step with `uses`. The toy-train pipeline of section 8.3 becomes:
+
+```yaml
+pipeline:
+  subpipelines:
+    bring_up:                              # deploy, start everything, pilot last
+      steps:
+        - {id: deploy, for_each: components, do: deploy}
+        - {id: flash_pilot, component: pilot, do: install, needs: [deploy]}
+        - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
+        - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
+        - {id: start_tm, component: telemetry, do: start, needs: [deploy]}
+        - {id: tm_ready, component: telemetry, do: ready, needs: [start_tm]}
+        - {id: start_au, component: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: au_ready, component: acquisition, do: ready, needs: [start_au]}
+        - {id: start_pilot, component: pilot, do: start, needs: [flash_pilot, sims_ready, tm_ready, au_ready]}
+        - {id: pilot_running, wait_for: {state: running, component: pilot, timeout: 20s}, needs: [start_pilot]}
+    shut_down:                             # pilot first, then the others given as a parameter
+      params: {others: [acquisition, telemetry, propulsion, piezo]}
+      steps:
+        - {id: stop_pilot, component: pilot, do: stop}
+        - {id: stop_others, for_each: "{{ params.others }}", do: stop, needs: [stop_pilot]}
+
+  phases:
+    - id: test_run
+      stages: [train]
+      components: [propulsion, piezo]
+      steps:
+        - {id: up, uses: bring_up}
+        - {id: run, delay: "{{ scenario.duration_s }}s", needs: [up]}
+        - {id: down, uses: shut_down, needs: [run]}
+      finally:
+        - {id: kill_leftovers, for_each: components, do: kill, if: "not succeeded('down')"}
+        - {id: collect, for_each: components, do: collect}
+```
+
+- A `uses` step stands for the whole group. Its `needs` apply to the group's first steps, and a step that needs it waits for all the group's steps. Its verdict is the worst of its steps' verdicts.
+- Inside a group, steps keep their own `needs`, so a sub-pipeline has its own parallelism and rendez-vous points.
+- Step ids are namespaced in logs, status and the UI (`up.start_tm`), so the same sub-pipeline can be used several times.
+- `params` declares parameters with their defaults, given by `with:` on the `uses` step and read as `params.*` in the group.
+- A sub-pipeline can use other sub-pipelines. Cycles and unknown names are rejected at validation, and `tsq validate` can print the pipeline flattened.
+- Sub-pipelines shared by several test definitions can live in YAML files listed in `pipeline.include`, relative to the test definition. The datapack tool copies them into the datapack's `definition/` folder, so the datapack stays self-sufficient.
+
 ## 9. Queue, scheduling and locking
 
 **Priority.** Each run has a priority, an integer from 0 to 100 (default 50), given at submission (`tsq submit --priority 80`) and changeable while queued (`tsq priority <run> 90`). The queue is ordered by priority, then by submission time. Optional aging (`priority_aging: +1 per 30 min`, off by default) keeps low-priority runs from waiting forever.
@@ -523,7 +640,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
    - It reads the pipeline, commands, resources needed and `context.yml` from the zip only.
    - It validates them against the lab inventory: stage types, roles, component types, commands.
    - The run state is `queued`.
-2. **Activate**: binding and locking (section 9), then a fresh state probe of every locked component. The run state goes `waiting_resources → reserved → running`.
+2. **Activate**: binding and locking (section 9), a check that `storage.min_free_space` is available, then the platform self-test of every locked component (section 7.5). The run state goes `waiting_resources → reserved → selftest → running`.
 3. **Phases**:
    - Before a phase, the kernel copies its `inputs` and binds and locks its resources if they aren't held yet.
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.
@@ -535,11 +652,29 @@ A lower-priority run may start while a higher-priority one waits, but only on re
    - `error`: at least one step crashed or could not complete (section 8.3), or the run was cancelled or killed. The test outcome is then unknown, not negative.
 
    The status of each phase and step is kept.
-6. **Results**: the run folder is zipped as `<datapack>_results.zip`, a valid datapack whose manifest now covers the outputs too, and whose baseline gets the `run` part (section 5.3). The run record stays in the database as history.
+6. **Results**: the run folder becomes the results datapack (section 10.1), whose baseline gets the `run` part (section 5.3). The run record stays in the database as history.
 
 State machines:
-- run: `queued → waiting_resources → reserved → running → cleaning → done`, or `cancelled` while still queued; a done run carries its verdict, and an aborted run (`tsq cancel`, `tsq kill`) gets the verdict `error`;
+- run: `queued → waiting_resources → reserved → selftest → running → cleaning → done`, or `cancelled` while still queued; a done run carries its verdict, and an aborted run (`tsq cancel`, `tsq kill`) gets the verdict `error`;
 - step: `pending → ready → running → succeeded | failed | error | skipped`, with the reason of an `error` kept (crash, timeout, killed, transport).
+
+### 10.1 Results: retrieved data in the datapack
+
+Everything retrieved from the components becomes part of the datapack contents. The **results datapack** is the run folder, packed with the same layout as the datapack it came from:
+- `data/<component>/input/`: the inputs, unchanged;
+- `data/<component>/output/`: everything `collect` retrieved, whatever its size or format (logs, CSV, binary records, pcap files...);
+- `logs/`: the log of every step;
+- `selftest.yml`, `run.yml` (states, verdict, step statuses) and the completed `baseline.yml`.
+
+The BagIt manifests are recomputed over all of it, so `datapack --verify` checks the outputs too. It is written to `storage.results` as `<datapack>_results.zip`, with the `_NONCONFORM` suffix when flagged (section 5.3).
+
+Large raw data, such as pcap captures of a long run, is handled without loading it in memory:
+- **Transfer**: `collect` streams files over SFTP, computes their SHA-256 on the fly, and resumes an interrupted transfer. Each component type can restrict what it collects (`collect: {include, exclude, max_size}`), for example to leave scratch files on the target.
+- **Packing**: zip64, so files and archives over 4 GB work. Files over `storage.large_files.threshold`, and formats that are already compressed (`.gz`, `.zst`, `.pcapng.gz`...), are stored without compression, which keeps packing fast and lets the UI read them from the zip directly.
+- **External mode**: with `large_files.mode: external`, files over the threshold stay next to the zip, in `<datapack>_results.data/`, and the zip lists them in BagIt's `fetch.txt` with their size and checksum. The bag stays complete and verifiable, without one huge archive to copy around.
+- **Limits**: a run is not activated when less than `storage.min_free_space` is free, and collected outputs over `storage.max_run_output` end the run in `error`, after `finally`. Both are shown in the UI before they bite.
+
+During the run, the outputs are already in the run folder as they are collected, and can be browsed from the CLI (`tsq files <run>`) and the UI (section 13.1).
 
 ## 11. Abort and kill
 
@@ -581,6 +716,10 @@ tsq runs [--state running] | tsq show <run> | tsq logs <run> [--step S] [-f]
 tsq cancel <run> | tsq kill <run>
 tsq stages | tsq components                                 # monitored state, lock state, holder
 tsq hold | release | maintenance | resume <stage | component>
+tsq selftest [<stage | component>]                          # platform self-test on demand (section 7.5)
+tsq files <run | datapack.zip> [<path>] [--get]             # browse or download a datapack's contents
+tsq lab status | reload                                     # inventory git state; reload after a change
+tsq config                                                  # settings in use, and where each comes from
 ```
 
 `--wait` returns the run verdict as exit code (0 succeeded, 1 failed, 2 error), and `--follow` streams the logs: what scripts and CI need.
@@ -588,14 +727,39 @@ tsq hold | release | maintenance | resume <stage | component>
 **REST API** (FastAPI, OpenAPI generated):
 - `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill`, `GET /runs/{id}/logs/{step}`;
 - `GET /stages`, `GET /components`, `POST /stages/{id}|/components/{id}/hold|release|maintenance|resume`;
-- `GET /events` (Server-Sent Events: run and component state changes, log lines).
+- `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
+- `POST /selftest`, `GET /lab` (inventory, types, git state), `POST /lab/reload`;
+- `GET /events` (Server-Sent Events: run and component state changes, log lines);
+- Editor mode only: `PUT /lab/files/{path}`, `POST /lab/commit`, `GET|PUT /workspaces/{ws}/files/{path}`, `POST /workspaces/{ws}/datapack` (section 13.2).
 
-**UI (optional, later).** Any web front end on the REST API. It can post a new datapack (upload, priority) and show:
-- the queue, with priorities that can be changed;
-- the stages and components, with their monitored and lock states;
-- each run, with its step DAG, live logs and cancel/kill buttons.
+The kernel never depends on the UI below: it is a web front end on the REST API, served by `tsqd` when `server.ui` is set.
 
-The kernel never depends on it.
+### 13.1 UI
+
+| Use case | What the UI offers |
+|---|---|
+| Post a datapack | upload a zip, set its priority and an optional expected baseline; see at once whether it is valid, conform, and which stage types it waits for |
+| Manage and monitor components | stages and components with their monitored state, lock state and holder, self-test results, history of state changes; hold, release, maintenance, resume and self-test buttons |
+| Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
+| Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs; cancel and kill |
+| Access a datapack's contents | before the run (queued: inputs, definition, keys, baseline), during the run (inputs, outputs collected so far, logs) and after it (the results datapack): a file tree with viewers for text, YAML, CSV and logs, and downloads for the rest, large files included |
+
+### 13.2 Editor mode
+
+An optional mode of the same UI, enabled with `server.editor` (off by default, since it writes files). It edits the YAML files the CLI tools read, and adds nothing the files cannot express: whatever it does can also be done with a text editor and git.
+
+**Lab inventory.**
+- Forms for stages, ad hoc components and their variables, with a YAML view next to them.
+- Helpers: when creating a component, the list of available component types (lab type library and plugins), each with its commands, status probe and self-test; the roles already used in the lab; the stage types; host reachability on demand.
+- Every save is validated like `tsq lab reload` and refused if invalid.
+- The changes are written to the lab git clone. The UI shows the diff, commits with a message and, optionally, tags and pushes. Until it is committed and tagged, the lab carries the warning of section 6.1. `tsq lab reload` then applies it.
+
+**Datapack definitions.**
+- Create a test definition and its setup in one of the `server.workspaces` git clones, or start from an existing one.
+- Helpers: the logical stage types and roles of the lab; the component types to extend; input files by method (template, copy, generate), with a preview of a rendered template; the pipeline as a graph, with sub-pipelines, built from the commands each component type offers.
+- **Generate** runs the datapack tool on the server, as `datapack <testdef>` would. The UI shows the generated contents and baseline, and can post the datapack to the queue at once.
+
+**Access.** The kernel has no access control (SQ-22). With the Editor enabled, the UI should sit behind a reverse proxy with authentication.
 
 **GitLab runner (future).** gitlab-runner's **Custom executor** turns the sequencer into a GitLab runner without implementing the runner protocol:
 - `config` declares the builds dir;
@@ -634,14 +798,19 @@ src/testsuit/sequencer/
   model/          # pydantic: lab inventory, component types, resources needed, pipeline, run state
   inventory.py    # Ansible-format loader, variable precedence, stages, ad hoc components, roles
   types.py        # component type library, 'extends' chains, command resolution
+  config.py       # tsq.yml: settings, defaults, sources
+  lab.py          # lab folder git state, inventory reload
   monitor.py      # state probes, expected vs probed state, availability
+  selftest.py     # platform self-test before each run
   intake.py       # verify zip, unzip, load embedded definition and context
   store.py        # SQLAlchemy tables: runs, stages, components, locks, states, steps, events
   scheduler.py    # priority queue, binding, backfilling, atomic locking, release
-  engine.py       # phases, step DAG, timeouts, cancel and kill, finally
+  engine.py       # phases, sub-pipelines, step DAG, timeouts, cancel and kill, finally
+  results.py      # streamed collect, results datapack, large files, fetch.txt
   steps/          # run, push/pull, delay, wait_for
   transports/     # local, ssh (AsyncSSH), http, remote process control
   api.py          # FastAPI app
+  ui/             # web UI, with its Editor mode (separate build)
   daemon.py       # tsqd entry point
   gitlab/         # Custom executor scripts (config, prepare, run, cleanup)
 src/testsuit/cli/tsq.py
@@ -657,16 +826,17 @@ Tests:
 
 1. **Datapack refinements**: `method: generate` with registered generators, component `needs`, and the baseline with its check against an expected baseline. Small, independent, testable on their own.
 2. **Models and validation**:
-   - Pydantic models for the lab inventory, component types, resources needed and pipeline;
+   - `tsq.yml` and the lab folder's git state;
+   - Pydantic models for the lab inventory, component types, resources needed, pipeline and sub-pipelines;
    - `tsq validate` printing the binding candidates and every command fully expanded (the main debugging tool for YAML authors).
 3. **Local runner**: `tsq run --local` with the engine, the `linux_system` type and the `local` and `ssh` transports, one run at a time, file locks per component. Already usable on one stage.
 4. **Daemon**: SQLite store, priority queue, binding, backfilling, atomic locking, REST API, CLI as a client.
-5. **State monitoring**: status probes, expected vs probed states, `wait_for: state`, availability.
+5. **State monitoring and self-test**: status probes, expected vs probed states, `wait_for: state`, availability, self-test before each run.
 6. **Robust abort**: systemd-run/setsid process control, kill, restart recovery.
-7. **Results**: phase `inputs`, results zip, exploit component type for exploit_runner.
+7. **Results**: phase `inputs`, streamed collect, results datapack with large files, exploit component type for exploit_runner.
 8. **Plugins**: transports, component types, state probes, step types, ready checks; ansible and labgrid adapters if needed.
 9. **GitLab Custom executor** scripts.
-10. **UI** (separate, later).
+10. **UI** (separate, later): monitoring and datapack contents first, then the Editor mode.
 
 ## 17. Open points
 
@@ -676,3 +846,5 @@ Defaults are proposed for each; none blocks the start.
 2. **Preemption.** Default: none, a running datapack is never interrupted by a higher-priority one; priority only orders the queue.
 3. **Reservation of later phases.** Default: resources are locked phase by phase; `reserve: all` holds all of them from activation.
 4. **Recovery of broken components.** Default: a component becomes available again as soon as its probe reports a healthy state; `tsq maintenance` keeps it out until `tsq resume`.
+5. **Large outputs.** Default: `large_files.mode: zip`, one self-contained results zip; `external` is opt-in for labs whose captures make archives impractical.
+6. **Self-test failure.** Default: the run goes back to the queue (up to `max_attempts`). The alternative, ending the run in `error` at once, suits labs with a single stage of each type, where requeueing only delays the failure.

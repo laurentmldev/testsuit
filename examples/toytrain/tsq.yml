@@ -1,0 +1,19 @@
+# Main configuration of the toy-train lab's sequencer (sequencer README, section 4.1).
+# Installed on lab-srv as /etc/testsuit/tsq.yml; every setting not given here has its default.
+lab:
+  folder: /srv/tsq/toytrain-lab        # git clone of the lab repository: this example's lab/ folder
+  inventory: toytrain_lab.yml
+  require_tag: true                    # warn unless the clone is on a clean tag
+storage:
+  root: /srv/tsq
+  min_free_space: 20GB
+  max_run_output: 5GB                  # telemetry and simulation records are small
+  large_files: {threshold: 200MB, mode: zip}
+  retention: {runs: 30d, results: forever}
+server:
+  listen: 0.0.0.0:8640
+  ui: true
+  editor: true                         # behind the lab's authenticating reverse proxy
+  workspaces: [/srv/tsq/toytrain-tests]   # git clone of the tests repository: this example's datapack/ folder
+selftest: {before_each_run: true, timeout: 60s, max_attempts: 3}
+plugins: [toytrain]

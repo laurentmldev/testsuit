@@ -20,6 +20,8 @@ component_types:
       kill:    {run: "sudo systemctl kill --signal=KILL toytrain-{{ component.role }}; sudo /usr/local/bin/toytrain-install --halt-mcu"}
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
       version: {run: "/usr/local/bin/toytrain-install --version"}   # recorded in the results baseline
+    selftest:                          # added to linux_system's checks (SSH, remote_root, disk, clock)
+      - {id: mcu_link, run: "sudo /usr/local/bin/toytrain-install --check", timeout: 20s}
     status:
       probe: {run: "systemctl is-active toytrain-{{ component.role }}; cat /run/toytrain/state 2>/dev/null"}
       interval: 10s
@@ -38,6 +40,8 @@ component_types:
       kill:    {run: "sudo systemctl kill --signal=KILL toytrain-{{ component.role }}"}
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
       version: {run: "toytrain-{{ component.role }} --version"}
+    selftest:
+      - {id: service_installed, run: "systemctl cat toytrain-{{ component.role }} > /dev/null"}
     status:
       probe: {run: "systemctl is-active toytrain-{{ component.role }}"}
       interval: 10s
@@ -51,6 +55,7 @@ component_types:
     # Probed from the sequencer host, so its transport is local.
     extends: component
     transport: local
+    # self-test: the inherited 'component' check, its status probe (a ping) answers
     status:
       probe: {run: "ping -c 1 -W 1 {{ component.host }}"}
       interval: 30s
@@ -65,3 +70,8 @@ component_types:
     commands:
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/sim.log", regex: "READY"}, timeout: 20s}}
       version: {run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
+    selftest:
+      - {id: sim_installed, run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
+      - {id: propulsion_address, run: "ip -o addr show | grep -q ' {{ component.vars.tsq_sim_address }}/'",
+         if: "component.role == 'propulsion_sim'"}
+      - {id: gpio_adapter, run: "test -e {{ component.vars.tsq_gpio_adapter }}", if: "component.role == 'piezo_sim'"}
