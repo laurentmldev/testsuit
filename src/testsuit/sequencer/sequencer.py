@@ -646,11 +646,12 @@ class RunExecution:
                     await asyncio.wait_for(asyncio.gather(*stops, return_exceptions=True), DEFAULT_STOP_GRACE)
                 except asyncio.TimeoutError:
                     pass
-        if self.ctx.main_task is not None:
-            self.ctx.main_task.cancel()
+        # kill before the current phase's finally steps run (they start once its steps are cancelled)
         live = [b for b, a in zip(bound, await asyncio.gather(*[alive(b) for b in bound])) if a]
         await asyncio.gather(*[self._command(b, "kill") for b in live if "kill" in b.resolved.commands],
                              return_exceptions=True)
+        if self.ctx.main_task is not None:
+            self.ctx.main_task.cancel()
 
     async def watch_abort(self) -> None:
         """An abort written to the store by another process (the daemon, for a tsq run --local run)."""

@@ -516,9 +516,11 @@ def ssh_server(tmp_path):
     authorized = asyncssh.import_authorized_keys(client_key.export_public_key().decode())
 
     async def handle(process):
-        proc = await asyncio.create_subprocess_shell(process.command or "sh", stdin=asyncio.subprocess.PIPE,
-                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await process.redirect(stdin=proc.stdin, stdout=proc.stdout, stderr=proc.stderr)
+        # output forwarded until EOF before the exit status: no data lost when the command exits at once
+        proc = await asyncio.create_subprocess_shell(process.command or "true", stdin=asyncio.subprocess.DEVNULL,
+                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        while chunk := await proc.stdout.read(65536):
+            process.stdout.write(chunk)
         process.exit(await proc.wait())
 
     async def start():
