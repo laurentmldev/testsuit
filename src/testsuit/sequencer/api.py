@@ -168,9 +168,9 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
 
     @app.get("/runs/{run_id}/files")
     @app.get("/runs/{run_id}/files/{path:path}")
-    async def files(run_id: str, path: str = "", results: bool = False):
+    async def files(run_id: str, path: str = "", results: bool = False, list: bool = False):  # noqa: A002
         """List a folder or download a file of the run: run folder, or results zip (results=true, or once
-        the run folder is gone)."""
+        the run folder is gone). With results=true, the bare path downloads the zip, unless list=true."""
         run = run_or_404(run_id)
         folder = Path(run["dir"])
         if folder.is_dir() and not results:
@@ -183,7 +183,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         if not run.get("results") or not Path(run["results"]).is_file():
             raise HTTPException(404, f"run {run['id']} has no files")
-        if path in ("", "results.zip") and results:
+        if results and (path == "results.zip" or (path == "" and not list)):
             return FileResponse(run["results"], media_type="application/zip", filename=Path(run["results"]).name)
         return zip_entry(Path(run["results"]), path)
 

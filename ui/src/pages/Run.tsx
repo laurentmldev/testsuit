@@ -208,6 +208,9 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   const records: any[] = r?.steps || [];
   const live = r && (ACTIVE.includes(r.state) || ["queued", "waiting_resources"].includes(r.state));
   const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, s.component) === key);
+  // the log to show: the selected record, or the first component of a step run on several; none before it starts
+  const logRecord = selected ? recordFor(selected) || records.find((s) => selected === `${s.phase}:${s.id}`) : null;
+  const logKey = logRecord ? stepKey(logRecord.phase, logRecord.id, logRecord.component) : null;
   if (run.error) return <div className="page"><div className="error-box">{run.error}</div></div>;
   if (!r) return <div className="page muted">Loading…</div>;
   const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"]];
@@ -249,8 +252,8 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
           <div className="split-side">
             {selected ? (
               <>
-                <StepFacts record={recordFor(selected)} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={setSelected} />
-                <LogTail runId={r.id} step={selected} live={!!live && !ENDED.includes(recordFor(selected)?.state)} />
+                <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={setSelected} />
+                {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
           </div>
@@ -277,12 +280,12 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
             {records.length === 0 && <p className="muted">No step has started yet.</p>}
           </div>
           <div className="split-side">
-            {selected && <LogTail runId={r.id} step={selected} live={!!live && !ENDED.includes(recordFor(selected)?.state)} />}
+            {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
           </div>
         </div>
       )}
       {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} />}
-      {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true" />}
+      {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" />}
     </div>
   );
 }

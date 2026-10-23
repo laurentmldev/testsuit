@@ -468,6 +468,8 @@ def test_daemon_api_and_cli(daemon, capsys):
     log = requests.get(f"{url}/runs/{run['id']}/files/data/dut/output/app.log", headers={"Range": "bytes=0-4"})
     assert log.status_code == 206 and log.text == "READY"
     in_zip = requests.get(f"{url}/runs/{run['id']}/files/run.yml", params={"results": "true"})
+    listed = requests.get(f"{url}/runs/{run['id']}/files/", params={"results": "true", "list": "true"}).json()
+    assert "run.yml" in {f["name"] for f in listed}
     assert yaml.safe_load(in_zip.text)["verdict"] == "succeeded"
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
 
