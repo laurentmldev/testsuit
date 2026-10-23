@@ -19,7 +19,7 @@ from testsuit.sequencer.inventory import Component
 from testsuit.sequencer.lab import Lab
 from testsuit.sequencer.component_types import ResolvedType
 from testsuit.sequencer.transports import Transport
-from testsuit.sequencer.util import SequencerError, now, parse_duration, parse_size, render, evaluate
+from testsuit.sequencer.util import SequencerError, evaluate, now, parse_duration, parse_size, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
 
@@ -160,11 +160,8 @@ class Monitor:
                        if time.monotonic() - self._last.get(c, 0) >= self.interval_of(c)]
                 if due:
                     await asyncio.gather(*[self.probe(c) for c in due], return_exceptions=True)
-            try:
-                await asyncio.wait_for(self._wake.wait(), 1.0)
+            if await wait_event(self._wake, 1.0):
                 self._wake.clear()
-            except asyncio.TimeoutError:
-                pass
 
 
 # ── self-test ──────────────────────────────────────────────────────────────

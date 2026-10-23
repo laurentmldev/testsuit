@@ -30,7 +30,7 @@ from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resou
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport
 from testsuit.sequencer.results import pack_results
-from testsuit.sequencer.util import SequencerError, dump_yaml, now, parse_duration, render
+from testsuit.sequencer.util import SequencerError, dump_yaml, now, parse_duration, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
 
@@ -231,10 +231,7 @@ class Sequencer:
                 self.schedule()
             except Exception:
                 log.exception("scheduler error")
-            try:
-                await asyncio.wait_for(self._wake.wait(), 5.0)
-            except asyncio.TimeoutError:
-                pass
+            await wait_event(self._wake, 5.0)
             self._wake.clear()
 
     # ── operator actions ───────────────────────────────────────────────

@@ -20,6 +20,7 @@ jobs:
 
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 20   # a hung test fails the job instead of blocking it for hours
     strategy:
       fail-fast: false
       matrix:

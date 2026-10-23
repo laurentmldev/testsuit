@@ -1,6 +1,7 @@
 """Small helpers shared by the sequencer modules: durations, sizes, templates, YAML."""
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,20 @@ _SIZE_UNITS = {"": 1, "B": 1, "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**1
 
 class SequencerError(Exception):
     """A configuration, inventory, datapack or pipeline the sequencer cannot use."""
+
+
+async def wait_event(event: asyncio.Event, timeout: float) -> bool:
+    """Wait for an event, at most timeout seconds; True if it is set.
+
+    Unlike ``asyncio.wait_for(event.wait(), timeout)``, a cancellation is never lost when the event is
+    set at the same time (Python 3.10, bpo-42130), so a loop built on it always stops when cancelled.
+    """
+    waiter = asyncio.ensure_future(event.wait())
+    try:
+        await asyncio.wait({waiter}, timeout=timeout)
+    finally:
+        waiter.cancel()
+    return event.is_set()
 
 
 def parse_duration(value: Any) -> float | None:
