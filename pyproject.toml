@@ -94,8 +94,8 @@ python_files = ["*_t.py"]
 "testsuit.jupytertools.notebooks" = ["*.ipynb"]
 # JS/CSS libraries embedded in the HTML report (offline, single file)
 "testsuit.exploit.runner" = ["report_libs/*"]
-# GitLab Custom executor scripts and the sequencer documentation
-"testsuit.sequencer" = ["gitlab/*", "*.md"]
+# GitLab Custom executor scripts, the sequencer documentation and its web UI (built from ui/: npm run build)
+"testsuit.sequencer" = ["gitlab/*", "*.md", "ui/*", "ui/assets/*"]
 
 [tool.setuptools_scm]
 root = "."  # ".git" is in the parent directory

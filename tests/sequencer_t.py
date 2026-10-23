@@ -261,6 +261,10 @@ def test_queue_and_parallel_stages(tmp_path, no_git):
     assert {r["binding"]["stages"]["bench"] for r in done[1:]} == {"bench_1", "bench_2"}
     # it started once a stage was released: after the test_run phase of another run (exploit needs no stage)
     assert done[0]["activated_at"] > max(r["activated_at"] for r in done[1:])
+    # the analysis host is not locked: each run had its own folders there, never clobbered by another run
+    seq_host = tmp_path / "remote" / "seq_host"
+    assert not (seq_host / "analysis").exists()
+    assert all((seq_host / ".tsq" / r["id"] / "analysis" / "input" / "check.sh").is_file() for r in done)
 
 
 def test_cancel_runs_finally(tmp_path, no_git):
@@ -468,6 +472,8 @@ def test_daemon_api_and_cli(daemon, capsys):
     log = requests.get(f"{url}/runs/{run['id']}/files/data/dut/output/app.log", headers={"Range": "bytes=0-4"})
     assert log.status_code == 206 and log.text == "READY"
     in_zip = requests.get(f"{url}/runs/{run['id']}/files/run.yml", params={"results": "true"})
+    listed = requests.get(f"{url}/runs/{run['id']}/files/", params={"results": "true", "list": "true"}).json()
+    assert "run.yml" in {f["name"] for f in listed}
     assert yaml.safe_load(in_zip.text)["verdict"] == "succeeded"
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
 

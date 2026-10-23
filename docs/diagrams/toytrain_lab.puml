@@ -1,0 +1,25 @@
+@startuml toytrain_lab
+!pragma layout smetana
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+node "Linux server lab-srv (ad hoc components)" as srv {
+  component "sequencer\n(+ exploit_runner)" as seq
+  component "simulated propulsion\nalias 10.42.0.20\n(address of the real controller)" as prop
+  component "simulated piezo sensors\nUSB GPIO adapter" as piezo
+}
+
+rectangle "stage train_1" as stage {
+  component "switch Auvidea M82" as sw
+  component "CALC-Pilot\n10.42.0.10" as pilot
+  component "CALC-TM\n10.42.0.11" as tm
+  component "AU\n10.42.0.12" as au
+}
+
+seq -- sw : 10.42.0.1
+prop -- sw
+sw -- pilot
+sw -- tm
+sw -- au
+piezo --> au : GPIO 17 / 27
+@enduml

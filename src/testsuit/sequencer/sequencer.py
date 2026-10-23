@@ -396,6 +396,9 @@ class RunExecution:
             bound = BoundComponent(logical=lc, concrete=concrete, stage=stage, logical_stage=stage_logical,
                                    resolved=resolved, transport=transport)
             bound.root = await transport.resolve_root()
+            if concrete.lock != "exclusive":
+                # Several runs may hold it at once: each gets its own input/output folders.
+                bound.work = f"{bound.root}/.tsq/{self.run_id}"
             self.ctx.bound[logical] = bound
         self.ctx.stage_binding = dict(self.binding.stages)
         self.seq.monitor.active |= {b.concrete.id for b in self.ctx.bound.values()}

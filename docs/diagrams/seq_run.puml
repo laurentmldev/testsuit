@@ -1,0 +1,36 @@
+@startuml seq_run
+title Activate a run and execute its pipeline
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+participant "Scheduler" as sched
+database "State store\n(locks)" as store
+participant "Run engine" as engine
+participant "Transport\n(ssh / local)" as tr
+participant "Bound components\n(stage, ad hoc,\nsequencer)" as comp
+
+sched -> sched : walk the queue by priority;\nbind logical stages and components\nto free concrete ones
+sched -> store : lock everything the phase needs\n(one transaction, all or nothing)
+alt nothing free
+  sched -> store : run "waiting_resources"\n(and what it waits for)
+else locked
+  sched -> engine : start run (reserved)
+  engine -> tr : self-test of every locked component
+  tr -> comp : reachability, disk, clock, type checks
+  loop each phase (test_run, then exploit...)
+    loop each step whose needs are met (in parallel)
+      engine -> tr : deploy / start / ready / feed...
+      tr -> comp : put inputs, setsid + pid file, wait_for
+      comp --> tr : exit status, log lines
+      tr --> engine : step succeeded | failed | error
+    end
+    engine -> tr : finally steps (stop, collect)
+    tr -> comp : stop, pull outputs
+    engine -> store : release what the next phase does not use
+  end
+  note over engine, comp : the exploit phase is a phase like the others: its steps\nrun on the sequencer component, on the outputs collected before
+  engine -> engine : verdict; pack the results datapack\n(baseline completed with the run)
+  engine -> store : run "done" + verdict, locks released
+end
+@enduml
