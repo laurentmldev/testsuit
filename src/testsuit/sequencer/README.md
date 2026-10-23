@@ -15,6 +15,84 @@ Status: the kernel is implemented (everything but the UI and its Editor mode, se
 
 A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
 
+## Cheat sheet
+
+The main operations, on the toy-train sample in emulated mode (section 6.2): every component is a local process, so this runs on any Linux host. Commands run from `examples/toytrain`; `TSQ_CONFIG` saves giving `--config tsq.dev.yml` to each of them. On the lab, the configuration is `/etc/testsuit/tsq.yml` and the setup configuration is the test definition's own (`sim_bench`).
+
+**Install** (from the root of the repository):
+
+```bash
+pip install -e ".[sequencer]"                 # testsuit with tsq and tsqd
+pip install -e "examples/toytrain[test]"      # the toy-train plugin: importer, criteria, formats
+cd examples/toytrain
+export TSQ_CONFIG=$PWD/tsq.dev.yml
+tsq config                                    # every setting, and where it comes from
+tsq lab status                                # inventory, git state of the lab folder, stages, components
+```
+
+**Build a datapack**, then check it against the lab:
+
+```bash
+datapack datapack/testdef/front_contact/testdef.yml --setup-config emulated --nocheck   # zip in .work/datapacks/
+ZIP=$(ls -t .work/datapacks/toytrain_front_contact_*.zip | head -1)
+datapack --verify $ZIP                        # checksums
+datapack --check-baseline baseline_expected.yml $ZIP   # conformity (a --nocheck datapack is not conform)
+tsq validate $ZIP                             # binding, phases and every command, fully expanded
+tsq validate datapack/testdef/max_speed/testdef.yml --setup-config emulated   # straight from a test definition
+tsq files $ZIP data/pilot/input               # browse its contents
+```
+
+**Start the daemon** (REST API on `server.listen`, here 127.0.0.1:8640; OpenAPI at `/docs`):
+
+```bash
+tsqd &                                        # or: tsqd --config tsq.dev.yml --log-level debug
+tsq components                                # monitored state, lock mode, holder
+tsq selftest                                  # self-test of the whole lab, or: tsq selftest train_emu
+```
+
+**Post a datapack and follow it:**
+
+```bash
+tsq submit $ZIP --priority 70 --follow        # steps and logs live; exit code 0 succeeded, 1 failed, 2 error
+tsq submit $ZIP --baseline baseline_expected.yml --wait   # quiet, the verdict as exit code
+tsq submit $ZIP                               # just queue it
+tsq queue                                     # waiting runs, priority, what each waits for
+tsq priority <run> 90                         # a queued run's priority
+tsq runs [--state running]                    # runs, newest first (a unique prefix of a run id is enough)
+tsq show <run>                                # state, binding, verdict, every step
+tsq logs <run>                                # steps and their logs; one log: tsq logs <run> --step test_run:up.start_tm -f
+tsq cancel <run>                              # stop commands, then kill, then finally (collect)
+tsq kill <run>                                # kill at once, then finally
+```
+
+**Without a daemon** (one datapack in the foreground, same storage and locks):
+
+```bash
+tsq run $ZIP --local --follow
+```
+
+**Results:**
+
+```bash
+tsq files <run>                               # run folder: data/<component>/{input,output}, logs/, run.yml, selftest.yml, baseline.yml
+tsq files <run> data/telemetry/output/telemetry.csv --get
+tsq files <run> --results --get               # the results zip (<run>_results.zip)
+datapack --verify <run>_results.zip
+```
+
+They are kept in `storage.results/<run>/<datapack>_results.zip`, with `_NONCONFORM` when the baseline does not match.
+
+**Lab operations:**
+
+```bash
+tsq maintenance train_emu --note "rewiring"   # out of scheduling; tsq resume train_emu brings it back
+tsq hold calc_tm                              # keep a component for yourself; tsq release calc_tm
+tsq release train_emu                         # also frees a lock left by a run (audited)
+tsq lab reload                                # re-read the inventory; --pull [<rev>] fetches the lab repository first
+```
+
+The example's release store only holds placeholders of the toy-train applications, so until host builds of them exist, a run of these datapacks stops at the self-test (the simulation is not installed under `~/.toytrain-emu/sim/venv`) or at the first `start`, with verdict `error`. Everything above still works on it, results included.
+
 Contents:
 1. [Functional requirements](#1-functional-requirements)
 2. [Vocabulary](#2-vocabulary)
@@ -908,18 +986,7 @@ Where the code differs from this document, and why:
 | Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
 | Generator scripts (5.1) | get every resolved key in their JSON file, so no key is recorded for them in `datapack.yml` | only a registered generator's reads can be tracked |
 
-Getting started, on the emulated toy train (section 6.2):
-
-```
-pip install -e ".[sequencer]"
-cd examples/toytrain
-datapack datapack/testdef/front_contact/testdef.yml --setup-config emulated --nocheck -o out/
-tsq --config tsq.dev.yml validate out/*.zip          # binding and every command, expanded
-tsqd --config tsq.dev.yml &                           # REST API on 127.0.0.1:8640 (OpenAPI at /docs)
-tsq submit out/*.zip --follow                         # or, without a daemon: tsq --config tsq.dev.yml run out/*.zip --local
-```
-
-The release store of the example only holds placeholders of the toy-train applications, so until host builds of them exist, such a run deploys every input and then ends in `error` at the first `start`.
+The main operations are in the [cheat sheet](#cheat-sheet).
 
 Not done yet:
 - the UI and its Editor mode (sections 13.1 and 13.2);

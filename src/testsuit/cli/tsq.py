@@ -514,6 +514,9 @@ def main(argv=None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:                                  # output piped into head, less...
+        sys.stderr.close()
+        return 0
 
 
 if __name__ == "__main__":
