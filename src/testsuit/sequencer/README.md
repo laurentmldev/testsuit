@@ -89,7 +89,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 |---|---|---|
 | SQ-18 | The product works from the command line, without any UI. | 13 |
 | SQ-19 | An optional UI can be added on top of the kernel later. It covers posting a datapack; managing and monitoring components, queued datapacks and running datapacks; and accessing the contents of a datapack before, during and after its run. | 13.1 |
-| SQ-29 | The UI has an optional **Editor** mode: edit the lab inventory, with helpers (for example the available component types when creating a component), and create a new datapack definition and generate a datapack from it. | 13.2 |
+| SQ-29 | The UI has an optional **Editor** mode: edit the lab inventory, with helpers (for example the available component types when creating a component); create a new datapack definition and generate a datapack from it; create and update pipelines. Applying a modification asks the user for git credentials to push it; the sequencer then reloads this latest configuration on demand only. | 13.2 |
 | SQ-30 | One overall YAML file defines the main configuration settings: storage folders (datapacks, runs, results), lab inventory folder, server, queue, self-test and monitoring defaults. | 4.1 |
 | SQ-20 | The product can act as a GitLab runner, for a future CI integration. | 13 |
 | SQ-21 | Simple and modular, built on well-known open-source languages and libraries. | 3, 14 |
@@ -328,7 +328,7 @@ The inventory and its type library live in the folder `lab.folder` of the main c
 - At startup and on `tsq lab reload`, the sequencer reads the git state of the folder: commit, tag on that commit, and whether the work tree is clean.
 - A **warning** is shown when the folder is not a git work tree, has local changes, or is not on a tag (with `require_tag: true`, the default). It appears at startup, in `tsq lab status`, as a banner in the UI, and in the record of every run activated meanwhile.
 - The warning does not stop the sequencer. The git state is written to the `run` part of each results baseline (section 5.3), so a run on an untagged lab is flagged non-conform when its expected baseline names a lab tag.
-- The inventory is loaded at startup and reloaded only on `tsq lab reload` (or from the Editor, section 13.2), never on its own. A reload is validated first and refused if invalid. Running datapacks keep the components they are bound to; the new inventory applies to the next activations.
+- The inventory is loaded at startup and reloaded only on demand, never on its own: `tsq lab reload` reloads the folder as it is, and `tsq lab reload --pull [<tag | commit>]` first fetches the lab repository and checks out that revision (the latest commit of the branch by default). The Editor's Reload button does the same (section 13.2). A reload is validated first and refused if invalid, leaving the folder on its previous revision. Running datapacks keep the components they are bound to; the new inventory applies to the next activations.
 
 ## 7. Component types and state monitoring
 
@@ -718,7 +718,7 @@ tsq stages | tsq components                                 # monitored state, l
 tsq hold | release | maintenance | resume <stage | component>
 tsq selftest [<stage | component>]                          # platform self-test on demand (section 7.5)
 tsq files <run | datapack.zip> [<path>] [--get]             # browse or download a datapack's contents
-tsq lab status | reload                                     # inventory git state; reload after a change
+tsq lab status | reload [--pull [<rev>]]                   # inventory git state; reload on demand (section 6.1)
 tsq config                                                  # settings in use, and where each comes from
 ```
 
@@ -730,7 +730,7 @@ tsq config                                                  # settings in use, a
 - `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
 - `POST /selftest`, `GET /lab` (inventory, types, git state), `POST /lab/reload`;
 - `GET /events` (Server-Sent Events: run and component state changes, log lines);
-- Editor mode only: `PUT /lab/files/{path}`, `POST /lab/commit`, `GET|PUT /workspaces/{ws}/files/{path}`, `POST /workspaces/{ws}/datapack` (section 13.2).
+- Editor mode only: `POST /edit/sessions` (scratch clone of a repository), `GET|PUT /edit/sessions/{id}/files/{path}`, `POST /edit/sessions/{id}/validate`, `POST /edit/sessions/{id}/datapack`, `POST /edit/sessions/{id}/push` (credentials in the request body, never stored), and `POST /lab/reload` with a revision (section 13.2).
 
 The kernel never depends on the UI below: it is a web front end on the REST API, served by `tsqd` when `server.ui` is set.
 
@@ -748,16 +748,29 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 
 An optional mode of the same UI, enabled with `server.editor` (off by default, since it writes files). It edits the YAML files the CLI tools read, and adds nothing the files cannot express: whatever it does can also be done with a text editor and git.
 
+**Where it works.** The Editor never edits the sequencer's own lab folder. Each editing session works in a scratch clone of the repository being edited (the lab repository, or one of `server.workspaces`), on the branch it was opened on, so that a half-done change never reaches the running lab.
+
 **Lab inventory.**
 - Forms for stages, ad hoc components and their variables, with a YAML view next to them.
 - Helpers: when creating a component, the list of available component types (lab type library and plugins), each with its commands, status probe and self-test; the roles already used in the lab; the stage types; host reachability on demand.
-- Every save is validated like `tsq lab reload` and refused if invalid.
-- The changes are written to the lab git clone. The UI shows the diff, commits with a message and, optionally, tags and pushes. Until it is committed and tagged, the lab carries the warning of section 6.1. `tsq lab reload` then applies it.
+- Every change is validated like `tsq lab reload` and refused if invalid.
 
 **Datapack definitions.**
-- Create a test definition and its setup in one of the `server.workspaces` git clones, or start from an existing one.
-- Helpers: the logical stage types and roles of the lab; the component types to extend; input files by method (template, copy, generate), with a preview of a rendered template; the pipeline as a graph, with sub-pipelines, built from the commands each component type offers.
+- Create a test definition and its setup in one of the `server.workspaces` repositories, or start from an existing one.
+- Helpers: the logical stage types and roles of the lab; the component types to extend; input files by method (template, copy, generate), with a preview of a rendered template.
 - **Generate** runs the datapack tool on the server, as `datapack <testdef>` would. The UI shows the generated contents and baseline, and can post the datapack to the queue at once.
+
+**Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
+- a graph view of phases, sub-pipelines and steps, where `needs` are the edges: add, remove and connect steps, group steps into a new sub-pipeline, or expand a `uses` step to see its steps;
+- a palette of what a step can do on each logical component, built from the commands its component type offers (`deploy`, `start`, `ready`, `install`...), plus `run`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's logical stages and components;
+- a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
+- validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
+
+**Applying a modification.** The same for the three kinds of edits:
+1. The UI shows the diff against the branch and asks for a commit message, and optionally a tag.
+2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The commit author is the user, not the sequencer.
+3. It commits and pushes. If the push is rejected (the branch moved meanwhile, or the credentials lack the right), nothing is applied: the UI shows why, and the user can rebase on the latest revision and try again.
+4. Nothing is reloaded at this point. For the lab, the UI shows that a newer configuration exists (its commit, tag and author) next to the one in use, with a **Reload** button. Reload is `tsq lab reload --pull` on that revision (section 6.1): it fetches it into the lab folder, validates it, and applies it to the next activations. Datapack definitions are not loaded by the sequencer at all: they are used when a datapack is next generated from them.
 
 **Access.** The kernel has no access control (SQ-22). With the Editor enabled, the UI should sit behind a reverse proxy with authentication.
 
