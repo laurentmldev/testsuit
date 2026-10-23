@@ -904,7 +904,7 @@ Checked against every requirement on 2026-10-23: [benchmark](benchmark.md#6-last
 | Large results | `zipfile` (zip64, files streamed from disk), BagIt `fetch.txt`, Starlette range requests | results zips beyond 4 GB without loading them; downloads that resume | `stream-zip` |
 | UI and Editor (separate build) | React, React Flow with ELK.js, Monaco with monaco-yaml, react-jsonschema-form | pipeline graph, YAML with schema validation, forms from the Pydantic JSON Schemas, diff view | htmx with server templates, for a lighter monitoring-only UI |
 | Authentication | a reverse proxy (for example oauth2-proxy) | no access control in the kernel (SQ-22) | - |
-| Optional backends | ansible-runner, labgrid, Jumpstarter | as plugins only | - |
+| Optional backends | ansible-runner, labgrid, Jumpstarter; OpenHTF as a step type for measurements with instruments | as plugins only | - |
 
 New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `fastapi`, `uvicorn`, `python-multipart`), so datapack and exploit users are not affected. Jinja2, Pydantic, PyYAML and requests are already dependencies; Server-Sent Events are a plain streaming response.
 

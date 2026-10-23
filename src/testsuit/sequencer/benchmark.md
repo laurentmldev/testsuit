@@ -64,6 +64,10 @@ Constraints: simple and modular, well-known open-source dependencies, reuse of t
 
 **OpenTAP** (Keysight, open source core, C#/.NET): test sequencer for instruments with test plans, parallel steps, resources (instruments/DUTs) opened/locked by plan, plugins, CLI + (proprietary) GUI. Domain is right (test sequencing, resources), but .NET-centric, test-plan XML, instruments rather than Linux hosts; the useful GUI is commercial. Not retained. NI TestStand: same domain, proprietary, Windows: excluded.
 
+**OpenHTF** (Google, maintained by Waymo engineers, Python ≥ 3.10, Apache-2.0): a framework for writing hardware test scripts in Python, from bring-up to end-of-line manufacturing tests. A test is a list of **phases** (timeouts, retries, teardown, checkpoints, conditional branches), **measurements** declared with units and validators (ranges, regex, functions) from which the framework computes pass or fail, **plugs** wrapping instruments, DUT interfaces and the operator, created before the test and torn down after it, and one structured **test record** per run (outcome, phases, measurements, logs, attachments), written by output callbacks (JSON or custom). A browser operator UI shows phases live and handles operator prompts (scan a serial number).
+- Why not as the kernel: it runs one test on one station, in one process. It has no queue, no reservation of shared resources, no remote execution over SSH, no pipeline of parallel steps across machines with rendez-vous, and it leaves storage and traceability to whatever consumes its records. It covers the inside of one step, not C1, C2, C4 or C7.
+- **Where it fits**: as a **step type** (section 12 of the README), for the steps that measure something with an instrument or on a DUT. A step `openhtf: {test: tests/power_rail.py}` runs an OpenHTF test on a component (or on the sequencer host). Its JSON record is collected as an output and joins the results datapack, and its outcome gives the step verdict (PASS → succeeded, FAIL → failed, ERROR, TIMEOUT or ABORTED → error). Its plugs are then the place for instrument drivers (PyVISA, pyserial, pymodbus), which the sequencer does not provide. Its measurement model (value, unit, limits, validator) is also a good reference for the verdicts of mexploit criteria, and its operator prompts for a future `prompt` step on semi-manual benches. A plugin only, so the kernel does not depend on it.
+
 **Robot Framework** (+ SSHLibrary), **Avocado** (Red Hat test framework with remote runners), **pytest + pytest-xdist/fabric**: test *runners* executing scenarios, not schedulers with queues and resource locks. Robot's keyword syntax could express the run phase, but parallel branches with rendez-vous are not its strength. Not retained as kernel. pytest stays where it already is (inside mexploit).
 
 ### Configuration management / remote execution
@@ -98,6 +102,7 @@ Constraints: simple and modular, well-known open-source dependencies, reuse of t
 | LAVA | ✓ | ✓ | ✓ (fixed actions) | ~ | ✓ | ✓ | heavy | **reference for model** |
 | labgrid | ~ (reservations) | ✓ | ✗ | ✓ | ~ | ~ (CLI) | light | **optional backend** |
 | OpenTAP | ~ | ✓ | ~ (XML) | ~ | ✓ | ~ | .NET | no |
+| OpenHTF | ✗ | ✗ (one station) | ~ (Python phases) | ✗ | ~ (teardown) | ~ (operator UI) | lib | **step type plugin** |
 | Ansible (+AWX) | ~/✓ | ✗ | ~ | ✓✓ | ~ | ✓ | medium | **command plugin** |
 | Rundeck / StackStorm | ✓ | ✗/~ | ~ | ✓ | ~ | ✓ | heavy | no |
 | AsyncSSH / Fabric | - | - | - | ✓✓ | ✓ | - | lib | **transport** |
@@ -128,7 +133,7 @@ The hard parts are small and well understood; the rest is plumbing that well-kno
 - **build a thin sequencer kernel in Python**, inside testsuit: same language, same plugin system, same YAML and Jinja2 stack, direct reuse of datapack and exploit_runner;
 - **borrow designs, not servers**: GitLab CI syntax for the pipeline (`needs`, `when`, `timeout`, `after_script`-like `finally`), Jenkins and labgrid semantics for locks and reservations, LAVA's job/device/dispatcher split and health checks, Ansible's inventory format and ready-check vocabulary (`wait_for` port/file/regex);
 - **rely on standard libraries** for each layer (AsyncSSH, SQLite/SQLAlchemy, FastAPI, Pydantic, Jinja2), each replaceable;
-- **keep doors open**: an `ansible` command type for components already managed by playbooks, a `labgrid` transport for boards with power or serial control, and the gitlab-runner Custom executor for CI.
+- **keep doors open**: an `ansible` command type for components already managed by playbooks, a `labgrid` transport for boards with power or serial control, an `openhtf` step type for measurements with instruments, and the gitlab-runner Custom executor for CI.
 
 Fallback if the team prefers adopting a platform rather than owning a kernel: Prefect 3, with each phase compiled to a flow and components mapped to global concurrency limits. It brings the UI and the queue, and costs a server dependency and an API that moves fast.
 
@@ -156,6 +161,7 @@ This section checks again whether a tool now covers the whole, then gives the bu
 | **Jumpstarter** (Red Hat community) | Python hardware-in-the-loop framework: exporters on the hosts wired to the devices, drivers, leases by label selector with pre- and post-lease hooks, a Kubernetes controller for shared labs, plus local and direct modes without Kubernetes | strong on leases (C2) and drivers (C9); no queue of datapacks, no pipeline DSL; the shared mode needs Kubernetes | possible later as a transport plugin, like labgrid |
 | **labgrid** 25.0 / 26.0 | the coordinator is now a standalone gRPC service (25.0); 26.0 (June 2026) fixes reservation locking and supports Python 3.14 | unchanged verdict, and a sounder coordinator | optional backend, as before |
 | **Kestra** | Java workflow orchestrator, Apache-2.0, YAML flows edited in a web UI with git integration; needs a JVM and a database (PostgreSQL) | its YAML-plus-UI editing with git is the Editor mode we want, but no hardware resource model, no stage locks, and a heavy server | reference for the Editor's YAML/form round trip |
+| **OpenHTF** (Google, Apache-2.0, 1.6, Python ≥ 3.10) | hardware test scripts: phases, measurements with validators and units, plugs for instruments and DUTs, one JSON test record per run, an operator UI | one test on one station: no queue, no locks, no remote execution, no multi-machine pipeline; strong where the sequencer is weak, measuring with instruments | a step type plugin (section 4), not the kernel |
 | GitLab CI, Prefect 3, LAVA, Ansible | no change that affects the first study | | as in section 3 |
 
 None of them covers the combination either, so the conclusion of section 5 stands: a thin Python kernel, with the libraries below.
