@@ -5,11 +5,12 @@
 # The sequencer fields (extends, commands, stages, stage, role) are kept in the datapack as
 # written, for the sequencer to use at run time (commands are not rendered by the datapack tool).
 
-id: toytrain_lab_setup
-name: Toy train on the lab (simulated propulsion and sensors)
+id: toytrain_setup
+name: Toy train (simulated propulsion and sensors)
 
 dictionaries:
   - globals.yml
+  - "platforms/{{ testdef.setup_config }}.yml"   # what the platform changes: sim_bench (the lab) or emulated (a dev host)
 
 datarepositories:
   - id: toytrain
@@ -56,11 +57,6 @@ component_types:
           - {source: "{{ toytrain_sw.path }}/acquisition/", target: app/, method: copy}
           - {source: templates/acquisition.yml, target: acquisition.yml}
 
-  network_switch:                             # nothing deployed: only monitored, and locked with the stage
-    extends: auvidea_m82
-    configurations:
-      passive: {inputs: []}
-
   propulsion_sim:
     extends: toytrain_sim
     configurations:
@@ -91,15 +87,16 @@ component_types:
     commands:
       start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m, expect: {exit: [0]}}
 
+# The datapack does not drive the train's switch: on the lab it is locked with its stage all the same.
 configurations:
-  sim_bench:                                  # real calculators, simulated propulsion and sensors
+  sim_bench: &toytrain_components             # the lab: real calculators, simulated propulsion and sensors
     stages:
       train: {type: toytrain}                 # bound to train_1 (the only stage of this type)
     components:
       pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
       telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage: train, role: telemetry}
       acquisition: {name: AU, type: acquisition_app, configuration: standard, stage: train, role: acquisition}
-      switch:      {name: Switch M82, type: network_switch, configuration: passive, stage: train, role: switch}
       propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
       piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
       analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}
+  emulated: *toytrain_components              # a dev host: everything emulated by local processes (README, emulated mode)

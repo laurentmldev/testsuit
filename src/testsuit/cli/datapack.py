@@ -29,6 +29,7 @@ Return 1 if something went wrong, 0 otherwise
     parser.add_argument('file',help="the test definition YAML file (or, with --verify, the datapack zip)")
     parser.add_argument('--nocheck',action='store_true',help="Ignore warnings and consistency checks (git tags etc.) for test definition and setup folders.")
     parser.add_argument('--output-dir','-o',help="where to write the datapack zip (default: key 'datapack.output_dir')")
+    parser.add_argument('--setup-config','-c',help="setup configuration to use instead of the test definition's 'setup_config'")
     parser.add_argument('--verify',action='store_true',help="check the checksums of the given datapack zip")
     args = parser.parse_args()
 
@@ -41,7 +42,7 @@ Return 1 if something went wrong, 0 otherwise
         sys.exit(1 if problems else 0)
 
     try:
-        datapack(expandPath(args.file), args.nocheck, args.output_dir)
+        datapack(expandPath(args.file), args.nocheck, args.output_dir, args.setup_config)
     except DatapackError as e:
         print(Fore.RED+"ERROR: "+str(e)+Style.RESET_ALL)
         sys.exit(1)

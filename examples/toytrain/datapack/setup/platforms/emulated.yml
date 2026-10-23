@@ -1,0 +1,14 @@
+# Platform dictionary of the emulated mode (setup configuration emulated): every component is a process
+# on one dev host. Each one keeps an address of its own, on the loopback interface (Linux routes all of
+# 127.0.0.0/8 there, with no setup and no root), and the multicast traffic stays on the loopback too.
+platform:
+  name: emulated toy train (dev host)
+  emulated: true
+
+net:
+  pilot: 127.0.0.10
+  telemetry: 127.0.0.11
+  acquisition: 127.0.0.12
+  propulsion: 127.0.0.20         # the propulsion simulation
+  lab_server: 127.0.0.30         # the piezo simulation
+  # ports and multicast group: unchanged (globals.yml)

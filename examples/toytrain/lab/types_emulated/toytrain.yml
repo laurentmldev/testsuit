@@ -1,0 +1,43 @@
+# Component types of the emulated toy train (sequencer README, sections 7 and 6.2): the same type names
+# as the lab's type library (lab/types/toytrain.yml), so the datapack setup binds to them unchanged,
+# but every component is a process on the dev host, started and stopped by the sequencer itself.
+#
+# What is simplified compared to the lab:
+# - no systemd service, no sudo, nothing installed on a target: each application runs from the inputs
+#   the datapack deployed (<remote_root>/<component>/input/app/), as the user running the sequencer;
+# - the toy-train applications run on the host as they are (Python); only the hardware they touch is
+#   replaced, through options given by the inventory (tsq_start_args):
+#   - CALC-Pilot's microcontroller: its host stub (--mcu host), so there is nothing to flash;
+#   - AU's GPIO inputs: UDP datagrams from the piezo simulation (--gpio-backend udp://...);
+# - no switch: the loopback interface is the train network.
+
+component_types:
+
+  emulated_app:
+    # a toy-train application run as a local process (abstract: not bound by itself)
+    extends: linux_system
+    commands:
+      start:   {run: "cd {{ component.input_dir }} && exec app/bin/toytrain-{{ component.role }} --config {{ component.role }}.yml {{ component.vars.tsq_start_args | default('') }}",
+                detach: true}
+      stop:    {signal: TERM, timeout: 10s}    # then KILL: the default linux_system kill
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
+      version: {run: "{{ component.input_dir }}/app/bin/toytrain-{{ component.role }} --version"}
+    # state: the linux_system default (running while its process is alive, idle otherwise)
+
+  arduino_unoq:
+    extends: emulated_app
+    commands:
+      install: {run: "{{ component.input_dir }}/app/bin/toytrain-install --mcu host --input {{ component.input_dir }}"}   # checks the firmware image only
+
+  rpi5:
+    extends: emulated_app
+
+  toytrain_sim:
+    # the same simulations as on the lab server, from the same release
+    extends: linux_system
+    commands:
+      stop:    {signal: TERM, timeout: 10s}
+      ready:   {wait_for: {log: {file: "{{ component.output_dir }}/sim.log", regex: "READY"}, timeout: 20s}}
+      version: {run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
+    selftest:
+      - {id: sim_installed, run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}

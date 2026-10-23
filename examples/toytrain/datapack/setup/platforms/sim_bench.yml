@@ -1,0 +1,5 @@
+# Platform dictionary of the lab (setup configuration sim_bench): the train's own network plan
+# (globals.yml) applies as is, since the calculators are the real ones.
+platform:
+  name: toy-train lab
+  emulated: false

@@ -91,6 +91,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-19 | An optional UI can be added on top of the kernel later. It covers posting a datapack; managing and monitoring components, queued datapacks and running datapacks; and accessing the contents of a datapack before, during and after its run. | 13.1 |
 | SQ-29 | The UI has an optional **Editor** mode: edit the lab inventory, with helpers (for example the available component types when creating a component); create a new datapack definition and generate a datapack from it; create and update pipelines. Applying a modification asks the user for git credentials to push it; the sequencer then reloads this latest configuration on demand only. | 13.2 |
 | SQ-30 | One overall YAML file defines the main configuration settings: storage folders (datapacks, runs, results), lab inventory folder, server, queue, self-test and monitoring defaults. | 4.1 |
+| SQ-31 | A live example of the toy-train platform runs on a dev host, with every component emulated on the local host: the same test definitions, no hardware, no root access, no SSH. | 6.2 |
 | SQ-20 | The product can act as a GitLab runner, for a future CI integration. | 13 |
 | SQ-21 | Simple and modular, built on well-known open-source languages and libraries. | 3, 14 |
 | SQ-22 | A single-team lab is enough for a first version: no access control in the kernel. | 13 |
@@ -146,7 +147,7 @@ One process (`tsqd`) runs an asyncio loop. There is no broker and no worker flee
 
 ### 4.1 Main configuration file
 
-One YAML file, `tsq.yml`, holds the main settings of a sequencer instance. It is read from `--config`, else `$TSQ_CONFIG`, else `/etc/testsuit/tsq.yml`. Relative paths are relative to `storage.root`. Every setting has a default, so a minimal file only gives the lab folder.
+One YAML file, `tsq.yml`, holds the main settings of a sequencer instance. It is read from `--config`, else `$TSQ_CONFIG`, else `/etc/testsuit/tsq.yml`. Relative paths are relative to `storage.root` for the `storage` settings, and to the configuration file for the others (`lab.folder`, `server.workspaces`). Every setting has a default, so a minimal file only gives the lab folder.
 
 ```yaml
 # tsq.yml
@@ -229,7 +230,7 @@ The datapack tool already records part of it in `datapack.yml` (git commit, tag 
 
 ```yaml
 # baseline.yml
-datapack: {name: toytrain_max_speed_toytrain_lab_setup_20261022T1012, format: 2, conform: true}
+datapack: {name: toytrain_max_speed_toytrain_setup_20261022T1012, format: 2, conform: true}
 sources:                          # every original input, by git origin
   - {role: testdef, path: datapack/testdef/max_speed/testdef.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
   - {role: setup, path: datapack/setup/toytrain_setup.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
@@ -329,6 +330,23 @@ The inventory and its type library live in the folder `lab.folder` of the main c
 - A **warning** is shown when the folder is not a git work tree, has local changes, or is not on a tag (with `require_tag: true`, the default). It appears at startup, in `tsq lab status`, as a banner in the UI, and in the record of every run activated meanwhile.
 - The warning does not stop the sequencer. The git state is written to the `run` part of each results baseline (section 5.3), so a run on an untagged lab is flagged non-conform when its expected baseline names a lab tag.
 - The inventory is loaded at startup and reloaded only on demand, never on its own: `tsq lab reload` reloads the folder as it is, and `tsq lab reload --pull [<tag | commit>]` first fetches the lab repository and checks out that revision (the latest commit of the branch by default). The Editor's Reload button does the same (section 13.2). A reload is validated first and refused if invalid, leaving the folder on its previous revision. Running datapacks keep the components they are bound to; the new inventory applies to the next activations.
+
+### 6.2 Emulated lab on a dev host
+
+A lab can have an **emulated** twin that runs on one Linux computer, for writing and debugging tests and pipelines, and for demonstrations. It is the same mechanism as a real lab, with three files instead of hardware:
+- **an inventory** with the same stage types and roles, where every component uses the `local` transport, each with its own `remote_root`;
+- **a type library with the same type names** as the lab's, where each type runs its application as a local process (started by the sequencer, stopped by a signal) and replaces the hardware it touches by a stand-in, through host variables (`tsq_start_args`). The datapack component types `extends` these names, so they bind unchanged;
+- **a main configuration** (`tsq.dev.yml`) pointing to that inventory, with local storage and the server listening on `127.0.0.1` only.
+
+On the datapack side, only what the platform changes (addresses, for example) goes in a dictionary of its own, chosen by the setup configuration: `datapack <testdef> --setup-config emulated` builds the datapack of the same test definition for the emulated platform. Then `tsq run <datapack.zip> --local --config tsq.dev.yml` runs it in the foreground, or `tsqd --config tsq.dev.yml` serves the queue and the UI locally.
+
+The toy train of [examples/toytrain](../../../examples/toytrain/README.md#emulated-mode-on-a-dev-host) has one:
+- every calculator is a process with an address of its own on the loopback interface (`127.0.0.10` and up), which carries the train's multicast traffic with no setup;
+- the CALC-Pilot microcontroller becomes its host stub;
+- the AU GPIO inputs become UDP datagrams from the piezo simulation;
+- the switch disappears.
+
+A run on an emulated lab is flagged non-conform against the campaign's expected baseline, whose lab tag it does not match (section 5.3).
 
 ## 7. Component types and state monitoring
 
@@ -833,7 +851,7 @@ src/testsuit/datatools/datapack/   # + generators (5.1) and component needs (5.2
 Tests:
 - engine, scheduler and monitor against a fake transport (pure asyncio, no network);
 - the ssh transport against a local `sshd` container in CI;
-- an end-to-end example in `examples/toytrain` with its stage and its simulations as ad hoc components on `localhost`.
+- an end-to-end run of `examples/toytrain` in emulated mode (section 6.2), on the CI runner itself.
 
 ## 16. Implementation plan
 
@@ -842,7 +860,7 @@ Tests:
    - `tsq.yml` and the lab folder's git state;
    - Pydantic models for the lab inventory, component types, resources needed, pipeline and sub-pipelines;
    - `tsq validate` printing the binding candidates and every command fully expanded (the main debugging tool for YAML authors).
-3. **Local runner**: `tsq run --local` with the engine, the `linux_system` type and the `local` and `ssh` transports, one run at a time, file locks per component. Already usable on one stage.
+3. **Local runner**: `tsq run --local` with the engine, the `linux_system` type and the `local` and `ssh` transports, one run at a time, file locks per component. Already usable on one stage, and enough to run the emulated toy train (section 6.2), together with a host build of the toy-train applications and simulations.
 4. **Daemon**: SQLite store, priority queue, binding, backfilling, atomic locking, REST API, CLI as a client.
 5. **State monitoring and self-test**: status probes, expected vs probed states, `wait_for: state`, availability, self-test before each run.
 6. **Robust abort**: systemd-run/setsid process control, kill, restart recovery.

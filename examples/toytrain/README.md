@@ -64,9 +64,12 @@ src/toytrain/
 lab/                                   owned by the lab operators
   toytrain_lab.yml                     inventory: stage train_1, ad hoc components on lab-srv
   types/toytrain.yml                   lab types: arduino_unoq, rpi5, auvidea_m82, toytrain_sim
+  toytrain_emulated.yml                inventory of the emulated mode: everything on the dev host
+  types_emulated/toytrain.yml          the same type names, as local processes
 datapack/                              owned by the test authors
   setup/toytrain_setup.yml             test component types (extending the lab types), inputs, resources
   setup/globals.yml                    train characteristics, network plan, versions
+  setup/platforms/<configuration>.yml  what the platform changes: sim_bench (the lab), emulated (dev host)
   setup/templates/                     configuration of each component, rendered by the datapack tool
   testdef/<test>/testdef.yml           test definition and pipeline
   testdef/<test>/scenario.yml          scenario keys
@@ -74,6 +77,7 @@ datapack/                              owned by the test authors
   release_store/                       stand-in for the release server (toytrain-release importer)
 baseline_expected.yml                  expected baseline of the campaign
 tsq.yml                                main configuration of the lab's sequencer
+tsq.dev.yml                            main configuration of a sequencer on a dev host (emulated mode)
 sample/
   data/<test>/                         recordings of a nominal run: telemetry.csv, propulsion.propj
   exploit_<test>.yml                   exploit_runner session: the test's criteria on its recording
@@ -169,7 +173,7 @@ datapack datapack/testdef/front_contact/testdef.yml        # build the zip (inpu
 tsq submit .work/datapacks/toytrain_front_contact_*.zip --baseline baseline_expected.yml --wait --follow
 ```
 
-Before anything else, the sequencer self-tests every bound component: SSH, target folders, disk space and clock for the Linux systems, plus the microcontroller link of CALC-Pilot, the simulation's address and GPIO adapter on lab-srv, and a ping of the switch. A failure puts the datapack back in the queue.
+Before anything else, the sequencer self-tests every component it locks: SSH, target folders, disk space and clock for the Linux systems, plus the microcontroller link of CALC-Pilot, the simulation's address and GPIO adapter on lab-srv, and a ping of the switch. A failure puts the datapack back in the queue.
 
 The pipeline then has two phases, the first one built from two sub-pipelines.
 
@@ -183,6 +187,28 @@ The pipeline then has two phases, the first one built from two sub-pipelines.
 
 Everything collected joins the results datapack, next to the inputs. Its baseline carries the git tags of the software and simulation, the lab inventory version, and the software version read on each calculator. A mismatch with `baseline_expected.yml` flags the run as non-conform.
 
+## Emulated mode on a dev host
+
+The same tests can run with the whole platform emulated on one Linux computer, with no hardware, no root access and no SSH. This is meant for writing and debugging tests and pipelines, and for a demonstration of the sequencer. It will be runnable once the sequencer is.
+
+```
+datapack datapack/testdef/front_contact/testdef.yml --nocheck --setup-config emulated
+tsq run .work/datapacks/toytrain_front_contact_toytrain_setup_*.zip --local --config tsq.dev.yml
+```
+
+What changes, and what does not:
+- **The datapack** is built from the same test definitions and setup. Only the setup configuration differs: `emulated` adds the dictionary `platforms/emulated.yml`, which moves every address to the loopback interface (`127.0.0.10` to `127.0.0.30`). Linux routes all of `127.0.0.0/8` to it, multicast included, so this needs no network setup. Ports and the multicast group are unchanged.
+- **The lab** is `lab/toytrain_emulated.yml`. Its stage `train_emu` has the type `toytrain` and the roles pilot, telemetry and acquisition, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
+- **The component types** in `lab/types_emulated/` keep the lab's type names. Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
+- **The hardware** is simplified away:
+  - the CALC-Pilot microcontroller is replaced by its host stub (`--mcu host`), so flashing only checks the firmware image;
+  - the AU GPIO inputs are replaced by UDP datagrams from the piezo simulation, in place of the USB GPIO adapter;
+  - there is no switch, since the loopback interface is the train network;
+  - the propulsion and piezo simulations are the same as on the lab.
+- **Exploitation** is the same, with `exploit_runner` on the dev host.
+
+A run in emulated mode is flagged non-conform against `baseline_expected.yml`, since its lab is not a tagged lab repository. Its results can therefore never be taken for a lab run.
+
 ## Assumptions
 
 Interfaces assumed for this example, all belonging to the toy-train software:
@@ -191,7 +217,10 @@ Interfaces assumed for this example, all belonging to the toy-train software:
 - messages are UDP. Commands go to the propulsion controller on port 5000. Speed feedback (20 Hz), contact events and pilot state are multicast on 239.42.0.1, ports 5001 to 5003;
 - the telemetry file is a CSV with a `#TOYTRAIN-TM` first line and columns `Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back` (`pilot_cmd`: 0 keep, 1 up, 2 down, 3 stop; `pilot_state`: 0 idle, 1 running, 2 stopped);
 - the propulsion controller and its simulation record what they receive and send as `*.propj` JSON files;
-- the switch is unmanaged: it is only monitored (ping), and locked with its stage.
+- the switch is unmanaged: it is only monitored (ping), and locked with its stage. The datapack does not drive it, so it has no component in the setup;
+- each application sends and joins its multicast traffic on the interface of its `local_address`;
+- the applications are Python, so the same release runs on the calculators and on a dev host; each one is started as `app/bin/toytrain-<role> --config <role>.yml`;
+- in emulated mode, the pilot accepts `--mcu host` (microcontroller host stub), the AU accepts `--gpio-backend udp://<address>:<port>` (one datagram per GPIO edge), and the piezo simulation's `--gpio` accepts the same URL in place of the adapter device.
 
 This sample also uses a few details that the sequencer README leaves open:
 - a probe state can be matched on an exit code (`exit: 0`);

@@ -257,8 +257,9 @@ def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
 
 class _Builder:
 
-    def __init__(self, testdef_file: Path, nocheck: bool) -> None:
+    def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None) -> None:
         self.testdef_file = testdef_file
+        self.setup_config = setup_config
         self.testdef_dir = testdef_file.parent
         self.nocheck = nocheck
         self.now = datetime.now()
@@ -316,6 +317,8 @@ class _Builder:
         keys = self.keys(with_setup=False, with_datasets=False)
         pipeline = raw.pop("pipeline", None)
         testdef = _validate(Testdef, {**keys.render_data(raw), "pipeline": pipeline}, f"test definition '{self.testdef_file}'")
+        if self.setup_config:
+            testdef.setup_config = self.setup_config
         self.setup_file = _expand(testdef.setup_file, self.testdef_dir)
         self.builtin["testdef"].update({"id": testdef.id, "name": testdef.name,
                                         "setup_file": self.setup_file.as_posix(), "setup_config": testdef.setup_config})
@@ -501,7 +504,8 @@ class _Builder:
         return zip_path
 
 
-def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None) -> Path:
+def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None,
+             setup_config: str | None = None) -> Path:
     """Generate the datapack of a test definition file.
 
     The datapack contents are left in '.current_datapack' next to the test definition file.
@@ -509,12 +513,13 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
     :param nocheck: accept test definition and setup folders that are not clean git tags, and datasets
         whose version cannot be confirmed (the datapack is then named '..._DRAFT')
     :param output_dir: where to write the zip (default: key 'datapack.output_dir')
+    :param setup_config: setup configuration to use instead of the test definition's 'setup_config'
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """
     # importers and processors declared by external libraries
     load_plugins()
     try:
-        return _Builder(Path(testdef_file).resolve(), nocheck).build(output_dir)
+        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config).build(output_dir)
     except TemplateError as e:
         raise DatapackError(str(e)) from e

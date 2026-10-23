@@ -110,6 +110,15 @@ def test_output_dir_from_dictionary(etc_copy, no_git):
     assert zip_path.parent == (etc_copy / "out").resolve()
 
 
+def test_setup_config_override(tmp_path, no_git):
+    """the setup configuration given to the tool replaces the test definition's one"""
+    datapack(TESTDEF, nocheck=True, output_dir=tmp_path, setup_config="other")
+    manifest = yaml.safe_load((TESTDEF.parent / ".current_datapack" / "datapack.yml").read_text())
+    assert manifest["setup"]["configuration"] == "other" and not manifest["components"]
+    with pytest.raises(DatapackError, match="no configuration 'unknown'"):
+        datapack(TESTDEF, nocheck=True, output_dir=tmp_path, setup_config="unknown")
+
+
 def _edit(path, old, new):
     text = path.read_text()
     assert old in text
