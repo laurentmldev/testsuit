@@ -51,6 +51,11 @@ class BoundComponent:
     resolved: ResolvedType
     transport: Transport
     root: str = ""                                # remote root, '~' resolved
+    work: str = ""                                # where input/ and output/ live; the root unless shared
+
+    @property
+    def base(self) -> str:
+        return self.work or self.root
 
     @property
     def id(self) -> str:
@@ -58,11 +63,11 @@ class BoundComponent:
 
     @property
     def input_dir(self) -> str:
-        return f"{self.root}/{self.logical.id}/input"
+        return f"{self.base}/{self.logical.id}/input"
 
     @property
     def output_dir(self) -> str:
-        return f"{self.root}/{self.logical.id}/output"
+        return f"{self.base}/{self.logical.id}/output"
 
     def pid_dir(self, run_id: str) -> str:
         """Pid files of the processes a run started (by concrete id: components may share a remote root)."""

@@ -405,6 +405,7 @@ all:
   - `exclusive` (default): one datapack at a time;
   - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `train_1` and `train_2` can run two datapacks at the same time although they share `lab_switch`;
   - `none`: never locked, for the sequencer component.
+  - A `shared` or `none` component gives each run its own folders, `<remote_root>/.tsq/<run>/<component>/{input,output}`, so that two runs deploying to it at once do not clobber each other's files; an `exclusive` one uses `<remote_root>/<component>/{input,output}`.
 - Components are taken out of scheduling by state, not by editing the file: a `broken` state (section 7.4), or `tsq maintenance <component>`.
 
 ### 6.1 Where the inventory lives
