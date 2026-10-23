@@ -11,7 +11,7 @@ Several datapacks run at the same time when they use different stages.
 
 One sequencer manages one lab: the whole set of components and the stages they belong to, however complex. Another lab, for example on another site, gets its own sequencer instance.
 
-Status: architecture proposal, nothing is implemented yet. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
+Status: the kernel is implemented (everything but the UI and its Editor mode, section 13.1 and 13.2): `tsqd`, the REST API, the `tsq` command line, the datapack refinements and the GitLab executor scripts. [Implementation status](#18-implementation-status) lists where the code differs from this document and what is left. The tools that were considered, and why the design reuses their ideas and libraries rather than one of them as a whole, are in [benchmark.md](benchmark.md).
 
 A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
 
@@ -33,6 +33,7 @@ Contents:
 15. [Package layout](#15-package-layout)
 16. [Implementation plan](#16-implementation-plan)
 17. [Open points](#17-open-points)
+18. [Implementation status](#18-implementation-status)
 
 ## 1. Functional requirements
 
@@ -138,7 +139,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
    │       types)                 │                                                       │
    │                         State monitor (polls each component's status command)        │
    └─────────────────────────────────────────────────────────────────────────────────────┘
-          │ ssh / scp / systemd-run / kill / status ...               │ local
+          │ ssh / sftp / setsid / kill / status ...                   │ local
           ▼                                                           ▼
    stage and ad hoc components (computers, switches, clocks)  sequencer component
 ```
@@ -199,7 +200,7 @@ component_types:
             options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
 ```
 
-A generator is a Python callable registered like processors (`register_generator(name, fn)`), called as `fn(source, target, keys, options, component)`. When the name is not registered, it is run as a script relative to the setup folder, with the source, the target and a JSON file of the resolved keys. The keys a generator reads are recorded in `datapack.yml` like those of templates.
+A generator is a Python callable registered like processors (`testsuit.datatools.datapack.generators.register_generator(name, fn)`), called as `fn(source, target, keys, options, component)`. When the name is not registered, it is run as a script relative to the setup folder, with the source, the target and a JSON file of the resolved keys. The keys a generator reads are recorded in `datapack.yml` like those of templates.
 
 ### 5.2 Components needing other components' inputs
 
@@ -684,7 +685,7 @@ Everything retrieved from the components becomes part of the datapack contents. 
 - `logs/`: the log of every step;
 - `selftest.yml`, `run.yml` (states, verdict, step statuses) and the completed `baseline.yml`.
 
-The BagIt manifests are recomputed over all of it, so `datapack --verify` checks the outputs too. It is written to `storage.results` as `<datapack>_results.zip`, with the `_NONCONFORM` suffix when flagged (section 5.3).
+The BagIt manifests are recomputed over all of it, so `datapack --verify` checks the outputs too. It is written to `storage.results` as `<run>/<datapack>_results.zip`, with the `_NONCONFORM` suffix when flagged (section 5.3); the run folder keeps the same datapack submitted several times apart.
 
 Large raw data, such as pcap captures of a long run, is handled without loading it in memory:
 - **Transfer**: `collect` streams files over SFTP, computes their SHA-256 on the fly, and resumes an interrupted transfer. Each component type can restrict what it collects (`collect: {include, exclude, max_size}`), for example to leave scratch files on the target.
@@ -698,10 +699,10 @@ During the run, the outputs are already in the run folder as they are collected,
 
 - **`tsq cancel <run>`**: a queued run leaves the queue. On a running one, pending steps are cancelled and running steps get their `stop` command; after a grace period, the kill below follows.
 - **`tsq kill <run>`**: no grace. The `kill` command of every running step, then the `finally` steps (at least `collect`, to keep the logs), then the locks are released.
-- **Remote processes** on `linux_system` components start as transient systemd units:
-  - `systemd-run --user --unit=tsq-<run>-<step>-<component> --collect ...`;
-  - `systemctl --user kill --signal=KILL tsq-<run>-*` kills whole process trees, even when the ssh session is gone;
-  - fallback without systemd: `setsid` + pid file under `<remote_root>/.tsq/<run>/` and `kill -9 -<pgid>`.
+- **Remote processes** on `linux_system` components start in a process group of their own, recorded in a pid file:
+  - `setsid -w sh -c ...` (ssh) or a new session (local), the group id written to `<remote_root>/.tsq/<run>/<component>/<step>.pid`;
+  - `kill -KILL -<pgid>` for each pid file kills whole process trees, even when the ssh session is gone, and a group is alive while `ps` lists a member that is not a zombie;
+  - it needs nothing on the target but a POSIX shell, `setsid` and `ps`; a type that prefers systemd units overrides `start` and `kill`.
 - **Other component types** override `kill`: stop the propulsion controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
 - **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <stage | component>` is the audited manual escape hatch.
 
@@ -814,54 +815,57 @@ Checked against every requirement on 2026-10-23: [benchmark](benchmark.md#6-last
 | Lab inventory | Ansible YAML inventory format, own loader | standard topology format, Ansible optional | own schema |
 | Concurrency | asyncio | DAG execution, state probes, timeouts, cancellation | anyio |
 | SSH, SCP, SFTP | AsyncSSH | async, pure Python, signals, keepalive, `~/.ssh` keys and agent | Fabric / Paramiko |
-| Remote process control | `systemd-run --user`, `setsid` fallback | kill whole trees, standard Linux | tmux |
-| State store | SQLite via SQLAlchemy 2 | queue, locks, states, history; zero administration; Postgres later if needed | JSON files |
+| Remote process control | `setsid` + pid file per step (systemd units through a type's own commands) | kill whole trees, nothing to install on the targets | `systemd-run --user`, tmux |
+| State store | SQLite (`sqlite3`, standard library), WAL mode, locks taken in one `BEGIN IMMEDIATE` transaction | queue, locks, states, history; zero administration; shared by `tsqd` and `tsq run --local` | SQLAlchemy, for Postgres later |
 | API | FastAPI + uvicorn, SSE | REST + OpenAPI for UI and CI | Flask |
-| CLI | argparse (like the other testsuit tools), rich for tables and live views | consistent with existing CLIs | Typer |
+| CLI | argparse (like the other testsuit tools), plain text tables, requests | consistent with existing CLIs, no new dependency | rich, Typer |
 | CI integration | gitlab-runner Custom executor | official runner, no protocol to implement | - |
 | DAG ordering | `graphlib.TopologicalSorter` (standard library) | cycles detected, ready steps in order | networkx |
 | Git (lab folder, Editor) | GitPython (already a dependency) | git state, scratch clones, commit and push with per-push credentials (`GIT_ASKPASS`) | pygit2, dulwich |
 | YAML written back | ruamel.yaml (already a dependency) | keeps comments and key order when the Editor saves a file | - |
-| Large results | `stream-zip` (zip64, streaming), BagIt `fetch.txt`, Starlette range requests | results zips beyond 4 GB without loading them; downloads that resume | zipfile with `force_zip64` |
+| Large results | `zipfile` (zip64, files streamed from disk), BagIt `fetch.txt`, Starlette range requests | results zips beyond 4 GB without loading them; downloads that resume | `stream-zip` |
 | UI and Editor (separate build) | React, React Flow with ELK.js, Monaco with monaco-yaml, react-jsonschema-form | pipeline graph, YAML with schema validation, forms from the Pydantic JSON Schemas, diff view | htmx with server templates, for a lighter monitoring-only UI |
 | Authentication | a reverse proxy (for example oauth2-proxy) | no access control in the kernel (SQ-22) | - |
 | Optional backends | ansible-runner, labgrid, Jumpstarter | as plugins only | - |
 
-New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `sqlalchemy`, `fastapi`, `uvicorn`, `sse-starlette`, `stream-zip`, `rich`), so datapack and exploit users are not affected. Jinja2 and Pydantic are already dependencies.
+New dependencies go to an optional extra, `testsuit[sequencer]` (`asyncssh`, `fastapi`, `uvicorn`, `python-multipart`), so datapack and exploit users are not affected. Jinja2, Pydantic, PyYAML and requests are already dependencies; Server-Sent Events are a plain streaming response.
 
 ## 15. Package layout
 
 ```
 src/testsuit/sequencer/
   README.md, benchmark.md
-  model/          # pydantic: lab inventory, component types, resources needed, pipeline, run state
-  inventory.py    # Ansible-format loader, variable precedence, stages, ad hoc components, roles
-  types.py        # component type library, 'extends' chains, command resolution
-  config.py       # tsq.yml: settings, defaults, sources
-  lab.py          # lab folder git state, inventory reload
-  monitor.py      # state probes, expected vs probed state, availability
-  selftest.py     # platform self-test before each run
-  intake.py       # verify zip, unzip, load embedded definition and context
-  store.py        # SQLAlchemy tables: runs, stages, components, locks, states, steps, events
-  scheduler.py    # priority queue, binding, backfilling, atomic locking, release
-  engine.py       # phases, sub-pipelines, step DAG, timeouts, cancel and kill, finally
-  results.py      # streamed collect, results datapack, large files, fetch.txt
-  steps/          # run, push/pull, delay, wait_for
-  transports/     # local, ssh (AsyncSSH), http, remote process control
-  api.py          # FastAPI app
-  ui/             # web UI, with its Editor mode (separate build)
-  daemon.py       # tsqd entry point
-  gitlab/         # Custom executor scripts (config, prepare, run, cleanup)
+  util.py             # durations, sizes, Jinja2 rendering of commands (StrictUndefined, native values)
+  config.py           # tsq.yml: settings, defaults, sources
+  inventory.py        # Ansible-format loader, variable precedence, stages, ad hoc components, roles
+  component_types.py  # component type library, 'extends' chains, command resolution (7.3)
+  registry.py         # plugin registrations: transports, component types, state probes, step types, ready checks
+  lab.py              # lab folder git state, inventory reload, pull with rollback
+  model.py            # pydantic: pipeline, sub-pipelines, phases, steps; resources needed; flattening, validation
+  intake.py           # verify zip, unzip, load the embedded definition and context, check against the lab
+  store.py            # SQLite: runs, locks, resources (state, maintenance, hold), usage, events
+  scheduler.py        # binding, backfilling, aging, queue order
+  monitor.py          # state probes, expected vs probed state, platform self-test (7.4, 7.5)
+  engine.py           # steps (run, do, delay, wait_for, push, pull, plugins), step DAG, retries, finally
+  sequencer.py        # intake, scheduling loop, run lifecycle, per-phase locking, abort, restart recovery
+  results.py          # results datapack, large files, fetch.txt
+  transports/         # local, ssh (AsyncSSH, SFTP), process groups and pid files
+  api.py              # FastAPI app
+  daemon.py           # tsqd entry point
+  gitlab/             # Custom executor scripts (config, prepare, run, cleanup)
 src/testsuit/cli/tsq.py
-src/testsuit/datatools/datapack/   # + generators (5.1) and component needs (5.2)
+src/testsuit/datatools/datapack/   # + generators.py (5.1), component needs (5.2), baseline.py (5.3)
 ```
 
-Tests:
-- engine, scheduler and monitor against a fake transport (pure asyncio, no network);
-- the ssh transport against a local `sshd` container in CI;
-- an end-to-end run of `examples/toytrain` in emulated mode (section 6.2), on the CI runner itself.
+Tests (`tests/sequencer_t.py`):
+- end-to-end runs on a bench of local processes: verdicts, queue and parallel stages, backfilling, cancel, kill, self-test failure and requeue, maintenance, restart recovery, shared locks between `tsqd` and `tsq run --local`;
+- `tsqd` on a free port, driven by `tsq` (`submit --follow`, files with range requests, stages, self-test);
+- the ssh transport against an in-process AsyncSSH server (commands, SFTP, killing a process tree);
+- still to do: an end-to-end run of `examples/toytrain` in emulated mode (section 6.2), once host builds of the toy-train applications exist (the release store only holds placeholders).
 
 ## 16. Implementation plan
+
+Steps 1 to 9 are done (section 18); the UI is next.
 
 1. **Datapack refinements**: `method: generate` with registered generators, component `needs`, and the baseline with its check against an expected baseline. Small, independent, testable on their own.
 2. **Models and validation**:
@@ -887,3 +891,38 @@ Defaults are proposed for each; none blocks the start.
 4. **Recovery of broken components.** Default: a component becomes available again as soon as its probe reports a healthy state; `tsq maintenance` keeps it out until `tsq resume`.
 5. **Large outputs.** Default: `large_files.mode: zip`, one self-contained results zip; `external` is opt-in for labs whose captures make archives impractical.
 6. **Self-test failure.** Default: the run goes back to the queue (up to `max_attempts`). The alternative, ending the run in `error` at once, suits labs with a single stage of each type, where requeueing only delays the failure.
+
+## 18. Implementation status
+
+Where the code differs from this document, and why:
+
+| Topic | In the code | Why |
+|---|---|---|
+| Local runs | `tsq run --local` uses the same SQLite store as `tsqd` (not file locks), and only runs its own datapack | one arbiter for the locks, so a dev run and the daemon never take the same stage |
+| Remote processes | `setsid` + pid files, no `systemd-run` (section 11) | works on any Linux target, including the emulated toy train; a type can still use systemd through its own commands |
+| Store | `sqlite3` from the standard library, no SQLAlchemy | the schema is five tables; one less dependency |
+| Results | `storage.results/<run>/<datapack>_results.zip` | the same datapack can be submitted several times |
+| Pid files | `<remote_root>/.tsq/<run>/<concrete component>/` | components sharing a remote root (emulated mode) keep their states apart |
+| Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: sequencer`) |
+| `finally` steps without `needs` | run in the order written | a `kill` before a `collect` is the usual intent |
+| Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
+| Generator scripts (5.1) | get every resolved key in their JSON file, so no key is recorded for them in `datapack.yml` | only a registered generator's reads can be tracked |
+
+Getting started, on the emulated toy train (section 6.2):
+
+```
+pip install -e ".[sequencer]"
+cd examples/toytrain
+datapack datapack/testdef/front_contact/testdef.yml --setup-config emulated --nocheck -o out/
+tsq --config tsq.dev.yml validate out/*.zip          # binding and every command, expanded
+tsqd --config tsq.dev.yml &                           # REST API on 127.0.0.1:8640 (OpenAPI at /docs)
+tsq submit out/*.zip --follow                         # or, without a daemon: tsq --config tsq.dev.yml run out/*.zip --local
+```
+
+The release store of the example only holds placeholders of the toy-train applications, so until host builds of them exist, such a run deploys every input and then ends in `error` at the first `start`.
+
+Not done yet:
+- the UI and its Editor mode (sections 13.1 and 13.2);
+- `collect` resuming an interrupted transfer, checksums computed during the transfer, and `collect: {max_size}` (`include` and `exclude` work);
+- the `http` transport;
+- the end-to-end emulated toy-train run in CI (section 15).

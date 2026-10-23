@@ -148,3 +148,68 @@ def test_cli_verify(tmp_path, no_git, monkeypatch, capsys):
     with pytest.raises(SystemExit) as exit_info:
         cli.main()
     assert exit_info.value.code == 0 and "intact" in capsys.readouterr().out
+
+
+def test_generate_and_needs(tmp_path, no_git):
+    """method: generate (registered function or script) and components reading the inputs they need."""
+    from testsuit.datatools.datapack.generators import register_generator, unregister_generator
+
+    def compile_profile(source, target, keys, options, component):
+        steps = yaml.safe_load(source.read_text())["steps"]
+        target.write_text(yaml.safe_dump({"table": [s * options["scale"] for s in steps],
+                                          "speed": keys["train"]["speed"], "for": component["id"]}))
+    register_generator("profile-compiler", compile_profile)
+    root = tmp_path / "dp"
+    (root / "setup" / "files").mkdir(parents=True)
+    (root / "testdef").mkdir()
+    (root / "setup" / "files" / "profile.yml").write_text("steps: [1, 2, 3]\n")
+    (root / "setup" / "files" / "peer.yml").write_text(
+        "table: {{ (read_input('pilot/profile.yml') | from_yaml).table }}\npilot: {{ components.pilot.input_dir }}\n")
+    (root / "setup" / "gen.sh").write_text(
+        'python3 -c "import json,sys; k=json.load(open(sys.argv[3])); '
+        'open(sys.argv[2],\'w\').write(str(k[\'train\'][\'speed\'] * k[\'options\'][\'n\']))" "$@"\n')
+    (root / "setup" / "globals.yml").write_text("train: {speed: 2}\n")
+    setup = {"id": "s", "dictionaries": ["globals.yml"], "component_types": {
+        "pilot_t": {"configurations": {"std": {"inputs": [
+            {"source": "files/profile.yml", "target": "profile.yml", "method": "generate",
+             "generator": "profile-compiler", "options": {"scale": "{{ train.speed }}"}},
+            {"source": "files/profile.yml", "target": "scaled.txt", "method": "generate", "generator": "gen.sh",
+             "options": {"n": 5}}]}}},
+        "tm_t": {"configurations": {"std": {"inputs": [{"source": "files/peer.yml", "target": "peer.yml"}]}}}},
+        "configurations": {"c": {"components": {
+            "telemetry": {"type": "tm_t", "configuration": "std", "needs": ["pilot"],
+                          "commands": {"start": {"run": "{{ component.input_dir }}/go"}}},
+            "pilot": {"type": "pilot_t", "configuration": "std"}}}}}
+    (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
+    (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
+                                                            "setup_config": "c"}))
+    try:
+        datapack(root / "testdef" / "t.yml", nocheck=True, output_dir=tmp_path / "out")
+    finally:
+        unregister_generator("profile-compiler")
+    work = root / "testdef" / ".current_datapack" / "data"
+    assert yaml.safe_load((work / "pilot" / "input" / "profile.yml").read_text()) == \
+        {"table": [2, 4, 6], "speed": 2, "for": "pilot"}
+    assert (work / "pilot" / "input" / "scaled.txt").read_text() == "10"
+    peer = yaml.safe_load((work / "telemetry" / "input" / "peer.yml").read_text())
+    assert peer["table"] == [2, 4, 6] and peer["pilot"].endswith("data/pilot/input")
+    manifest = yaml.safe_load((root / "testdef" / ".current_datapack" / "datapack.yml").read_text())
+    assert list(manifest["components"]) == ["telemetry", "pilot"]               # as written, generated in needs order
+    assert manifest["components"]["pilot"]["inputs"][0]["keys"]["profile.yml"] == \
+        {"train.speed": str(root / "setup" / "globals.yml")}
+    assert manifest["components"]["telemetry"]["needs"] == ["pilot"]
+
+
+def test_needs_cycle(tmp_path, no_git):
+    root = tmp_path / "dp"
+    (root / "setup").mkdir(parents=True)
+    (root / "testdef").mkdir()
+    setup = {"id": "s", "component_types": {"t": {"configurations": {"std": {"inputs": []}}}},
+             "configurations": {"c": {"components": {
+                 "a": {"type": "t", "configuration": "std", "needs": ["b"]},
+                 "b": {"type": "t", "configuration": "std", "needs": ["a"]}}}}}
+    (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
+    (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
+                                                            "setup_config": "c"}))
+    with pytest.raises(DatapackError, match="components needing each other"):
+        datapack(root / "testdef" / "t.yml", nocheck=True, output_dir=tmp_path / "out")
