@@ -30,6 +30,8 @@ Usage::
 """
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import re
 import shutil
@@ -71,12 +73,16 @@ class _Environment(jinja2.Environment):
 
 
 def _environment(search_path: Iterable[Path] = ()) -> _Environment:
-    return _Environment(
+    env = _Environment(
         loader=jinja2.FileSystemLoader([str(p) for p in search_path]),
         undefined=jinja2.StrictUndefined,
         keep_trailing_newline=True,
         autoescape=False,
     )
+    # structured data read from another component's generated input: read_input('pilot/pilot.yml') | from_yaml
+    env.filters["from_yaml"] = yaml.safe_load
+    env.filters["from_json"] = json.loads
+    return env
 
 
 def load_yaml_mapping(path: str | os.PathLike) -> dict:
@@ -267,6 +273,18 @@ class Keys:
             raise
         except jinja2.TemplateError as e:
             raise TemplateError(f"{where}: {e}") from e
+
+    @contextlib.contextmanager
+    def tracking(self) -> Iterator[dict[str, str]]:
+        """Record the keys read through ``root`` within the block (dotted name -> origin)."""
+        resolver = self._get_resolver()
+        resolver.used = set()
+        used: dict[str, str] = {}
+        try:
+            yield used
+        finally:
+            read, resolver.used = resolver.used, None
+            used.update({key: self.origins.get(key, "") for key in sorted(read) if key in self.origins})
 
     def render_string(self, text: str, extra: Mapping | None = None, where: str = "string") -> Any:
         """Render text; a text made of one expression gives the native value of that expression."""

@@ -39,6 +39,11 @@ Setup::
               - source: "{{ toytrain_sw.path }}/pilot/"
                 target: app/
                 method: copy
+              - source: templates/profile.yml             # a registered generator, or a script of the setup folder
+                target: profile.bin
+                method: generate
+                generator: toytrain-profile-compiler
+                options: {step_mps: 0.05}
         commands: ...                     # for the test sequencer, not rendered
     configurations:
       sim_bench:
@@ -46,12 +51,16 @@ Setup::
           train: {type: toytrain}
         components:
           pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
+          telemetry:
+            type: telemetry_app
+            configuration: standard
+            needs: [pilot]                # generated after pilot: read_input('pilot/pilot.yml'), components.pilot.input_dir
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Model(BaseModel):
@@ -96,9 +105,18 @@ class InputFile(_Model):
     source: str
     # file (or folder) name in the component 'input' folder
     target: str
-    method: Literal["template", "copy"] = "template"
+    method: Literal["template", "copy", "generate"] = "template"
     optional: bool = False
     postprocess: list[str] = Field(default_factory=list)
+    # method generate: registered generator, or script relative to the setup folder, and its options
+    generator: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _generator_given(self):
+        if self.method == "generate" and not self.generator:
+            raise ValueError(f"input '{self.source}': method 'generate' needs a 'generator'")
+        return self
 
 
 class ComponentConfiguration(_Model):
@@ -116,9 +134,12 @@ class Component(_Model):
     name: str = ""
     type: str
     configuration: str
-    # for the test sequencer: logical stage and role it is bound by
+    # other components whose generated inputs this one reads (generated first)
+    needs: list[str] = Field(default_factory=list)
+    # for the test sequencer: logical stage and role it is bound by, command overrides (not rendered)
     stage: str = ""
     role: str = ""
+    commands: dict[str, Any] = Field(default_factory=dict)
 
 
 class SetupConfiguration(_Model):

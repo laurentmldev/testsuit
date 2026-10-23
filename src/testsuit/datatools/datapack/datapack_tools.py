@@ -17,6 +17,8 @@ Steps, from a test definition file (see model for the file formats, templating f
          datapack.yml                what the datapack was built from: ids, git state, datasets,
                                      components and the keys used by each generated file
          context.yml                 every key, resolved: the datapack needs no dictionary to be used
+         baseline.yml                where the contents come from: sources (git), datasets, tools,
+                                     and each generated file with its checksum (conform or not)
          definition/                 test definition, setup and dictionaries, as written
          data/<component>/input/     generated files
          data/<component>/output/    empty, for the test results
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import getpass
 import glob
+import graphlib
 import hashlib
 import os
 import shutil
@@ -50,6 +53,8 @@ import yaml
 from colorama import Fore, Style
 from pydantic import ValidationError
 
+from testsuit.datatools.datapack.baseline import check_baseline, tool_versions
+from testsuit.datatools.datapack.generators import GeneratorError, run_generator
 from testsuit.datatools.datapack.importers import create_data_importer
 from testsuit.datatools.datapack.model import DataRepository, Setup, Testdef
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
@@ -57,7 +62,7 @@ from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yam
 from testsuit.plugins import load_plugins
 
 WORK_FOLDER = ".current_datapack"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 class DatapackError(Exception):
@@ -98,7 +103,11 @@ def git_state(folder: Path) -> dict | None:
         tag = None
     rel = os.path.relpath(folder, repo.working_tree_dir)
     dirty = bool(repo.git.status("--porcelain", "--", rel))
-    return {"commit": commit, "tag": tag, "clean": not dirty}
+    try:
+        remote = repo.remotes.origin.url if "origin" in [r.name for r in repo.remotes] else None
+    except Exception:
+        remote = None
+    return {"commit": commit, "tag": tag, "clean": not dirty, "repo": remote, "root": repo.working_tree_dir}
 
 
 def normalize_dataset_path(version: str) -> str:
@@ -123,9 +132,11 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
         raise DatapackError(f"dataset '{dataset.id}': {e.args[0]}") from e
 
     label = Fore.LIGHTBLUE_EX + "     [DATASET] " + Style.RESET_ALL + dataset.id + Fore.LIGHTBLACK_EX + " -> " + Fore.CYAN + dataset.version + Style.RESET_ALL
+    confirmed = True
     if local_path.is_dir():
         _info(label + " [" + Fore.GREEN + "found" + Style.RESET_ALL + "]")
         if not importer.checkVersion(dataset.version):
+            confirmed = False
             message = f"dataset '{dataset.id}': could not confirm it matches version '{dataset.version}'"
             if not nocheck:
                 raise DatapackError(message)
@@ -144,7 +155,8 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
                 raise DatapackError(str(e)) from e
 
     return {"id": dataset.id, "datasource": datasource.id, "importer": datasource.importer,
-            "source": datasource.source, "version": dataset.version, "path": local_path.as_posix()}
+            "source": datasource.source, "version": dataset.version, "path": local_path.as_posix(),
+            "confirmed": confirmed}
 
 
 def _find_sources(source: str, folders: list[Path]) -> list[Path]:
@@ -224,6 +236,14 @@ def zip_folder(folder: Path, zip_path: Path, root_name: str) -> Path:
     return zip_path
 
 
+def _sha256_member(archive: zipfile.ZipFile, name: str) -> str:
+    digest = hashlib.sha256()
+    with archive.open(name) as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
     """Check the checksums of a datapack zip against its manifests.
 
@@ -238,6 +258,13 @@ def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
         root = roots.pop()
         files = {n[len(root) + 1:]: n for n in names}
         listed = set()
+        # files kept out of the zip (results with large files in external mode): next to the zip
+        fetched = {}
+        if "fetch.txt" in files:
+            for line in archive.read(files["fetch.txt"]).decode("utf-8").splitlines():
+                parts = line.split(maxsplit=2)
+                if len(parts) == 3:
+                    fetched[parts[2]] = Path(zip_path).parent / parts[0]
         for manifest in ("manifest-sha256.txt", "tagmanifest-sha256.txt"):
             if manifest not in files:
                 problems.append(f"missing {manifest}")
@@ -245,9 +272,14 @@ def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
             for line in archive.read(files[manifest]).decode("utf-8").splitlines():
                 checksum, _, path = line.partition("  ")
                 listed.add(path)
-                if path not in files:
+                if path not in files and path in fetched:
+                    if not fetched[path].is_file():
+                        problems.append(f"missing external file: {fetched[path]}")
+                    elif _sha256(fetched[path]) != checksum:
+                        problems.append(f"checksum mismatch: {path} ({fetched[path]})")
+                elif path not in files:
                     problems.append(f"missing file: {path}")
-                elif hashlib.sha256(archive.read(files[path])).hexdigest() != checksum:
+                elif _sha256_member(archive, files[path]) != checksum:
                     problems.append(f"checksum mismatch: {path}")
         for path in files:
             if path.startswith("data/") and path not in listed:
@@ -255,10 +287,18 @@ def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
     return problems
 
 
+def _depth(comp_id: str, components: dict) -> int:
+    """Length of the longest needs chain below a component (0: needs nothing)."""
+    needs = components[comp_id].needs
+    return 1 + max(_depth(n, components) for n in needs) if needs else 0
+
+
 class _Builder:
 
-    def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None) -> None:
+    def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None,
+                 expected_baseline: dict | None = None) -> None:
         self.testdef_file = testdef_file
+        self.expected_baseline = expected_baseline
         self.setup_config = setup_config
         self.testdef_dir = testdef_file.parent
         self.nocheck = nocheck
@@ -362,11 +402,19 @@ class _Builder:
                     self.dataset_keys.append(({dataset.id: {"path": record["path"], "version": dataset.version}}, "<datapack>"))
 
         keys = self.keys()
+        # sequencer commands are kept as written: rendered at run time, with the run's keys
+        commands = {}
+        for config_id, config in (raw.get("configurations") or {}).items():
+            for comp_id, comp in ((config or {}).get("components") or {}).items():
+                if isinstance(comp, dict) and "commands" in comp:
+                    commands[(config_id, comp_id)] = comp.pop("commands")
         rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "component_types"}),
                     "component_types": {
                         type_id: {**keys.render_data({k: v for k, v in type_def.items() if k != "commands"}, where=f"component_types.{type_id}"),
                                   "commands": type_def.get("commands", {})}
                         for type_id, type_def in (raw.get("component_types") or {}).items()}}
+        for (config_id, comp_id), value in commands.items():
+            rendered["configurations"][config_id]["components"][comp_id]["commands"] = value
         setup = _validate(Setup, rendered, f"setup '{self.setup_file}'")
         if testdef.setup_config not in setup.configurations:
             raise DatapackError(f"no configuration '{testdef.setup_config}' in setup '{self.setup_file}' "
@@ -377,7 +425,18 @@ class _Builder:
         _info(Fore.GREEN + f"\n *** [2] Generating files for setup '{setup.id}' in configuration '{testdef.setup_config}' ***")
         setup_dir = self.setup_file.parent
         components = {}
-        for comp_id, component in setup.configurations[testdef.setup_config].components.items():
+        configured = setup.configurations[testdef.setup_config].components
+        for comp_id, component in configured.items():
+            unknown = [n for n in component.needs if n not in configured]
+            if unknown:
+                raise DatapackError(f"component '{comp_id}' needs unknown component(s) {', '.join(unknown)}")
+        try:
+            order = list(graphlib.TopologicalSorter({c: comp.needs for c, comp in configured.items()}).static_order())
+        except graphlib.CycleError as e:
+            raise DatapackError(f"components needing each other: {' -> '.join(e.args[1])}") from e
+        order.sort(key=lambda c: (_depth(c, configured), list(configured).index(c)))
+        for comp_id in order:
+            component = configured[comp_id]
             if component.type not in setup.component_types:
                 raise DatapackError(f"component '{comp_id}': no component type '{component.type}' in setup '{self.setup_file}'")
             comp_type = setup.component_types[component.type]
@@ -389,8 +448,20 @@ class _Builder:
             input_dir = self.work / "data" / comp_id / "input"
             input_dir.mkdir(parents=True)
             (self.work / "data" / comp_id / "output").mkdir()
-            extra = {"component": {"id": comp_id, "name": component.name, "type": component.type,
-                                   "configuration": component.configuration}}
+            needed = {n: {"id": n, "name": configured[n].name, "type": configured[n].type,
+                          "input_dir": (self.work / "data" / n / "input").as_posix()} for n in component.needs}
+
+            def read_input(path: str, comp_id=comp_id, component=component, data_dir=self.work / "data") -> str:
+                other = path.split("/", 1)[0]
+                if other not in component.needs:
+                    raise DatapackError(f"component '{comp_id}': read_input('{path}'): '{other}' is not in its needs")
+                file = (data_dir / other / "input" / path.split("/", 1)[-1]).resolve()
+                if not file.is_relative_to((data_dir / other / "input").resolve()) or not file.is_file():
+                    raise DatapackError(f"component '{comp_id}': read_input('{path}'): no such generated input")
+                return file.read_text(encoding="utf-8")
+            comp_keys = {"id": comp_id, "name": component.name, "type": component.type,
+                         "configuration": component.configuration, "input_dir": input_dir.as_posix()}
+            extra = {"component": comp_keys, "components": needed, "read_input": read_input}
             inputs = []
             for input_file in comp_type.configurations[component.configuration].inputs:
                 sources = _find_sources(input_file.source, [self.testdef_dir, setup_dir])
@@ -405,7 +476,17 @@ class _Builder:
                 for source in sources:
                     # a glob pattern always gives a folder, even when it matches one file
                     destination = target / source.name if glob.has_magic(input_file.source) else target
-                    if input_file.method == "copy":
+                    if input_file.method == "generate":
+                        try:
+                            with keys.tracking() as read:
+                                tracked = run_generator(input_file.generator, source, destination, keys.root,
+                                                        input_file.options, {**comp_keys, "components": needed},
+                                                        setup_dir, keys.resolve_all)
+                        except GeneratorError as e:
+                            raise DatapackError(f"component '{comp_id}': {e}") from e
+                        if tracked:
+                            used[destination.relative_to(input_dir).as_posix()] = read
+                    elif input_file.method == "copy":
                         if source.is_dir():
                             shutil.copytree(source, destination)
                         else:
@@ -428,17 +509,30 @@ class _Builder:
                     except ProcessorError as e:
                         raise DatapackError(f"component '{comp_id}': {e}") from e
                 inputs.append({"source": input_file.source, "target": input_file.target, "method": input_file.method,
+                               **({"generator": input_file.generator} if input_file.generator else {}),
                                "files": [s.as_posix() for s in sources],
                                "keys": {name: dict(k) for name, k in sorted(used.items())}})
             components[comp_id] = {"name": component.name, "type": component.type,
-                                   "configuration": component.configuration, "inputs": inputs}
-        return components
+                                   "configuration": component.configuration, "inputs": inputs,
+                                   **({"needs": component.needs} if component.needs else {})}
+        return {c: components[c] for c in configured}
 
     def write_definition(self) -> None:
         definition = self.work / "definition"
         definition.mkdir()
         shutil.copy2(self.testdef_file, definition / "testdef.yml")
         shutil.copy2(self.setup_file, definition / "setup.yml")
+        # files the pipeline refers to: shared sub-pipelines and the expected baseline (sequencer)
+        pipeline = (load_yaml_mapping(self.testdef_file).get("pipeline") or {})
+        extra = list(pipeline.get("include") or []) + ([pipeline["baseline"]] if pipeline.get("baseline") else [])
+        for name in extra:
+            source = _expand(name, self.testdef_dir)
+            if not source.is_file():
+                raise DatapackError(f"file '{name}' given in the pipeline of '{self.testdef_file}' not found")
+            target = definition / name if not Path(name).is_absolute() and ".." not in Path(name).parts \
+                else definition / "include" / Path(name).name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
         for layer, path in self.dictionaries:
             target = definition / "dictionaries" / layer / path.name
             if layer == "datasets":
@@ -450,6 +544,52 @@ class _Builder:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
             target.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH)
+
+    def _source(self, role: str, path: Path, state: dict | None) -> dict:
+        entry = {"role": role, "path": path.as_posix()}
+        if state is not None:
+            root = state.get("root")
+            if root:
+                entry["path"] = Path(os.path.relpath(path, root)).as_posix()
+            entry.update({"repo": state.get("repo"), "commit": state.get("commit"), "tag": state.get("tag"),
+                          "clean": state.get("clean")})
+        else:
+            entry.update({"repo": None, "commit": None, "tag": None, "clean": False})
+        return entry
+
+    def _relative(self, file: str) -> str:
+        for state in (self.setup_git, getattr(self, "testdef_git", None)):
+            root = (state or {}).get("root")
+            if root and os.path.abspath(file).startswith(os.path.abspath(root) + os.sep):
+                return Path(os.path.relpath(file, root)).as_posix()
+        return Path(file).as_posix()
+
+    def baseline(self, name: str, components: dict, testdef_git: dict | None) -> dict:
+        """The baseline: sources, tools and generated files (sequencer README, section 5.3)."""
+        sources = [self._source("testdef", self.testdef_file, testdef_git),
+                   self._source("setup", self.setup_file, self.setup_git)]
+        for layer, path in self.dictionaries:
+            if layer != "datasets":
+                sources.append(self._source("dictionary", path, git_state(path.parent)))
+        for ds in self.datasets:
+            sources.append({"role": "dataset", "id": ds["id"], "importer": ds["importer"], "source": ds["source"],
+                            "version": ds["version"], "confirmed": ds.get("confirmed", True)})
+        files = {}
+        for comp_id, comp in components.items():
+            input_dir = self.work / "data" / comp_id / "input"
+            targets = sorted(comp["inputs"], key=lambda i: -len(i["target"]))
+            for path in sorted(p for p in input_dir.rglob("*") if p.is_file()):
+                rel = path.relative_to(input_dir).as_posix()
+                origin = next((i for i in targets if rel == i["target"].rstrip("/") or rel.startswith(i["target"].rstrip("/") + "/")), None)
+                entry = {"sha256": _sha256(path)}
+                if origin is not None:
+                    entry = {"from": [self._relative(f) for f in origin["files"]], "method": origin["method"], **entry}
+                files[f"data/{comp_id}/input/{rel}"] = entry
+        conform = (not self.nocheck
+                   and all(s.get("clean") and s.get("tag") for s in sources if s["role"] != "dataset")
+                   and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset"))
+        return {"datapack": {"name": name, "format": FORMAT_VERSION, "conform": conform},
+                "sources": sources, "tools": tool_versions(), "files": files}
 
     def build(self, output_dir: str | os.PathLike | None) -> Path:
         if self.work.exists():
@@ -495,6 +635,11 @@ class _Builder:
             "datasets": self.datasets,
             "components": components,
         })
+        baseline = self.baseline(name, components, testdef_git)
+        _dump_yaml(self.work / "baseline.yml", baseline, "# where the contents of this datapack come from (sequencer README, section 5.3)\n")
+        problems = check_baseline(baseline, self.expected_baseline, parts=("datapack", "sources", "tools"))
+        for problem in problems:
+            _warn(f"baseline: {problem}")
         write_bag(self.work, name, f"testsuit {__version__} datapack")
         zip_path = zip_folder(self.work, output_dir / f"{name}.zip", name)
 
@@ -505,7 +650,7 @@ class _Builder:
 
 
 def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None,
-             setup_config: str | None = None) -> Path:
+             setup_config: str | None = None, expected_baseline: dict | None = None) -> Path:
     """Generate the datapack of a test definition file.
 
     The datapack contents are left in '.current_datapack' next to the test definition file.
@@ -514,12 +659,22 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
         whose version cannot be confirmed (the datapack is then named '..._DRAFT')
     :param output_dir: where to write the zip (default: key 'datapack.output_dir')
     :param setup_config: setup configuration to use instead of the test definition's 'setup_config'
+    :param expected_baseline: an expected baseline to check the datapack against (mismatches are warnings)
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """
     # importers and processors declared by external libraries
     load_plugins()
     try:
-        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config).build(output_dir)
+        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline).build(output_dir)
     except TemplateError as e:
         raise DatapackError(str(e)) from e
+
+
+def read_baseline(zip_path: str | os.PathLike) -> dict | None:
+    """The baseline.yml of a datapack zip (None for a datapack without one)."""
+    with zipfile.ZipFile(zip_path) as archive:
+        names = [n for n in archive.namelist() if n.count("/") == 1 and n.endswith("/baseline.yml")]
+        if not names:
+            return None
+        return yaml.safe_load(archive.read(names[0]))

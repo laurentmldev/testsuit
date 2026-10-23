@@ -4,7 +4,7 @@ The example project of testsuit: the test environment of a small system, a toy t
 
 It has two parts:
 - **the `toytrain` package**, a Python library extending testsuit without changing it: file formats for the train's recordings, mexploit criteria, a datapack importer for its software releases, a report logo and a command-line tool;
-- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, component types, datapack setup, test definitions with their pipeline, and exploitation criteria. The sequencer is not implemented yet, but the datapacks build and the criteria run on sample recordings today.
+- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, component types, datapack setup, test definitions with their pipeline, and exploitation criteria. The [sequencer cheat sheet](../../src/testsuit/sequencer/README.md#cheat-sheet) shows how to build, post and follow these datapacks.
 
 ## The system under test
 
@@ -189,11 +189,11 @@ Everything collected joins the results datapack, next to the inputs. Its baselin
 
 ## Emulated mode on a dev host
 
-The same tests can run with the whole platform emulated on one Linux computer, with no hardware, no root access and no SSH. This is meant for writing and debugging tests and pipelines, and for a demonstration of the sequencer. It will be runnable once the sequencer is.
+The same tests can run with the whole platform emulated on one Linux computer, with no hardware, no root access and no SSH. This is meant for writing and debugging tests and pipelines, and for a demonstration of the sequencer. A full run needs host builds of the toy-train applications and simulations; the release store only holds placeholders, so a run ends in `error` at the self-test.
 
 ```
 datapack datapack/testdef/front_contact/testdef.yml --nocheck --setup-config emulated
-tsq run .work/datapacks/toytrain_front_contact_toytrain_setup_*.zip --local --config tsq.dev.yml
+tsq --config tsq.dev.yml run .work/datapacks/toytrain_front_contact_toytrain_setup_*.zip --local
 ```
 
 What changes, and what does not:
