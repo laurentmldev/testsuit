@@ -87,7 +87,12 @@ def server(seq, app, host: str, port: int, log_level: str = "info"):
 
 
 def serve(seq, app, host: str, port: int, log_level: str = "info") -> None:
-    server(seq, app, host, port, log_level).run()
+    """Run tsqd until Ctrl+C or SIGTERM. uvicorn re-raises the Ctrl+C once it has shut down cleanly: it
+    ends quietly here, without a traceback."""
+    try:
+        server(seq, app, host, port, log_level).run()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
