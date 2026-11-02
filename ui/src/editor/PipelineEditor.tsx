@@ -136,6 +136,8 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
           onSelect(many ? (selected.includes(node.id) ? selected.filter((x) => x !== node.id) : [...selected, node.id]) : [node.id]);
         }}
         onPaneClick={() => selected.length && onSelect([])}
+        // an arrow picked alone: the steps unselected, so that Delete removes the arrow, not the steps
+        onEdgeClick={(e) => !(e.shiftKey || e.metaKey || e.ctrlKey) && selected.length && onSelect([])}
         onEdgesChange={(changes) => setEdges((es) => applyEdgeChanges(changes.filter((c) => c.type === "select"), es))}
         onConnect={(c: Connection) => {
           const [ps, ...s] = (c.source || "").split(":");

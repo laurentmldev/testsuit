@@ -52,7 +52,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
           <DatapackType doc={doc} name={sel.name} value={types[sel.name]} update={update} onRenamed={(n) => setSel({ kind: "type", name: n })} onDeleted={() => setSel({ kind: "general" })} />
         )}
         {sel.kind === "config" && configs[sel.name] !== undefined && (
-          <Configuration name={sel.name} data={data} update={update} onAddFromLab={() => setWizard("lab:" + sel.name)}
+          <Configuration name={sel.name} data={data} update={update} onAddFromLab={(mode) => setWizard(`lab:${mode}:${sel.name}`)}
             onOpenType={(t) => setSel({ kind: "type", name: t })} onRenamed={(n) => setSel({ kind: "config", name: n })} onDeleted={() => setSel({ kind: "general" })} />
         )}
       </div>
@@ -64,7 +64,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         setSel({ kind: "type", name });
         setWizard(null);
       }} />}
-      {wizard?.startsWith("lab:") && <FromLab data={data} config={wizard.slice(4)} onClose={() => setWizard(null)} onApply={(draft) => {
+      {wizard?.startsWith("lab:") && <FromLab data={data} initial={wizard.split(":")[1]} config={wizard.split(":").slice(2).join(":")} onClose={() => setWizard(null)} onApply={(draft) => {
         api.setData(draft);
         setWizard(null);
       }} />}
@@ -131,6 +131,10 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
                 </table>
                 <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
               </Field>
+              <button className="small danger" onClick={() => {
+                if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
+                update((d) => d.datarepositories[i].datasources.splice(j, 1));
+              }}>Remove data source</button>
             </div>
           ))}
           <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources ||= []).push({ id: "source", importer: "git", source: "", datasets: [] })))}>+ Data source</button>
@@ -306,7 +310,7 @@ function NewDatapackType({ data, onClose, onCreate }: { data: any; onClose: () =
 }
 
 function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed, onDeleted }: {
-  name: string; data: any; update: (fn: (d: any) => void) => void; onAddFromLab: () => void; onOpenType: (t: string) => void;
+  name: string; data: any; update: (fn: (d: any) => void) => void; onAddFromLab: (mode: "stage" | "adhoc") => void; onOpenType: (t: string) => void;
   onRenamed: (n: string) => void; onDeleted: () => void;
 }) {
   const { ctx } = useSession();
@@ -343,7 +347,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     const st = stage ? stageType(stage) : null;
     return (
       <table className="grid compact components">
-        <thead><tr><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Role</th><th>Needs</th><th /></tr></thead>
+        <thead><tr><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th><th /></tr></thead>
         <tbody>
           {ids.map((id) => {
             const c = comps[id];
@@ -354,6 +358,10 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
             const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
             return (
               <tr key={id}>
+                <td>
+                  <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
+                  {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
+                </td>
                 <td><code>{id}</code>{!stage && c?.stage && <div className="error-text small">stage '{c.stage}' is not declared</div>}</td>
                 <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
                 <td>
@@ -361,10 +369,6 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                   {c?.type && types[c.type] && <button className="link small" onClick={() => onOpenType(c.type)}>open</button>}
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
-                <td>
-                  <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
-                  {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
-                </td>
                 <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
                 <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
               </tr>
@@ -467,7 +471,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       {aliased && <div className="hint-box small">Same contents as another configuration (likely a YAML alias): changing it here gives it a copy of its own.</div>}
       <Markdown text={help(["configurations", "_"])} className="muted" />
       <Section title="Stages" help={help(["configurations", "_", "stages"])}
-        actions={<button className="small primary" onClick={onAddFromLab}>Add from the lab…</button>}>
+        actions={<button className="small primary" onClick={() => onAddFromLab("stage")}>Add from the lab…</button>}>
         {!Object.keys(stages).length && <p className="muted small">No logical stage: the test only uses ad hoc components.</p>}
         {Object.keys(stages).map((s) => {
           const st = stageType(s);   // one fold per logical stage, with its components
@@ -507,7 +511,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
         })}>+ Logical stage</button>
       </Section>
       <Section title="Ad hoc components" help={help(["configurations", "_", "components"])}
-        actions={<button className="small" onClick={onAddFromLab}>Add from the lab…</button>}>
+        actions={<button className="small" onClick={() => onAddFromLab("adhoc")}>Add from the lab…</button>}>
         {componentsTable(Object.keys(comps).filter((id) => !comps[id]?.stage || !(comps[id].stage in stages)), null)}
         <button className="small" onClick={() => addComponent(null)}>+ Component</button>
       </Section>
@@ -524,10 +528,10 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
 }
 
 /** Adds a logical stage of a lab stage type and a component per role, with datapack types extending the lab types. */
-function FromLab({ data, config, onClose, onApply }: { data: any; config: string; onClose: () => void; onApply: (draft: any) => void }) {
+function FromLab({ data, config, initial, onClose, onApply }: { data: any; config: string; initial?: string; onClose: () => void; onApply: (draft: any) => void }) {
   const { ctx } = useSession();
   const stageTypes = Object.keys(ctx.lab.stage_type_roles || {});
-  const [mode, setMode] = useState<string>(stageTypes.length ? "stage" : "adhoc");
+  const [mode, setMode] = useState<string>(initial === "stage" && stageTypes.length ? "stage" : "adhoc");
   const [stageType, setStageType] = useState(stageTypes[0] || "");
   const cfg = data.configurations?.[config] || {};
   const [logical, setLogical] = useState(freeName(slug(stageTypes[0] || "stage"), Object.keys(cfg.stages || {})));
