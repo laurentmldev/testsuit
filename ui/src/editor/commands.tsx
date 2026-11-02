@@ -2,6 +2,7 @@
 // (wait_for) and expected results, used by every form that has commands.
 import { useState } from "react";
 import { Choices, Combo, Field, helpText, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { CodeEditor } from "../monaco";
 import { classes, Markdown } from "../util";
 import { clone, useSession } from "./state";
 
@@ -11,14 +12,66 @@ export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "depl
 
 export function commandKind(spec: any): string {
   if (!spec || typeof spec !== "object") return "run";
-  for (const k of ["builtin", "wait_for", "signal", "run"]) if (k in spec) return k;
+  for (const k of ["builtin", "wait_for", "signal", "run", "python"]) if (k in spec) return k;
   return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env"].includes(k)) || "run";
+}
+
+export function pythonSummary(py: any): string {
+  if (!py || typeof py !== "object") return "";
+  if (py.script) return String(py.script).split("/").pop() || "";
+  const first = String(py.code || "").split("\n").find((l) => l.trim() && !l.startsWith("import ")) || "";
+  return `code: ${first.trim().slice(0, 40)}`;
+}
+
+/** The `python` action of a step or a command: a script on the target, or inline code edited as Python. */
+export function PythonEditor({ value, onChange, help, uri }: {
+  value: any; onChange: (v: any) => void; help: (field: string) => string | undefined; uri: string;
+}) {
+  const v = value && typeof value === "object" ? value : {};
+  const inline = "code" in v;
+  const set = (k: string, x: any) => {
+    const next = { ...v, [k]: x };
+    if (x === "" || x === undefined || (Array.isArray(x) && !x.length)) delete next[k];
+    onChange(next);
+  };
+  return (
+    <>
+      <Field label="Source" help={help("")}>
+        <Choices value={inline ? "code" : "script"} onChange={(k) => {
+          if (!k || k === (inline ? "code" : "script")) return;
+          const { code, script, ...rest } = v;
+          onChange(k === "code" ? { ...rest, code: code ?? "import sys\n\nprint(keys['run']['id'])\nsys.exit(0)\n" }
+            : { ...rest, script: script ?? "{{ component.input_dir }}/check.py" });
+        }} choices={[
+          { value: "script", label: "a script file", description: "on the target, usually an input of the component" },
+          { value: "code", label: "inline code", description: "written here, the keys as `keys`" },
+        ]} />
+      </Field>
+      {inline ? (
+        <Field label="Code" help={help("code")} wide>
+          <div className="code-box"><CodeEditor uri={uri} language="python" value={String(v.code ?? "")} onChange={(x) => onChange({ ...v, code: x })} height={200} /></div>
+        </Field>
+      ) : (
+        <>
+          <Field label="Script" help={help("script")} wide><Text mono value={v.script} onChange={(x) => set("script", x)} placeholder="{{ component.input_dir }}/check.py" /></Field>
+          <Field label="Arguments" help={help("args")}><Tags value={v.args} onChange={(x) => set("args", x)} placeholder="{{ component.output_dir }}" /></Field>
+        </>
+      )}
+      <Field label="Interpreter" help={help("interpreter")}>
+        <Combo mono value={v.interpreter} onChange={(x) => set("interpreter", x)} choices={[
+          { value: "python3", description: "the default on a component" },
+          { value: "{{ component.vars.venv }}/bin/python", description: "a virtual environment named by a component variable" },
+        ]} />
+      </Field>
+    </>
+  );
 }
 
 export function summary(spec: any): string {
   if (!spec || typeof spec !== "object") return String(spec ?? "");
   const kind = commandKind(spec);
   if (kind === "run") return `${spec.detach ? "start " : ""}${spec.run ?? ""}`;
+  if (kind === "python") return `python ${pythonSummary(spec.python)}`;
   if (kind === "builtin") return `built-in ${spec.builtin}`;
   if (kind === "signal") return `signal ${spec.signal}${spec.timeout ? `, then KILL after ${spec.timeout}` : ""}`;
   if (kind === "wait_for") {
@@ -137,6 +190,7 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
 
 const KINDS: Choice[] = [
   { value: "run", label: "shell command", description: "Run a command on the component (or start it, detached)." },
+  { value: "python", label: "Python script", description: "A script or inline code, with the run's keys; an exception is an error." },
   { value: "wait_for", label: "wait for", description: "Wait until a check passes: state, log line, port, URL…" },
   { value: "signal", label: "signal", description: "Signal the processes the run started (TERM, then KILL)." },
   { value: "builtin", label: "built-in", description: "deploy, collect or kill, as linux_system does them." },
@@ -144,7 +198,7 @@ const KINDS: Choice[] = [
 
 export function CommandEditor({ name, spec, onChange }: { name: string; spec: any; onChange: (v: any) => void }) {
   const help = useCommandHelp();
-  const { ctx } = useSession();
+  const { ctx, schemas } = useSession();
   const kinds = [...KINDS, ...(ctx.step_types || []).map((s: string) => ({ value: s, label: s, description: "plugin step type" }))];
   const kind = commandKind(spec);
   const s = spec && typeof spec === "object" ? spec : {};
@@ -159,7 +213,7 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
     if (s.timeout) keep.timeout = s.timeout;
     onChange({
       ...keep,
-      ...(k === "run" ? { run: "" } : k === "wait_for" ? { wait_for: { log: { file: "{{ component.output_dir }}/app.log", regex: "READY" }, timeout: "30s" } }
+      ...(k === "run" ? { run: "" } : k === "python" ? { python: { script: "{{ component.input_dir }}/check.py" } } : k === "wait_for" ? { wait_for: { log: { file: "{{ component.output_dir }}/app.log", regex: "READY" }, timeout: "30s" } }
         : k === "signal" ? { signal: "TERM", timeout: "10s" } : k === "builtin" ? { builtin: WELL_KNOWN.includes(name) && ["deploy", "collect", "kill"].includes(name) ? name : "deploy" } : { [k]: {} }),
     });
   };
@@ -173,6 +227,17 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
           <Field label="Command" help={help("run")} wide>
             <Text mono multiline value={s.run} onChange={(x) => set("run", x)} placeholder="sudo systemctl start my-app" />
           </Field>
+          <div className="inline-fields">
+            <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
+            <Field label="Timeout" help={help("timeout")}><Text value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
+          </div>
+          <ExpectEditor value={s.expect} onChange={(x) => set("expect", x)} />
+        </>
+      )}
+      {kind === "python" && (
+        <>
+          <PythonEditor value={s.python} onChange={(x) => set("python", x)} uri={`inmemory:///command/${name}.py`}
+            help={(f) => helpText(schemas.types, [...CMD_PATH, "python", ...(f ? [f] : [])])} />
           <div className="inline-fields">
             <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
             <Field label="Timeout" help={help("timeout")}><Text value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
@@ -196,7 +261,7 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
           ]} />
         </Field>
       )}
-      {!["run", "wait_for", "signal", "builtin"].includes(kind) && (
+      {!["run", "python", "wait_for", "signal", "builtin"].includes(kind) && (
         <Field label="Options" help="Given to the plugin step type (YAML / JSON)."><Text mono multiline value={JSON.stringify(s[kind] ?? {})} onChange={(x) => {
           try {
             set(kind, JSON.parse(x));

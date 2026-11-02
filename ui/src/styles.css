@@ -337,3 +337,6 @@ table.grid td > input, table.grid td > .combo, table.grid td > select { min-widt
 .template-side .preview { white-space: pre; word-break: normal; }
 .dialog .inline-fields > .field, .step-form .inline-fields > .field { grid-template-columns: 1fr; }
 .dialog .inline-fields > .field > label { padding-top: 0; }
+
+/* inline Python code of a step or a command */
+.code-box { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; min-width: 0; }

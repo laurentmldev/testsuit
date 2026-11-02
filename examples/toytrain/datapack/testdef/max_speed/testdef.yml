@@ -59,6 +59,13 @@ pipeline:
         - {from: "test_run:piezo/output/piezo.csv", to: "analysis/input/data/"}
       steps:
         - {id: deploy, component: analysis, do: deploy}
-        - {id: analyse, component: analysis, do: start, needs: [deploy]}   # exit 0: criteria ok, else failed
+        # a Python step (README section 8.3): the collected data is complete, or the test run lost some
+        - id: check_data
+          component: analysis
+          needs: [deploy]
+          python:
+            script: "{{ component.input_dir }}/check_data.py"
+            args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]
+        - {id: analyse, component: analysis, do: start, needs: [check_data]}   # exit 0: criteria ok, else failed
       finally:
         - {id: collect, component: analysis, do: collect}

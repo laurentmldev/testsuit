@@ -9,10 +9,12 @@ A phase runs its steps as asyncio tasks: a step starts when every step it ``need
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shlex
 import socket
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,8 +31,38 @@ log = logging.getLogger("testsuit.sequencer")
 
 SUCCEEDED, FAILED, ERROR, SKIPPED = "succeeded", "failed", "error", "skipped"
 _RANK = {SUCCEEDED: 0, SKIPPED: 0, FAILED: 1, ERROR: 2}
+PYTHON_CRASH = 70                   # exit status of a python step whose script raised (EX_SOFTWARE)
 DETACH_SETTLE = 0.5                 # a detached command that exits within this time is judged on its exit
 DEFAULT_STOP_GRACE = 30.0
+
+
+# Runs a python step's script: the keys as `keys`, the script's folder first on sys.path, and an uncaught
+# exception as exit status 70 with its traceback. Plain Python 3, so the target needs nothing else.
+PYTHON_WRAPPER = """import json, os, runpy, sys, traceback
+script = sys.argv[1]
+sys.argv = sys.argv[1:]
+sys.path[0] = os.path.dirname(os.path.abspath(script))
+with open(os.environ["TSQ_KEYS"]) as f:
+    keys = json.load(f)
+try:
+    runpy.run_path(script, init_globals={"keys": keys}, run_name="__main__")
+except SystemExit:
+    raise
+except BaseException:
+    traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(70)
+"""
+
+
+def _plain(value: Any) -> Any:
+    """The keys without what JSON cannot hold (the template functions such as succeeded())."""
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items() if not callable(v)}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value if not callable(v)]
+    return value
 
 
 def worst(verdicts) -> str:
@@ -232,6 +264,8 @@ class StepRunner:
                 return await self.wait_for(render(self.step.wait_for, keys, self.fs.id), timeout)
             if action == "run":
                 spec = {"run": self.step.run}
+            elif action == "python":
+                spec = {"python": self.step.python}
             elif action == "do":
                 spec = self.command(self.step.do)
             elif action in ("push", "pull"):
@@ -269,6 +303,8 @@ class StepRunner:
         if "signal" in spec:
             grace = parse_duration(render(spec.get("timeout", "10s"), keys, self.fs.id))
             return await self.signal(str(spec["signal"]), grace)
+        if "python" in spec:
+            return await self.python(spec, keys, timeout)
         if "run" in spec:
             command = render(spec["run"], keys, self.fs.id)
             env = {**render(spec.get("env") or {}, keys, self.fs.id), **render(step.env, keys, self.fs.id)}
@@ -279,7 +315,45 @@ class StepRunner:
             if name.lower() in registry.step_types:
                 outcome = await registry.step_types[name.lower()](self, render(value, keys, self.fs.id))
                 return outcome if isinstance(outcome, tuple) else ((SUCCEEDED, "") if outcome else (FAILED, "plugin step failed"))
-        raise SequencerError(f"step '{self.fs.id}': command {spec} has no 'run', 'wait_for', 'signal' or known step type")
+        raise SequencerError(f"step '{self.fs.id}': command {spec} has no 'run', 'python', 'wait_for', 'signal' "
+                             f"or known step type")
+
+    async def python(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
+        """A Python script (README section 8.3, SQ-32): the step's keys in a JSON file named by TSQ_KEYS, run
+        through a wrapper that turns an uncaught exception into exit status 70, judged like a shell command."""
+        from testsuit.sequencer.model import check_python
+        check_python(spec["python"], f"step '{self.fs.id}'")
+        py = dict(spec["python"])
+        code = py.pop("code", None)                # inline code is Python, not a template
+        py = render(py, keys, self.fs.id)
+        local = self.ctx.bag / ".tsq" / self.ctx.run_id / "python" / (self.fs.id + (f"[{self.component.id}]" if self.component else ""))
+        local.mkdir(parents=True, exist_ok=True)
+        (local / "keys.json").write_text(json.dumps(_plain(keys), indent=1, default=str), encoding="utf-8")
+        (local / "tsq_python.py").write_text(PYTHON_WRAPPER, encoding="utf-8")
+        if code is not None:
+            (local / "step.py").write_text(str(code), encoding="utf-8")
+        if self.component is None:                 # on the sequencer host: the daemon's interpreter by default
+            folder = str(local)
+            interpreter = str(py.get("interpreter") or sys.executable)
+        else:                                      # on the component: next to the step's pid file
+            folder = f"{self.component.pid_dir(self.ctx.run_id)}/python/{local.name}"
+            try:
+                await self.component.transport.put(local, folder)
+            except Exception as e:
+                return ERROR, f"transport: {e}"
+            interpreter = str(py.get("interpreter") or self.component.concrete.vars.get("tsq_python") or "python3")
+        script = f"{folder}/step.py" if code is not None else str(py["script"])
+        command = " ".join(shlex.quote(a) for a in [interpreter, f"{folder}/tsq_python.py", script,
+                                                    *[str(a) for a in py.get("args") or []]])
+        env = {**render(spec.get("env") or {}, keys, self.fs.id), **render(self.step.env, keys, self.fs.id),
+               "TSQ_KEYS": f"{folder}/keys.json"}
+        detach = self.step.detach if self.step.detach is not None else bool(spec.get("detach", False))
+        expect = self.step.expect if self.step.expect is not None else spec.get("expect")
+        verdict, reason = await self.shell(command, env, timeout, detach, expect)
+        if verdict == FAILED and self.record.exit_status == PYTHON_CRASH:
+            self.note("the script raised an exception: error, not failed")
+            return ERROR, "python exception"
+        return verdict, reason
 
     def transport(self) -> Transport:
         if self.component is None:
@@ -631,7 +705,7 @@ class PhaseRunner:
             component = self.ctx.bound[target]
         rec = self.record(fs, target)
         runner = StepRunner(self.ctx, self.flat, fs, component, rec)
-        uses_component = component is not None and fs.step.action in ("do", "run", "push", "pull")
+        uses_component = component is not None and fs.step.action in ("do", "run", "python", "push", "pull")
         lock = self.ctx.lock_for(component.concrete.id) if uses_component and component.concrete.lock != "none" else None
         try:
             self.set_state(rec, "ready")

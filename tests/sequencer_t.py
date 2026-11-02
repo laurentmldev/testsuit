@@ -1,5 +1,6 @@
 """Sequencer kernel: a small bench of local processes run end to end (queue, locks, phases, abort, results)."""
 import asyncio
+import copy
 import socket
 import time
 import zipfile
@@ -232,6 +233,86 @@ def test_failed_verdict(bench):
     assert record["phases"] == {"test_run": "succeeded", "exploit": "failed"}
     assert {s["id"]: s["state"] for s in record["steps"] if s["phase"] == "exploit"} == \
         {"deploy": "succeeded", "analyse": "failed", "collect": "succeeded"}
+
+
+# A python step's script, deployed with the analysis inputs: the count against min_count, from the keys.
+CHECK_PY = """import json, sys
+count = int(open(sys.argv[1]).read())
+with open(sys.argv[2] + "/py_verdict.json", "w") as f:
+    json.dump({"count": count, "min": keys["min_count"], "run": keys["run"]["id"]}, f)
+sys.exit(0 if count >= keys["min_count"] else 1)
+"""
+
+
+def python_bench(bench: Bench, exploit_steps: list) -> dict:
+    """The bench pipeline whose exploit phase runs the given steps, check.py among the analysis inputs."""
+    setup = copy.deepcopy(SETUP)
+    setup["component_types"]["analysis"]["configurations"]["standard"]["inputs"].append(
+        {"source": "files/check.py", "target": "check.py", "method": "copy"})
+    write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
+    write(bench.dp / "setup" / "files" / "check.py", CHECK_PY)
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][1]["steps"] = [{"id": "deploy", "component": "analysis", "do": "deploy"}, *exploit_steps]
+    return pipeline
+
+
+def run_one(bench: Bench, zip_path: Path) -> dict:
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(zip_path)
+        [run] = await run_until_done(seq, [run["id"]])
+        await seq.close()
+        return run
+    return asyncio.run(main())
+
+
+def test_python_steps(bench):
+    """SQ-32: a script deployed on a component, and inline code on the sequencer host, with the run's keys."""
+    pipeline = python_bench(bench, [
+        {"id": "check", "component": "analysis", "needs": ["deploy"], "python": {
+            "script": "{{ component.input_dir }}/check.py",
+            "args": ["{{ component.input_dir }}/data/count.txt", "{{ component.output_dir }}"]}},
+        {"id": "inline", "needs": ["check"], "python": {"code": (
+            "import os, sys\n"
+            "print('run', keys['run']['id'], 'in', os.getcwd())\n"
+            "sys.exit(0 if os.path.isfile('data/dut/output/count.txt') else 1)\n")}}])
+    run = run_one(bench, bench.build("py", pipeline=pipeline))
+    assert (run["verdict"], run["reason"]) == ("succeeded", "")
+    verdict = yaml.safe_load(read_member(run, "data/analysis/output/py_verdict.json"))
+    assert verdict["count"] >= 3 and verdict["min"] == 3 and verdict["run"] == run["id"]
+    assert f"run {run['id']} in" in read_member(run, "logs/exploit/inline.log")
+    assert not any(".tsq" in n for n in results_of(run)[0])       # keys and wrapper stay out of the results
+
+
+def test_python_step_results(bench):
+    """A script's exit status is judged like a shell command's; an uncaught exception is an error."""
+    pipeline = python_bench(bench, [
+        {"id": "low", "component": "analysis", "needs": ["deploy"], "continue_on_error": True, "python": {
+            "script": "{{ component.input_dir }}/check.py",
+            "args": ["{{ component.input_dir }}/data/count.txt", "{{ component.output_dir }}"]}},
+        {"id": "expected", "needs": ["deploy"], "expect": {"exit": [3]}, "python": {"code": "raise SystemExit(3)"}},
+        {"id": "crash", "needs": ["low"], "python": {"code": "1 / 0"}}])
+    run = run_one(bench, bench.build("py_bad", pipeline=pipeline, min_count=100000))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    states = {s["id"]: (s["state"], s["exit_status"]) for s in record["steps"] if s["phase"] == "exploit"}
+    assert states["low"] == ("failed", 1)
+    assert states["expected"] == ("succeeded", 3)
+    assert states["crash"] == ("error", 70)
+    assert run["verdict"] == "error"
+    assert "ZeroDivisionError" in read_member(run, "logs/exploit/crash.log")
+
+
+def test_python_step_checked():
+    from testsuit.sequencer.component_types import TypeDef
+    from testsuit.sequencer.model import Step
+    from testsuit.sequencer.util import SequencerError
+    Step(id="ok", python={"code": "pass"}).check()
+    with pytest.raises(SequencerError, match="exactly one of 'script' and 'code'"):
+        Step(id="both", python={"script": "a.py", "code": "x"}).check()
+    with pytest.raises(SequencerError, match="unknown 'python' key"):
+        Step(id="typo", python={"scrpit": "a.py"}).check()
+    with pytest.raises(SequencerError, match="command 'start'"):
+        TypeDef.from_dict("t", {"extends": "linux_system", "commands": {"start": {"python": {}}}}, "types.yml")
 
 
 def test_queue_and_parallel_stages(tmp_path, no_git):

@@ -369,6 +369,8 @@ def cmd_validate(args, client: Client | None) -> int:
                             problems.append(f"phase {flat.phase.id}, step {fs.id}: {step.component} "
                                             f"({concrete.type}) has no command '{step.do}'")
                         command = f"  = {json.dumps(spec)} ({resolved.command_sources.get(step.do, '?')})"
+                    if step.action == "python":
+                        command = f"  = {json.dumps(step.python)}"
                     print(f"  {'finally ' if part == 'finally' else ''}{fs.id}: {what} on {target}"
                           + (f", needs {', '.join(fs.needs)}" if fs.needs else "") + command)
     if problems:

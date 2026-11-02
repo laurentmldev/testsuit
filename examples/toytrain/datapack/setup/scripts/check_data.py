@@ -1,0 +1,42 @@
+"""Python step of the exploit phase (sequencer README, section 8.3): check that the telemetry the test run
+collected is complete before exploit_runner judges it, so that a lost recording reads as a data problem,
+not as a speed criterion failure.
+
+    python: {script: "{{ component.input_dir }}/check_data.py",
+             args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]}
+
+`keys` holds the datapack keys (the sequencer gives them to every python step). Standard library only, so
+it runs with any Python 3 on the target. Exit 0: the data is complete; 1: it is not (the step fails).
+"""
+import csv
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+data, out = Path(sys.argv[1]), Path(sys.argv[2])
+expected = float(keys["scenario"]["duration_s"])      # noqa: F821 (given by the sequencer)
+problems = []
+
+telemetry = data / "telemetry.csv"
+rows = []
+if telemetry.is_file():
+    with open(telemetry, newline="") as f:
+        lines = [line for line in f if not line.startswith("#")]
+    rows = list(csv.DictReader(lines, delimiter=";"))
+else:
+    problems.append("telemetry.csv was not collected")
+
+times = [datetime.fromisoformat(r["Time"].replace("Z", "+00:00")) for r in rows if r.get("Time")]
+span = (max(times) - min(times)).total_seconds() if len(times) > 1 else 0.0
+if telemetry.is_file() and span < 0.9 * expected:
+    problems.append(f"telemetry covers {span:.1f} s of the {expected:g} s scenario")
+for name in ("propulsion.propj", "piezo.csv"):
+    if not (data / name).is_file():
+        problems.append(f"{name} was not collected")
+
+report = {"rows": len(rows), "span_s": round(span, 3), "expected_s": expected, "problems": problems}
+out.mkdir(parents=True, exist_ok=True)
+(out / "data_check.json").write_text(json.dumps(report, indent=1) + "\n")
+print(json.dumps(report))
+sys.exit(1 if problems else 0)

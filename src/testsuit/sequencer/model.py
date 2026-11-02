@@ -16,7 +16,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-BUILTIN_ACTIONS = ("do", "run", "push", "pull", "delay", "wait_for", "uses")
+BUILTIN_ACTIONS = ("do", "run", "python", "push", "pull", "delay", "wait_for", "uses")
+PYTHON_KEYS = ("script", "code", "args", "interpreter")
+
+
+def check_python(spec: Any, where: str) -> None:
+    """A ``python`` action (README section 8.3, SQ-32): exactly one of ``script`` and ``code``."""
+    if not isinstance(spec, dict):
+        raise SequencerError(f"{where}: 'python' takes a mapping with 'script' or 'code'")
+    unknown = sorted(set(spec) - set(PYTHON_KEYS))
+    if unknown:
+        raise SequencerError(f"{where}: unknown 'python' key(s) {', '.join(unknown)} (known: {', '.join(PYTHON_KEYS)})")
+    if ("script" in spec) == ("code" in spec):
+        raise SequencerError(f"{where}: 'python' takes exactly one of 'script' and 'code'")
+    if not isinstance(spec.get("args", []), list):
+        raise SequencerError(f"{where}: 'python.args' is a list")
 
 
 class _Model(BaseModel):
@@ -33,6 +47,7 @@ class Step(BaseModel):
     # actions (exactly one; a plugin step type is given by its name as key)
     do: str | None = None
     run: str | None = None
+    python: dict | None = None
     push: dict | None = None
     pull: dict | None = None
     delay: str | float | None = None
@@ -73,6 +88,8 @@ class Step(BaseModel):
         action = self.action
         if action not in BUILTIN_ACTIONS and action.lower() not in registry.step_types:
             raise SequencerError(f"step '{self.id}': unknown key or step type '{action}'")
+        if action == "python":
+            check_python(self.python, f"step '{self.id}'")
         if action in ("do", "push", "pull") and not (self.component or self.for_each):
             raise SequencerError(f"step '{self.id}': '{action}' needs a 'component' or 'for_each'")
         if self.component and self.for_each is not None:
