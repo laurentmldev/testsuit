@@ -373,9 +373,9 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           <tbody>
             {Object.entries(comps).map(([id, c]) => {
               const st = c?.stage ? stageType(c.stage) : null;
-              const roles = roleChoices(ctx, st ? { stageType: st } : { adhoc: true });
-              const typeConfigs = Object.keys(types[c?.type]?.configurations || {});
               const labType = types[c?.type]?.extends;
+              const roles = roleChoices(ctx, st ? { stageType: st, labType } : { adhoc: true, labType });
+              const typeConfigs = Object.keys(types[c?.type]?.configurations || {});
               const roleType = st ? ctx.lab.stage_type_roles?.[st]?.[c?.role] : ctx.lab.adhoc_roles?.[c?.role];
               const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
               return (
