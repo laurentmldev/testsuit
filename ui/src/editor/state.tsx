@@ -182,15 +182,17 @@ export function stageTypeChoices(ctx: any): Choice[] {
 }
 
 /** Roles: those used in the lab, then those datapack setups ask for. stageType narrows to the roles of
- * stages of that type; adhoc to the ad hoc components. */
-export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?: boolean } = {}): Choice[] {
+ * stages of that type; adhoc to the ad hoc components; labType to the roles held by a component of
+ * that lab type or of a type extending it (a datapack type that extends it binds only to those). */
+export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?: boolean; labType?: string | null } = {}): Choice[] {
   const result: Record<string, Choice> = {};
+  const fits = (type: string) => !opts.labType || (ctx.lab.types?.[type]?.chain || [type]).includes(opts.labType);
   if (opts.stageType) {
     for (const [role, type] of Object.entries<any>(ctx.lab.stage_type_roles?.[opts.stageType] || {}))
-      result[role] = { value: role, description: `in the ${opts.stageType} stages: a \`${type}\`` };
+      if (fits(type)) result[role] = { value: role, description: `in the ${opts.stageType} stages: a \`${type}\`` };
   } else if (opts.adhoc) {
     for (const [role, type] of Object.entries<any>(ctx.lab.adhoc_roles || {}))
-      result[role] = { value: role, description: `ad hoc component of type \`${type}\`` };
+      if (fits(type)) result[role] = { value: role, description: `ad hoc component of type \`${type}\`` };
   } else {
     for (const [role, comps] of Object.entries<any>(ctx.lab.roles || {}))
       result[role] = { value: role, description: `used by ${comps.join(", ")}` };
@@ -199,6 +201,8 @@ export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?:
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
       for (const [id, comp] of Object.entries<any>(c.components || {})) {
         if (!comp.role || result[comp.role]) continue;
+        const asked = setup.component_types?.[comp.type]?.extends;
+        if (opts.labType && asked && !fits(asked)) continue;
         const stageType = comp.stage ? c.stages?.[comp.stage] : null;
         if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.stage)) continue;
         result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), component ${id}: no lab component has it yet` };

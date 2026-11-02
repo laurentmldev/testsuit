@@ -325,6 +325,55 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   const [newName, setNewName] = useState(name);
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const aliased = Object.entries<any>(data.configurations).some(([other, c]) => other !== name && JSON.stringify(c) === JSON.stringify(cfg));
+  const addComponent = (stage: string | null) => {
+    // the id is the user's: the name the test definition and its keys use for this component
+    const typed = window.prompt("Id of the new component (as the pipeline and the keys will name it):");
+    const id = slug(typed || "");
+    if (!id) return;
+    if (id in comps) return window.alert(`There is already a component '${id}' in this configuration.`);
+    update((d) => {
+      d.configurations[name].components ||= {};
+      const t = Object.keys(types)[0];
+      d.configurations[name].components[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", ...(stage ? { stage } : {}), role: "" };
+    });
+  };
+  /** The logical components of one stage (or the ad hoc ones), with roles narrowed to that stage and to each component's type. */
+  const componentsTable = (ids: string[], stage: string | null) => {
+    if (!ids.length) return <p className="muted small">No component yet.</p>;
+    const st = stage ? stageType(stage) : null;
+    return (
+      <table className="grid compact components">
+        <thead><tr><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Role</th><th>Needs</th><th /></tr></thead>
+        <tbody>
+          {ids.map((id) => {
+            const c = comps[id];
+            const labType = types[c?.type]?.extends;
+            const roles = roleChoices(ctx, st ? { stageType: st, labType } : { adhoc: true, labType });
+            const typeConfigs = Object.keys(types[c?.type]?.configurations || {});
+            const roleType = st ? ctx.lab.stage_type_roles?.[st]?.[c?.role] : ctx.lab.adhoc_roles?.[c?.role];
+            const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
+            return (
+              <tr key={id}>
+                <td><code>{id}</code>{!stage && c?.stage && <div className="error-text small">stage '{c.stage}' is not declared</div>}</td>
+                <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
+                <td>
+                  <Combo value={c?.type} onChange={(v) => setComp(id, "type", v)} choices={typeOptions} strict />
+                  {c?.type && types[c.type] && <button className="link small" onClick={() => onOpenType(c.type)}>open</button>}
+                </td>
+                <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
+                <td>
+                  <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
+                  {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
+                </td>
+                <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+                <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  };
   return (
     <div>
       <div className="form-title">
@@ -346,77 +395,40 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       </div>
       {aliased && <div className="hint-box small">Same contents as another configuration (likely a YAML alias): changing it here gives it a copy of its own.</div>}
       <Markdown text={help(["configurations", "_"])} className="muted" />
-      <Section title="Logical stages" help={help(["configurations", "_", "stages"])}
+      <Section title="Stages" help={help(["configurations", "_", "stages"])}
         actions={<button className="small primary" onClick={onAddFromLab}>Add from the lab…</button>}>
-        <table className="grid compact">
-          <thead><tr><th>Logical stage</th><th>Stage type</th><th>Roles its lab stages offer</th><th /></tr></thead>
-          <tbody>
-            {Object.keys(stages).map((s) => (
-              <tr key={s}>
-                <td><code>{s}</code></td>
-                <td><Combo value={stageType(s)} onChange={(v) => update((d) => (d.configurations[name].stages[s] = { type: v }))} choices={stageTypeChoices(ctx)} /></td>
-                <td className="small">{Object.entries<any>(ctx.lab.stage_type_roles?.[stageType(s)] || {}).map(([r, t]) => `${r} (${t})`).join(", ") || <span className="error-text">no lab stage of this type</span>}</td>
-                <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].stages[s])}>×</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {!Object.keys(stages).length && <p className="muted small">No logical stage: the test only uses ad hoc components.</p>}
+        {Object.keys(stages).map((s) => {
+          const st = stageType(s);   // one fold per logical stage, with its components
+          const inStage = Object.keys(comps).filter((id) => comps[id]?.stage === s);
+          return (
+            <Section key={s} title={<><code>{s}</code> <span className="muted small">{st || "no stage type"} · {inStage.length} component{inStage.length === 1 ? "" : "s"}</span></>}
+              actions={<button className="small danger" onClick={() => {
+                if (inStage.length && !window.confirm(`Remove logical stage ${s} and its components ${inStage.join(", ")}?`)) return;
+                update((d) => {
+                  delete d.configurations[name].stages[s];
+                  for (const id of inStage) delete d.configurations[name].components[id];
+                });
+              }}>Remove</button>}>
+              <Field label="Stage type" help="Bound at run time to any free lab stage of this type.">
+                <Combo value={st} onChange={(v) => update((d) => (d.configurations[name].stages[s] = { type: v }))} choices={stageTypeChoices(ctx)} />
+                {!ctx.lab.stage_type_roles?.[st] && <div className="error-text small">no lab stage of this type</div>}
+              </Field>
+              {componentsTable(inStage, s)}
+              <button className="small" onClick={() => addComponent(s)}>+ Component</button>
+            </Section>
+          );
+        })}
         <button className="small" onClick={() => update((d) => {
           d.configurations[name].stages ||= {};
           const type = stageTypeChoices(ctx)[0]?.value || "";
           d.configurations[name].stages[freeName(slug(type || "stage"), Object.keys(stages))] = { type };
         })}>+ Logical stage</button>
       </Section>
-      <Section title="Logical components" help={help(["configurations", "_", "components"])}>
-        <table className="grid compact components">
-          <thead><tr><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Stage</th><th>Role</th><th>Needs</th><th /></tr></thead>
-          <tbody>
-            {Object.entries(comps).map(([id, c]) => {
-              const st = c?.stage ? stageType(c.stage) : null;
-              const roles = roleChoices(ctx, st ? { stageType: st } : { adhoc: true });
-              const typeConfigs = Object.keys(types[c?.type]?.configurations || {});
-              const labType = types[c?.type]?.extends;
-              const roleType = st ? ctx.lab.stage_type_roles?.[st]?.[c?.role] : ctx.lab.adhoc_roles?.[c?.role];
-              const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
-              return (
-                <tr key={id}>
-                  <td><code>{id}</code></td>
-                  <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
-                  <td>
-                    <Combo value={c?.type} onChange={(v) => setComp(id, "type", v)} choices={typeOptions} strict />
-                    {c?.type && types[c.type] && <button className="link small" onClick={() => onOpenType(c.type)}>open</button>}
-                  </td>
-                  <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
-                  <td>
-                    <select value={c?.stage || ""} onChange={(e) => setComp(id, "stage", e.target.value || undefined)}>
-                      <option value="">(ad hoc)</option>
-                      {Object.keys(stages).map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
-                    {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
-                  </td>
-                  <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
-                  <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <button className="small" onClick={() => {
-          // the id is the user's: the name the test definition and its keys use for this component
-          const typed = window.prompt("Id of the new component (as the pipeline and the keys will name it):");
-          const id = slug(typed || "");
-          if (!id) return;
-          if (id in comps) return window.alert(`There is already a component '${id}' in this configuration.`);
-          update((d) => {
-            d.configurations[name].components ||= {};
-            const t = Object.keys(types)[0];
-            d.configurations[name].components[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", role: "" };
-          });
-        }}>+ Component</button>
-        <button className="small" onClick={onAddFromLab}>+ Components from the lab…</button>
+      <Section title="Ad hoc components" help={help(["configurations", "_", "components"])}
+        actions={<button className="small" onClick={onAddFromLab}>Add from the lab…</button>}>
+        {componentsTable(Object.keys(comps).filter((id) => !comps[id]?.stage || !(comps[id].stage in stages)), null)}
+        <button className="small" onClick={() => addComponent(null)}>+ Component</button>
       </Section>
       <Section title="Command overrides per component" collapsed help={help(["configurations", "_", "components", "_", "commands"])}>
         {Object.entries(comps).map(([id, c]) => (
