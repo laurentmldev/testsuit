@@ -53,8 +53,8 @@ export function PythonEditor({ value, onChange, help, uri }: {
         </Field>
       ) : (
         <>
-          <Field label="Script" help={help("script")} wide><Text mono value={v.script} onChange={(x) => set("script", x)} placeholder="{{ component.input_dir }}/check.py" /></Field>
-          <Field label="Arguments" help={help("args")}><Tags value={v.args} onChange={(x) => set("args", x)} placeholder="{{ component.output_dir }}" /></Field>
+          <Field label="Script" help={help("script")} wide><Text keys mono value={v.script} onChange={(x) => set("script", x)} placeholder="{{ component.input_dir }}/check.py" /></Field>
+          <Field label="Arguments" help={help("args")}><Tags keys value={v.args} onChange={(x) => set("args", x)} placeholder="{{ component.output_dir }}" /></Field>
         </>
       )}
       <Field label="Interpreter" help={help("interpreter")}>
@@ -156,13 +156,13 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
       )}
       {kind === "log" && (
         <>
-          <Field label="Log file" help="Path of the log file on the component (templates allowed)."><Text mono value={val?.file} onChange={(x) => set("log", { ...val, file: x })} /></Field>
-          <Field label="Line matching" help="Regular expression (grep -E) a line must match."><Text mono value={val?.regex} onChange={(x) => set("log", { ...val, regex: x })} /></Field>
+          <Field label="Log file" help="Path of the log file on the component (templates allowed)."><Text keys mono value={val?.file} onChange={(x) => set("log", { ...val, file: x })} /></Field>
+          <Field label="Line matching" help="Regular expression (grep -E) a line must match."><Text keys mono value={val?.regex} onChange={(x) => set("log", { ...val, regex: x })} /></Field>
         </>
       )}
       {kind === "http" && (
         <>
-          <Field label="URL" help={waitHelp("http")}><Text mono value={typeof val === "string" ? val : val?.url} onChange={(x) => set("http", { ...(typeof val === "object" ? val : {}), url: x })} /></Field>
+          <Field label="URL" help={waitHelp("http")}><Text keys mono value={typeof val === "string" ? val : val?.url} onChange={(x) => set("http", { ...(typeof val === "object" ? val : {}), url: x })} /></Field>
           <Field label="Status" help="Expected HTTP status (default 200)."><Text value={val?.status} onChange={(x) => set("http", { ...(typeof val === "object" ? val : { url: val }), status: x ? Number(x) : undefined })} placeholder="200" /></Field>
           <Field label="Body matches" help="Optional regular expression on the body."><Text mono value={val?.regex} onChange={(x) => set("http", { ...(typeof val === "object" ? val : { url: val }), regex: x || undefined })} /></Field>
         </>
@@ -176,7 +176,7 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
         <Field label="Value" help="Given to the plugin ready check as is."><Text mono value={typeof val === "object" ? JSON.stringify(val) : val} onChange={(x) => set(kind, x)} /></Field>
       )}
       <div className="inline-fields">
-        <Field label="Timeout" help="Then the step is `error` (default 60 s)."><Text value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="60s" /></Field>
+        <Field label="Timeout" help="Then the step is `error` (default 60 s)."><Text keys value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="60s" /></Field>
         <Field label="Interval" help="Time between checks (default 0.5 s)."><Text value={v.interval} onChange={(x) => set("interval", x)} placeholder="0.5s" /></Field>
       </div>
       {withComponent && (
@@ -225,11 +225,11 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
       {kind === "run" && (
         <>
           <Field label="Command" help={help("run")} wide>
-            <Text mono multiline value={s.run} onChange={(x) => set("run", x)} placeholder="sudo systemctl start my-app" />
+            <Text keys mono multiline value={s.run} onChange={(x) => set("run", x)} placeholder="sudo systemctl start my-app" />
           </Field>
           <div className="inline-fields">
             <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
-            <Field label="Timeout" help={help("timeout")}><Text value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
+            <Field label="Timeout" help={help("timeout")}><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
           </div>
           <ExpectEditor value={s.expect} onChange={(x) => set("expect", x)} />
         </>
@@ -240,7 +240,7 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
             help={(f) => helpText(schemas.types, [...CMD_PATH, "python", ...(f ? [f] : [])])} />
           <div className="inline-fields">
             <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
-            <Field label="Timeout" help={help("timeout")}><Text value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
+            <Field label="Timeout" help={help("timeout")}><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
           </div>
           <ExpectEditor value={s.expect} onChange={(x) => set("expect", x)} />
         </>
@@ -249,7 +249,7 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
       {kind === "signal" && (
         <div className="inline-fields">
           <Field label="Signal" help={help("signal")}><Combo value={s.signal} onChange={(x) => set("signal", x)} choices={["TERM", "INT", "HUP", "USR1", "KILL"].map((v) => ({ value: v }))} /></Field>
-          <Field label="Then KILL after" help="Grace period before KILL (default 10 s)."><Text value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="10s" /></Field>
+          <Field label="Then KILL after" help="Grace period before KILL (default 10 s)."><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="10s" /></Field>
         </div>
       )}
       {kind === "builtin" && (

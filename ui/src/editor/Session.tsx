@@ -2,10 +2,10 @@
 // and the session actions (check everything, generate a datapack, review and push).
 import { useMemo, useState } from "react";
 import { del, post, put } from "../api";
-import { HelpPanel, HelpProvider } from "../fields";
+import { HelpPanel, HelpProvider, KeysProvider } from "../fields";
 import { CodeEditor } from "../monaco";
 import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
-import { SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
+import { runtimeKeyItems, SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
 import { InventoryForm } from "./InventoryForm";
 import { TypesForm } from "./TypesForm";
 import { SetupForm } from "./SetupForm";
@@ -183,7 +183,11 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
                 {!path && <SessionWelcome session={session} />}
                 {path && !doc && !api.error && <div className="pad"><Spinner text={`Loading and checking ${path}…`} /></div>}
                 {path && api.error && !doc && <div className="error-box">{api.error}</div>}
-                {doc && <DocView session={session} doc={doc} view={view} setView={(v) => setQuery("view", v)} api={api} revealLine={revealLine} />}
+                {doc && (
+                  <KeysProvider keys={runtimeKeyItems(session.ctx)}>
+                    <DocView session={session} doc={doc} view={view} setView={(v) => setQuery("view", v)} api={api} revealLine={revealLine} />
+                  </KeysProvider>
+                )}
               </div>
               <div className="session-side">
                 <HelpPanel topic={topic} fallback={<KindHelp kind={doc?.kind} />} />

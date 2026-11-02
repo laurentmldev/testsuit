@@ -58,6 +58,111 @@ export function helpText(schema: any, path: (string | number)[]): string | undef
   return node?.markdownDescription || node?.description;
 }
 
+// ── keys: typing {{ in a field whose value is rendered with keys ───────────
+
+export interface KeyItem {
+  key: string;
+  value?: string;      // its value, when known (datapack keys)
+  help?: string;       // what it is (run-time keys)
+  origin?: string;     // the file it comes from
+}
+
+const KeysContext = createContext<KeyItem[] | null>(null);
+
+/** The keys available where the fields below it are rendered (run-time keys, a test's datapack keys). */
+export function KeysProvider({ keys, children }: { keys: KeyItem[]; children: ReactNode }) {
+  return <KeysContext.Provider value={keys}>{children}</KeysContext.Provider>;
+}
+
+type Editable = HTMLInputElement | HTMLTextAreaElement;
+
+/** For a field rendered with keys: typing `{{` opens a list of the keys of the context with a quick
+ * search; picking one writes `{{ key }}` where `{{` was typed. */
+function useKeyPicker(enabled: boolean | undefined, onChange: (v: string) => void) {
+  const keys = useContext(KeysContext);
+  const [at, setAt] = useState<{ el: Editable; pos: number } | null>(null);
+  const on = !!enabled && !!keys;
+  const watch = (el: Editable) => {
+    if (!on) return;
+    const pos = el.selectionStart ?? el.value.length;
+    if (el.value.slice(Math.max(0, pos - 2), pos) === "{{") setAt({ el, pos });
+  };
+  const insert = (key: string) => {
+    if (!at) return;
+    const { el, pos } = at;
+    const before = el.value.slice(0, pos - 2), after = el.value.slice(pos).replace(/^\s*}}/, "");
+    const text = `{{ ${key} }}`;
+    onChange(before + text + after);
+    setAt(null);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(before.length + text.length, before.length + text.length);
+    });
+  };
+  const close = () => {
+    const el = at?.el;
+    setAt(null);
+    requestAnimationFrame(() => el?.focus());
+  };
+  const picker = on && at ? <KeyPicker keys={keys!} onPick={insert} onClose={close} /> : null;
+  return { watch, picker, open: !!at, hint: on ? "Type {{ to insert a key." : undefined };
+}
+
+function KeyPicker({ keys, onPick, onClose }: { keys: KeyItem[]; onPick: (key: string) => void; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const [active, setActive] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  const shown = useMemo(() => {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const found = keys.filter((k) => words.every((w) => `${k.key} ${k.value ?? ""} ${k.help ?? ""}`.toLowerCase().includes(w))).slice(0, 80);
+    // a key the editor does not know (from a dictionary not chosen yet, a plugin...) can still be written
+    const typed = q.trim();
+    return typed && !keys.some((k) => k.key === typed) ? [...found, { key: typed, typed: true }] : found;
+  }, [keys, q]) as (KeyItem & { typed?: boolean })[];
+  useEffect(() => {
+    const away = (e: MouseEvent) => box.current && !box.current.contains(e.target as Node) && onClose();
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [onClose]);
+  useEffect(() => {
+    box.current?.querySelector(".key-item.active")?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return (
+    <div className="key-picker" ref={box} role="dialog" aria-label="Insert a key">
+      <input className="key-search" autoFocus placeholder="search keys…" value={q}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setActive(0);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, shown.length - 1)), e.preventDefault();
+          else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0)), e.preventDefault();
+          else if (e.key === "Enter") {
+            e.preventDefault();
+            if (shown[active]) onPick(shown[active].key);
+          } else if (e.key === "Escape") e.preventDefault(), onClose();
+        }} />
+      <div className="key-list">
+        {shown.length === 0 && <div className="muted small pad-s">Type a key name; the list narrows as you type.</div>}
+        {shown.map((k, i) => (
+          <div key={(k.typed ? "typed:" : "") + k.key} className={classes("key-item", i === active && "active", k.typed && "typed")}
+            onMouseEnter={() => setActive(i)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick(k.key);
+            }}>
+            <code>{k.key}</code>
+            {k.typed && <span className="key-help">not a known key: insert it as typed</span>}
+            {k.value !== undefined && <span className="key-value" title={k.value}>{k.value}</span>}
+            {k.help && <span className="key-help">{k.help}</span>}
+            {k.origin && <span className="key-origin">{k.origin}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── fields ──────────────────────────────────────────────────────────────
 
 export function Field({
@@ -85,20 +190,29 @@ export function Field({
 }
 
 export function Text({
-  value, onChange, placeholder, mono, multiline, disabled, onBlur,
+  value, onChange, placeholder, mono, multiline, disabled, onBlur, keys,
 }: {
   value?: string | number | null; onChange: (v: string) => void; placeholder?: string; mono?: boolean;
   multiline?: boolean; disabled?: boolean; onBlur?: () => void;
+  keys?: boolean;      // the value is rendered with keys: typing {{ proposes them
 }) {
   const v = value === null || value === undefined ? "" : String(value);
-  if (multiline)
-    return (
-      <textarea className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
-        rows={Math.min(8, Math.max(2, v.split("\n").length))} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
-    );
+  const picker = useKeyPicker(keys, onChange);
+  const change = (e: { target: Editable }) => {
+    onChange(e.target.value);
+    picker.watch(e.target);
+  };
   return (
-    <input className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
-      onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
+    <div className={classes("text-field", picker.picker && "picking")} title={picker.hint}>
+      {multiline ? (
+        <textarea className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
+          rows={Math.min(8, Math.max(2, v.split("\n").length))} onChange={change} onBlur={onBlur} />
+      ) : (
+        <input className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
+          onChange={change} onBlur={onBlur} />
+      )}
+      {picker.picker}
+    </div>
   );
 }
 
@@ -143,11 +257,13 @@ export function Choices({ value, onChange, choices, allowNone }: {
 /** A text input with suggestions: each suggestion shows its description, free text stays possible
  * (strict: only the choices). */
 export function Combo({
-  value, onChange, choices, placeholder, strict, mono, onPick, autoFocus,
+  value, onChange, choices, placeholder, strict, mono, onPick, autoFocus, keys,
 }: {
   value?: string | null; onChange: (v: string) => void; choices: Choice[]; placeholder?: string; strict?: boolean;
   mono?: boolean; onPick?: (v: string) => void; autoFocus?: boolean;
+  keys?: boolean;      // the value is rendered with keys: typing {{ proposes them
 }) {
+  const picker = useKeyPicker(keys, onChange);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [typed, setTyped] = useState(false);
@@ -182,6 +298,7 @@ export function Combo({
           setTyped(true);
           setOpen(true);
           setActive(0);
+          picker.watch(e.target);
         }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, shown.length - 1)), setOpen(true), e.preventDefault();
@@ -190,7 +307,8 @@ export function Combo({
           else if (e.key === "Escape") setOpen(false);
         }} />
       {known?.description && !open && <div className="combo-desc"><Markdown text={known.description} /></div>}
-      {open && shown.length > 0 && (
+      {picker.picker}
+      {open && !picker.open && shown.length > 0 && (
         <div className="combo-list">
           {shown.map((c, i) => (
             <div key={c.value} className={classes("combo-item", i === active && "active", c.value === v && "current")}
@@ -212,8 +330,9 @@ export function Combo({
 }
 
 /** A list of short strings (needs, stages, components...) as removable tags, with suggestions. */
-export function Tags({ value, onChange, choices, placeholder }: {
+export function Tags({ value, onChange, choices, placeholder, keys }: {
   value?: string[] | null; onChange: (v: string[]) => void; choices?: Choice[]; placeholder?: string;
+  keys?: boolean;      // the items are rendered with keys: typing {{ proposes them
 }) {
   const list = value || [];
   const [draft, setDraft] = useState("");
@@ -232,7 +351,7 @@ export function Tags({ value, onChange, choices, placeholder }: {
         </span>
       ))}
       <div className="tag-input">
-        <Combo value={draft} onChange={setDraft} choices={remaining} placeholder={placeholder || "add…"} onPick={add} />
+        <Combo value={draft} onChange={setDraft} choices={remaining} placeholder={placeholder || "add…"} onPick={add} keys={keys} />
         {draft && <button type="button" className="small" onClick={() => add(draft)}>add</button>}
       </div>
     </div>
