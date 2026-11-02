@@ -175,6 +175,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-17 | A test run can be forced to stop, killing the remote processes (`kill -9` or similar), while the cleanup and result retrieval still run. | 11 |
 | SQ-27 | The data retrieved from the components after a run is added to the datapack contents. It can be large raw data, such as pcap files. | 10.1 |
 | SQ-28 | A pipeline can be built as a sequence of sub-pipelines, to keep complex pipelines manageable. | 8.4 |
+| SQ-32 | A pipeline step, or a command of a component type, can be a Python script, run on a component or on the sequencer host, with the run's keys available to it. Its result is judged like a shell command's, and an uncaught exception is an `error`. | 8.3 |
 | SQ-24 | Each run ends with a verdict: `succeeded`; `failed` when a command did not give its expected result, typically an unexpected return status; or `error` when a command crashed or could not complete (signal, timeout, unreachable component). | 8.3, 10 |
 
 ### 1.4 Interfaces and integration
@@ -236,7 +237,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | **template** | an input file rendered with Jinja2 and the datapack keys (`{{ key }}`), one per component. |
 | **input methods** | how an input file is made: `template`, `copy`, or `generate` (a registered **generator**), optionally followed by `postprocess` **processors** (section 5.1). An **importer** fetches the datasets of a datasource (`importer: git`, a release store...). |
 | **pipeline** | the phases and steps of a test definition; **`needs`** are the edges between steps, and each phase has **`finally`** steps that always run. |
-| **step type** | what a step does: a component command (`do`), `run`, `delay`, `wait_for`, `uses` (a sub-pipeline) or a plugin step type. A **ready check** is one condition of `wait_for` (port, log, file, command, or a plugin's). |
+| **step type** | what a step does: a component command (`do`), `run`, `python` (a Python script), `wait_for`, `uses` (a sub-pipeline) or a plugin step type. A **ready check** is one condition of `wait_for` (port, log, file, command, or a plugin's). |
 | **sub-pipeline** | a reusable group of steps with parameters, in the test definition or in a shared file, called with `uses` (section 8.4). |
 | **baseline** | where each content of a datapack comes from (revisions, tags, tool versions) and, for results, the run; checked against an expected baseline, a mismatch makes the datapack **non-conform**. |
 | **verdict** | the outcome of a run: `succeeded`, `failed` or `error`. |
@@ -712,10 +713,37 @@ Phase fields: `id`, `needs`, `stages` (logical stages), `components` (ad hoc log
 
 Step fields:
 - target: `component`, or `for_each` (a list of components, `components` for all the components of the phase, or a role);
-- action, one of: `do` (a named command), `run` (inline shell), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
+- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
 - options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
 
 `expect` gives the expected result of a step: `exit` (exit codes, default `[0]`), and optionally `stdout` or `stderr` (regex). A step that ran but did not give the expected result is `failed`. A step that could not run or did not finish normally is `error`: a crash (killed by a signal), a timeout, a transport failure, an unreachable or broken component, or an internal sequencer error.
+
+**Python steps** (SQ-32). `python` runs a Python script where `run` would run a shell command: on the step's component, or on the sequencer host for a step without one. It is also allowed wherever a component type defines a command, so a type's `start` or `ready` can be a script.
+
+```yaml
+- id: check_speed                          # inline code, on the sequencer host
+  needs: [run]
+  python:
+    code: |
+      import csv, sys
+      rows = list(csv.DictReader(open(keys["run"]["dir"] + "/data/telemetry/output/telemetry.csv")))
+      top = max(float(r["speed_mps"]) for r in rows)
+      print(f"top speed {top} m/s")
+      sys.exit(0 if top <= keys["train"]["speed_limit_mps"] else 1)
+- id: analyse                              # a script deployed with the component's inputs
+  component: analysis
+  needs: [deploy]
+  python:
+    script: "{{ component.input_dir }}/analyse.py"
+    args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]
+    interpreter: "{{ component.vars.venv }}/bin/python"   # default: the component's tsq_python, else python3
+```
+
+- **Source**: `script` is a path on the target, usually an input of the component (`data/<component>/input/`, so it is part of the datapack and of its baseline); `code` is inline and sent with the command. One of the two.
+- **Keys**: before the script runs, the sequencer writes every key the step's templates can use (the datapack's `context.yml` and the run-time keys) to a JSON file next to the step's pid file, and gives its path in `TSQ_KEYS`. The script reads them with `json.load(open(os.environ["TSQ_KEYS"]))`; inline `code` gets them already loaded as `keys`. `args`, `env` and `script` are Jinja2 templates like any command.
+- **Result**: the same as for `run`: the exit status and output are checked against `expect`, and `timeout`, `retries`, `detach` and `continue_on_error` apply. A small wrapper runs the script and turns an uncaught exception into exit status 70 with its traceback on stderr, which makes the step `error`, not `failed`: a crashed check says nothing about the system under test.
+- **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it. The target needs nothing but a Python 3 interpreter, not testsuit. On the sequencer host, it runs as a separate process, never inside `tsqd`: a script cannot block the daemon or crash it.
+- **Help in the Editor**: the step palette offers **Python script** next to **Shell command**, and the YAML view edits inline `code` as Python.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.4), `tcp`, `http` (status or regex), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -1082,6 +1110,7 @@ Where the code differs from this document, and why:
 The main operations are in the [cheat sheet](#cheat-sheet).
 
 Not done yet:
+- Python steps (`python`, SQ-32, section 8.3): specified, not implemented; until then, `run: python3 script.py` runs a script as a shell command, without `TSQ_KEYS` or the exception mapping;
 - `collect` resuming an interrupted transfer, checksums computed during the transfer, and `collect: {max_size}` (`include` and `exclude` work);
 - the `http` transport;
 - the end-to-end emulated toy-train run in CI (section 15).
