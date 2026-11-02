@@ -281,3 +281,14 @@ def test_api(repos, tmp_path):
     finally:
         server.should_exit = True
         thread.join(30)
+
+
+def test_schemas_match_the_datapack_models():
+    """Every key the Editor's forms offer in a setup or a test definition is one the datapack tool accepts."""
+    from testsuit.datatools.datapack import model
+    from testsuit.sequencer import editor_schemas as schemas
+    for schema, cls in ((schemas.DATAPACK_TYPE, model.ComponentType), (schemas.LOGICAL_COMPONENT, model.Component),
+                        (schemas.SETUP_CONFIGURATION, model.SetupConfiguration), (schemas.INPUT, model.InputFile),
+                        (schemas.SETUP, model.Setup), (schemas.TESTDEF, model.Testdef)):
+        assert set(schema.get("properties") or {}) <= set(cls.model_fields), cls.__name__
+    model.ComponentType(configurations={}, description="a counter")
