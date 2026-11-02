@@ -343,7 +343,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     const st = stage ? stageType(stage) : null;
     return (
       <table className="grid compact components">
-        <thead><tr><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Role</th><th>Needs</th><th /></tr></thead>
+        <thead><tr><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th><th /></tr></thead>
         <tbody>
           {ids.map((id) => {
             const c = comps[id];
@@ -354,6 +354,10 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
             const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
             return (
               <tr key={id}>
+                <td>
+                  <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
+                  {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
+                </td>
                 <td><code>{id}</code>{!stage && c?.stage && <div className="error-text small">stage '{c.stage}' is not declared</div>}</td>
                 <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
                 <td>
@@ -361,10 +365,6 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                   {c?.type && types[c.type] && <button className="link small" onClick={() => onOpenType(c.type)}>open</button>}
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
-                <td>
-                  <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
-                  {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
-                </td>
                 <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
                 <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
               </tr>
