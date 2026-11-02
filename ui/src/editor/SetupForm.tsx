@@ -374,6 +374,77 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       </table>
     );
   };
+  /** A stage's components: one row per role its lab stages offer, ticked when the test uses it. Ticking
+   * adds a component for that role (with a datapack type extending the role's lab type), unticking
+   * removes it. Components of the stage with another role follow. */
+  const stageTable = (stage: string) => {
+    const st = stageType(stage);
+    const labRoles: [string, string][] = Object.entries<any>(ctx.lab.stage_type_roles?.[st] || {});
+    const inStage = Object.keys(comps).filter((id) => comps[id]?.stage === stage);
+    const byRole = (r: string) => inStage.find((id) => comps[id]?.role === r);
+    const others = inStage.filter((id) => !labRoles.some(([r]) => r === comps[id]?.role));
+    const typeFor = (labType: string, role: string) => Object.entries(types).find(([, t]) => t?.extends === labType)?.[0] || `${slug(role)}_app`;
+    const tick = (role: string, labType: string, on: boolean) => update((d) => {
+      const c = d.configurations[name];
+      c.components ||= {};
+      if (!on) {
+        for (const [id, x] of Object.entries<any>(c.components)) if (x?.stage === stage && x?.role === role) delete c.components[id];
+        return;
+      }
+      d.component_types ||= {};
+      const t = typeFor(labType, role);
+      if (!d.component_types[t]) d.component_types[t] = { extends: labType, configurations: { standard: { inputs: [] } } };
+      const id = freeName(slug(role), Object.keys(c.components));
+      c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
+    });
+    const cells = (id: string) => {
+      const c = comps[id];
+      const labType = types[c?.type]?.extends;
+      const roleType = ctx.lab.stage_type_roles?.[st]?.[c?.role];
+      const mismatch = labType && roleType && !(ctx.lab.types[roleType]?.chain || []).includes(labType);
+      return (
+        <>
+          <td><code>{id}</code></td>
+          <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
+          <td>
+            <Combo value={c?.type} onChange={(v) => setComp(id, "type", v)} choices={typeOptions} strict />
+            {mismatch && <div className="error-text small">the lab's {c.role} is a {roleType}, not a {labType}</div>}
+            {c?.type && types[c.type] && <button className="link small" onClick={() => onOpenType(c.type)}>open</button>}
+          </td>
+          <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={Object.keys(types[c?.type]?.configurations || {}).map((x) => ({ value: x }))} strict /></td>
+          <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+        </>
+      );
+    };
+    if (!labRoles.length && !others.length) return <p className="muted small">No lab stage of this type, so no component to pick.</p>;
+    return (
+      <table className="grid compact components">
+        <thead><tr><th className="tick" /><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th></tr></thead>
+        <tbody>
+          {labRoles.map(([role, labType]) => {
+            const id = byRole(role);
+            return (
+              <tr key={role} className={id ? "" : "unused"}>
+                <td className="tick"><input type="checkbox" checked={!!id} title={id ? "the test uses it: untick to drop it" : "tick to use it"} onChange={(e) => tick(role, labType, e.target.checked)} /></td>
+                <td>{role}<div className="muted small"><code>{labType}</code></div></td>
+                {id ? cells(id) : <td colSpan={5} className="muted small">not used by this test</td>}
+              </tr>
+            );
+          })}
+          {others.map((id) => (
+            <tr key={id}>
+              <td className="tick"><button className="icon" title="remove" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
+              <td>
+                <Combo value={comps[id]?.role} onChange={(v) => setComp(id, "role", v)} choices={roleChoices(ctx, { stageType: st, labType: types[comps[id]?.type]?.extends })} />
+                <div className="error-text small">{comps[id]?.role ? "no lab stage of this type has this role" : "no role"}</div>
+              </td>
+              {cells(id)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
   return (
     <div>
       <div className="form-title">
@@ -414,15 +485,25 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                 <Combo value={st} onChange={(v) => update((d) => (d.configurations[name].stages[s] = { type: v }))} choices={stageTypeChoices(ctx)} />
                 {!ctx.lab.stage_type_roles?.[st] && <div className="error-text small">no lab stage of this type</div>}
               </Field>
-              {componentsTable(inStage, s)}
-              <button className="small" onClick={() => addComponent(s)}>+ Component</button>
+              {stageTable(s)}
             </Section>
           );
         })}
         <button className="small" onClick={() => update((d) => {
-          d.configurations[name].stages ||= {};
+          // a new logical stage uses every role of its lab stages: untick the ones the test does not need
+          const c = d.configurations[name];
+          c.stages ||= {};
+          c.components ||= {};
+          d.component_types ||= {};
           const type = stageTypeChoices(ctx)[0]?.value || "";
-          d.configurations[name].stages[freeName(slug(type || "stage"), Object.keys(stages))] = { type };
+          const stage = freeName(slug(type || "stage"), Object.keys(stages));
+          c.stages[stage] = { type };
+          for (const [role, labType] of Object.entries<any>(ctx.lab.stage_type_roles?.[type] || {})) {
+            const t = Object.entries<any>(d.component_types).find(([, x]) => x?.extends === labType)?.[0] || `${slug(role)}_app`;
+            d.component_types[t] ||= { extends: labType, configurations: { standard: { inputs: [] } } };
+            const id = freeName(slug(role), Object.keys(c.components));
+            c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
+          }
         })}>+ Logical stage</button>
       </Section>
       <Section title="Ad hoc components" help={help(["configurations", "_", "components"])}

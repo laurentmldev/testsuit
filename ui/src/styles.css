@@ -340,6 +340,10 @@ details.palette-group[open] { display: flex; }
 
 /* tables inside forms: room for their inputs */
 .form-body { overflow-x: auto; }
+table.components tr.unused td { opacity: 0.6; }
+table.components tr.unused td:first-child { opacity: 1; }
+table.grid td > input[type="checkbox"] { width: auto; min-width: 0; border: none; padding: 0; margin: 6px 0 0; }
+table.components .tick { width: 1%; white-space: nowrap; }
 table.grid td > input, table.grid td > .combo, table.grid td > select { min-width: 110px; }
 .nav-item { flex-wrap: wrap; }
 .template-side .preview { white-space: pre; word-break: normal; }
