@@ -1,6 +1,6 @@
 // Lab inventory form (sequencer README, sections 6 and 13.2): stages, their components, ad hoc components
 // and their variables, with the component types, roles and stage types of the lab and the tests at hand.
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Text, useHelp, type Choice } from "../fields";
 import { attempt, classes, freeName, Markdown, slug } from "../util";
@@ -322,6 +322,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
 
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
   return <input className="inline-name" value={v} onChange={(e) => setV(e.target.value.replace(/[^\w.-]/g, "_"))} onBlur={() => onChange(v)} onKeyDown={(e) => e.key === "Enter" && onChange(v)} key={value} />;
 }
 

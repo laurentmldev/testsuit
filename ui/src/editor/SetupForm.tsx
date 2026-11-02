@@ -164,6 +164,7 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
   const lab = t.extends ? ctx.lab.types[t.extends] : null;
   const usedBy = Object.entries<any>((doc.data?.configurations) || {}).flatMap(([c, cfg]) => Object.entries<any>(cfg?.components || {}).filter(([, comp]) => comp?.type === name).map(([id]) => `${id} (${c})`));
   const [newName, setNewName] = useState(name);
+  useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const configs: Record<string, any> = t.configurations || {};
   const sources = sourceChoices(session, doc, doc.data || {});
   return (
@@ -322,6 +323,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   });
   const typeOptions: Choice[] = Object.entries(types).map(([t, def]) => ({ value: t, description: `extends \`${def?.extends || "?"}\` · configurations ${Object.keys(def?.configurations || {}).join(", ")}` }));
   const [newName, setNewName] = useState(name);
+  useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const aliased = Object.entries<any>(data.configurations).some(([other, c]) => other !== name && JSON.stringify(c) === JSON.stringify(cfg));
   return (
     <div>

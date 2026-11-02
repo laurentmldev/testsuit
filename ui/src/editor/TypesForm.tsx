@@ -1,6 +1,6 @@
 // Component type library form (sequencer README, section 7): each type with what it inherits, its own
 // commands, status probe, self-test and transport.
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, Section, Tags, Text } from "../fields";
 import { classes, freeName, Markdown, slug } from "../util";
 import { CommandEditor, CommandsEditor, summary } from "./commands";
@@ -77,14 +77,14 @@ export function TypesForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         </div>
       </div>
       <div className="form-main">
-        {sel && types[sel] ? <TypeForm name={sel} value={types[sel]} onChange={(v) => setType(sel, v)} onRename={(to) => rename(sel, to)}
+        {sel && types[sel] ? <TypeForm key={sel} name={sel} value={types[sel]} onChange={(v) => setType(sel, v)} onRename={(to) => rename(sel, to)}
           onDelete={() => {
             if (!window.confirm(`Delete type ${sel}?${ctx.lab.types[sel]?.used_by?.length ? ` It is used by ${ctx.lab.types[sel].used_by.join(", ")}.` : ""}`)) return;
             setType(sel, undefined);
             setSel(null);
           }} /> : <p className="muted">Pick a type, or add one.</p>}
       </div>
-      {creating && <NewType taken={Object.keys(ctx.lab.types)} onClose={() => setCreating(false)} onCreate={(name, body) => {
+      {creating && <NewType taken={[...new Set([...Object.keys(ctx.lab.types), ...Object.keys(types)])]} onClose={() => setCreating(false)} onCreate={(name, body) => {
         setType(name, body);
         setSel(name);
         setCreating(false);
@@ -123,6 +123,7 @@ function TypeForm({ name, value, onChange, onRename, onDelete }: { name: string;
   const parent = t.extends ? ctx.lab.types[t.extends] : null;
   const inherited: Record<string, any> = parent ? Object.fromEntries(Object.entries<any>(parent.commands).map(([c, i]) => [c, { spec: i.spec, from: i.from }])) : {};
   const [newName, setNewName] = useState(name);
+  useEffect(() => setNewName(name), [name]);         // another type picked, or created
   return (
     <div>
       <div className="form-title">
