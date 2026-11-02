@@ -131,6 +131,10 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
                 </table>
                 <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
               </Field>
+              <button className="small danger" onClick={() => {
+                if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
+                update((d) => d.datarepositories[i].datasources.splice(j, 1));
+              }}>Remove data source</button>
             </div>
           ))}
           <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources ||= []).push({ id: "source", importer: "git", source: "", datasets: [] })))}>+ Data source</button>
