@@ -35,11 +35,15 @@ export function EditorHome() {
         {(home.data?.repositories || []).map((r: any) => (
           <div key={r.id} className="card repo">
             <div className="card-head"><strong>{r.label}</strong></div>
-            <div className="muted small mono">{r.folder}</div>
-            <div className="small">
-              {r.git ? <>commit <code>{r.git.commit?.slice(0, 10)}</code>{r.git.tag && <> · tag <code>{r.git.tag}</code></>}{r.git.branch && <> · branch {r.git.branch}</>}{r.git.repo && <> · from <code>{r.git.repo}</code></>}</>
-                : <span className="error-text">not a git work tree: the Editor needs one</span>}
-            </div>
+            <div className="muted small mono repo-folder" title={r.folder}>{r.folder}</div>
+            {r.git ? (
+              <dl className="repo-git small">
+                <dt>commit</dt><dd><code title={r.git.commit}>{r.git.commit?.slice(0, 10)}</code>{r.git.clean === false && <span className="muted"> (local changes)</span>}</dd>
+                {r.git.tag && <><dt>tag</dt><dd><code>{r.git.tag}</code></dd></>}
+                {r.git.branch && <><dt>branch</dt><dd><code>{r.git.branch}</code></dd></>}
+                {r.git.repo && <><dt>from</dt><dd><code title={r.git.repo}>{r.git.repo}</code></dd></>}
+              </dl>
+            ) : <div className="small error-text">not a git work tree: the Editor needs one</div>}
             <div className="card-actions">
               <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
                 onChange={(e) => setBranch({ ...branch, [r.id]: e.target.value })} title="Branch the session works on and pushes to" />
