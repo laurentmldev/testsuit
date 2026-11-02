@@ -1,0 +1,105 @@
+@startuml data_model
+!pragma layout smetana
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam ArrowColor #555555
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide circle
+hide empty members
+
+package "Lab side (lab repository, lab operators)" as labside {
+  class "Lab" as Lab {
+    one per sequencer
+  }
+  class "Stage" as Stage {
+    unit of reservation
+  }
+  class "Stage type" as StageType
+  class "Component" as Component {
+    host, transport, remote root
+    role, lock mode
+    monitored state
+  }
+  class "Lab component type" as LabType {
+    commands, status probe, self-test
+  }
+  class "Built-in base type\n(component, linux_system)" as BaseType
+  class "Command" as Command {
+    run, signal, wait_for
+    or a plugin step type
+  }
+}
+
+package "Tests side (tests repositories, test authors)" as testside {
+  class "Test definition\n(testdef.yml)" as TestDef
+  class "Setup file" as Setup
+  class "Setup configuration" as SetupConf
+  class "Logical stage" as LStage {
+    stage type
+  }
+  class "Logical component" as LComp {
+    role
+  }
+  class "Datapack component type" as DpType {
+    inputs (template, copy, generate)
+  }
+  class "Dictionary" as Dict {
+    keys
+  }
+  class "Pipeline" as Pipeline
+  class "Phase" as Phase {
+    steps, finally
+  }
+  class "Step" as Step {
+    do, run, python,
+    wait_for, uses
+  }
+  class "Sub-pipeline" as SubPipe
+}
+
+package "Sequencer (runs)" as runside {
+  class "Datapack (zip)" as Datapack {
+    inputs, resolved keys, baseline
+  }
+  class "Run" as Run {
+    binding, locks
+    state, verdict
+  }
+  class "Results datapack" as Results {
+    outputs, logs, baseline
+  }
+}
+
+Lab "1" *-- "*" Stage
+Lab "1" *-- "*" Component
+Stage "*" o-- "*" Component : specific or shared;\nad hoc: no stage
+Stage "*" --> "1" StageType
+Component "*" --> "1" LabType : tsq_type
+LabType --> LabType : extends
+LabType --|> BaseType
+LabType "1" *-- "*" Command
+
+TestDef "*" --> "1" Setup
+TestDef "1" *-- "1" Pipeline
+TestDef "*" --> "*" Dict
+Setup "1" *-- "*" SetupConf
+Setup "1" *-- "*" DpType
+SetupConf "1" *-- "*" LStage
+SetupConf "1" *-- "*" LComp
+LComp "*" --> "0..1" LStage : in
+LComp "*" --> "1" DpType
+DpType --|> LabType : extends
+DpType "1" *-- "*" Command : adds or overrides
+Pipeline "1" *-- "*" Phase
+Phase "1" *-- "*" Step
+Step --> SubPipe : uses
+Step --> LComp : on
+Phase --> LStage : locks
+
+Datapack --> TestDef : built from\n(one setup configuration)
+Run "*" --> "1" Datapack : activates
+LStage ..> Stage : bound to at activation\n(same stage type), locked
+LComp ..> Component : bound to at activation\n(same role), locked
+Run "1" --> "0..1" Results : packs
+@enduml
