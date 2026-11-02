@@ -358,3 +358,4 @@ table.grid td > input, table.grid td > .combo, table.grid td > select { min-widt
 button .spinner { width: 11px; height: 11px; vertical-align: -1px; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.editor-home .in-place { display: flex; align-items: center; gap: 6px; color: var(--muted); }

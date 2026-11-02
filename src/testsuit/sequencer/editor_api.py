@@ -39,7 +39,7 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.post("/edit/sessions", status_code=201)
     async def open_session(body: dict):
-        s = await run(editor.open, str(body.get("repo") or "lab"), body.get("branch"))
+        s = await run(editor.open, str(body.get("repo") or "lab"), body.get("branch"), bool(body.get("local")))
         return editor.describe(s)
 
     @app.get("/edit/sessions/{sid}")

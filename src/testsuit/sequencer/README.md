@@ -249,7 +249,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | Term | Meaning |
 |---|---|
 | **Editor mode** | the part of the web UI that edits the lab and tests repositories (`server.editor`, section 13.2). |
-| **editing session** | a scratch git clone of one repository, on one branch, where the Editor writes: a **lab session** edits the inventory and types, a **workspace session** (one of `server.workspaces`) edits setups, test definitions, sub-pipelines, dictionaries and templates. |
+| **editing session** | a scratch git clone of one repository, on one branch, where the Editor writes (or, **in place**, the folder itself): a **lab session** edits the inventory and types, a **workspace session** (one of `server.workspaces`) edits setups, test definitions, sub-pipelines, dictionaries and templates. |
 | **context** | what the Editor's menus and help are built from: the types with their commands, roles, stage types, setups, test definitions and installed plugins, read again after each save. A lab session uses its own files; a workspace session uses the running lab. |
 | **palette** | in the pipeline graph, what a step can do on each logical component: its commands, with where each comes from, plus the generic and plugin step types. |
 | **flattened view** | the whole pipeline with sub-pipelines expanded and every command resolved for a setup configuration, as the run will see it. |
@@ -925,7 +925,7 @@ tsq config                                                  # settings in use, a
 - `GET /events` (Server-Sent Events: run and component state changes, log lines);
 - `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`: the run graph of the UI);
 - Editor mode only (section 13.2):
-  - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository), `GET|DELETE /edit/sessions/{id}`;
+  - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository, or `local: true` to edit it in place), `GET|DELETE /edit/sessions/{id}`;
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `PUT` of `data` merges it into the file, keeping its comments), `POST .../rename`;
   - helpers: `GET .../context` (lab types, roles, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
@@ -947,7 +947,13 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 
 An optional mode of the same UI, enabled with `server.editor` (off by default, since it writes files). It edits the YAML files the CLI tools read, and adds nothing the files cannot express: whatever it does can also be done with a text editor and git.
 
-**Where it works.** The Editor never edits the sequencer's own lab folder. Each editing session works in a scratch clone of the repository being edited (the lab repository, or one of `server.workspaces`), on the branch it was opened on, so that a half-done change never reaches the running lab.
+**Where it works.** By default an editing session works in a scratch clone of the repository being edited (the lab repository, or one of `server.workspaces`), on the branch it was opened on, so that a half-done change never reaches the running lab.
+
+**In place.** A session can instead edit the folder itself (`in place (no clone)` on the Editor home, `"local": true` on `POST /edit/sessions`):
+- The files are saved where the sequencer reads them. A lab change still applies only on **Reload**; a test definition is used the next time a datapack is generated.
+- The folder need not be a git work tree. When it is, the session works on the checked-out branch, and review and push commit and push only the edited folder, in the user's name: other changes of that working copy are left alone. From a detached HEAD (a lab on a tag) nothing can be pushed.
+- Rebase replays the working copy's own commits on the upstream branch; it never drops them.
+- One in-place session per repository at a time; opening it again returns the same session. Closing it keeps the files.
 
 **Lab inventory.**
 - Forms for stages, ad hoc components and their variables, with a YAML view next to them.
@@ -1038,7 +1044,7 @@ src/testsuit/sequencer/
   results.py          # results datapack, large files, fetch.txt
   transports/         # local, ssh (AsyncSSH, SFTP), process groups and pid files
   api.py              # FastAPI app; serves the web UI under /ui
-  editor.py           # Editor mode: sessions on scratch clones, file kinds, checks, helpers, generate, push, rebase
+  editor.py           # Editor mode: sessions on scratch clones or in place, file kinds, checks, helpers, generate, push, rebase
   editor_api.py       # its REST routes (server.editor)
   editor_schemas.py   # JSON Schemas of the files, with help, filled with the lab's choices
   yamledit.py         # YAML written back keeping comments, key order and layout

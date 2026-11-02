@@ -7,6 +7,7 @@ const INTRO = `The Editor changes the YAML files the sequencer and the datapack 
 
 - Each **editing session** works in a scratch clone of a repository, on a branch: half-done changes never reach the running lab.
 - Forms fill the files for you, with the choices the lab and the tests offer, and keep your comments and layout.
+- **In place** edits the folder itself instead of a clone: the sequencer's copy, with whatever else it holds. Use it for a folder that is not a git work tree, or to work on your own checkout; closing such a session keeps the files.
 - **Review and push** commits your changes in your name and pushes them, with credentials used for that push only.
 - A pushed lab change is applied only when you click **Reload** (\`tsq lab reload --pull\`). Test definitions are used the next time a datapack is generated.`;
 
@@ -14,15 +15,17 @@ export function EditorHome() {
   const home = useResource<any>("edit");
   const [branch, setBranch] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [inPlace, setInPlace] = useState<Record<string, boolean>>({});
   if (home.error) return <div className="page"><div className="error-box">{home.error}</div></div>;
-  const open = async (repo: string) => {
+  const open = async (repo: string, plain = false) => {
     setBusy(repo);
-    const s = await attempt(() => post("edit/sessions", { repo, branch: branch[repo] || null }));
+    const local = plain || !!inPlace[repo];
+    const s = await attempt(() => post("edit/sessions", { repo, branch: local ? null : branch[repo] || null, local }));
     setBusy(null);
     if (s) navigate(`edit/${s.id}`);
   };
   const close = async (s: any) => {
-    if (s.changed && !window.confirm(`Session ${s.id} has ${s.changed} changed file(s) that were not pushed. Close it and drop them?`)) return;
+    if (!s.local && s.changed && !window.confirm(`Session ${s.id} has ${s.changed} changed file(s) that were not pushed. Close it and drop them?`)) return;
     await attempt(() => del(`edit/sessions/${s.id}`), "session closed");
     home.refresh();
   };
@@ -44,12 +47,16 @@ export function EditorHome() {
                 {r.git.branch && <><dt>branch</dt><dd><code>{r.git.branch}</code></dd></>}
                 {r.git.repo && <><dt>from</dt><dd><code title={r.git.repo}>{r.git.repo}</code></dd></>}
               </dl>
-            ) : <div className="small error-text">not a git work tree: the Editor needs one</div>}
+            ) : <div className="small muted">not a git work tree: it can only be edited in place</div>}
+            <label className="small in-place" title="Edit the folder itself, without a clone: changes are saved where the sequencer reads them">
+              <input type="checkbox" checked={!r.git || !!inPlace[r.id]} disabled={!r.git}
+                onChange={(e) => setInPlace({ ...inPlace, [r.id]: e.target.checked })} /> in place (no clone)
+            </label>
             <div className="card-actions">
-              <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
-                onChange={(e) => setBranch({ ...branch, [r.id]: e.target.value })} title="Branch the session works on and pushes to" />
-              <button className="primary" disabled={!r.git || busy === r.id} onClick={() => open(r.id)}>
-                {busy === r.id ? <><span className="spinner" aria-hidden="true" />Cloning…</> : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
+              {r.git && !inPlace[r.id] && <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
+                onChange={(e) => setBranch({ ...branch, [r.id]: e.target.value })} title="Branch the session works on and pushes to" />}
+              <button className="primary" disabled={busy === r.id} onClick={() => open(r.id, !r.git)}>
+                {busy === r.id ? <><span className="spinner" aria-hidden="true" />{!r.git || inPlace[r.id] ? "Opening…" : "Cloning…"}</> : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
               </button>
             </div>
           </div>
@@ -62,8 +69,8 @@ export function EditorHome() {
           {(home.data?.sessions || []).map((s: any) => (
             <tr key={s.id}>
               <td><a href={`#/edit/${s.id}`}><strong>{s.repo === "lab" ? "Lab" : s.folder}</strong></a> <span className="muted small">{s.id}</span></td>
-              <td>branch {s.branch}</td>
-              <td>{s.changed ? `${s.changed} changed file(s)` : "no change"}</td>
+              <td>{s.local && <span className="badge info">in place</span>} {s.git === false ? "files only" : `branch ${s.branch || "detached"}`}</td>
+              <td>{s.changed == null ? "" : s.changed ? `${s.changed} changed file(s)` : "no change"}</td>
               <td>{s.pushed?.length ? `${s.pushed.length} push(es), last ${ago(s.pushed[s.pushed.length - 1].at)}` : ""}</td>
               <td className="muted">opened {ago(s.created_at)}</td>
               <td><button className="small" onClick={() => navigate(`edit/${s.id}`)}>Open</button> <button className="small" onClick={() => close(s)}>Close</button></td>
