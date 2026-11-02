@@ -2,8 +2,8 @@
 // with their inputs and commands, and the configurations: logical stages and components bound by role.
 import { useEffect, useState } from "react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
-import { attempt, classes, freeName, Markdown, relPath, slug } from "../util";
+import { Choices, Combo, Dialog, Field, helpText, IdText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { CommandsEditor } from "./commands";
 import { clone, roleChoices, stageTypeChoices, typeChoices, useSession, type Doc } from "./state";
 
@@ -84,7 +84,7 @@ function General({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d: 
   return (
     <div>
       <h3>Setup</h3>
-      <Field label="Id" help={help(["id"])}><Text value={data.id} onChange={(v) => update((d) => (d.id = slug(v)))} /></Field>
+      <Field label="Id" help={help(["id"])}><IdText value={data.id} onChange={(v) => update((d) => (d.id = v))} /></Field>
       <Field label="Name" help={help(["name"])}><Text value={data.name} onChange={(v) => update((d) => (d.name = v || undefined))} /></Field>
       <Field label="Key files" help={help(["dictionaries"])} wide
         hint={<>Templates allowed: <code>{"platforms/{{ testdef.setup_config }}.yml"}</code> picks a file per configuration (what a platform changes, such as addresses).</>}>
@@ -107,13 +107,13 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
       {repos.map((repo, i) => (
         <Section key={i} title={`Repository ${repo.id || i + 1}`} actions={<button className="small danger" onClick={() => update((d) => d.datarepositories.splice(i, 1))}>Remove</button>}>
           <div className="inline-fields">
-            <Field label="Id"><Text value={repo.id} onChange={(v) => update((d) => (d.datarepositories[i].id = slug(v)))} /></Field>
+            <Field label="Id"><IdText value={repo.id} onChange={(v) => update((d) => (d.datarepositories[i].id = v))} /></Field>
             <Field label="Local folder" help={help(["datarepositories", 0, "path"])}><Text mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} /></Field>
           </div>
           {(repo.datasources || []).map((src: any, j: number) => (
             <div key={j} className="sub-form">
               <div className="inline-fields">
-                <Field label="Source id"><Text value={src.id} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].id = slug(v)))} /></Field>
+                <Field label="Source id"><IdText value={src.id} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].id = v))} /></Field>
                 <Field label="Importer" help={help(["datarepositories", 0, "datasources", 0, "importer"])}><Combo value={src.importer} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].importer = v))} choices={importers} /></Field>
               </div>
               <Field label="Read from" help={help(["datarepositories", 0, "datasources", 0, "source"])}><Text mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} /></Field>
@@ -122,7 +122,7 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
                   <tbody>
                     {(src.datasets || []).map((ds: any, k: number) => (
                       <tr key={k}>
-                        <td><input value={ds.id || ""} placeholder="id" onChange={(e) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].id = slug(e.target.value)))} /></td>
+                        <td><IdText value={ds.id} placeholder="id" onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].id = v))} /></td>
                         <td><input className="mono" value={ds.version || ""} placeholder="version, e.g. {{ sw_version }}" onChange={(e) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].version = e.target.value))} /></td>
                         <td><button className="icon" onClick={() => update((d) => d.datarepositories[i].datasources[j].datasets.splice(k, 1))}>×</button></td>
                       </tr>
@@ -170,8 +170,8 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
   return (
     <div>
       <div className="form-title">
-        <h3>Datapack type <input className="inline-name" key={name} value={newName} onChange={(e) => setNewName(slug(e.target.value))} onBlur={() => {
-          if (!newName || newName === name || newName in (doc.data.component_types || {})) return;
+        <h3>Datapack type <input className={classes("inline-name", newName !== name && idProblem(newName, Object.keys(doc.data.component_types || {})) && "invalid")} key={name} value={newName} onChange={(e) => setNewName(idInput(e.target.value))} onBlur={() => {
+          if (newName === name || idProblem(newName, Object.keys(doc.data.component_types || {}))) return setNewName(name);
           update((d) => {
             d.component_types = Object.fromEntries(Object.entries(d.component_types).map(([k, v]) => [k === name ? newName : k, v]));
             for (const cfg of Object.values<any>(d.configurations || {})) for (const comp of Object.values<any>(cfg?.components || {})) if (comp?.type === name) comp.type = newName;
@@ -300,7 +300,7 @@ function NewDatapackType({ data, onClose, onCreate }: { data: any; onClose: () =
   return (
     <Dialog title="New datapack component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, { extends: base, configurations: { standard: { inputs: [] } } })}>Create</button>}>
       <Field label="Runs on" help="The lab type the component binds to (it must be that type, or derive from it). Its commands are inherited."><Combo value={base} onChange={setBase} choices={typeChoices(ctx)} strict onPick={(b) => setName(freeName(`${b}_app`, taken))} /></Field>
-      <Field label="Name" help="What the component is in the test (`pilot_app`, `exploit`)." error={taken.includes(name) ? "already used" : null}><Text value={name} onChange={(v) => setName(slug(v))} /></Field>
+      <Field label="Name" help="What the component is in the test (`pilot_app`, `exploit`)." error={idProblem(name, taken)}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
     </Dialog>
   );
 }
@@ -448,8 +448,8 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   return (
     <div>
       <div className="form-title">
-        <h3>Configuration <input className="inline-name" key={name} value={newName} onChange={(e) => setNewName(slug(e.target.value))} onBlur={() => {
-          if (!newName || newName === name || newName in data.configurations) return;
+        <h3>Configuration <input className={classes("inline-name", newName !== name && idProblem(newName, Object.keys(data.configurations)) && "invalid")} key={name} value={newName} onChange={(e) => setNewName(idInput(e.target.value))} onBlur={() => {
+          if (newName === name || idProblem(newName, Object.keys(data.configurations))) return setNewName(name);
           update((d) => (d.configurations = Object.fromEntries(Object.entries(d.configurations).map(([k, v]) => [k === name ? newName : k, v]))));
           onRenamed(newName);
         }} /></h3>
@@ -570,7 +570,7 @@ function FromLab({ data, config, onClose, onApply }: { data: any; config: string
             setStageType(v);
             setLogical(freeName(slug(v), Object.keys(cfg.stages || {})));
           }} choices={stageTypeChoices(ctx).filter((c) => stageTypes.includes(c.value))} /></Field>
-          <Field label="Logical stage id" help="The name the pipeline phases use (`stages: [train]`)."><Text value={logical} onChange={(v) => setLogical(slug(v))} /></Field>
+          <Field label="Logical stage id" help="The name the pipeline phases use (`stages: [train]`)."><Text value={logical} onChange={(v) => setLogical(idInput(v))} invalid={!!idProblem(logical)} /></Field>
         </>
       )}
       <table className="grid compact">

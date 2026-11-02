@@ -1,8 +1,8 @@
 // Component type library form (sequencer README, section 7): each type with what it inherits, its own
 // commands, status probe, self-test and transport.
 import { useState, useEffect } from "react";
-import { Choices, Combo, Dialog, Field, helpText, Section, Tags, Text } from "../fields";
-import { classes, freeName, Markdown, slug } from "../util";
+import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text } from "../fields";
+import { classes, freeName, idInput, idProblem, Markdown } from "../util";
 import { CommandEditor, CommandsEditor, summary } from "./commands";
 import { clone, transportChoices, typeChoices, useSession, type Doc } from "./state";
 
@@ -103,8 +103,8 @@ function NewType({ taken, onClose, onCreate }: { taken: string[]; onClose: () =>
     <Dialog title="New component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
       <Field label="Start from"><Choices value={starter} onChange={(v) => v && setStarter(v)} choices={STARTERS.map((x) => ({ value: x.id, label: x.label, description: x.description }))} /></Field>
       {starter === "derived" && <Field label="Type to extend"><Combo value={base} onChange={setBase} choices={typeChoices(ctx)} strict /></Field>}
-      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`)." error={taken.includes(name) ? "already a type" : null}>
-        <Text value={name} onChange={(v) => setName(slug(v))} />
+      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`)." error={idProblem(name, taken)}>
+        <Text value={name} onChange={(v) => setName(idInput(v))} />
       </Field>
     </Dialog>
   );
@@ -127,7 +127,8 @@ function TypeForm({ name, value, onChange, onRename, onDelete }: { name: string;
   return (
     <div>
       <div className="form-title">
-        <h3>Type <input className="inline-name" value={newName} onChange={(e) => setNewName(slug(e.target.value))} onBlur={() => onRename(newName)} key={name} /></h3>
+        <h3>Type <input className={classes("inline-name", newName !== name && idProblem(newName, Object.keys(ctx.lab.types || {})) && "invalid")} value={newName} onChange={(e) => setNewName(idInput(e.target.value))}
+          onBlur={() => (newName === name || idProblem(newName, Object.keys(ctx.lab.types || {})) ? setNewName(name) : onRename(newName))} key={name} /></h3>
         <button className="small danger" onClick={onDelete}>Delete</button>
       </div>
       <Field label="Extends" help={help(["extends"])}>
@@ -223,7 +224,7 @@ function SelftestEditor({ value, onChange, inherited }: { value: any[] | undefin
             </tr>,
             open === i && (
               <tr key={i + "e"} className="editing"><td colSpan={4}>
-                <Field label="Id"><Text value={c.id} onChange={(v) => set(i, { ...c, id: slug(v) })} /></Field>
+                <Field label="Id"><IdText value={c.id} taken={list.map((x) => x.id)} onChange={(v) => set(i, { ...c, id: v })} /></Field>
                 <CommandEditor name={c.id} spec={c} onChange={(v) => set(i, { id: c.id, ...v })} />
               </td></tr>
             ),

@@ -6,9 +6,9 @@ import {
   applyEdgeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
-import { attempt, classes, freeName, Markdown, notify, relPath, slug } from "../util";
+import { attempt, classes, freeName, idInput, idProblem, Markdown, notify, relPath, slug } from "../util";
 import { ExpectEditor, PythonEditor, pythonSummary, summary, WaitForEditor } from "./commands";
 import { clone, useSession, useTestKeys, type Doc } from "./state";
 
@@ -413,7 +413,7 @@ function GroupDialog({ subs, onClose, onGroup }: { subs: Record<string, any>; on
   return (
     <Dialog title="Group into a sub-pipeline" onClose={onClose} footer={<button className="primary" disabled={!name || name in subs} onClick={() => onGroup(name)}>Group</button>}>
       <Markdown text="The selected steps become a sub-pipeline, and a `uses` step takes their place: it needs what they needed from outside, and the steps that needed them now need it. Their own `needs` between them stay." />
-      <Field label="Name" error={name in subs ? "already a sub-pipeline" : null}><Text value={name} onChange={(v) => setName(slug(v))} /></Field>
+      <Field label="Name" error={idProblem(name, Object.keys(subs))}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
     </Dialog>
   );
 }
@@ -540,7 +540,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
   ]);
   return (
     <div className="step-form">
-      <Field label="Id" help={help("id")}><Text value={step.id} onChange={(v) => v && set("id", slug(v))} /></Field>
+      <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} /></Field>
       <Field label="On" help={help("for_each")}>
         <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no component" choices={[
           { value: "component", label: "a component" }, { value: "all", label: "every component", description: "of the phase, in parallel" },

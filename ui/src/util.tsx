@@ -195,6 +195,20 @@ export function Badge({ value, title }: { value?: string | null; title?: string 
   );
 }
 
+/** What the user types in an id field, as an id: lower case, other characters as "_". Unlike slug(),
+ * nothing is trimmed and nothing is made up, so an empty field stays empty (and shows as invalid). */
+export function idInput(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
+}
+
+/** Why an id is not usable, or null. */
+export function idProblem(id: string, taken: Iterable<string> = []): string | null {
+  if (!id) return "required";
+  if (!/[a-z0-9]/.test(id)) return "letters or digits needed";
+  if ([...taken].includes(id)) return "already used";
+  return null;
+}
+
 export function slug(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "item";
 }

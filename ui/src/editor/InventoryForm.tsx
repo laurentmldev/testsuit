@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Text, useHelp, type Choice } from "../fields";
-import { attempt, classes, freeName, Markdown, slug } from "../util";
+import { attempt, classes, freeName, idInput, idProblem, Markdown, slug } from "../util";
 import { CommandsEditor, summary } from "./commands";
 import { clone, roleChoices, stageTypeChoices, transportChoices, typeChoices, useSession, type Doc } from "./state";
 
@@ -460,7 +460,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
           }
         }} allowNone="nothing (empty stage)" choices={stages.map((s) => ({ value: s.name, description: `${s.vars.tsq_stage_type}: ${s.hosts.join(", ")}` }))} />
       </Field>
-      <Field label="Name" error={taken.includes(name) ? "already used" : null}><Text value={name} onChange={(v) => setName(slug(v))} /></Field>
+      <Field label="Name" error={idProblem(name, taken)}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
       <Field label="Stage type" help="What datapacks ask for (`stages: {train: {type: ...}}`)."><Combo value={type} onChange={setType} choices={stageTypeChoices(ctx)} /></Field>
       {plan.length > 0 && (
         <table className="grid compact">
@@ -468,7 +468,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
           <tbody>
             {plan.map((p) => (
               <tr key={p.from}><td>{p.from}</td><td>{p.role}</td>
-                <td>{p.shared ? <span>{p.to} <span className="badge info">shared</span></span> : <input value={names[p.from] ?? p.to} onChange={(e) => setNames({ ...names, [p.from]: slug(e.target.value) })} />}</td></tr>
+                <td>{p.shared ? <span>{p.to} <span className="badge info">shared</span></span> : <input value={names[p.from] ?? p.to} className={classes(idProblem(names[p.from] ?? p.to) && "invalid")} onChange={(e) => setNames({ ...names, [p.from]: idInput(e.target.value) })} />}</td></tr>
             ))}
           </tbody>
         </table>
