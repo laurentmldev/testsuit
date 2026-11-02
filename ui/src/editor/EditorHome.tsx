@@ -5,9 +5,9 @@ import { ago, attempt, Markdown, navigate, Spinner } from "../util";
 
 const INTRO = `The Editor changes the YAML files the sequencer and the datapack tool read, and nothing else: whatever it does can also be done with a text editor and git.
 
-- Each **editing session** works in a scratch clone of a repository, on a branch: half-done changes never reach the running lab.
+- Each **editing session** works on one repository, in place or in a scratch clone on a branch, where half-done changes never reach the running lab.
 - Forms fill the files for you, with the choices the lab and the tests offer, and keep your comments and layout.
-- **In place** edits the folder itself instead of a clone: the sequencer's copy, with whatever else it holds. Use it for a folder that is not a git work tree, or to work on your own checkout; closing such a session keeps the files.
+- **In place**, ticked by default, edits the folder itself instead of a clone: the sequencer's copy, with whatever else it holds; closing such a session keeps the files. Untick it to work in a scratch clone on a branch (git work trees only).
 - **Review and push** commits your changes in your name and pushes them, with credentials used for that push only.
 - A pushed lab change is applied only when you click **Reload** (\`tsq lab reload --pull\`). Test definitions are used the next time a datapack is generated.`;
 
@@ -19,7 +19,7 @@ export function EditorHome() {
   if (home.error) return <div className="page"><div className="error-box">{home.error}</div></div>;
   const open = async (repo: string, plain = false) => {
     setBusy(repo);
-    const local = plain || !!inPlace[repo];
+    const local = plain || (inPlace[repo] ?? true);
     const s = await attempt(() => post("edit/sessions", { repo, branch: local ? null : branch[repo] || null, local }));
     setBusy(null);
     if (s) navigate(`edit/${s.id}`);
@@ -49,14 +49,14 @@ export function EditorHome() {
               </dl>
             ) : <div className="small muted">not a git work tree: it can only be edited in place</div>}
             <label className="small in-place" title="Edit the folder itself, without a clone: changes are saved where the sequencer reads them">
-              <input type="checkbox" checked={!r.git || !!inPlace[r.id]} disabled={!r.git}
+              <input type="checkbox" checked={!r.git || (inPlace[r.id] ?? true)} disabled={!r.git}
                 onChange={(e) => setInPlace({ ...inPlace, [r.id]: e.target.checked })} /> in place (no clone)
             </label>
             <div className="card-actions">
-              {r.git && !inPlace[r.id] && <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
+              {r.git && !(inPlace[r.id] ?? true) && <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
                 onChange={(e) => setBranch({ ...branch, [r.id]: e.target.value })} title="Branch the session works on and pushes to" />}
               <button className="primary" disabled={busy === r.id} onClick={() => open(r.id, !r.git)}>
-                {busy === r.id ? <><span className="spinner" aria-hidden="true" />{!r.git || inPlace[r.id] ? "Opening…" : "Cloning…"}</> : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
+                {busy === r.id ? <><span className="spinner" aria-hidden="true" />{!r.git || (inPlace[r.id] ?? true) ? "Opening…" : "Cloning…"}</> : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
               </button>
             </div>
           </div>
