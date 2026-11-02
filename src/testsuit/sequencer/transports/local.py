@@ -45,6 +45,12 @@ class LocalTransport(Transport):
                     code = None
                 process.done.set_result(Result(code, process.text(), error=f"killed by {signal}" if signal else None,
                                                signal=signal))
+            except asyncio.CancelledError:
+                # The loop is shutting down (tsqd stopping, asyncio.run ending): close the process's
+                # transport now. Left to the garbage collector, it would be closed after the loop,
+                # which fails with 'Event loop is closed'.
+                proc._transport.close()
+                raise
             except Exception as e:                       # pragma: no cover - defensive
                 if not process.done.done():
                     process.done.set_result(Result(None, process.text(), error=f"transport: {e}"))

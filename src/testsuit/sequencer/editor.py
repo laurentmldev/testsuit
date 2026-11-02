@@ -1,8 +1,13 @@
 """Editor mode (README section 13.2): editing sessions on scratch clones, checks, helpers, push.
 
 An editing session is a clone of the repository holding the lab folder, or one of
-``server.workspaces``, in ``<storage.root>/editor/<session>/repo``. The sequencer's own lab
-folder is never written: a change reaches the lab when it is pushed, then reloaded on demand.
+``server.workspaces``, in ``<storage.root>/editor/<session>/repo``: the sequencer's own copy is not
+written, and a change reaches the lab when it is pushed, then reloaded on demand.
+
+An *in-place* session (``local``) edits the folder itself instead, without a clone: the files are
+saved where the sequencer reads them, with whatever else that working copy holds. The folder need
+not be a git work tree; when it is, review and push commit and push from it. A lab change still
+applies only on ``tsq lab reload``. One in-place session per repository at a time.
 
 Everything the Editor does can be done with a text editor and git: it reads and writes the same
 YAML files, and keeps them as written (``yamledit``).
@@ -82,10 +87,13 @@ class EditSession:
     upstream: str | None
     created_at: str = field(default_factory=now)
     pushed: list[dict] = field(default_factory=list)
+    local: bool = False             # in place: edits the folder itself, no clone
+    local_root: str = ""            # in place: the git work tree root, or the folder when it is not in one
+    git: bool = True                # in place: whether local_root is a git work tree
 
     @property
     def root(self) -> Path:
-        return Path(self.dir) / "repo"
+        return Path(self.local_root) if self.local else Path(self.dir) / "repo"
 
     @property
     def folder(self) -> Path:
@@ -177,7 +185,9 @@ class Editor:
                 return repo
         raise SequencerError(f"no repository '{repo_id}' (lab, or workspace0.. from server.workspaces)")
 
-    def open(self, repo_id: str, branch: str | None = None) -> EditSession:
+    def open(self, repo_id: str, branch: str | None = None, local: bool = False) -> EditSession:
+        if local:
+            return self._open_in_place(repo_id, branch)
         repo = self._repo(repo_id)
         source = Path(repo["folder"])
         src_root = _repo_root(source)
@@ -212,6 +222,49 @@ class Editor:
         self._save(session)
         return session
 
+    def _open_in_place(self, repo_id: str, branch: str | None) -> EditSession:
+        """A session on the folder itself. The one already open on that repository is returned as is."""
+        for existing in self.sessions.values():
+            if existing.local and existing.repo == repo_id:
+                if branch and branch != existing.branch:
+                    raise SequencerError(f"an in-place session works on the checked-out branch "
+                                         f"('{existing.branch or 'detached'}'), not '{branch}'")
+                return existing
+        repo = self._repo(repo_id)
+        source = Path(repo["folder"]).resolve()
+        if not source.is_dir():
+            raise SequencerError(f"no folder '{source}'")
+        try:
+            root, git = _repo_root(source).resolve(), True
+        except SequencerError:
+            root, git = source, False
+        current = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip() if git else ""
+        if branch and branch != current:
+            raise SequencerError(f"an in-place session works on the checked-out branch ('{current or 'detached'}'), "
+                                 f"not '{branch}': check it out first, or open a session on a clone")
+        session_id = uuid.uuid4().hex[:8]
+        folder = self.base / session_id
+        folder.mkdir(parents=True)
+        upstream = (_git(root, "remote", "get-url", "origin", check=False).strip() or None) if git else None
+        if git:                                         # datapacks generated here leave their work folder
+            exclude = Path(_git(root, "rev-parse", "--git-path", "info/exclude").strip())
+            exclude = exclude if exclude.is_absolute() else root / exclude
+            if ".current_datapack/" not in (exclude.read_text() if exclude.is_file() else ""):
+                exclude.parent.mkdir(parents=True, exist_ok=True)
+                with open(exclude, "a") as f:
+                    f.write("\n.current_datapack/\n")
+        session = EditSession(id=session_id, repo=repo_id, kind=repo["kind"], source=str(source), dir=str(folder),
+                              sub=source.relative_to(root).as_posix() if source != root else "", branch=current,
+                              base=_git(root, "rev-parse", "HEAD", check=False).strip() if git else "",
+                              upstream=upstream, local=True, local_root=str(root), git=git)
+        self.sessions[session_id] = session
+        self._save(session)
+        return session
+
+    def _need_git(self, session: EditSession) -> None:
+        if not session.git:
+            raise SequencerError(f"'{session.source}' is not a git work tree: there is nothing to review or push")
+
     def _save(self, session: EditSession) -> None:
         (Path(session.dir) / "session.json").write_text(json.dumps(asdict(session), indent=1))
 
@@ -221,12 +274,15 @@ class Editor:
         return self.sessions[session_id]
 
     def close(self, session_id: str) -> None:
+        """Drop the session: its clone, generated datapacks and notes. An in-place session's folder is kept."""
         session = self.sessions.pop(session_id, None)
         if session is not None:
             shutil.rmtree(session.dir, ignore_errors=True)
 
     def describe(self, session: EditSession) -> dict:
-        status = _git(session.root, "status", "--porcelain", "--untracked-files=all", check=False)
+        if not session.git:
+            return {**session.describe(), "changed": None, "head": None}
+        status = _git(session.root, "status", "--porcelain", "--untracked-files=all", "--", session.sub or ".", check=False)
         return {**session.describe(), "changed": len([line for line in status.splitlines() if line.strip()]),
                 "head": _git(session.root, "rev-parse", "HEAD", check=False).strip()}
 
@@ -967,9 +1023,12 @@ class Editor:
     # ── git: diff, push, rebase ──────────────────────────────────────────
 
     def diff(self, session: EditSession) -> dict:
-        _git(session.root, "add", "-A")
-        names = _git(session.root, "diff", "--cached", "--name-status", session.base)
-        patch = _git(session.root, "diff", "--cached", session.base)
+        self._need_git(session)
+        # only the edited folder: an in-place session's working copy may hold other changes, left alone
+        where = ["--", session.sub or "."]
+        _git(session.root, "add", "-A", *where)
+        names = _git(session.root, "diff", "--cached", "--name-status", session.base, *where)
+        patch = _git(session.root, "diff", "--cached", session.base, *where)
         files = [{"status": line.split("\t")[0], "path": line.split("\t")[-1]} for line in names.splitlines() if line]
         ahead = _git(session.root, "rev-list", "--count", f"{session.base}..HEAD").strip()
         return {"files": files, "patch": patch, "branch": session.branch, "base": session.base,
@@ -993,6 +1052,9 @@ class Editor:
         """Commit the session's changes as the user, tag, and push to the session's branch. On a refused
         push nothing is applied: the commit and the tag are undone, the changes stay in the session."""
         credentials = credentials or {}
+        self._need_git(session)
+        if not session.branch:
+            raise SequencerError("the working copy is on no branch (detached HEAD): check out a branch to push from it")
         if not message.strip():
             raise SequencerError("a commit message is needed")
         if not author_name.strip() or not author_email.strip():
@@ -1005,7 +1067,7 @@ class Editor:
         if not diff["files"]:
             raise SequencerError("nothing to push: no change since the session started")
         ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
-        _git(session.root, *ident, "commit", "--quiet", "-m", message)
+        _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
         commit = _git(session.root, "rev-parse", "HEAD").strip()
         if tag:
             _git(session.root, *ident, "tag", "-a", tag, "-m", message)
@@ -1034,15 +1096,28 @@ class Editor:
     def rebase(self, session: EditSession, credentials: dict | None = None) -> dict:
         """Fetch the upstream branch and put the session's changes on top of it."""
         credentials = credentials or {}
+        self._need_git(session)
         result = subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--tags", "origin"],
                                 cwd=session.root, capture_output=True, text=True, timeout=300,
                                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **self._push_env(credentials)})
         if result.returncode:
             return {"ok": False, "error": self._scrub(result.stderr.strip(), credentials)}
         _git(session.root, "add", "-A")
+        before = len(_git(session.root, "stash", "list").splitlines())
         stashed = _git(session.root, "stash", "push", "--quiet", "--include-untracked", "-m", "editor", check=False)
-        has_stash = bool(_git(session.root, "stash", "list").strip())
-        _git(session.root, "reset", "--quiet", "--hard", f"origin/{session.branch}")
+        has_stash = len(_git(session.root, "stash", "list").splitlines()) > before
+        if session.local:
+            # the user's working copy: its own commits are replayed on the upstream branch, never dropped
+            moved = subprocess.run(["git", "rebase", "--quiet", f"origin/{session.branch}"], cwd=session.root,
+                                   capture_output=True, text=True)
+            if moved.returncode:
+                _git(session.root, "rebase", "--abort", check=False)
+                if has_stash:
+                    _git(session.root, "stash", "pop", "--quiet", check=False)
+                return {"ok": False, "error": "the local commits do not apply on the latest revision: "
+                        + (moved.stderr or moved.stdout).strip(), "conflicts": []}
+        else:
+            _git(session.root, "reset", "--quiet", "--hard", f"origin/{session.branch}")
         session.base = _git(session.root, "rev-parse", "HEAD").strip()
         self._save(session)
         conflicts = []

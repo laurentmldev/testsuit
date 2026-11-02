@@ -1,6 +1,7 @@
 """Editor mode of the sequencer (README section 13.2): comment-keeping YAML edits, editing sessions on clones of
 the lab and tests repositories, their checks and helpers, and pushing to the upstream repository."""
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from testsuit.sequencer import yamledit
 from testsuit.sequencer.config import Config
 from testsuit.sequencer.editor import Editor
 from testsuit.sequencer.editor_schemas import schemas
-from testsuit.sequencer.sequencer import Sequencer
+from testsuit.sequencer.sequencer import Sequencer, SequencerError
 
 # ── yamledit ────────────────────────────────────────────────────────────
 
@@ -183,6 +184,55 @@ def test_rejected_push_then_rebase(repos):
     editor.write(second, "setup/globals.yml", content="duration: 1s\nmin_count: 5\n")   # fixed in the YAML view
     assert editor.push(second, "More counts", "Bob", "bob@example.com")["ok"]
     assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml")) == {"duration": "1s", "min_count": 5}
+
+
+def test_in_place_session(repos, tmp_path):
+    editor = repos.editor
+    folder = repos.root / "tests-clone" / "datapack"
+    session = editor.open("workspace0", local=True)
+    assert session.local and session.root == (repos.root / "tests-clone").resolve() and session.branch == "main"
+    assert editor.open("workspace0", local=True).id == session.id          # one in-place session per repository
+    with pytest.raises(SequencerError, match="checked-out branch"):
+        editor.open("workspace0", "other", local=True)
+
+    (repos.root / "tests-clone" / "notes.txt").write_text("mine")               # outside the edited folder
+    editor.write(session, "setup/globals.yml", data={"duration": "2s", "min_count": 4})
+    assert yaml.safe_load((folder / "setup" / "globals.yml").read_text())["duration"] == "2s"   # written in place
+    assert editor.describe(session)["changed"] == 1
+    assert [f["path"] for f in editor.diff(session)["files"]] == ["datapack/setup/globals.yml"]
+    assert editor.push(session, "Longer", "Ada", "ada@example.com")["ok"]
+    assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml"))["duration"] == "2s"
+    assert "notes.txt" in git(repos.root / "tests-clone", "status", "--porcelain")   # not pushed, left as is
+    # someone pushed meanwhile: the push is refused, the rebase replays the working copy on top
+    other = editor.open("workspace0")
+    editor.write(other, "setup/extra.yml", data={"extra": 1})
+    assert editor.push(other, "Extra", "Bob", "bob@example.com")["ok"]
+    editor.write(session, "setup/globals.yml", data={"duration": "2s", "min_count": 6})
+    assert "rebase" in editor.push(session, "More", "Ada", "ada@example.com")["hint"]
+    assert editor.rebase(session)["ok"]
+    assert (folder / "setup" / "extra.yml").is_file()
+    assert editor.push(session, "More", "Ada", "ada@example.com")["ok"]
+    assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml"))["min_count"] == 6
+
+    editor.close(session.id)
+    assert (folder / "setup" / "globals.yml").is_file()                     # closing keeps the folder
+
+    # the lab, checked out on a tag: edited in place, not pushed from a detached HEAD
+    lab = editor.open("lab", local=True)
+    assert lab.branch == "" and editor.kind(lab, "inventory.yml") == "inventory"
+    with pytest.raises(SequencerError, match="detached"):
+        editor.push(lab, "x", "Ada", "ada@example.com")
+
+    # a folder outside git: files only
+    plain = tmp_path / "plain"
+    shutil.copytree(folder, plain)
+    editor.seq.config.server.workspaces.append(str(plain))
+    loose = editor.open("workspace1", local=True)
+    assert not loose.git and editor.describe(loose)["changed"] is None
+    editor.write(loose, "setup/globals.yml", data={"duration": "3s", "min_count": 1})
+    assert "3s" in (plain / "setup" / "globals.yml").read_text()
+    with pytest.raises(SequencerError, match="not a git work tree"):
+        editor.diff(loose)
 
 
 def test_lab_session(repos):

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { del, post, put } from "../api";
 import { HelpPanel, HelpProvider } from "../fields";
 import { CodeEditor } from "../monaco";
-import { attempt, classes, Markdown, navigate, notify, setQuery, type Route } from "../util";
+import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
 import { SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
 import { InventoryForm } from "./InventoryForm";
 import { TypesForm } from "./TypesForm";
@@ -135,15 +135,18 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const session = useSessionData(id, openFile);
   const [allProblems, setAllProblems] = useState<Problem[]>([]);
   const [dialog, setDialog] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const api = useDoc(id, path, (saved) => {
     setAllProblems((all) => [...all.filter((p) => p.file !== saved.path), ...(saved.problems || [])]);
     if (["inventory", "types", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
     session?.refreshFiles();
   });
-  if (!session) return <div className="page muted">Opening the session…</div>;
+  if (!session) return <div className="page"><Spinner className="block" text="Opening the session: reading its files, the lab and the schemas…" /></div>;
   const doc = api.doc;
   const validateAll = async () => {
+    setChecking(true);
     const result = await attempt(() => post(`edit/sessions/${id}/validate`));
+    setChecking(false);
     if (result) {
       setAllProblems(result.problems);
       notify(result.ok ? `no error${result.problems.length ? `, ${result.problems.length} warning(s)` : ""}` : `${result.problems.filter((p: Problem) => p.severity === "error").length} error(s)`, result.ok ? "ok" : "error");
@@ -159,14 +162,17 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
             <div className="session-bar">
               <a href="#/edit" className="muted">Editor</a>
               <strong>{info.repo === "lab" ? "Lab" : `Tests (${info.folder})`}</strong>
-              <span className="muted">branch <code>{info.branch}</code> · {info.changed ? `${info.changed} changed file(s)` : "no change yet"}</span>
+              {info.local && <span className="badge info" title={`Files are saved directly in ${info.source}, where the sequencer reads them. Closing the session keeps them.`}>in place</span>}
+              {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
+                <span className="muted">branch <code>{info.branch || "detached"}</code> · {info.changed ? `${info.changed} changed file(s)` : "no change yet"}</span>
+              )}
               {session.ctx.lab_error && <span className="badge bad" title={session.ctx.lab_error}>the lab files do not load: helpers use the running lab</span>}
               <span className="spacer" />
-              <button onClick={validateAll} title="Check every file, as tsq lab reload and tsq validate would">Check everything</button>
+              <button onClick={validateAll} disabled={checking} title="Check every file, as tsq lab reload and tsq validate would">{checking ? <><span className="spinner" aria-hidden="true" />Checking…</> : "Check everything"}</button>
               {info.kind === "workspace" && <button onClick={() => setDialog("generate")} title="Run the datapack tool on a test definition, as datapack <testdef> would">Generate a datapack</button>}
-              <button className="primary" onClick={() => setDialog("publish")}>Review and push…</button>
+              {info.git !== false && <button className="primary" onClick={() => setDialog("publish")}>Review and push…</button>}
               <button onClick={async () => {
-                if (info.changed && !window.confirm("Close the session and drop the changes that were not pushed?")) return;
+                if (!info.local && info.changed && !window.confirm("Close the session and drop the changes that were not pushed?")) return;
                 await attempt(() => del(`edit/sessions/${id}`));
                 navigate("edit");
               }}>Close</button>
@@ -175,7 +181,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               <FileTree files={session.files} current={path} problems={problems} onNew={() => setDialog("new")} />
               <div className="session-center">
                 {!path && <SessionWelcome session={session} />}
-                {path && !doc && !api.error && <p className="muted pad">Loading {path}…</p>}
+                {path && !doc && !api.error && <div className="pad"><Spinner text={`Loading and checking ${path}…`} /></div>}
                 {path && api.error && !doc && <div className="error-box">{api.error}</div>}
                 {doc && <DocView session={session} doc={doc} view={view} setView={(v) => setQuery("view", v)} api={api} revealLine={revealLine} />}
               </div>
@@ -227,7 +233,7 @@ function SessionWelcome({ session }: { session: Session }) {
       <h3>{lab ? "Editing the lab" : "Editing the tests"}</h3>
       {lab ? (
         <>
-          <p>This session edits a clone of the lab repository. Start with:</p>
+          <p>This session edits {session.info.local ? <>the lab folder in place (<code>{session.info.source}</code>)</> : "a clone of the lab repository"}. Start with:</p>
           <ul>
             {inventory && <li><button className="link" onClick={() => open(inventory)}>the inventory ({inventory})</button>: stages, components, roles</li>}
             {files.filter((f) => f.kind === "types").map((f) => <li key={f.path}><button className="link" onClick={() => open(f.path)}>{f.path}</button>: component types</li>)}
@@ -235,7 +241,7 @@ function SessionWelcome({ session }: { session: Session }) {
         </>
       ) : (
         <>
-          <p>This session edits a clone of a tests repository. Test definitions:</p>
+          <p>This session edits {session.info.local ? <>the tests folder in place (<code>{session.info.source}</code>)</> : "a clone of a tests repository"}. Test definitions:</p>
           <ul>
             {(ctx.workspace?.testdefs || []).map((t: any) => <li key={t.path}><button className="link" onClick={() => open(t.path)}>{t.name || t.id}</button> <span className="muted">{t.path}</span></li>)}
           </ul>
