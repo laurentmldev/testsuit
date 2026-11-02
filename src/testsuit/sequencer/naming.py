@@ -1,5 +1,5 @@
-"""Naming convention (README section 2): ids are in lower case, lab ids start with ``lab_``
-(``lab_calc_pilot``), and lab names (component labels, ``tsq_label``) are in capitals (``CALC-PILOT``).
+"""Naming convention (README section 2): ids are in lower case (``calc_pilot``), and lab names
+(component labels, ``tsq_label``) are in capitals (``CALC-PILOT``).
 
 Lab side: stages, stage types, components (inventory hosts), roles and lab component types. The
 built-in types (``component``, ``linux_system``) keep their names. Test side: setups, test
@@ -10,22 +10,16 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-LAB_PREFIX = "lab_"
-
-
-def is_lab_id(value: str) -> bool:
-    return value.startswith(LAB_PREFIX) and len(value) > len(LAB_PREFIX) and value == value.lower()
-
 
 def lab_warnings(inventory, types=None) -> list[str]:
-    """Lab ids of the inventory and its type library not lab_ then lower case, and component labels not
-    in capitals."""
+    """Lab ids of the inventory and its type library not in lower case, and component labels not in
+    capitals."""
     found: list[str] = []
 
     def check(kind: str, value: Any) -> None:
-        if value and not is_lab_id(str(value)):
-            found.append(f"{kind} '{value}' should be '{LAB_PREFIX}' then lower case, like '{LAB_PREFIX}"
-                         f"{str(value).lower().removeprefix(LAB_PREFIX)}' (the convention for lab ids)")
+        if value and str(value) != str(value).lower():
+            found.append(f"{kind} '{value}' should be in lower case, like '{str(value).lower()}' "
+                         f"(the convention for ids)")
 
     for stage in inventory.stages.values():
         check("stage", stage.id)
@@ -49,17 +43,15 @@ def lab_warnings(inventory, types=None) -> list[str]:
 def test_warnings(setup: dict | None = None, configuration: str | None = None, testdef: dict | None = None,
                   phases: Iterable | None = None) -> list[str]:
     """Test ids of a setup (one configuration, or all), a test definition and its phases that are not in
-    lower case, or use the lab_ prefix kept for lab ids."""
+    lower case."""
     found: list[str] = []
 
     def check(kind: str, value: Any) -> None:
         if not value:
             return
         value = str(value)
-        if value.lower().startswith(LAB_PREFIX):
-            found.append(f"{kind} '{value}' starts with '{LAB_PREFIX}', the prefix kept for lab ids")
-        elif value != value.lower():
-            found.append(f"{kind} '{value}' should be in lower case (the convention for test ids)")
+        if value != value.lower():
+            found.append(f"{kind} '{value}' should be in lower case (the convention for ids)")
 
     if setup:
         check("setup", setup.get("id"))

@@ -323,7 +323,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
-  // lab ids start with lab_; an empty or unprefixed name shows red and is not applied
+  // an empty or taken name shows red and is not applied
   const done = () => (labIdProblem(v) ? setV(value) : onChange(v));
   return <input className={classes("inline-name", labIdProblem(v) && "invalid")} value={v} onChange={(e) => setV(labIdInput(e.target.value))} onBlur={done} onKeyDown={(e) => e.key === "Enter" && done()} key={value} />;
 }
@@ -378,7 +378,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         <span className="muted">{stagesOf.length ? `in stage ${stagesOf.map((s) => s.name).join(", ")}` : "ad hoc"}</span>
         <button className="small danger" onClick={remove}>Delete</button>
       </div>
-      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v ? v.toUpperCase() : v)} placeholder={name.replace(/^lab_/, "").toUpperCase()} /></Field>
+      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v ? v.toUpperCase() : v)} placeholder={name.toUpperCase()} /></Field>
       <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])} hint={reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}>
         <div className="with-button">
           <Text mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name} />
@@ -424,7 +424,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
   const taken = groups(inv).map((g) => g.name);
   const [copyFrom, setCopyFrom] = useState<string>(stages[0]?.name || "");
   const source = stages.find((s) => s.name === copyFrom);
-  const [name, setName] = useState(source ? nextName(source.name, taken) : freeName("lab_stage_1", taken));
+  const [name, setName] = useState(source ? nextName(source.name, taken) : freeName("stage_1", taken));
   const [type, setType] = useState(source?.vars.tsq_stage_type || stageTypeChoices(ctx)[0]?.value || "");
   const hosts = allHosts(inv);
   const plan = (source?.hosts || []).map((h) => {

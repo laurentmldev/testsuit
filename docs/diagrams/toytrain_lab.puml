@@ -9,7 +9,7 @@ node "Linux server lab-srv (ad hoc components)" as srv {
   component "simulated piezo sensors\nUSB GPIO adapter" as piezo
 }
 
-rectangle "stage lab_train_1" as stage {
+rectangle "stage train_1" as stage {
   component "switch Auvidea M82" as sw
   component "CALC-Pilot\n10.42.0.10" as pilot
   component "CALC-TM\n10.42.0.11" as tm

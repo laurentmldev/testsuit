@@ -34,7 +34,7 @@ datarepositories:
 component_types:
 
   pilot_app:                                  # CALC-Pilot application
-    extends: lab_arduino_unoq                     # lab type: binds only to an Arduino UNO Q
+    extends: arduino_unoq                     # lab type: binds only to an Arduino UNO Q
     configurations:
       standard:
         inputs:
@@ -42,7 +42,7 @@ component_types:
           - {source: templates/pilot.yml, target: pilot.yml}
 
   telemetry_app:                              # CALC-TM application
-    extends: lab_rpi5
+    extends: rpi5
     configurations:
       standard:
         inputs:
@@ -50,7 +50,7 @@ component_types:
           - {source: templates/telemetry.yml, target: telemetry.yml}
 
   acquisition_app:                            # AU application
-    extends: lab_rpi5
+    extends: rpi5
     configurations:
       standard:
         inputs:
@@ -58,7 +58,7 @@ component_types:
           - {source: templates/acquisition.yml, target: acquisition.yml}
 
   propulsion_sim:
-    extends: lab_toytrain_sim
+    extends: toytrain_sim
     configurations:
       standard:
         inputs:
@@ -68,7 +68,7 @@ component_types:
       start: {run: "{{ remote_root }}/venv/bin/toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml --out {{ component.output_dir }}", detach: true}
 
   piezo_sim:
-    extends: lab_toytrain_sim
+    extends: toytrain_sim
     configurations:
       standard:
         inputs:
@@ -92,12 +92,12 @@ component_types:
 configurations:
   sim_bench: &toytrain_components             # the lab: real calculators, simulated propulsion and sensors
     stages:
-      train: {type: lab_toytrain}                 # bound to lab_train_1 (the only stage of this type)
+      train: {type: toytrain}                 # bound to train_1 (the only stage of this type)
     components:
-      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: lab_pilot}
-      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage: train, role: lab_telemetry}
-      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage: train, role: lab_acquisition}
-      propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: lab_propulsion_sim}
-      piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: lab_piezo_sim}
-      analysis:    {name: Exploitation, type: exploit, configuration: standard, role: lab_sequencer}
+      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
+      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage: train, role: telemetry}
+      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage: train, role: acquisition}
+      propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
+      piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
+      analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}
   emulated: *toytrain_components              # a dev host: everything emulated by local processes (README, emulated mode)

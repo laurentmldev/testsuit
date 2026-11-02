@@ -254,7 +254,7 @@ VARS = {
     "tsq_type": h("Component type (lab type library, section 7): gives the commands, the status probe and the "
                   "self-test. Default `linux_system`.", type="string"),
     "tsq_role": h("Role of the component in its stage: datapacks bind their logical components by role "
-                  "(`role: lab_pilot` binds the host with `tsq_role: lab_pilot` in the stage). Unique within a stage.",
+                  "(`role: pilot` binds the host with `tsq_role: pilot` in the stage). Unique within a stage.",
                   type="string"),
     "tsq_lock": LOCK,
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
@@ -279,7 +279,7 @@ GROUP_VARS = h("Variables of the group. A group with `tsq_stage_type` is a stage
                "components (host variables win).", type=["object", "null"],
                properties={**VARS, "tsq_stage_type": h(
                    "Makes this group a **stage** of that type: datapacks ask for a stage by type "
-                   "(`stages: {train: {type: lab_toytrain}}`) and get any free stage of it.", type="string")})
+                   "(`stages: {train: {type: toytrain}}`) and get any free stage of it.", type="string")})
 
 
 def _group(depth: int) -> dict:
@@ -312,7 +312,7 @@ INVENTORY = {
                                              type=["array", "string"], items={"type": "string"},
                                              examples=[["types/"]])}),
                                "hosts": h("Ad hoc components: in no stage, bound by role on their own "
-                                          "(`role: lab_sequencer` for the analysis on the sequencer host, simulations...).",
+                                          "(`role: sequencer` for the analysis on the sequencer host, simulations...).",
                                           type=["object", "null"], additionalProperties=HOST_VARS)}}},
 }
 

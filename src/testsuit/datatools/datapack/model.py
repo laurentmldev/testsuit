@@ -30,7 +30,7 @@ Setup::
                 postprocess: [finalize]
     component_types:
       pilot_app:
-        extends: lab_arduino_unoq         # for the test sequencer: the lab type it derives from
+        extends: arduino_unoq             # for the test sequencer: the lab type it derives from
         configurations:
           standard:
             inputs:
@@ -48,9 +48,9 @@ Setup::
     configurations:
       sim_bench:
         stages:                           # for the test sequencer: logical stages needed
-          train: {type: lab_toytrain}
+          train: {type: toytrain}
         components:
-          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: lab_pilot}
+          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
           telemetry:
             type: telemetry_app
             configuration: standard
