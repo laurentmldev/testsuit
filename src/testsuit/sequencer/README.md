@@ -15,9 +15,9 @@ Status: implemented: `tsqd`, the REST API, the `tsq` command line, the datapack 
 
 A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
 
-**Data model.** The lab side describes what the lab is made of; the tests side describes what a test needs and does; a run binds the second to the first when it activates a datapack ([Vocabulary](#2-vocabulary) defines each term):
+**Data model, simplified.** A test definition says what a test needs (logical components, each with a role) and what it does (a pipeline of steps). The lab says what exists (stages of components, each with a type that gives its commands). When a run starts, each logical component is bound to a free component with the same role ([Vocabulary](#2-vocabulary) has the full list of terms):
 
-![Data model: lab side, tests side and runs](../../../docs/diagrams/data_model.svg)
+![Data model, simplified](../../../docs/diagrams/data_model.svg)
 
 ## Cheat sheet
 
