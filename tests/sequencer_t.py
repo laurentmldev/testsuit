@@ -508,9 +508,8 @@ def daemon(tmp_path, no_git):
     import socket
     import threading
 
-    import uvicorn
 
-    from testsuit.sequencer.daemon import build
+    from testsuit.sequencer.daemon import build, server as tsqd_server
 
     bench = Bench(tmp_path, stages=1)
     config = bench.config.model_dump(exclude={"file", "given"})
@@ -519,7 +518,7 @@ def daemon(tmp_path, no_git):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    server = tsqd_server(seq, app, "127.0.0.1", port, "warning")
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     import requests
@@ -529,7 +528,7 @@ def daemon(tmp_path, no_git):
             break
         except requests.ConnectionError:
             time.sleep(0.1)
-    yield bench, f"http://127.0.0.1:{port}", config_file
+    yield bench, f"http://127.0.0.1:{port}", config_file, server, thread
     server.should_exit = True
     thread.join(30)
 
@@ -560,7 +559,7 @@ def test_daemon_api_and_cli(daemon, capsys):
     import requests
 
     from testsuit.cli.tsq import main as tsq
-    bench, url, config_file = daemon
+    bench, url, config_file, _, _ = daemon
     zip_path = bench.build()
 
     # submit --follow: steps and logs streamed, the verdict as exit code
@@ -593,6 +592,39 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert tsq(["--server", url, "submit", str(zip_path), "--wait"]) == 0
     assert tsq(["--server", url, "lab", "reload"]) == 0
     assert tsq(["--server", url, "kill", "nope"]) == 2
+
+
+def test_daemon_stops_with_an_event_stream_open(tmp_path, no_git):
+    """Ctrl+C stops tsqd at once even while a browser follows its events (a response that never ends)."""
+    import signal
+    import subprocess
+    import sys
+
+    bench = Bench(tmp_path, stages=1)
+    config_file = write(tmp_path / "tsq.yml", yaml.safe_dump(bench.config.model_dump(exclude={"file", "given"})))
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    proc = subprocess.Popen([sys.executable, "-m", "testsuit.sequencer.daemon", "--config", str(config_file),
+                             "--listen", f"127.0.0.1:{port}", "--log-level", "warning"])
+    try:
+        for _ in range(100):
+            try:
+                stream = socket.create_connection(("127.0.0.1", port), timeout=10)
+                break
+            except OSError:
+                time.sleep(0.1)
+        stream.sendall(b"GET /events HTTP/1.1\r\nHost: tsqd\r\n\r\n")
+        received = b""
+        while b": connected" not in received:          # the headers and the first chunk may come apart
+            chunk = stream.recv(4096)
+            assert chunk, received
+            received += chunk
+        proc.send_signal(signal.SIGINT)
+        proc.wait(8)                                   # uvicorn exits by re-raising the SIGINT
+        stream.close()
+    finally:
+        proc.kill()
 
 
 def test_cli_without_daemon(tmp_path, no_git, capsys):

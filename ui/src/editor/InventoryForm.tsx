@@ -488,7 +488,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
   // the type other components with this role have
   const typeFor = (r: string) => (stageType ? ctx.lab.stage_type_roles?.[stageType]?.[r] : ctx.lab.adhoc_roles?.[r]) || "";
   const [type, setType] = useState(typeFor(roles[0]?.value || ""));
-  const [name, setName] = useState(freeName(slug(roles[0]?.value || "component"), allHosts(inv)));
+  const [name, setName] = useState("");               // the user names the component (its inventory host name)
   const [host, setHost] = useState("");
   const [transport, setTransport] = useState<string | null>(null);
   const taken = allHosts(inv);
@@ -510,11 +510,13 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Combo value={role} onChange={setRole} choices={roles} onPick={(r) => {
           setRole(r);
           if (typeFor(r)) setType(typeFor(r));
-          setName(freeName(slug(r), taken));
         }} />
       </Field>
       <Field label="Type" help="Commands, status probe and self-test come from it."><Combo value={type} onChange={setType} choices={typeChoices(ctx)} strict /></Field>
-      <Field label="Name" error={taken.includes(name) ? "already used" : null}><Text value={name} onChange={(v) => setName(slug(v))} /></Field>
+      <Field label="Id" help="The component's id in the lab (its inventory host name): what runs, logs and `tsq components` show. Letters, digits, `_`, `-` and `.`."
+        error={taken.includes(name) ? "already used" : null}>
+        <Text value={name} onChange={(v) => setName(v.replace(/[^\w.-]/g, "_"))} placeholder={`for example ${freeName(slug(role || "component"), taken)}`} />
+      </Field>
       <Field label="Address" help="IP address or host name (leave empty for localhost with the local transport)."><Text mono value={host} onChange={setHost} /></Field>
       <Field label="Transport"><Choices value={transport} onChange={setTransport} choices={transportChoices(ctx)} allowNone="inherited" /></Field>
     </Dialog>

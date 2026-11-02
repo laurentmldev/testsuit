@@ -6,11 +6,11 @@ import {
   applyEdgeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
 import { attempt, classes, freeName, Markdown, notify, relPath, slug } from "../util";
 import { ExpectEditor, PythonEditor, pythonSummary, summary, WaitForEditor } from "./commands";
-import { clone, useSession, type Doc } from "./state";
+import { clone, useSession, useTestKeys, type Doc } from "./state";
 
 type Scope = { kind: "phase"; index: number } | { kind: "sub"; name: string } | { kind: "settings" } | { kind: "flat" };
 const ACTIONS = ["do", "run", "python", "push", "pull", "delay", "wait_for", "uses"];
@@ -191,6 +191,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
     }).catch((e) => setPaletteError(e.message));
   }, [sid, testdefFor, config]);
   useEffect(loadPalette, [loadPalette, doc.data?.setup_file, doc.data?.setup_config]);
+  const keyItems = useTestKeys(sid, testdefFor, ctx, `${doc.data?.setup_file}|${doc.data?.setup_config}|${(doc.data?.dictionaries || []).join(",")}`);
 
   const subs: Record<string, any> = useMemo(() => {
     const all: Record<string, any> = { ...(palette?.shared_subpipelines || {}), ...(palette?.subpipelines || {}) };
@@ -311,6 +312,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
     : [{ part: "steps", title: `sub-pipeline ${scope.kind === "sub" ? scope.name : ""}`, steps: current("steps") }];
 
   return (
+    <KeysProvider keys={keyItems}>
     <div className="pipeline-editor">
       {scopes}
       {paletteError && <div className="banner warn">{paletteError}: the palette has the generic steps only.</div>}
@@ -402,6 +404,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
         setGrouping(false);
       }} />}
     </div>
+    </KeysProvider>
   );
 }
 
@@ -544,10 +547,10 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           { value: "list", label: "some components", description: "in parallel" }, { value: "role", label: "a role" },
         ]} />
       </Field>
-      {targetMode === "component" && <Field label="Component" help={help("component")}><Combo value={step.component} onChange={(v) => set("component", v)} choices={comps} strict={!isSub} /></Field>}
+      {targetMode === "component" && <Field label="Component" help={help("component")}><Combo keys value={step.component} onChange={(v) => set("component", v)} choices={comps} strict={!isSub} /></Field>}
       {targetMode === "list" && <Field label="Components" help={help("for_each")}><Tags value={step.for_each} onChange={(v) => set("for_each", v)} choices={comps} /></Field>}
       {targetMode === "role" && <Field label="Role"><Combo value={step.for_each} onChange={(v) => set("for_each", v)} choices={roles.map((r) => ({ value: r }))} /></Field>}
-      {targetMode === "expr" && <Field label="for_each" help={help("for_each")}><Text mono value={step.for_each} onChange={(v) => set("for_each", v)} /></Field>}
+      {targetMode === "expr" && <Field label="for_each" help={help("for_each")}><Text keys mono value={step.for_each} onChange={(v) => set("for_each", v)} /></Field>}
       <Field label="Does" help={help(action || "do")}>
         <Choices value={action} onChange={setAction} choices={[
           { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "python", label: "Python" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
@@ -560,15 +563,15 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           <Combo value={step.do} onChange={(v) => set("do", v)} choices={commandChoices} strict={commandChoices.length > 0} />
         </Field>
       )}
-      {action === "run" && <Field label="Command" help={help("run")} wide><Text mono multiline value={step.run} onChange={(v) => set("run", v)} /></Field>}
+      {action === "run" && <Field label="Command" help={help("run")} wide><Text keys mono multiline value={step.run} onChange={(v) => set("run", v)} /></Field>}
       {action === "python" && <PythonEditor value={step.python} onChange={(v) => set("python", v)} uri={`inmemory:///step/${part}/${step.id}.py`}
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "python", ...(f ? [f] : [])])} />}
-      {action === "delay" && <Field label="Duration" help={help("delay")}><Text value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
+      {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withComponent={!step.component} components={comps} />}
       {(action === "push" || action === "pull") && (
         <div className="inline-fields">
-          <Field label="From" help={help(action)}><Text mono value={step[action]?.from} onChange={(v) => set(action, { ...step[action], from: v })} /></Field>
-          <Field label="To"><Text mono value={step[action]?.to} onChange={(v) => set(action, { ...step[action], to: v })} /></Field>
+          <Field label="From" help={help(action)}><Text keys mono value={step[action]?.from} onChange={(v) => set(action, { ...step[action], from: v })} /></Field>
+          <Field label="To"><Text keys mono value={step[action]?.to} onChange={(v) => set(action, { ...step[action], to: v })} /></Field>
         </div>
       )}
       {action === "uses" && (
@@ -589,9 +592,9 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {plugins.includes(action) && <Field label="Options" help="Given to the plugin step type."><KeyValues value={step[action]} onChange={(v) => set(action, v)} /></Field>}
       <Field label="Needs" help={help("needs")}><Tags value={step.needs} onChange={(v) => set("needs", v)} choices={others} /></Field>
       <Section title="Options" collapsed={!(step.if || step.timeout || step.retries || step.expect || step.detach !== undefined || step.continue_on_error || step.env)}>
-        <Field label="Only if" help={help("if")}><Combo mono value={step.if} onChange={(v) => set("if", v)} choices={ifChoices} /></Field>
+        <Field label="Only if" help={help("if")}><Combo keys mono value={step.if} onChange={(v) => set("if", v)} choices={ifChoices} /></Field>
         <div className="inline-fields">
-          <Field label="Timeout" help={help("timeout")}><Text value={step.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
+          <Field label="Timeout" help={help("timeout")}><Text keys value={step.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
           <Field label="Retries" help={help("retries")}><Text value={step.retries} onChange={(v) => set("retries", v ? Number(v) : undefined)} placeholder="0" /></Field>
         </div>
         {(action === "do" || action === "run" || action === "python") && (

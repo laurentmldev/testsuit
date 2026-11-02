@@ -288,6 +288,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                             return
                         yield ": keepalive\n\n"
                         continue
+                    if event is None:                   # the server is stopping
+                        return
                     if event["kind"] == "log" and not logs:
                         continue
                     if run and event.get("run") and not str(event["run"]).startswith(run):

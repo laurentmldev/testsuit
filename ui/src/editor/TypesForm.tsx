@@ -171,7 +171,7 @@ function StatusEditor({ value, onChange, inherited }: { value: any; onChange: (v
       )}
       {s && (
         <>
-          <Field label="Probe command" help={help(["probe"])}><Text mono value={s.probe?.run} onChange={(v) => set("probe", { ...s.probe, run: v })} placeholder="systemctl is-active my-service" /></Field>
+          <Field label="Probe command" help={help(["probe"])}><Text keys mono value={s.probe?.run} onChange={(v) => set("probe", { ...s.probe, run: v })} placeholder="systemctl is-active my-service" /></Field>
           <Field label="Every" help={help(["interval"])}><Text value={s.interval} onChange={(v) => set("interval", v)} placeholder="30s" /></Field>
           <Field label="States" help={help(["states"])} wide>
             <table className="grid compact">

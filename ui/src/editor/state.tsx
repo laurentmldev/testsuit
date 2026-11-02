@@ -1,8 +1,8 @@
 // State shared by the views of an editing session: its files, the helpers of the lab and workspace
 // (context), the schemas, and the document being edited (saved to the scratch clone as you go).
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { get, post, put } from "../api";
-import type { Choice } from "../fields";
+import type { Choice, KeyItem } from "../fields";
 import { notify } from "../util";
 
 export interface Problem {
@@ -228,4 +228,24 @@ function relativeFrom(fromFile: string, to: string): string {
 
 export function clone<T>(x: T): T {
   return x === undefined ? x : JSON.parse(JSON.stringify(x));
+}
+
+// ── keys a field rendered with keys can use (the {{ picker) ──────────────
+
+/** Run-time keys of commands and steps (component.*, run.*, params.*...), with their help. */
+export function runtimeKeyItems(ctx: any): KeyItem[] {
+  return Object.entries<string>(ctx?.runtime_keys || {}).map(([key, help]) => ({ key, help }));
+}
+
+/** The keys of a test definition's datapack (dictionaries, setup), with their values and files, then
+ * the run-time keys. Datapack keys are also keys of its steps at run time. */
+export function useTestKeys(sid: string, testdef: string | null | undefined, ctx: any, refresh?: unknown): KeyItem[] {
+  const [items, setItems] = useState<KeyItem[]>([]);
+  useEffect(() => {
+    if (!testdef) return setItems([]);
+    post(`edit/sessions/${sid}/keys`, { testdef })
+      .then((r: any) => setItems((r.keys || []).map((k: any) => ({ key: k.key, value: k.value, origin: k.origin }))))
+      .catch(() => setItems([]));
+  }, [sid, testdef, refresh]);
+  return useMemo(() => [...items, ...runtimeKeyItems(ctx)], [items, ctx]);
 }

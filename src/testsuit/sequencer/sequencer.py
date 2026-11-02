@@ -98,6 +98,17 @@ class Sequencer:
         if kind in ("component", "run") and self._wake is not None:
             self._wake.set()
 
+    def end_streams(self) -> None:
+        """End the open event streams (GET /events): the server is stopping, and would otherwise wait
+        for these never-ending responses before it exits."""
+        for queue in list(self.subscribers):
+            while True:
+                try:
+                    queue.put_nowait(None)
+                    break
+                except asyncio.QueueFull:
+                    queue.get_nowait()                  # the end matters more than an event nobody will read
+
     def wake(self) -> None:
         if self._wake is not None:
             self._wake.set()

@@ -404,12 +404,18 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
             })}
           </tbody>
         </table>
-        <button className="small" onClick={() => update((d) => {
-          d.configurations[name].components ||= {};
-          const id = freeName("component", Object.keys(comps));
-          const t = Object.keys(types)[0];
-          d.configurations[name].components[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", role: "" };
-        })}>+ Component</button>
+        <button className="small" onClick={() => {
+          // the id is the user's: the name the test definition and its keys use for this component
+          const typed = window.prompt("Id of the new component (as the pipeline and the keys will name it):");
+          const id = slug(typed || "");
+          if (!id) return;
+          if (id in comps) return window.alert(`There is already a component '${id}' in this configuration.`);
+          update((d) => {
+            d.configurations[name].components ||= {};
+            const t = Object.keys(types)[0];
+            d.configurations[name].components[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", role: "" };
+          });
+        }}>+ Component</button>
         <button className="small" onClick={onAddFromLab}>+ Components from the lab…</button>
       </Section>
       <Section title="Command overrides per component" collapsed help={help(["configurations", "_", "components", "_", "commands"])}>
