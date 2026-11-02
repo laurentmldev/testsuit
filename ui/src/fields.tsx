@@ -189,12 +189,12 @@ export function Field({
   );
 }
 
-/** An id field: what is typed is kept as typed (in id characters), and handed to onChange only while
- * it is a valid id (not empty, not taken); otherwise the field shows red and the document keeps the
- * last valid id. */
-export function IdText({ value, onChange, taken = [], placeholder, className, onBlurOnly }: {
+/** An id field: what is typed is kept as typed (in id characters), and handed to onChange when the
+ * field is left or on Enter, if it is a valid id (not empty, not taken). Applying it at each letter
+ * would rename what the form is keyed by, and the field would lose the focus. While invalid, the field
+ * shows red; when left invalid, it goes back to the last valid id. */
+export function IdText({ value, onChange, taken = [], placeholder, className }: {
   value?: string | null; onChange: (id: string) => void; taken?: string[]; placeholder?: string; className?: string;
-  onBlurOnly?: boolean;   // the id is applied when the field is left (or on Enter), not at each letter
 }) {
   const [draft, setDraft] = useState(value || "");
   useEffect(() => setDraft(value || ""), [value]);
@@ -206,11 +206,10 @@ export function IdText({ value, onChange, taken = [], placeholder, className, on
       onChange={(e) => {
         const v = idInput(e.target.value);
         setDraft(v);
-        if (!onBlurOnly && !idProblem(v, others) && v !== value) onChange(v);
       }}
-      onKeyDown={(e) => onBlurOnly && e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       onBlur={() => {
-        if (onBlurOnly && !idProblem(draft, others) && draft !== value) onChange(draft);
+        if (!idProblem(draft, others) && draft !== value) onChange(draft);
         else setDraft(value || "");
       }} />
   );

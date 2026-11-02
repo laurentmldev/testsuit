@@ -542,7 +542,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
   ]);
   return (
     <div className="step-form">
-      <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} onBlurOnly /></Field>
+      <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} /></Field>
       <Field label="On" help={help("for_each")}>
         <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no component" choices={[
           { value: "component", label: "a component" }, { value: "all", label: "every component", description: "of the phase, in parallel" },
