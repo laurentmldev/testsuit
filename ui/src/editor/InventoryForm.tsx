@@ -378,7 +378,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         <span className="muted">{stagesOf.length ? `in stage ${stagesOf.map((s) => s.name).join(", ")}` : "ad hoc"}</span>
         <button className="small danger" onClick={remove}>Delete</button>
       </div>
-      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v ? v.toUpperCase() : v)} placeholder={name.toUpperCase()} /></Field>
+      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v)} placeholder={name} /></Field>
       <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])} hint={reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}>
         <div className="with-button">
           <Text mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name} />

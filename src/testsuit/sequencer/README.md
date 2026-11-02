@@ -197,8 +197,6 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 
 ## 2. Vocabulary
 
-**Naming convention.** Ids are in lower case: stages, stage types, components, roles and lab component types on the lab side (`train_1`, `toytrain`, `calc_pilot`, `pilot`, `rpi5`), and setups, test definitions, configurations, logical stages and components, datapack types, phases and steps on the test side (`sim_bench`, `pilot`, `pilot_app`). Lab names, the component labels (`tsq_label`), are in capitals: `CALC-PILOT`. The Editor applies the convention as you type; `tsq lab status`, the Editor's problems and `tsq validate` warn about ids and labels that break it, and they still load and run.
-
 | Term | Meaning |
 |---|---|
 | **lab** | everything one sequencer manages: all the components and the stages they belong to. One sequencer instance per lab. |

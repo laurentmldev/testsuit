@@ -103,7 +103,7 @@ function NewType({ taken, onClose, onCreate }: { taken: string[]; onClose: () =>
     <Dialog title="New component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
       <Field label="Start from"><Choices value={starter} onChange={(v) => v && setStarter(v)} choices={STARTERS.map((x) => ({ value: x.id, label: x.label, description: x.description }))} /></Field>
       {starter === "derived" && <Field label="Type to extend"><Combo value={base} onChange={setBase} choices={typeChoices(ctx)} strict /></Field>}
-      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`), in lower case." error={labIdProblem(name, taken)}>
+      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`)." error={labIdProblem(name, taken)}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} />
       </Field>
     </Dialog>

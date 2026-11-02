@@ -737,23 +737,3 @@ def test_dead_local_run_recovered(tmp_path, no_git):
     result, locks = asyncio.run(main())
     assert result["state"] == "cancelled" and locks == []
 
-
-def test_naming_convention_warnings():
-    """Ids are in lower case, lab labels in capitals."""
-    from types import SimpleNamespace as NS
-    from testsuit.sequencer.naming import lab_warnings, test_warnings
-    inv = NS(stages={"train_1": NS(id="train_1", type="Toytrain")},
-             components={"calc_pilot": NS(id="calc_pilot", role="pilot", vars={"tsq_label": "CALC-PILOT"}),
-                         "AU": NS(id="AU", role="acquisition", vars={"tsq_label": "Acquisition unit"})})
-    types = NS(types={"linux_system": NS(name="linux_system", source="<builtin>"),
-                      "RPI5": NS(name="RPI5", source="types/x.yml")})
-    found = lab_warnings(inv, types)
-    assert len(found) == 4, found
-    assert any("stage type 'Toytrain'" in w and "'toytrain'" in w for w in found)
-    assert any("component 'AU'" in w and "'au'" in w for w in found)
-    assert any("label 'Acquisition unit'" in w for w in found)
-    assert any("lab type 'RPI5'" in w for w in found)
-    setup = {"id": "toytrain_setup", "component_types": {"Pilot_app": {}},
-             "configurations": {"sim_bench": {"stages": {"lab_train": "x"}, "components": {"pilot": {}}}}}
-    found = test_warnings(setup=setup, testdef={"id": "front_contact"})
-    assert found == ["datapack type 'Pilot_app' should be in lower case (the convention for ids)"], found
