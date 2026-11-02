@@ -18,7 +18,7 @@ export function commandKind(spec: any): string {
 
 export function pythonSummary(py: any): string {
   if (!py || typeof py !== "object") return "";
-  if (py.script) return `${py.script}${(py.args || []).length ? " " + py.args.join(" ") : ""}`;
+  if (py.script) return String(py.script).split("/").pop() || "";
   const first = String(py.code || "").split("\n").find((l) => l.trim() && !l.startsWith("import ")) || "";
   return `code: ${first.trim().slice(0, 40)}`;
 }
