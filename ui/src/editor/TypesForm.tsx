@@ -97,13 +97,13 @@ function NewType({ taken, onClose, onCreate }: { taken: string[]; onClose: () =>
   const { ctx } = useSession();
   const [starter, setStarter] = useState("service");
   const [base, setBase] = useState("linux_system");
-  const [name, setName] = useState(freeName("lab_my_type", taken));
+  const [name, setName] = useState(freeName("my_type", taken));
   const s = STARTERS.find((x) => x.id === starter)!;
   return (
     <Dialog title="New component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
       <Field label="Start from"><Choices value={starter} onChange={(v) => v && setStarter(v)} choices={STARTERS.map((x) => ({ value: x.id, label: x.label, description: x.description }))} /></Field>
       {starter === "derived" && <Field label="Type to extend"><Combo value={base} onChange={setBase} choices={typeChoices(ctx)} strict /></Field>}
-      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`lab_rpi5`, `lab_arduino_unoq`): lab ids start with `lab_`." error={labIdProblem(name, taken)}>
+      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`), in lower case." error={labIdProblem(name, taken)}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} />
       </Field>
     </Dialog>

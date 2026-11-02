@@ -24,7 +24,7 @@ The pilot runs at 0.25 m/s for 5 s, then goes up by steps of +0.1 m/s until it r
 
 ![The toy-train lab](../../docs/diagrams/toytrain_lab.svg)
 
-- **One stage**, `lab_train_1`, holds CALC-Pilot, CALC-TM, AU and the switch. They are locked together.
+- **One stage**, `train_1`, holds CALC-Pilot, CALC-TM, AU and the switch. They are locked together.
 - **The Linux server** hosts three ad hoc components: the sequencer itself, never locked, which also runs the exploitation, and the two simulations.
 - **The simulated propulsion controller** answers on the real controller's address, so the calculators run with exactly the configuration they use on the real train.
 - **The simulated piezo sensors** pulse the AU GPIO inputs through a USB GPIO adapter. A contact can be triggered on a condition on the speed feedback, for example 3 s after full speed is reached.
@@ -50,8 +50,8 @@ src/toytrain/
   cli.py                               the toytrain command
   assets/toytrain_logo.svg             report logo
 lab/                                   owned by the lab operators
-  toytrain_lab.yml                     inventory: stage lab_train_1, ad hoc components on lab-srv
-  types/toytrain.yml                   lab types: lab_arduino_unoq, lab_rpi5, lab_auvidea_m82, lab_toytrain_sim
+  toytrain_lab.yml                     inventory: stage train_1, ad hoc components on lab-srv
+  types/toytrain.yml                   lab types: arduino_unoq, rpi5, auvidea_m82, toytrain_sim
   toytrain_emulated.yml                inventory of the emulated mode: everything on the dev host
   types_emulated/toytrain.yml          the same type names, as local processes
 datapack/                              owned by the test authors
@@ -166,7 +166,7 @@ Before anything else, the sequencer self-tests every component it locks: SSH, ta
 
 The pipeline then has two phases, the first one built from two sub-pipelines.
 
-**test_run** locks the stage `lab_train_1` and the two simulations, then:
+**test_run** locks the stage `train_1` and the two simulations, then:
 1. `bring_up`: deploys every input in parallel, and flashes the CALC-Pilot microcontroller; starts the simulations, then CALC-TM and AU, each waiting for its `READY` log line; starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
 2. lets the scenario run for its duration;
 3. `shut_down`: stops the pilot first, then the rest;
@@ -189,7 +189,7 @@ tsq --config tsq.dev.yml run .work/datapacks/toytrain_front_contact_toytrain_set
 
 What changes, and what does not:
 - **The datapack** is built from the same test definitions and setup. Only the setup configuration differs: `emulated` adds the dictionary `platforms/emulated.yml`, which moves every address to the loopback interface (`127.0.0.10` to `127.0.0.30`). Linux routes all of `127.0.0.0/8` to it, multicast included, so this needs no network setup. Ports and the multicast group are unchanged.
-- **The lab** is `lab/toytrain_emulated.yml`. Its stage `lab_train_emu` has the type `lab_toytrain` and the roles `lab_pilot`, `lab_telemetry` and `lab_acquisition`, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
+- **The lab** is `lab/toytrain_emulated.yml`. Its stage `train_emu` has the type `toytrain` and the roles pilot, telemetry and acquisition, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
 - **The component types** in `lab/types_emulated/` keep the lab's type names. Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
 - **The hardware** is simplified away:
   - the CALC-Pilot microcontroller is replaced by its host stub (`--mcu host`), so flashing only checks the firmware image;

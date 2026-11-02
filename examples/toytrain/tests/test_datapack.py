@@ -85,8 +85,8 @@ def test_sample_datapack(sample_copy, test):
     assert definition["pipeline"]["phases"][0]["stages"] == ["train"]
     assert "{{ scenario.duration_s }}" in str(definition["pipeline"])
     setup = yaml.safe_load((pack / "definition" / "setup.yml").read_text())
-    assert setup["component_types"]["pilot_app"]["extends"] == "lab_arduino_unoq"
-    assert setup["configurations"]["sim_bench"]["components"]["pilot"]["role"] == "lab_pilot"
+    assert setup["component_types"]["pilot_app"]["extends"] == "arduino_unoq"
+    assert setup["configurations"]["sim_bench"]["components"]["pilot"]["role"] == "pilot"
 
     # second run: the datasets are already there, their version is checked instead
     assert datapack(str(testdef), nocheck=True)

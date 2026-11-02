@@ -13,26 +13,26 @@
 
 component_types:
 
-  lab_emulated_app:
+  emulated_app:
     # a toy-train application run as a local process (abstract: not bound by itself)
     extends: linux_system
     commands:
-      start:   {run: "cd {{ component.input_dir }} && exec app/bin/toytrain-{{ component.role | replace('lab_', '') }} --config {{ component.role | replace('lab_', '') }}.yml {{ component.vars.tsq_start_args | default('') }}",
+      start:   {run: "cd {{ component.input_dir }} && exec app/bin/toytrain-{{ component.role }} --config {{ component.role }}.yml {{ component.vars.tsq_start_args | default('') }}",
                 detach: true}
       stop:    {signal: TERM, timeout: 10s}    # then KILL: the default linux_system kill
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
-      version: {run: "{{ component.input_dir }}/app/bin/toytrain-{{ component.role | replace('lab_', '') }} --version"}
+      version: {run: "{{ component.input_dir }}/app/bin/toytrain-{{ component.role }} --version"}
     # state: the linux_system default (running while its process is alive, idle otherwise)
 
-  lab_arduino_unoq:
-    extends: lab_emulated_app
+  arduino_unoq:
+    extends: emulated_app
     commands:
       install: {run: "{{ component.input_dir }}/app/bin/toytrain-install --mcu host --input {{ component.input_dir }}"}   # checks the firmware image only
 
-  lab_rpi5:
-    extends: lab_emulated_app
+  rpi5:
+    extends: emulated_app
 
-  lab_toytrain_sim:
+  toytrain_sim:
     # the same simulations as on the lab server, from the same release
     extends: linux_system
     commands:
