@@ -51,7 +51,6 @@ class Lab:
 
     @property
     def warnings(self) -> list[str]:
-        from testsuit.sequencer.naming import lab_warnings
         problems = []
         if self.git is None:
             problems.append(f"lab folder '{self.folder}' is not a git work tree")
@@ -60,7 +59,7 @@ class Lab:
                 problems.append(f"lab folder '{self.folder}' has local changes")
             if self.require_tag and not self.git["tag"]:
                 problems.append(f"lab folder '{self.folder}' is not on a tag")
-        return problems + lab_warnings(self.inventory, self.types)
+        return problems
 
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,

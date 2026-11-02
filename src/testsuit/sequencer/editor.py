@@ -622,10 +622,6 @@ class Editor:
                         line, column = _find_line(text, problem)
                         problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
                                          "message": f"setup {setup['id']} ({cfg_name}), in {folder.name}: {problem}"})
-        from testsuit.sequencer.naming import lab_warnings
-        for problem in lab_warnings(lab.inventory, lab.types):
-            line, column = _find_line(text, problem)
-            problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning", "message": problem})
         for comp in lab.inventory.components.values():
             if not comp.role and not comp.adhoc:
                 line, column = _find_line(text, f"'{comp.id}'")
@@ -690,10 +686,6 @@ class Editor:
         for problem in flat["problems"]:
             line, column = _find_line(text, problem)
             problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
-        from testsuit.sequencer.naming import test_warnings
-        for problem in test_warnings(testdef=raw, phases=pipeline.phases):
-            line, column = _find_line(text, problem)
-            problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
         return problems
 
     def check_setup(self, session: EditSession, rel: str) -> list[dict]:
@@ -748,10 +740,6 @@ class Editor:
                          if name else yamledit.locate(text, ["configurations", cfg_name])) or (1, 1)
                 problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                  "message": f"{cfg_name}: {problem}"})
-        from testsuit.sequencer.naming import test_warnings
-        for problem in test_warnings(setup=raw):
-            line, column = _find_line(text, problem)
-            problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
         return problems
 
     def check_subpipelines(self, session: EditSession, rel: str, text: str) -> list[dict]:

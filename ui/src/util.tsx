@@ -195,16 +195,16 @@ export function Badge({ value, title }: { value?: string | null; title?: string 
   );
 }
 
-/** What the user types in an id field, as an id: lower case, other characters as "_". Unlike slug(),
+/** What the user types in an id field, as an id: other characters than letters, digits and "_" as "_". Unlike slug(),
  * nothing is trimmed and nothing is made up, so an empty field stays empty (and shows as invalid). */
 export function idInput(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
+  return text.replace(/[^A-Za-z0-9_]+/g, "_");
 }
 
-/** The same for a lab id (stage, component, lab type, stage type, role): lower case, and components
- * (inventory host names) may also have "." and "-". Lab names (labels) are in capitals. */
+/** The same for a lab id (stage, component, lab type, stage type, role): components (inventory host
+ * names) may also have "." and "-". */
 export function labIdInput(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9_.-]+/g, "_");
+  return text.replace(/[^A-Za-z0-9_.-]+/g, "_");
 }
 
 /** A lab id for a name. */
