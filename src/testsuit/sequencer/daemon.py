@@ -62,15 +62,32 @@ def main(argv=None) -> int:
     parser.add_argument("--log-level", default="info")
     args = parser.parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    import uvicorn
     try:
         seq, app = build(args.config)
     except SequencerError as e:
         print(f"tsqd: {e}", file=sys.stderr)
         return 2
     host, _, port = (args.listen or seq.config.server.listen).rpartition(":")
-    uvicorn.run(app, host=host or "127.0.0.1", port=int(port), log_level=args.log_level.lower())
+    serve(seq, app, host or "127.0.0.1", int(port), args.log_level.lower())
     return 0
+
+
+def server(seq, app, host: str, port: int, log_level: str = "info"):
+    """The uvicorn server of tsqd. On Ctrl+C or SIGTERM it ends the open event streams first: uvicorn
+    waits for every response to finish before it stops, and an event stream never finishes by itself.
+    Requests still running after 10 s are cancelled."""
+    import uvicorn
+
+    class Server(uvicorn.Server):
+        async def shutdown(self, sockets=None):
+            seq.end_streams()
+            await super().shutdown(sockets)
+
+    return Server(uvicorn.Config(app, host=host, port=port, log_level=log_level, timeout_graceful_shutdown=10))
+
+
+def serve(seq, app, host: str, port: int, log_level: str = "info") -> None:
+    server(seq, app, host, port, log_level).run()
 
 
 if __name__ == "__main__":
