@@ -7,43 +7,105 @@ skinparam classAttributeIconSize 0
 skinparam packageStyle rectangle
 hide circle
 hide empty members
+skinparam class {
+  BackgroundColor #F2F2F2
+  BorderColor #9A9A9A
+  FontColor #555555
+  AttributeFontColor #777777
+}
 
-package "Tests side (test authors)" as testside {
-  class "Test definition" as TestDef
-  class "Setup configuration" as SetupConf
-  class "Logical component" as LComp {
-    role, inputs
+package "Lab side (lab repository, lab operators)" as labside {
+  class "Lab" as Lab {
+    one per sequencer
   }
-  class "Pipeline" as Pipeline {
-    phases of steps
+  class "Stage" as Stage #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    unit of reservation
+  }
+  class "Stage type" as StageType
+  class "Component" as Component #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    host, transport, remote root
+    role, lock mode
+    monitored state
+  }
+  class "Lab component type" as LabType #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    commands, status probe, self-test
+  }
+  class "Built-in base type\n(component, linux_system)" as BaseType
+  class "Command" as Command {
+    run, signal, wait_for
+    or a plugin step type
   }
 }
 
-package "Lab side (lab operators)" as labside {
-  class "Stage" as Stage
-  class "Component" as Component {
-    host, role
+package "Tests side (tests repositories, test authors)" as testside {
+  class "Test definition\n(testdef.yml)" as TestDef #DCE9FA;line:3A78C2;line.bold;text:1F4E8C
+  class "Setup file" as Setup
+  class "Setup configuration" as SetupConf #DCE9FA;line:3A78C2;line.bold;text:1F4E8C
+  class "Logical stage" as LStage {
+    stage type
   }
-  class "Component type" as Type {
-    commands: deploy, start,
-    stop, collect...
+  class "Logical component" as LComp #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    role
+  }
+  class "Datapack component type" as DpType {
+    inputs (template, copy, generate)
+  }
+  class "Dictionary" as Dict {
+    keys
+  }
+  class "Pipeline" as Pipeline #DCE9FA;line:3A78C2;line.bold;text:1F4E8C
+  class "Phase" as Phase {
+    steps, finally
+  }
+  class "Step" as Step {
+    do, run, python,
+    wait_for, uses
+  }
+  class "Sub-pipeline" as SubPipe
+}
+
+package "Sequencer (runs)" as runside {
+  class "Datapack (zip)" as Datapack #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    inputs, resolved keys, baseline
+  }
+  class "Run" as Run #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+    binding, locks
+    state, verdict
+  }
+  class "Results datapack" as Results {
+    outputs, logs, baseline
   }
 }
 
-class "Datapack" as Datapack
-class "Run" as Run {
-  verdict, results
-}
+Lab "1" *-- "*" Stage
+Lab "1" *-- "*" Component
+Stage "*" o-[#3A78C2]- "*" Component : specific or shared;\nad hoc: no stage
+Stage "*" --> "1" StageType
+Component "*" -[#3A78C2]-> "1" LabType : tsq_type
+LabType --> LabType : extends
+LabType --|> BaseType
+LabType "1" *-- "*" Command
 
-TestDef *-- SetupConf
-TestDef *-- Pipeline
-SetupConf *-- "*" LComp
-Pipeline --> LComp : steps run\ncommands on
+TestDef "*" --> "1" Setup
+TestDef "1" *-[#3A78C2]- "1" Pipeline
+TestDef "*" --> "*" Dict
+Setup "1" *-- "*" SetupConf
+Setup "1" *-- "*" DpType
+SetupConf "1" *-- "*" LStage
+SetupConf "1" *-[#3A78C2]- "*" LComp
+LComp "*" --> "0..1" LStage : in
+LComp "*" --> "1" DpType
+DpType --|> LabType : extends
+DpType "1" *-- "*" Command : adds or overrides
+Pipeline "1" *-- "*" Phase
+Phase "1" *-- "*" Step
+Step --> SubPipe : uses
+Step --> LComp : on
+Phase --> LStage : locks
 
-Stage o-- "*" Component
-Component --> Type
-
-Datapack --> TestDef : built from
-Run --> Datapack : runs
-LComp ..> Component : bound by role\nwhen the run starts
+Datapack -[#3A78C2]-> TestDef : built from\n(one setup configuration)
+Run "*" -[#3A78C2]-> "1" Datapack : activates
+LStage ..> Stage : bound to at activation\n(same stage type), locked
+LComp .[#3A78C2].> Component : bound to at activation\n(same role), locked
+Run "1" --> "0..1" Results : packs
 @enduml
