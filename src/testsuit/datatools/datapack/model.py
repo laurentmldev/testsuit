@@ -125,6 +125,7 @@ class ComponentConfiguration(_Model):
 
 class ComponentType(_Model):
     configurations: dict[str, ComponentConfiguration]
+    description: str = ""                    # what the type is (shown in the Editor)
     # for the test sequencer
     extends: str = ""
     commands: dict[str, Any] = Field(default_factory=dict)
