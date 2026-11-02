@@ -951,9 +951,9 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 
 An optional mode of the same UI, enabled with `server.editor` (off by default, since it writes files). It edits the YAML files the CLI tools read, and adds nothing the files cannot express: whatever it does can also be done with a text editor and git.
 
-**Where it works.** By default an editing session works in a scratch clone of the repository being edited (the lab repository, or one of `server.workspaces`), on the branch it was opened on, so that a half-done change never reaches the running lab.
+**Where it works.** An editing session works either in place, on the folder of the repository being edited (the lab repository, or one of `server.workspaces`), or in a scratch clone of it, on the branch it was opened on, so that a half-done change never reaches the running lab. On the Editor home, `in place (no clone)` is ticked by default; untick it for a scratch clone. `POST /edit/sessions` clones unless it is given `"local": true`.
 
-**In place.** A session can instead edit the folder itself (`in place (no clone)` on the Editor home, `"local": true` on `POST /edit/sessions`):
+**In place.** A session that edits the folder itself:
 - The files are saved where the sequencer reads them. A lab change still applies only on **Reload**; a test definition is used the next time a datapack is generated.
 - The folder need not be a git work tree. When it is, the session works on the checked-out branch, and review and push commit and push only the edited folder, in the user's name: other changes of that working copy are left alone. From a detached HEAD (a lab on a tag) nothing can be pushed.
 - Rebase replays the working copy's own commits on the upstream branch; it never drops them.
