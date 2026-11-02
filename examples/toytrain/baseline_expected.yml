@@ -11,6 +11,6 @@ tools:
 run:
   lab: {repo: git@forge.example:toytrain/toytrain-lab.git, tag: "lab-*"}
   components:                     # read with each lab type's 'version' command
-    calc_pilot: {version: "toytrain-pilot 0.3.0"}
-    calc_tm:    {version: "toytrain-telemetry 0.3.0"}
-    au:         {version: "toytrain-acquisition 0.3.0"}
+    lab_calc_pilot: {version: "toytrain-pilot 0.3.0"}
+    lab_calc_tm:    {version: "toytrain-telemetry 0.3.0"}
+    lab_au:         {version: "toytrain-acquisition 0.3.0"}

@@ -201,10 +201,32 @@ export function idInput(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
 }
 
+/** The same for a lab id (stage, component, lab type, stage type, role): by convention "lab_" then lower
+ * case (lab_calc_pilot); test ids are in lower case, without the prefix. Lab names (labels) are in
+ * capitals. Components (inventory host names) may also have "." and "-". */
+export const LAB_PREFIX = "lab_";
+export function labIdInput(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9_.-]+/g, "_");
+}
+
+/** A lab id for a name: lab_ and the name as an id (lab_ is not repeated). */
+export function labId(name: string): string {
+  const id = labIdInput(name).replace(/^_+/, "");
+  return id.startsWith(LAB_PREFIX) ? id : LAB_PREFIX + id;
+}
+
+/** Why a lab id is not usable, or null: as idProblem, and lab ids start with lab_. */
+export function labIdProblem(id: string, taken: Iterable<string> = []): string | null {
+  const problem = idProblem(id, taken);
+  if (problem) return problem;
+  if (!id.startsWith(LAB_PREFIX) || id.length === LAB_PREFIX.length) return `lab ids start with ${LAB_PREFIX}`;
+  return null;
+}
+
 /** Why an id is not usable, or null. */
 export function idProblem(id: string, taken: Iterable<string> = []): string | null {
   if (!id) return "required";
-  if (!/[a-z0-9]/.test(id)) return "letters or digits needed";
+  if (!/[A-Za-z0-9]/.test(id)) return "letters or digits needed";
   if ([...taken].includes(id)) return "already used";
   return null;
 }
