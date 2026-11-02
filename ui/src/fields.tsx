@@ -192,21 +192,27 @@ export function Field({
 /** An id field: what is typed is kept as typed (in id characters), and handed to onChange only while
  * it is a valid id (not empty, not taken); otherwise the field shows red and the document keeps the
  * last valid id. */
-export function IdText({ value, onChange, taken = [], placeholder, className }: {
+export function IdText({ value, onChange, taken = [], placeholder, className, onBlurOnly }: {
   value?: string | null; onChange: (id: string) => void; taken?: string[]; placeholder?: string; className?: string;
+  onBlurOnly?: boolean;   // the id is applied when the field is left (or on Enter), not at each letter
 }) {
   const [draft, setDraft] = useState(value || "");
   useEffect(() => setDraft(value || ""), [value]);
-  const problem = idProblem(draft, taken.filter((t) => t !== value));
+  const others = taken.filter((t) => t !== value);
+  const problem = idProblem(draft, others);
   return (
     <input className={classes("mono", className, problem && "invalid")} value={draft} placeholder={placeholder}
       title={problem ? `not a valid id: ${problem}` : undefined}
       onChange={(e) => {
         const v = idInput(e.target.value);
         setDraft(v);
-        if (!idProblem(v, taken.filter((t) => t !== value)) && v !== value) onChange(v);
+        if (!onBlurOnly && !idProblem(v, others) && v !== value) onChange(v);
       }}
-      onBlur={() => setDraft(value || "")} />
+      onKeyDown={(e) => onBlurOnly && e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      onBlur={() => {
+        if (onBlurOnly && !idProblem(draft, others) && draft !== value) onChange(draft);
+        else setDraft(value || "");
+      }} />
   );
 }
 
