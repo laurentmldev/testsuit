@@ -615,7 +615,11 @@ def test_daemon_stops_with_an_event_stream_open(tmp_path, no_git):
             except OSError:
                 time.sleep(0.1)
         stream.sendall(b"GET /events HTTP/1.1\r\nHost: tsqd\r\n\r\n")
-        assert b": connected" in stream.recv(4096)
+        received = b""
+        while b": connected" not in received:          # the headers and the first chunk may come apart
+            chunk = stream.recv(4096)
+            assert chunk, received
+            received += chunk
         proc.send_signal(signal.SIGINT)
         proc.wait(8)                                   # uvicorn exits by re-raising the SIGINT
         stream.close()
