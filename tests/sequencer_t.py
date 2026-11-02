@@ -534,6 +534,28 @@ def daemon(tmp_path, no_git):
     thread.join(30)
 
 
+def test_local_process_closed_when_the_loop_stops(tmp_path, monkeypatch):
+    """A command still running when its event loop stops has its transport closed with the loop,
+    not later by the garbage collector (which failed with 'Event loop is closed')."""
+    import types
+
+    from testsuit.sequencer.transports.local import LocalTransport
+    started = []
+    spawn = asyncio.create_subprocess_shell
+
+    async def tracked(*args, **kwargs):
+        started.append(await spawn(*args, **kwargs))
+        return started[-1]
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", tracked)
+
+    async def main():
+        transport = LocalTransport(types.SimpleNamespace(host="localhost", vars={}), str(tmp_path))
+        await transport.start("sleep 30")
+        await asyncio.sleep(0.1)
+    asyncio.run(main())
+    assert started and started[0]._transport.is_closing()
+
+
 def test_daemon_api_and_cli(daemon, capsys):
     import requests
 

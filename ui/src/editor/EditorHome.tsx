@@ -1,7 +1,7 @@
 // Editor mode, start page (sequencer README, section 13.2): the repositories it can edit, the editing sessions.
 import { useState } from "react";
 import { del, post, useResource } from "../api";
-import { ago, attempt, Markdown, navigate } from "../util";
+import { ago, attempt, Markdown, navigate, Spinner } from "../util";
 
 const INTRO = `The Editor changes the YAML files the sequencer and the datapack tool read, and nothing else: whatever it does can also be done with a text editor and git.
 
@@ -31,6 +31,7 @@ export function EditorHome() {
       <div className="page-head"><h2>Editor</h2></div>
       <Markdown text={INTRO} className="intro" />
       <h3>Repositories</h3>
+      {!home.data && <Spinner className="block" text="Reading the repositories and their git state…" />}
       <div className="cards">
         {(home.data?.repositories || []).map((r: any) => (
           <div key={r.id} className="card repo">
@@ -48,14 +49,14 @@ export function EditorHome() {
               <input placeholder={r.git?.branch || "branch (default: the upstream default)"} value={branch[r.id] || ""}
                 onChange={(e) => setBranch({ ...branch, [r.id]: e.target.value })} title="Branch the session works on and pushes to" />
               <button className="primary" disabled={!r.git || busy === r.id} onClick={() => open(r.id)}>
-                {busy === r.id ? "Cloning…" : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
+                {busy === r.id ? <><span className="spinner" aria-hidden="true" />Cloning…</> : r.kind === "lab" ? "Edit the lab" : "Edit the tests"}
               </button>
             </div>
           </div>
         ))}
       </div>
       <h3>Editing sessions</h3>
-      {(home.data?.sessions || []).length === 0 && <p className="muted">No session yet.</p>}
+      {home.data && (home.data.sessions || []).length === 0 && <p className="muted">No session yet.</p>}
       <table className="grid">
         <tbody>
           {(home.data?.sessions || []).map((s: any) => (

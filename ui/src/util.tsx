@@ -98,6 +98,15 @@ function inline(text: string, key: number): ReactNode {
   );
 }
 
+/** A small spinning ring, with what is being waited for next to it. */
+export function Spinner({ text, className }: { text?: string; className?: string }) {
+  return (
+    <span className={classes("spinner-line", className)} role="status" aria-live="polite">
+      <span className="spinner" aria-hidden="true" />{text && <span>{text}</span>}
+    </span>
+  );
+}
+
 export function Markdown({ text, className }: { text?: string | null; className?: string }) {
   if (!text) return null;
   const blocks: ReactNode[] = [];
