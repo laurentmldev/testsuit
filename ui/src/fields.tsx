@@ -2,7 +2,7 @@
 // focused or hovered, and its choices come with a description (component types with their commands,
 // roles with the components that have them...).
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { classes, Markdown } from "./util";
+import { classes, idInput, idProblem, Markdown } from "./util";
 
 // ── help panel ──────────────────────────────────────────────────────────
 
@@ -189,11 +189,32 @@ export function Field({
   );
 }
 
+/** An id field: what is typed is kept as typed (in id characters), and handed to onChange only while
+ * it is a valid id (not empty, not taken); otherwise the field shows red and the document keeps the
+ * last valid id. */
+export function IdText({ value, onChange, taken = [], placeholder, className }: {
+  value?: string | null; onChange: (id: string) => void; taken?: string[]; placeholder?: string; className?: string;
+}) {
+  const [draft, setDraft] = useState(value || "");
+  useEffect(() => setDraft(value || ""), [value]);
+  const problem = idProblem(draft, taken.filter((t) => t !== value));
+  return (
+    <input className={classes("mono", className, problem && "invalid")} value={draft} placeholder={placeholder}
+      title={problem ? `not a valid id: ${problem}` : undefined}
+      onChange={(e) => {
+        const v = idInput(e.target.value);
+        setDraft(v);
+        if (!idProblem(v, taken.filter((t) => t !== value)) && v !== value) onChange(v);
+      }}
+      onBlur={() => setDraft(value || "")} />
+  );
+}
+
 export function Text({
-  value, onChange, placeholder, mono, multiline, disabled, onBlur, keys,
+  value, onChange, placeholder, mono, multiline, disabled, onBlur, keys, invalid,
 }: {
   value?: string | number | null; onChange: (v: string) => void; placeholder?: string; mono?: boolean;
-  multiline?: boolean; disabled?: boolean; onBlur?: () => void;
+  multiline?: boolean; disabled?: boolean; onBlur?: () => void; invalid?: boolean;
   keys?: boolean;      // the value is rendered with keys: typing {{ proposes them
 }) {
   const v = value === null || value === undefined ? "" : String(value);
@@ -208,7 +229,7 @@ export function Text({
         <textarea className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
           rows={Math.min(8, Math.max(2, v.split("\n").length))} onChange={change} onBlur={onBlur} />
       ) : (
-        <input className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
+        <input className={classes(mono && "mono", invalid && "invalid")} value={v} placeholder={placeholder} disabled={disabled}
           onChange={change} onBlur={onBlur} />
       )}
       {picker.picker}

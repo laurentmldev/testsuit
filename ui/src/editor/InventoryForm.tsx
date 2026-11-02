@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Text, useHelp, type Choice } from "../fields";
-import { attempt, classes, freeName, Markdown, slug } from "../util";
+import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
 import { CommandsEditor, summary } from "./commands";
 import { clone, roleChoices, stageTypeChoices, transportChoices, typeChoices, useSession, type Doc } from "./state";
 
@@ -277,7 +277,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
       </div>
       {group.stage && (
         <Field label="Stage type" help={help(["all", "children", "_", "vars", "tsq_stage_type"])}>
-          <Combo value={group.vars.tsq_stage_type} onChange={(v) => set("tsq_stage_type", v)} choices={stageTypeChoices(ctx)} />
+          <Combo value={group.vars.tsq_stage_type} onChange={(v) => set("tsq_stage_type", v ? labIdInput(v) : v)} choices={stageTypeChoices(ctx)} />
         </Field>
       )}
       <Section title={`Components (${group.hosts.length})`} help={helpText(schemas.inventory, ["all", "children", "_", "hosts"])}
@@ -323,7 +323,9 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
-  return <input className="inline-name" value={v} onChange={(e) => setV(e.target.value.replace(/[^\w.-]/g, "_"))} onBlur={() => onChange(v)} onKeyDown={(e) => e.key === "Enter" && onChange(v)} key={value} />;
+  // lab ids start with lab_; an empty or unprefixed name shows red and is not applied
+  const done = () => (labIdProblem(v) ? setV(value) : onChange(v));
+  return <input className={classes("inline-name", labIdProblem(v) && "invalid")} value={v} onChange={(e) => setV(labIdInput(e.target.value))} onBlur={done} onKeyDown={(e) => e.key === "Enter" && done()} key={value} />;
 }
 
 function HostForm({ inv, name, update, onRenamed, onDeleted }: {
@@ -376,7 +378,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         <span className="muted">{stagesOf.length ? `in stage ${stagesOf.map((s) => s.name).join(", ")}` : "ad hoc"}</span>
         <button className="small danger" onClick={remove}>Delete</button>
       </div>
-      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v)} placeholder={name} /></Field>
+      <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v ? v.toUpperCase() : v)} placeholder={name.replace(/^lab_/, "").toUpperCase()} /></Field>
       <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])} hint={reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}>
         <div className="with-button">
           <Text mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name} />
@@ -388,7 +390,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           onPick={(v) => setHelp({ title: v, text: ctx.lab.types[v]?.description, extra: <TypeCard name={v} /> })} />
       </Field>
       <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}>
-        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={roleChoices(ctx, stageType ? { stageType } : { adhoc: true })} />
+        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v ? labIdInput(v) : v)} choices={roleChoices(ctx, stageType ? { stageType } : { adhoc: true })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
         <Choices value={vars.tsq_lock} onChange={(v) => set("tsq_lock", v ?? undefined)} allowNone="exclusive (default)" choices={[
@@ -422,7 +424,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
   const taken = groups(inv).map((g) => g.name);
   const [copyFrom, setCopyFrom] = useState<string>(stages[0]?.name || "");
   const source = stages.find((s) => s.name === copyFrom);
-  const [name, setName] = useState(source ? nextName(source.name, taken) : "stage_1");
+  const [name, setName] = useState(source ? nextName(source.name, taken) : freeName("lab_stage_1", taken));
   const [type, setType] = useState(source?.vars.tsq_stage_type || stageTypeChoices(ctx)[0]?.value || "");
   const hosts = allHosts(inv);
   const plan = (source?.hosts || []).map((h) => {
@@ -460,15 +462,15 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
           }
         }} allowNone="nothing (empty stage)" choices={stages.map((s) => ({ value: s.name, description: `${s.vars.tsq_stage_type}: ${s.hosts.join(", ")}` }))} />
       </Field>
-      <Field label="Name" error={taken.includes(name) ? "already used" : null}><Text value={name} onChange={(v) => setName(slug(v))} /></Field>
-      <Field label="Stage type" help="What datapacks ask for (`stages: {train: {type: ...}}`)."><Combo value={type} onChange={setType} choices={stageTypeChoices(ctx)} /></Field>
+      <Field label="Name" error={labIdProblem(name, taken)}><Text value={name} onChange={(v) => setName(labIdInput(v))} /></Field>
+      <Field label="Stage type" help="What datapacks ask for (`stages: {train: {type: ...}}`)."><Combo value={type} onChange={(v) => setType(labIdInput(v))} choices={stageTypeChoices(ctx)} /></Field>
       {plan.length > 0 && (
         <table className="grid compact">
           <thead><tr><th>From</th><th>Role</th><th>New component</th></tr></thead>
           <tbody>
             {plan.map((p) => (
               <tr key={p.from}><td>{p.from}</td><td>{p.role}</td>
-                <td>{p.shared ? <span>{p.to} <span className="badge info">shared</span></span> : <input value={names[p.from] ?? p.to} onChange={(e) => setNames({ ...names, [p.from]: slug(e.target.value) })} />}</td></tr>
+                <td>{p.shared ? <span>{p.to} <span className="badge info">shared</span></span> : <input value={names[p.from] ?? p.to} className={classes(labIdProblem(names[p.from] ?? p.to) && "invalid")} onChange={(e) => setNames({ ...names, [p.from]: labIdInput(e.target.value) })} />}</td></tr>
             ))}
           </tbody>
         </table>
@@ -507,15 +509,15 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
     <Dialog title={stage ? `New component in stage ${stage}` : "New ad hoc component"} onClose={onClose}
       footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={create}>Create the component</button>}>
       <Field label="Role" help={stage ? `Roles the ${stageType} stages have, and those the tests ask for. Unique in the stage.` : "Ad hoc components are bound by role alone: `sequencer` for the analysis on the sequencer host, a simulation…"}>
-        <Combo value={role} onChange={setRole} choices={roles} onPick={(r) => {
+        <Combo value={role} onChange={(v) => setRole(labIdInput(v))} choices={roles} onPick={(r) => {
           setRole(r);
           if (typeFor(r)) setType(typeFor(r));
         }} />
       </Field>
       <Field label="Type" help="Commands, status probe and self-test come from it."><Combo value={type} onChange={setType} choices={typeChoices(ctx)} strict /></Field>
       <Field label="Id" help="The component's id in the lab (its inventory host name): what runs, logs and `tsq components` show. Letters, digits, `_`, `-` and `.`."
-        error={taken.includes(name) ? "already used" : null}>
-        <Text value={name} onChange={(v) => setName(v.replace(/[^\w.-]/g, "_"))} placeholder={`for example ${freeName(slug(role || "component"), taken)}`} />
+        error={name ? labIdProblem(name, taken) : null}>
+        <Text value={name} onChange={(v) => setName(labIdInput(v))} placeholder={`for example ${freeName(labId(role || "component"), taken)}`} />
       </Field>
       <Field label="Address" help="IP address or host name (leave empty for localhost with the local transport)."><Text mono value={host} onChange={setHost} /></Field>
       <Field label="Transport"><Choices value={transport} onChange={setTransport} choices={transportChoices(ctx)} allowNone="inherited" /></Field>

@@ -52,7 +52,7 @@ tsq files $ZIP data/pilot/input               # browse its contents
 ```bash
 tsqd &                                        # or: tsqd --config tsq.dev.yml --log-level debug
 tsq components                                # monitored state, lock mode, holder
-tsq selftest                                  # self-test of the whole lab, or: tsq selftest train_emu
+tsq selftest                                  # self-test of the whole lab, or: tsq selftest lab_train_emu
 ```
 
 **Post a datapack and follow it:**
@@ -104,9 +104,9 @@ tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from anothe
 **Lab operations:**
 
 ```bash
-tsq maintenance train_emu --note "rewiring"   # out of scheduling; tsq resume train_emu brings it back
-tsq hold calc_tm                              # keep a component for yourself; tsq release calc_tm
-tsq release train_emu                         # also frees a lock left by a run (audited)
+tsq maintenance lab_train_emu --note "rewiring"   # out of scheduling; tsq resume lab_train_emu brings it back
+tsq hold lab_calc_tm                              # keep a component for yourself; tsq release lab_calc_tm
+tsq release lab_train_emu                         # also frees a lock left by a run (audited)
 tsq lab reload                                # re-read the inventory; --pull [<rev>] fetches the lab repository first
 ```
 
@@ -197,6 +197,8 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 
 ## 2. Vocabulary
 
+**Naming convention.** Ids are in lower case. Lab ids (stages, stage types, components, roles and lab component types) start with `lab_`: `lab_train_1`, `lab_toytrain`, `lab_calc_pilot`, `lab_pilot`, `lab_rpi5`. Test ids (setups, test definitions, configurations, logical stages and components, datapack types, phases and steps) have no prefix: `sim_bench`, `pilot`, `pilot_app`. Lab names, the component labels (`tsq_label`), are in capitals: `CALC-PILOT`. The built-in types `component` and `linux_system` keep their names. The Editor applies the convention as you type; `tsq lab status`, the Editor's problems and `tsq validate` warn about ids that break it, and they still load and run.
+
 | Term | Meaning |
 |---|---|
 | **lab** | everything one sequencer manages: all the components and the stages they belong to. One sequencer instance per lab. |
@@ -220,8 +222,8 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | **`extends`** | the parent of a type: a type inherits its parent's commands, status and self-test, and overrides or adds some. The chain of parents is the type's **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a type adds (`install`, `feed`...). A command is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | resolved in this order, last wins: the lab type and its parents, the datapack type, the setup component, the stage `tsq_commands`, the host `tsq_commands`, and an inline `run:` in a step (section 7.3). The Editor shows the source of each command. |
-| **role** | the job of a component in a stage (`pilot`, `telemetry`, `lab_network`...), set with `tsq_role`; logical components are bound to concrete ones by role. |
-| **stage type** | the kind of a stage (`toytrain`, `counter_bench`...): a datapack asks for a stage type, and any free stage of that type can be bound. |
+| **role** | the job of a component in a stage (`lab_pilot`, `lab_telemetry`, `lab_network`...), set with `tsq_role`; logical components are bound to concrete ones by role. |
+| **stage type** | the kind of a stage (`lab_toytrain`, `lab_counter_bench`...): a datapack asks for a stage type, and any free stage of that type can be bound. |
 | **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
 | **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
 | **transport** | how the sequencer reaches a component: `ssh`, `local`, or a plugin's (`tsq_transport`). |
@@ -435,31 +437,31 @@ all:
     tsq_types: [types/]                            # component type library, relative to this file (section 7.2)
 
   hosts:                                           # ad hoc components: in no stage
-    lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
-    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: propulsion_sim}
-    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: piezo_sim}
+    lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: lab_sequencer, tsq_lock: none}
+    lab_sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_type: lab_toytrain_sim, tsq_role: lab_propulsion_sim}
+    lab_sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_type: lab_toytrain_sim, tsq_role: lab_piezo_sim}
 
   children:
-    train_1:                                       # a stage
+    lab_train_1:                                       # a stage
       vars:
-        tsq_stage_type: toytrain                   # what datapacks ask for
+        tsq_stage_type: lab_toytrain                   # what datapacks ask for
       hosts:
-        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_type: arduino_unoq, tsq_role: pilot}
-        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_type: rpi5, tsq_role: telemetry}
-        au_1:         {ansible_host: 10.42.1.12, tsq_type: rpi5, tsq_role: acquisition}
-        switch_1:     {ansible_host: 10.42.1.2, tsq_type: auvidea_m82, tsq_role: switch}
-        lab_switch:   {ansible_host: 10.42.0.2, tsq_type: auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
-    train_2:                                       # a second stage of the same type
+        lab_calc_pilot_1: {ansible_host: 10.42.1.10, tsq_type: lab_arduino_unoq, tsq_role: lab_pilot}
+        lab_calc_tm_1:    {ansible_host: 10.42.1.11, tsq_type: lab_rpi5, tsq_role: lab_telemetry}
+        lab_au_1:         {ansible_host: 10.42.1.12, tsq_type: lab_rpi5, tsq_role: lab_acquisition}
+        lab_switch_1:     {ansible_host: 10.42.1.2, tsq_type: lab_auvidea_m82, tsq_role: lab_switch}
+        lab_switch:   {ansible_host: 10.42.0.2, tsq_type: lab_auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
+    lab_train_2:                                       # a second stage of the same type
       vars:
-        tsq_stage_type: toytrain
+        tsq_stage_type: lab_toytrain
         tsq_commands:                              # stage override: this train's pilot has no flashing helper
           install: {run: "arduino-cli upload --input-dir {{ component.input_dir }}/app"}
       hosts:
-        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_type: arduino_unoq, tsq_role: pilot}
-        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_type: rpi5, tsq_role: telemetry}
-        au_2:         {ansible_host: 10.42.2.12, tsq_type: rpi5, tsq_role: acquisition}
-        switch_2:     {ansible_host: 10.42.2.2, tsq_type: auvidea_m82, tsq_role: switch}
-        lab_switch: {}                             # shared with train_1: joins both trains to lab_srv
+        lab_calc_pilot_2: {ansible_host: 10.42.2.10, tsq_type: lab_arduino_unoq, tsq_role: lab_pilot}
+        lab_calc_tm_2:    {ansible_host: 10.42.2.11, tsq_type: lab_rpi5, tsq_role: lab_telemetry}
+        lab_au_2:         {ansible_host: 10.42.2.12, tsq_type: lab_rpi5, tsq_role: lab_acquisition}
+        lab_switch_2:     {ansible_host: 10.42.2.2, tsq_type: lab_auvidea_m82, tsq_role: lab_switch}
+        lab_switch: {}                             # shared with lab_train_1: joins both trains to lab_srv
 ```
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
@@ -467,7 +469,7 @@ all:
 - `tsq_type` assigns a component type to each component (section 7).
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
-  - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `train_1` and `train_2` can run two datapacks at the same time although they share `lab_switch`;
+  - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `lab_train_1` and `lab_train_2` can run two datapacks at the same time although they share `lab_switch`;
   - `none`: never locked, for the sequencer component.
   - A `shared` or `none` component gives each run its own folders, `<remote_root>/.tsq/<run>/<component>/{input,output}`, so that two runs deploying to it at once do not clobber each other's files; an `exclusive` one uses `<remote_root>/<component>/{input,output}`.
 - Components are taken out of scheduling by state, not by editing the file: a `broken` state (section 7.4), or `tsq maintenance <component>`.
@@ -516,7 +518,7 @@ Types are YAML, in the lab's **type library** (the `tsq_types` folders of the in
 ```yaml
 # lab/types/toytrain.yml
 component_types:
-  rpi5:
+  lab_rpi5:
     extends: linux_system
     commands:
       start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
@@ -530,14 +532,14 @@ component_types:
         broken:  {regex: "^failed"}
         idle:    {regex: "^inactive"}
 
-  arduino_unoq:
+  lab_arduino_unoq:
     extends: linux_system                  # Debian on the MPU, plus a microcontroller to flash
     commands:
       install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
       start:   {run: "sudo systemctl start toytrain-{{ component.role }}"}
       stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}"}
 
-  auvidea_m82:
+  lab_auvidea_m82:
     extends: component                     # an unmanaged switch: only monitored
     transport: local                       # probed from the sequencer host
     status:
@@ -558,7 +560,7 @@ component_types:
 ### 7.3 Where commands come from
 
 A datapack component type (setup file, section 8.2) can extend a lab type to add test-specific commands. The command used for a component is resolved in this order, last wins:
-1. the chain of its lab type, from the base type down (`component` → `linux_system` → `arduino_unoq`);
+1. the chain of its lab type, from the base type down (`component` → `linux_system` → `lab_arduino_unoq`);
 2. the datapack component type (setup file `component_types.<type>.commands`);
 3. the datapack component instance (setup configuration);
 4. the stage `tsq_commands` (lab inventory);
@@ -601,7 +603,7 @@ A component type gives its checks in `selftest`, and a derived type adds to its 
 
 ```yaml
 component_types:
-  arduino_unoq:
+  lab_arduino_unoq:
     extends: linux_system
     selftest:
       - {id: mcu_link, run: "sudo /usr/local/bin/toytrain-install --check", timeout: 20s}
@@ -625,17 +627,17 @@ The setup configuration (datapack side) names the **logical stages** it needs, b
 configurations:
   sim_bench:
     stages:
-      train: {type: toytrain}            # bound to train_1 or train_2, whichever is free
+      train: {type: lab_toytrain}            # bound to lab_train_1 or lab_train_2, whichever is free
     components:
-      pilot:       {type: pilot_app, configuration: standard, stage: train, role: pilot}
-      telemetry:   {type: telemetry_app, configuration: standard, stage: train, role: telemetry}
-      acquisition: {type: acquisition_app, configuration: standard, stage: train, role: acquisition}
-      propulsion:  {type: propulsion_sim, configuration: standard, role: propulsion_sim}   # ad hoc
-      piezo:       {type: piezo_sim, configuration: standard, role: piezo_sim}             # ad hoc
-      analysis:    {type: exploit, configuration: standard, role: sequencer}               # ad hoc: lab_srv
+      pilot:       {type: pilot_app, configuration: standard, stage: train, role: lab_pilot}
+      telemetry:   {type: telemetry_app, configuration: standard, stage: train, role: lab_telemetry}
+      acquisition: {type: acquisition_app, configuration: standard, stage: train, role: lab_acquisition}
+      propulsion:  {type: propulsion_sim, configuration: standard, role: lab_propulsion_sim}   # ad hoc
+      piezo:       {type: piezo_sim, configuration: standard, role: lab_piezo_sim}             # ad hoc
+      analysis:    {type: exploit, configuration: standard, role: lab_sequencer}               # ad hoc: lab_srv
 ```
 
-A datapack can therefore lock several stages and ad hoc components. Here the analysis runs on the sequencer host (`role: sequencer`); a separate exploitation server would be an ad hoc component with its own role.
+A datapack can therefore lock several stages and ad hoc components. Here the analysis runs on the sequencer host (`role: lab_sequencer`); a separate exploitation server would be an ad hoc component with its own role.
 
 ### 8.2 Datapack component types
 
@@ -644,14 +646,14 @@ Datapack component types (already in the setup file) declare the inputs. They ca
 ```yaml
 component_types:
   pilot_app:
-    extends: arduino_unoq               # lab type: binds only to an Arduino UNO Q
+    extends: lab_arduino_unoq               # lab type: binds only to an Arduino UNO Q
     configurations:
       standard:
         inputs:
           - {source: "{{ toytrain_sw.path }}/pilot/", target: app/, method: copy}
           - {source: templates/pilot.yml, target: pilot.yml}
   propulsion_sim:
-    extends: toytrain_sim
+    extends: lab_toytrain_sim
     configurations: {standard: {inputs: [{source: templates/propulsion_sim.yml, target: propulsion_sim.yml}]}}
     commands:
       start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
@@ -816,7 +818,7 @@ pipeline:
 
 A lower-priority run may start while a higher-priority one waits, but only on resources the waiting run cannot use (backfilling), so priority is respected without leaving the lab idle. Among several free candidates, the stage used last by the same test definition is preferred, then the least used one.
 
-**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, a toy-train datapack runs on `train_1` and holds the two simulations of `lab_srv`. A second one can only bind `train_2` once simulations are free too: with a second pair (two more ad hoc components with the same roles), both run together, sharing `lab_switch`, while a third one waits for a stage.
+**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, a toy-train datapack runs on `lab_train_1` and holds the two simulations of `lab_srv`. A second one can only bind `lab_train_2` once simulations are free too: with a second pair (two more ad hoc components with the same roles), both run together, sharing `lab_switch`, while a third one waits for a stage.
 
 **Locking.**
 - The granularity is the **stage** for components that belong to a stage, and the **component** for ad hoc components.
@@ -827,7 +829,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
 **Per phase.** At the end of a phase, the resources the next phase doesn't use are released, and those it does use stay held. Optionally, a run can pre-reserve the resources of all its phases at activation (`reserve: all`), so it isn't stuck between phases.
 
 **Visibility.**
-- `tsq queue` shows each waiting run with its priority and what it waits for (no free `toytrain` stage: `train_1` held by run A, `train_2` broken).
+- `tsq queue` shows each waiting run with its priority and what it waits for (no free `lab_toytrain` stage: `lab_train_1` held by run A, `lab_train_2` broken).
 - `tsq stages` and `tsq components` show stages and components with their monitored state, lock state and holder.
 
 ## 10. Running a datapack
@@ -1113,7 +1115,7 @@ Where the code differs from this document, and why:
 | Store | `sqlite3` from the standard library, no SQLAlchemy | the schema is five tables; one less dependency |
 | Results | `storage.results/<run>/<datapack>_results.zip` | the same datapack can be submitted several times |
 | Pid files | `<remote_root>/.tsq/<run>/<concrete component>/` | components sharing a remote root (emulated mode) keep their states apart |
-| Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: sequencer`) |
+| Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: lab_sequencer`) |
 | `finally` steps without `needs` | run in the order written | a `kill` before a `collect` is the usual intent |
 | Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
 | Editor saves | every change is saved in the session's clone as typed, valid or not, with its problems listed; an invalid lab is refused at push | a half-typed file is a normal state while editing; the clone never reaches the running lab |

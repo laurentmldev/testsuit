@@ -373,6 +373,12 @@ def cmd_validate(args, client: Client | None) -> int:
                         command = f"  = {json.dumps(step.python)}"
                     print(f"  {'finally ' if part == 'finally' else ''}{fs.id}: {what} on {target}"
                           + (f", needs {', '.join(fs.needs)}" if fs.needs else "") + command)
+    from testsuit.sequencer.naming import test_warnings
+    naming = test_warnings(setup=dp.setup, configuration=dp.configuration, testdef=dp.testdef, phases=dp.phases)
+    if naming:
+        print("\nwarnings:")
+        for w in naming:
+            print(f"  - {w}")
     if problems:
         print("\nproblems:")
         for p in problems:
