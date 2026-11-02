@@ -63,6 +63,9 @@ class TypeDef:
         for cmd, spec in commands.items():
             if not isinstance(spec, dict):
                 raise SequencerError(f"{source}: component type '{name}': command '{cmd}' must be a mapping")
+            if "python" in spec:
+                from testsuit.sequencer.model import check_python
+                check_python(spec["python"], f"{source}: component type '{name}': command '{cmd}'")
         selftest = data.get("selftest") or []
         if not isinstance(selftest, list) or not all(isinstance(c, dict) and c.get("id") for c in selftest):
             raise SequencerError(f"{source}: component type '{name}': 'selftest' must be a list of checks with an 'id'")

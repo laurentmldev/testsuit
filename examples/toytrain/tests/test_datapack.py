@@ -78,6 +78,7 @@ def test_sample_datapack(sample_copy, test):
     assert len(events) == (1 if test == "front_contact" else 0)
     criteria = pack / "data" / "analysis" / "input" / "scenario" / "toytrain" / test / f"{test}.mexploit.yml"
     assert criteria.is_file()
+    assert (pack / "data" / "analysis" / "input" / "check_data.py").is_file()   # the python step's script
 
     # the sequencer fields are kept as written: commands and pipeline are rendered at run time
     definition = yaml.safe_load((pack / "definition" / "testdef.yml").read_text())
@@ -89,6 +90,31 @@ def test_sample_datapack(sample_copy, test):
 
     # second run: the datasets are already there, their version is checked instead
     assert datapack(str(testdef), nocheck=True)
+
+
+@pytest.mark.parametrize("cut", [False, True])
+def test_check_data_step(tmp_path, cut):
+    """The python step of the exploit phase, run as the sequencer runs it (its wrapper, the keys in TSQ_KEYS),
+    on the sample telemetry of a 30 s run: complete, then cut to 10 s."""
+    import json
+    import sys
+
+    from testsuit.sequencer.engine import PYTHON_WRAPPER
+
+    data = tmp_path / "data"
+    shutil.copytree(PROJECT_ROOT / "sample" / "data" / "max_speed", data)
+    (data / "piezo.csv").write_text("Time;front;back\n")
+    if cut:
+        lines = (data / "telemetry.csv").read_text().splitlines(keepends=True)
+        (data / "telemetry.csv").write_text("".join(lines[:2 + 201]))       # 20 Hz: 10 s
+    (tmp_path / "keys.json").write_text(json.dumps({"scenario": {"duration_s": 30}}))
+    (tmp_path / "tsq_python.py").write_text(PYTHON_WRAPPER)
+    script = PROJECT_ROOT / "datapack" / "setup" / "scripts" / "check_data.py"
+    result = subprocess.run([sys.executable, str(tmp_path / "tsq_python.py"), str(script), str(data), str(tmp_path / "out")],
+                            env={"TSQ_KEYS": str(tmp_path / "keys.json")}, capture_output=True, text=True)
+    report = json.loads((tmp_path / "out" / "data_check.json").read_text())
+    assert result.returncode == (1 if cut else 0), result.stderr
+    assert report["problems"] == (["telemetry covers 10.0 s of the 30 s scenario"] if cut else [])
 
 
 def test_emulated_datapack(sample_copy):

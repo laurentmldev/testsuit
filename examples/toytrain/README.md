@@ -59,6 +59,7 @@ datapack/                              owned by the test authors
   setup/globals.yml                    train characteristics, network plan, versions
   setup/platforms/<configuration>.yml  what the platform changes: sim_bench (the lab), emulated (dev host)
   setup/templates/                     configuration of each component, rendered by the datapack tool
+  setup/scripts/check_data.py          a python step of the pipeline: the collected data is complete
   testdef/<test>/testdef.yml           test definition and pipeline
   testdef/<test>/scenario.yml          scenario keys
   testdef/<test>/criteria/<test>/      exploitation criteria (mexploit)
@@ -171,7 +172,9 @@ The pipeline then has two phases, the first one built from two sub-pipelines.
 3. `shut_down`: stops the pilot first, then the rest;
 4. finally collects every output (`telemetry.csv`, `propulsion.propj`, `piezo.csv`, logs), even after a kill.
 
-**exploit** runs on the lab server. It receives these outputs as inputs and runs `exploit_runner` on the criteria. Exit code 0 means the verdict is `succeeded`; any other exit code means `failed`.
+**exploit** runs on the lab server. It receives these outputs as inputs, then:
+1. `check_data`, a **Python step** (sequencer README, section 8.3): `check_data.py`, deployed with the analysis inputs, checks that the telemetry covers the whole scenario and that every recording was collected, using the scenario keys the sequencer gives it. A lost recording then fails here, as a data problem, rather than as a speed criterion; an exception in the script would make the step `error`;
+2. `analyse` runs `exploit_runner` on the criteria. Exit code 0 means the verdict is `succeeded`; any other exit code means `failed`.
 
 Everything collected joins the results datapack, next to the inputs. Its baseline carries the git tags of the software and simulation, the lab inventory version, and the software version read on each calculator. A mismatch with `baseline_expected.yml` flags the run as non-conform.
 

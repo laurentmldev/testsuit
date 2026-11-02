@@ -84,6 +84,7 @@ component_types:
         inputs:
           - {source: templates/exploit.yml, target: exploit.yml}
           - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
+          - {source: scripts/check_data.py, target: check_data.py, method: copy}   # a python step (testdef pipeline)
     commands:
       start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m, expect: {exit: [0]}}
 

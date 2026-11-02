@@ -71,9 +71,29 @@ WAIT_FOR = h("Wait until a check passes, polling every `interval` (default 0.5 s
                  {"label": "http health", "body": {"http": {"url": "${1:http://localhost:8080/health}"},
                                                    "timeout": "30s"}}])
 
+PYTHON = h("A Python script, run like a shell command: on the component, or on the sequencer host for a step "
+           "without one (with the daemon's interpreter). Give `script` (a path on the target, usually an input of the "
+           "component) or inline `code`. The keys of the step are in the JSON file named by `TSQ_KEYS`, and already "
+           "loaded as `keys` in the script. Exit 0 succeeds, as for `run` (`expect`, `timeout`, `detach` apply); an "
+           "uncaught exception makes the step `error`, not `failed`.", type="object", additionalProperties=False,
+           properties={
+               "script": h("Path of the script on the target: `{{ component.input_dir }}/check.py` for a script "
+                           "deployed with the component's inputs, or relative to the run folder on the sequencer "
+                           "host. " + TEMPLATE_NOTE, type="string"),
+               "code": h("Inline Python code (not a template: read the keys from `keys`). `sys.exit(1)` fails "
+                         "the step.", type="string"),
+               "args": h("Arguments of the script (`sys.argv[1:]`), templates allowed.", type="array",
+                         items={"type": ["string", "number"]}),
+               "interpreter": h("Python interpreter to use: default the component's `tsq_python` variable, "
+                                "else `python3`.", type="string", examples=["python3", "{{ component.vars.venv }}/bin/python"]),
+           },
+           defaultSnippets=[{"label": "inline code", "body": {"code": "import sys\n${1:print(keys['run']['id'])}\nsys.exit(0)\n"}},
+                            {"label": "script", "body": {"script": "{{ component.input_dir }}/${1:check.py}", "args": []}}])
+
 COMMAND = h(
     "What a command does, one of:\n"
     "- `run`: a shell command on the component (over its transport), with `timeout`, `detach`, `expect`, `env`;\n"
+    "- `python`: a Python script, `script` or inline `code`, with the same options as `run`;\n"
     "- `wait_for`: a ready check (state, tcp, http, file, log, cmd);\n"
     "- `signal`: send a signal to the processes the run started on the component (`TERM`, then `KILL` after "
     "`timeout`, default 10 s);\n"
@@ -82,6 +102,7 @@ COMMAND = h(
     type="object",
     properties={
         "run": h("Shell command run on the component. " + TEMPLATE_NOTE, type="string"),
+        "python": PYTHON,
         "detach": h("Start the command and go on without waiting for it to end (a server, a simulation). "
                     "Its processes are recorded, then stopped by `signal` or `kill`.", type="boolean"),
         "timeout": DURATION,
@@ -99,6 +120,7 @@ COMMAND = h(
     defaultSnippets=[
         {"label": "run a shell command", "body": {"run": "${1:command}", "timeout": "${2:30s}"}},
         {"label": "start a process (detached)", "body": {"run": "${1:command}", "detach": True}},
+        {"label": "run a Python script", "body": {"python": {"script": "{{ component.input_dir }}/${1:script.py}"}}},
         {"label": "wait for a log line", "body": {"wait_for": {"log": {"file": "{{ component.output_dir }}/${1:app.log}",
                                                                         "regex": "${2:READY}"}, "timeout": "30s"}}},
         {"label": "stop: signal TERM", "body": {"signal": "TERM", "timeout": "10s"}}])
@@ -415,6 +437,7 @@ STEP_FIELDS = {
     "do": h("A command of the component's type (`deploy`, `start`, `ready`, `stop`, `collect`...).", type="string"),
     "run": h("An inline shell command, on the component (or in the run folder on the sequencer host without one). "
              + TEMPLATE_NOTE, type="string"),
+    "python": PYTHON,
     "push": h("Copy files to the component: `{from: <path in the run folder>, to: <path on the component>}`.",
               type="object"),
     "pull": h("Copy files from the component: `{from: <path on the component>, to: <path in the run folder>}`.",
@@ -438,7 +461,7 @@ STEP_FIELDS = {
     "env": h("Environment variables of the step's command.", type="object"),
 }
 
-STEP = h("A step: a target (`component` or `for_each`), one action (`do`, `run`, `push`, `pull`, `delay`, "
+STEP = h("A step: a target (`component` or `for_each`), one action (`do`, `run`, `python`, `push`, `pull`, `delay`, "
          "`wait_for`, `uses`, or a plugin step type), and options.", type="object", required=["id"],
          properties=STEP_FIELDS, additionalProperties=True,
          defaultSnippets=[
@@ -447,6 +470,7 @@ STEP = h("A step: a target (`component` or `for_each`), one action (`do`, `run`,
              {"label": "for each component", "body": {"id": "${1:deploy}", "for_each": "components", "do": "${2:deploy}"}},
              {"label": "run a shell command", "body": {"id": "${1:check}", "component": "${2:component}",
                                                        "run": "${3:command}"}},
+             {"label": "run Python code", "body": {"id": "${1:check}", "python": {"code": "import sys\n${2:sys.exit(0)}\n"}}},
              {"label": "delay", "body": {"id": "${1:run}", "delay": "${2:30s}", "needs": []}},
              {"label": "wait for a state", "body": {"id": "${1:running}", "wait_for": {
                  "state": "running", "component": "${2:component}", "timeout": "20s"}}},

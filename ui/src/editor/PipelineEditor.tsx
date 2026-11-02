@@ -9,11 +9,11 @@ import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
 import { attempt, classes, freeName, Markdown, notify, relPath, slug } from "../util";
-import { ExpectEditor, summary, WaitForEditor } from "./commands";
+import { ExpectEditor, PythonEditor, pythonSummary, summary, WaitForEditor } from "./commands";
 import { clone, useSession, type Doc } from "./state";
 
 type Scope = { kind: "phase"; index: number } | { kind: "sub"; name: string } | { kind: "settings" } | { kind: "flat" };
-const ACTIONS = ["do", "run", "push", "pull", "delay", "wait_for", "uses"];
+const ACTIONS = ["do", "run", "python", "push", "pull", "delay", "wait_for", "uses"];
 
 export function stepAction(step: any, plugins: string[] = []): string {
   const found = ACTIONS.find((a) => step?.[a] !== undefined && step?.[a] !== null);
@@ -58,7 +58,7 @@ const nodeTypes = { step: EditStepNode, lane: LaneNode };
 function label(step: any, plugins: string[]): string {
   const a = stepAction(step, plugins);
   const target = step.component || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
-  const what = a === "do" ? step.do : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "delay" ? `delay ${step.delay}`
+  const what = a === "do" ? step.do : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "delay" ? `delay ${step.delay}`
     : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}` : a || "no action";
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
 }
@@ -461,6 +461,8 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
         <button className="palette-item" onClick={() => onAdd({ id: "wait", wait_for: { state: "running", component: held[0] || "", timeout: "30s" } })}
           onMouseEnter={() => setHelp({ title: "wait_for", text: "Wait until a check passes: state, log line, port, URL, file, command." })}>wait for</button>
         <button className="palette-item" onClick={() => onAdd({ id: "check", run: "echo ok" })} onMouseEnter={() => setHelp({ title: "run", text: "An inline shell command, on a component or in the run folder on the sequencer host." })}>shell command</button>
+        <button className="palette-item" onClick={() => onAdd({ id: "check", python: { code: "import sys\n\nprint(keys['run']['id'])\nsys.exit(0)\n" } })}
+          onMouseEnter={() => setHelp({ title: "python", text: "A Python script or inline code, on a component or on the sequencer host, with the run's keys as `keys`. Exit 0 succeeds; an exception makes the step an error." })}>Python script</button>
         {Object.keys(subs).map((n) => (
           <button key={n} className="palette-item" onClick={() => onAdd({ id: n, uses: n, ...(Object.keys(subs[n].params || {}).length ? { with: clone(subs[n].params) } : {}) })}
             onMouseEnter={() => setHelp({ title: `uses ${n}`, text: `Runs the sub-pipeline as one step: ${(subs[n].steps || []).join(", ")}` })}>uses {n}</button>
@@ -520,6 +522,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     for (const k of [...ACTIONS, ...plugins, "with"]) delete next[k];
     if (a === "do") next.do = commandChoices[0]?.value || "start";
     if (a === "run") next.run = "";
+    if (a === "python") next.python = { code: "import sys\n\nsys.exit(0)\n" };
     if (a === "delay") next.delay = "30s";
     if (a === "wait_for") next.wait_for = { state: "running", timeout: "30s" };
     if (a === "uses") next.uses = Object.keys(subs)[0] || "";
@@ -547,7 +550,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {targetMode === "expr" && <Field label="for_each" help={help("for_each")}><Text mono value={step.for_each} onChange={(v) => set("for_each", v)} /></Field>}
       <Field label="Does" help={help(action || "do")}>
         <Choices value={action} onChange={setAction} choices={[
-          { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
+          { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "python", label: "Python" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
           { value: "uses", label: "sub-pipeline" }, { value: "push", label: "push files" }, { value: "pull", label: "pull files" },
           ...plugins.map((p) => ({ value: p, label: p, description: "plugin step type" })),
         ]} />
@@ -558,6 +561,8 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         </Field>
       )}
       {action === "run" && <Field label="Command" help={help("run")} wide><Text mono multiline value={step.run} onChange={(v) => set("run", v)} /></Field>}
+      {action === "python" && <PythonEditor value={step.python} onChange={(v) => set("python", v)} uri={`inmemory:///step/${part}/${step.id}.py`}
+        help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "python", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withComponent={!step.component} components={comps} />}
       {(action === "push" || action === "pull") && (
@@ -589,7 +594,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           <Field label="Timeout" help={help("timeout")}><Text value={step.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
           <Field label="Retries" help={help("retries")}><Text value={step.retries} onChange={(v) => set("retries", v ? Number(v) : undefined)} placeholder="0" /></Field>
         </div>
-        {(action === "do" || action === "run") && (
+        {(action === "do" || action === "run" || action === "python") && (
           <>
             <ExpectEditor value={step.expect} onChange={(v) => set("expect", v)} />
             <Field label="Detach" help={help("detach")}>

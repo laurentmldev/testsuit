@@ -740,10 +740,12 @@ Step fields:
 ```
 
 - **Source**: `script` is a path on the target, usually an input of the component (`data/<component>/input/`, so it is part of the datapack and of its baseline); `code` is inline and sent with the command. One of the two.
-- **Keys**: before the script runs, the sequencer writes every key the step's templates can use (the datapack's `context.yml` and the run-time keys) to a JSON file next to the step's pid file, and gives its path in `TSQ_KEYS`. The script reads them with `json.load(open(os.environ["TSQ_KEYS"]))`; inline `code` gets them already loaded as `keys`. `args`, `env` and `script` are Jinja2 templates like any command.
+- **Keys**: before the script runs, the sequencer writes every key the step's templates can use (the datapack's `context.yml` and the run-time keys) to a JSON file, under `<remote_root>/.tsq/<run>/<component>/python/<step>/` with the wrapper below, and gives its path in `TSQ_KEYS`. The script finds them already loaded as `keys`, or reads them with `json.load(open(os.environ["TSQ_KEYS"]))`. `args`, `env`, `script` and `interpreter` are Jinja2 templates like any command; inline `code` is not (it reads `keys`).
 - **Result**: the same as for `run`: the exit status and output are checked against `expect`, and `timeout`, `retries`, `detach` and `continue_on_error` apply. A small wrapper runs the script and turns an uncaught exception into exit status 70 with its traceback on stderr, which makes the step `error`, not `failed`: a crashed check says nothing about the system under test.
-- **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it. The target needs nothing but a Python 3 interpreter, not testsuit. On the sequencer host, it runs as a separate process, never inside `tsqd`: a script cannot block the daemon or crash it.
-- **Help in the Editor**: the step palette offers **Python script** next to **Shell command**, and the YAML view edits inline `code` as Python.
+- **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it, with `interpreter`, else the component's `tsq_python` variable, else `python3`. The target needs nothing but a Python 3 interpreter, not testsuit. Without a component, it runs on the sequencer host in the run folder (relative paths such as `data/telemetry/output/telemetry.csv` work), with the daemon's own interpreter by default, so testsuit and its libraries are there; still as a separate process, never inside `tsqd`, so a script cannot block the daemon or crash it.
+- **Help in the Editor**: the step palette offers **Python script** next to **shell command**, the step and command forms switch between a script file (with its arguments) and inline code edited as Python, and `tsq validate` lists each python step with its script.
+
+The toy-train sample has one: `check_data` in the exploit phase of both test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before `exploit_runner` judges it.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.4), `tcp`, `http` (status or regex), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -959,7 +961,7 @@ An optional mode of the same UI, enabled with `server.editor` (off by default, s
 
 **Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
 - a graph view of phases, sub-pipelines and steps, where `needs` are the edges: add, remove and connect steps, group steps into a new sub-pipeline, or expand a `uses` step to see its steps;
-- a palette of what a step can do on each logical component, built from the commands its component type offers (`deploy`, `start`, `ready`, `install`...), plus `run`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's logical stages and components;
+- a palette of what a step can do on each logical component, built from the commands its component type offers (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's logical stages and components;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
 
@@ -1110,7 +1112,6 @@ Where the code differs from this document, and why:
 The main operations are in the [cheat sheet](#cheat-sheet).
 
 Not done yet:
-- Python steps (`python`, SQ-32, section 8.3): specified, not implemented; until then, `run: python3 script.py` runs a script as a shell command, without `TSQ_KEYS` or the exception mapping;
 - `collect` resuming an interrupted transfer, checksums computed during the transfer, and `collect: {max_size}` (`include` and `exclude` work);
 - the `http` transport;
 - the end-to-end emulated toy-train run in CI (section 15).

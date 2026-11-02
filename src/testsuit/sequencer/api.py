@@ -95,6 +95,11 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
         return run
 
+    def python_label(py: dict) -> str:
+        if py.get("script"):
+            return f"python {Path(str(py['script'])).name}"
+        return "python code"
+
     @app.get("/runs/{run_id}/pipeline")
     async def pipeline(run_id: str):
         """The run's pipeline as it runs: phases, steps after sub-pipeline expansion, their needs (the UI graph)."""
@@ -111,7 +116,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                     s = fs.step
                     steps.append({"id": fs.id, "part": part, "needs": fs.needs, "group": fs.group, "action": s.action,
                                   "do": s.do, "component": s.component, "for_each": s.for_each,
-                                  "if": s.if_, "label": s.do or s.run or s.uses or s.action})
+                                  "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else s.action)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stages": flat.phase.stages,
                            "components": flat.phase.components, "groups": flat.groups, "steps": steps})
         return {"phases": phases, "stages": dp.needs.stages,
