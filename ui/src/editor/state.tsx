@@ -1,6 +1,6 @@
 // State shared by the views of an editing session: its files, the helpers of the lab and workspace
 // (context), the schemas, and the document being edited (saved to the scratch clone as you go).
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { get, post, put } from "../api";
 import type { Choice, KeyItem } from "../fields";
 import { notify } from "../util";
@@ -73,7 +73,9 @@ export interface Doc {
 }
 
 /** A file of the session: setData merges a new version of its data (forms), setText replaces its text
- * (YAML view). Both are saved to the scratch clone after a short pause, and checked by the server. */
+ * (YAML view). Both are saved to the scratch clone after a short pause, and checked by the server.
+ * undo and redo step through the versions of the data (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y): edits less
+ * than a second apart, such as typing in a field, make one step. The history starts with the file. */
 export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) => void) {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
@@ -83,11 +85,20 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
   const saving = useRef<Promise<void> | null>(null);
   const savedRef = useRef(onSaved);
   savedRef.current = onSaved;
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  const past = useRef<any[]>([]);
+  const future = useRef<any[]>([]);
+  const lastEdit = useRef(0);
+  const [, setHistory] = useState(0);
 
   useEffect(() => {
     setDoc(null);
     setError(null);
     pending.current = null;
+    past.current = [];
+    future.current = [];
+    setHistory((n) => n + 1);
     if (!path) return;
     let cancelled = false;
     Promise.all([get(`edit/sessions/${sid}/files/${path}`), post(`edit/sessions/${sid}/validate`, { path }).catch(() => ({ problems: [] }))])
@@ -134,12 +145,40 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     timer.current = window.setTimeout(flush, delay);
   };
 
-  const setData = (data: any) => {
+  const copy = (data: any) => (data === undefined ? undefined : JSON.parse(JSON.stringify(data)));
+  /** Keeps the data before an edit as an undo step, unless the previous edit was less than a second ago. */
+  const record = () => {
+    const now = Date.now();
+    const current = docRef.current?.data;
+    if (current !== undefined && current !== null && now - lastEdit.current > 1000) {
+      past.current.push(copy(current));
+      if (past.current.length > 100) past.current.shift();
+    }
+    lastEdit.current = now;
+    future.current = [];
+    setHistory((n) => n + 1);
+  };
+  const apply = (data: any) => {
     setDoc((d) => (d ? { ...d, data } : d));
     pending.current = { data };
     schedule(500);
   };
+  const setData = (data: any) => {
+    record();
+    apply(data);
+  };
+  const step = (from: MutableRefObject<any[]>, to: MutableRefObject<any[]>) => {
+    const data = from.current.pop();
+    if (data === undefined) return;
+    to.current.push(copy(docRef.current?.data));
+    lastEdit.current = 0;
+    apply(data);
+    setHistory((n) => n + 1);
+  };
+  const undo = () => step(past, future);
+  const redo = () => step(future, past);
   const setText = (content: string) => {
+    record();
     setDoc((d) => (d ? { ...d, content } : d));
     pending.current = { content };
     schedule(1200);
@@ -148,7 +187,7 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     if (pending.current) flush();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
-  return { doc, state, error, setData, setText, flush };
+  return { doc, state, error, setData, setText, flush, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0 };
 }
 
 // ── choices built from the context ──────────────────────────────────────

@@ -1,6 +1,6 @@
 // An editing session: its files by kind, the form or YAML view of the open file, the help panel,
 // and the session actions (check everything, generate a datapack, review and push).
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { del, post, put } from "../api";
 import { HelpPanel, HelpProvider, KeysProvider } from "../fields";
 import { CodeEditor } from "../monaco";
@@ -114,6 +114,12 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
         <div className="segmented">
           {views.map(([v, label]) => <button key={v} className={current === v ? "selected" : ""} onClick={() => setView(v)}>{label}</button>)}
         </div>
+        {current !== "yaml" && current !== "template" && (
+          <span className="undo">
+            <button className="small" onClick={api.undo} disabled={!api.canUndo} title="Undo (Ctrl+Z)">↶ Undo</button>
+            <button className="small" onClick={api.redo} disabled={!api.canRedo} title="Redo (Ctrl+Shift+Z or Ctrl+Y)">↷ Redo</button>
+          </span>
+        )}
         <span className={classes("save-state", api.state)}>{{ saved: "saved in the session", pending: "editing…", saving: "saving…", error: "not saved" }[api.state]}</span>
         {doc.aliases && current !== "yaml" && <span className="badge info" title="This file uses YAML aliases (*name). A form change to an aliased part gives that place a copy of its own.">aliases</span>}
       </div>
@@ -141,6 +147,24 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
     if (["inventory", "types", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
     session?.refreshFiles();
   });
+  // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo the form and pipeline edits; the YAML and text
+  // editors keep their own undo.
+  const keys = useRef(api);
+  keys.current = api;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      if ((e.target as HTMLElement | null)?.closest?.(".monaco-editor")) return;
+      if (document.querySelector(".dialog")) return;
+      e.preventDefault();
+      if (k === "y" || e.shiftKey) keys.current.redo();
+      else keys.current.undo();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   if (!session) return <div className="page"><Spinner className="block" text="Opening the session: reading its files, the lab and the schemas…" /></div>;
   const doc = api.doc;
   const validateAll = async () => {
