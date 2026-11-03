@@ -70,7 +70,7 @@ export const connection = { connected: false, listeners: new Set<(c: boolean) =>
 function ensureSource() {
   if (source) return;
   source = new EventSource(url("events"));
-  const kinds = ["run", "phase", "step", "component", "lab", "release", "resource", "selftest", "state_mismatch"];
+  const kinds = ["run", "phase", "step", "component", "probe", "lab", "release", "resource", "selftest", "state_mismatch"];
   for (const kind of kinds) {
     source.addEventListener(kind, (e) => {
       let data: any = null;

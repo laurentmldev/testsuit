@@ -22,6 +22,7 @@ from testsuit.sequencer.transports import Transport
 from testsuit.sequencer.util import SequencerError, evaluate, now, parse_duration, parse_size, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
+probe_log = logging.getLogger("testsuit.probe")       # each probe: kept for the Lab page's log only (logbuffer)
 
 STATES = ("offline", "idle", "configured", "running", "broken", "unknown")
 
@@ -50,9 +51,11 @@ def _match(states: dict, output: str, exit_status: int | None) -> str | None:
 
 
 async def probe_component(comp: Component, resolved: ResolvedType, transport: Transport,
-                          expected: str | None = None) -> tuple[str, str]:
-    """(state, detail) of a component, from its type's status probe."""
+                          expected: str | None = None, trace: list[str] | None = None) -> tuple[str, str]:
+    """(state, detail) of a component, from its type's status probe; trace gets what was run."""
+    trace = trace if trace is not None else []
     status = resolved.status
+    trace.append(f"login to {comp.host}")
     try:
         root = await transport.resolve_root()
     except Exception as e:
@@ -60,6 +63,7 @@ async def probe_component(comp: Component, resolved: ResolvedType, transport: Tr
     if status is None:
         return "unknown", "no status probe"
     if status.get("builtin") == "linux_system":
+        trace[:] = [f"builtin linux_system on {comp.host}: 'true', then the process groups in {root}/.tsq"]
         result = await transport.shell("true", timeout=15)
         if not result.completed or result.exit_status:
             return "offline", result.error or result.output.strip()
@@ -74,20 +78,24 @@ async def probe_component(comp: Component, resolved: ResolvedType, transport: Tr
     keys = component_keys(comp, root)
     if "run" in probe:
         command = render(probe["run"], keys, f"{comp.id} status")
+        trace[:] = [f"on {comp.host}: {command}"]
         result = await transport.shell(str(command), timeout=parse_duration(probe.get("timeout")) or 15)
         if not result.completed:
             return "offline", result.error or ""
+        trace.append(f"exit status {result.exit_status}")
         state = _match(status.get("states") or {}, result.output, result.exit_status)
         return state or "unknown", result.output.strip()[-200:]
     for name, spec in probe.items():
         fn = registry.state_probes.get(name.lower())
         if fn is not None:
+            trace[:] = [f"probe {name} on {comp.host}: {render(spec, keys)}"]
             output, exit_status = await fn(transport, render(spec, keys), keys)
             state = _match(status.get("states") or {}, output, exit_status)
             return state or "unknown", str(output)[-200:]
     if "http" in probe:
         import urllib.request
         url = render(probe["http"] if isinstance(probe["http"], str) else probe["http"]["url"], keys)
+        trace[:] = [f"GET {url}"]
 
         def get():
             try:
@@ -127,15 +135,23 @@ class Monitor:
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.types.resolve(comp, stage)
         res = self.store.resources("component").get(("component", comp_id)) or {}
+        trace: list[str] = []
+        started = time.monotonic()
+        failed = False
         try:
             state, detail = await asyncio.wait_for(
-                probe_component(comp, resolved, self.transports(comp_id), res.get("expected")), 60)
+                probe_component(comp, resolved, self.transports(comp_id), res.get("expected"), trace), 60)
         except asyncio.TimeoutError:
-            state, detail = "offline", "probe timeout"
+            state, detail, failed = "offline", "probe timeout (60 s)", True
         except Exception as e:
-            state, detail = "unknown", f"probe failed: {e}"
+            state, detail, failed = "unknown", f"probe failed: {type(e).__name__}: {e}", True
+        # every probe in the log of the Lab page (logger testsuit.probe, not on the console); errors as warnings
+        line = (f"{comp_id}: {', '.join(trace) or 'no probe'} -> {state} ({time.monotonic() - started:.1f} s)"
+                + (f": {detail.strip()}" if detail and detail.strip() else ""))
+        probe_log.log(logging.WARNING if failed or state in ("offline", "broken") else logging.DEBUG, line)
         previous = self.store.set_state(comp_id, state, detail)
         self._last[comp_id] = time.monotonic()
+        self.notify("probe", {"component": comp_id, "state": state})      # the Lab page shows when, live
         if previous != state:
             self.notify("component", {"component": comp_id, "state": state, "previous": previous, "detail": detail})
         expected = res.get("expected")

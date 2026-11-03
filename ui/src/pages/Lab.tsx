@@ -71,11 +71,27 @@ function SelftestDialog({ target, onClose }: { target: string | null; onClose: (
 
 export function LabPage({ editor }: { editor?: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
-  const comps = useResource<any[]>("components", ["component", "resource", "release", "run", "lab", "selftest"]);
+  const comps = useResource<any[]>("components", ["component", "probe", "resource", "release", "run", "lab", "selftest"]);
   const stages = useResource<any[]>("stages", ["resource", "release", "run", "lab"]);
   const [selftest, setSelftest] = useState<string | null | undefined>(undefined);
   const [reloading, setReloading] = useState(false);
   const [logs, setLogs] = useState(false);
+  const [probing, setProbing] = useState(false);
+  // "probed 3s ago" kept true: redrawn every second, the components read again after each probe (events),
+  // and every component probed when the page opens
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const probeNow = async () => {
+    setProbing(true);
+    await attempt(() => post("lab/probe"));
+    setProbing(false);
+  };
+  useEffect(() => {
+    post("lab/probe").catch(() => undefined);
+  }, []);
   const refresh = () => {
     comps.refresh();
     stages.refresh();
@@ -118,6 +134,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <span className="spacer" />
         <button disabled={reloading} onClick={() => reload(false)} title="Read the lab folder again as it is (tsq lab reload)">Reload</button>
         <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
+        <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
         {editor && <button onClick={editLab} title="Open the lab inventory and component types in the Editor, in place">Edit lab config</button>}
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>

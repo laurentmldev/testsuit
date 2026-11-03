@@ -463,6 +463,10 @@ def test_api(repos, tmp_path):
         logs = requests.get(f"{url}/logs").json()
         assert any(line["message"].startswith(f"run: run={run['id']} state=queued") for line in logs["lines"]), logs
         assert requests.get(f"{url}/logs", params={"since": logs["next"]}).json()["lines"] == []
+        # every component probed now; probes are not kept as events
+        assert requests.post(f"{url}/lab/probe").json()["probed"] == len(seq.lab.inventory.components)
+        assert all(c["probed_at"] for c in requests.get(f"{url}/components").json())
+        assert not [e for e in seq.store.events() if e["kind"] == "probe"]
         pipeline = requests.get(f"{url}/runs/{run['id']}/pipeline").json()
         assert [p["id"] for p in pipeline["phases"]] == ["test_run", "exploit"]
         start = next(s for s in pipeline["phases"][0]["steps"] if s["id"] == "start")

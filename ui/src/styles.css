@@ -423,7 +423,8 @@ table.datasets tr.dataset-resolved dd { margin: 0; min-width: 0; }
 .logs-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .logs-bar input[type="search"] { flex: 1; min-width: 160px; }
 .sequencer-log { max-height: 60vh; min-height: 200px; overflow: auto; font-family: var(--mono, monospace); font-size: 12px; }
-.sequencer-log .log-line { display: grid; grid-template-columns: auto 64px 1fr; gap: 8px; padding: 1px 0; }
+.sequencer-log .log-line { display: grid; grid-template-columns: auto 104px 1fr; gap: 8px; padding: 1px 0; }
 .sequencer-log .log-time { color: var(--muted); }
 .sequencer-log .log-level { font-weight: 600; }
 .sequencer-log .log-message { white-space: pre-wrap; word-break: break-word; }
+.sequencer-log .log-probe { color: var(--muted); }
