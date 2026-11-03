@@ -126,7 +126,7 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.post("/edit/sessions/{sid}/datapack/jobs", status_code=201)
     async def start_generate(sid: str, body: dict):
         return await run(editor.start_generate, session(sid), str(body["testdef"]), body.get("setup_config"),
-                         bool(body.get("nocheck", True)))
+                         bool(body.get("nocheck", True)), bool(body.get("lenient", False)))
 
     @app.get("/edit/sessions/{sid}/datapack/jobs/{job}")
     async def generation_job(sid: str, job: str, since: int = 0):

@@ -43,7 +43,29 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   useEffect(() => () => {
     live.current = false;
   }, []);
-  const generate = async () => {
+  // the problems the configuration shows before generating: the user confirms, or goes back to fix them
+  const [problems, setProblems] = useState<string[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const request = async () => {
+    setChecking(true);
+    setResult(null);
+    setPosted(null);
+    try {
+      const found: any = await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config });
+      if (found.problems?.length) {
+        setProblems(found.problems);
+        return;
+      }
+    } catch (e: any) {
+      setProblems([`The configuration cannot be read: ${e.message}`]);
+      return;
+    } finally {
+      setChecking(false);
+    }
+    generate(false);
+  };
+  const generate = async (lenient: boolean) => {
+    setProblems(null);
     setBusy(true);
     setResult(null);
     setPosted(null);
@@ -53,7 +75,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
     setLastLine(Date.now());
     try {
       // in the background: its log comes line by line, subprocess errors included
-      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check });
+      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient });
       setJob(job);
       let since = 0;
       let failures = 0;
@@ -101,12 +123,17 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       <a className="button" href={url(`edit/sessions/${sid}/datapack/${result.name}`)} download>Download {result.zip}</a>
       <input className="priority" type="number" min={0} max={100} placeholder="priority" value={priority} onChange={(e) => setPriority(e.target.value)} />
       <button className="primary" onClick={submit} disabled={!!posted}>Post to the queue</button>
-      <button onClick={generate} disabled={busy}>Generate again</button>
+      <button onClick={request} disabled={busy || checking}>Generate again</button>
+    </>
+  ) : problems ? (
+    <>
+      <button onClick={() => setProblems(null)}>Back</button>
+      <button className="primary" onClick={() => generate(true)} title="Inputs that cannot be found or are empty are left out, with a warning; the datapack is a draft">Generate anyway</button>
     </>
   ) : (
     <>
       {busy && <button onClick={stop} disabled={!job || stopping} title="Stop the generation: at its next line of output; a command it runs is killed">{stopping ? "Stopping…" : "Stop"}</button>}
-      <button className="primary" disabled={!testdef || busy} onClick={generate}>{busy ? "Generating…" : "Generate"}</button>
+      <button className="primary" disabled={!testdef || busy || checking} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
     </>
   );
   return (
@@ -117,7 +144,13 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
           <Elapsed started={started} lastLine={lastLine} />
         </>
       )}
-      {!result && !busy && (
+      {problems && (
+        <div className="banner warn list">
+          <p><strong>This configuration has {problems.length === 1 ? "a problem" : `${problems.length} problems`}</strong>: generate anyway, and the inputs concerned are left out with a warning (the datapack is an incomplete draft); or go back and fix {problems.length === 1 ? "it" : "them"} first.</p>
+          <ul className="problems">{problems.map((p, i) => <li key={i}><code>{p}</code></li>)}</ul>
+        </div>
+      )}
+      {!result && !busy && !problems && (
         <>
           <Markdown text="Runs the datapack tool on the files of this session, as `datapack <testdef>` would: nothing is pushed. A datapack generated from uncommitted files is a **draft**: the queue accepts it, its report says so." />
           <Field label="Test definition">
@@ -145,6 +178,12 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       )}
       {result?.ok && (
         <>
+          {result.datapack?.skipped?.length > 0 && (
+            <div className="banner warn list">
+              Incomplete: {result.datapack.skipped.length} input(s) left out.
+              <ul className="problems">{result.datapack.skipped.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+            </div>
+          )}
           <p>
             <strong>{result.zip}</strong>: {result.files.length} files, {size(result.files.reduce((n: number, f: any) => n + f.size, 0))}.
             {result.datapack?.draft && <span className="badge warn" title="Generated from uncommitted files"> draft</span>}

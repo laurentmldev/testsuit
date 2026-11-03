@@ -417,3 +417,6 @@ table.datasets tr.dataset-resolved dd { margin: 0; min-width: 0; }
 .live-log { max-height: 50vh; overflow: auto; }
 .live-log .log-error { color: var(--bad); font-weight: 600; }
 .live-log .log-warn { color: var(--warn); }
+.banner.list { display: block; }
+.banner .problems { margin: 6px 0 0; padding-left: 20px; }
+.banner .problems li { margin: 2px 0; }
