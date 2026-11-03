@@ -43,6 +43,7 @@ import os
 import shutil
 import socket
 import stat
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -157,6 +158,26 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
     return {"id": dataset.id, "datasource": datasource.id, "importer": datasource.importer,
             "source": datasource.source, "version": dataset.version, "path": local_path.as_posix(),
             "confirmed": confirmed}
+
+
+def _copy(source: Path, destination: Path) -> None:
+    """Copy a file or a folder, saying every few seconds how far a long copy has gone."""
+    if not source.is_dir():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return
+    count, total, last = 0, 0, time.monotonic()
+
+    def copy(src: str, dst: str) -> str:
+        nonlocal count, total, last
+        result = shutil.copy2(src, dst)
+        count += 1
+        total += os.path.getsize(dst)
+        if time.monotonic() - last > 3:
+            last = time.monotonic()
+            _info(Fore.LIGHTBLACK_EX + f"        ... {count} files, {total / 1e6:.1f} MB copied")
+        return result
+    shutil.copytree(source, destination, copy_function=copy)
 
 
 def _find_sources(source: str, folders: list[Path]) -> list[Path]:
@@ -476,6 +497,9 @@ class _Builder:
                 for source in sources:
                     # a glob pattern always gives a folder, even when it matches one file
                     destination = target / source.name if glob.has_magic(input_file.source) else target
+                    # said before it is done: a long copy, or one that fails, shows where the tool is
+                    _info(Fore.MAGENTA + f"    [{input_file.method.upper()}] " + Fore.LIGHTBLACK_EX + source.as_posix()
+                          + Style.RESET_ALL + " --> " + Fore.WHITE + destination.relative_to(self.work / "data").as_posix())
                     if input_file.method == "generate":
                         try:
                             with keys.tracking() as read:
@@ -487,11 +511,10 @@ class _Builder:
                         if tracked:
                             used[destination.relative_to(input_dir).as_posix()] = read
                     elif input_file.method == "copy":
-                        if source.is_dir():
-                            shutil.copytree(source, destination)
-                        else:
-                            destination.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(source, destination)
+                        try:
+                            _copy(source, destination)
+                        except OSError as e:
+                            raise DatapackError(f"component '{comp_id}': copy of '{source}' failed: {e}") from e
                     else:
                         try:
                             rendered = keys.render_tree(source, destination, [self.testdef_dir, setup_dir], extra)
@@ -500,8 +523,6 @@ class _Builder:
                         prefix = destination.relative_to(input_dir)
                         used.update({(prefix / name if source.is_dir() else prefix.parent / name).as_posix(): k
                                      for name, k in rendered.items()})
-                    _info(Fore.MAGENTA + f"    [{input_file.method.upper()}] " + Fore.LIGHTBLACK_EX + source.as_posix()
-                          + Style.RESET_ALL + " --> " + Fore.WHITE + destination.relative_to(self.work / "data").as_posix())
                 for spec in input_file.postprocess:
                     _info(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + spec)
                     try:

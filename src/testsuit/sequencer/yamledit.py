@@ -234,14 +234,39 @@ def _patch(original: str, before: str, after: str) -> str:
         if tag != "equal":
             x1 = start[i1]
             x2 = end[i2] if i2 > i1 else x1
-            hunks.append((x1, max(x1, x2), bp[j1:j2]))
+            # the dump indents lists more than a file may ("- a" under its key): new lines take the indent
+            # of the original where they go
+            if i2 > i1 and x1 < len(a):
+                shift = _indent(a[x1]) - _indent(ap[i1])
+            elif i1 > 0 and 0 < x1 <= len(a):
+                shift = _indent(a[x1 - 1]) - _indent(ap[i1 - 1])
+            else:
+                shift = 0
+            hunks.append((x1, max(x1, x2), [_shift(line, shift) for line in bp[j1:j2]]))
     lines = list(a)
     for x1, x2, new in reversed(hunks):
         lines[x1:x2] = new
     text = "".join(lines)
     if not text.endswith("\n") and text:
         text += "\n"
-    return text
+    try:
+        if yaml.safe_load(text) == yaml.safe_load(after):
+            return text
+    except yaml.YAMLError:
+        pass
+    return after                                        # never a broken file: the dump, layout lost
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" ")) if line.strip() else 0
+
+
+def _shift(line: str, shift: int) -> str:
+    if shift > 0 and line.strip():
+        return " " * shift + line
+    if shift < 0 and line.strip():
+        return line[min(-shift, _indent(line)):]
+    return line
 
 
 # ── locating paths, for messages ───────────────────────────────────────────

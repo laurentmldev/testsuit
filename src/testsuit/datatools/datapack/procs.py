@@ -7,6 +7,16 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
+
+_running: dict[int, subprocess.Popen] = {}     # thread -> the command it runs
+
+
+def kill_running(thread: int) -> None:
+    """Kill the command a thread runs, if any (a generation stopped from the UI)."""
+    process = _running.get(thread)
+    if process is not None:
+        process.kill()
 
 
 def run_logged(command: list[str], prefix: str = "    | ", env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
@@ -19,8 +29,15 @@ def run_logged(command: list[str], prefix: str = "    | ", env: dict | None = No
                           text=True, errors="replace", bufsize=1, cwd=cwd,
                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})}) as process:
         assert process.stdout is not None
-        for line in process.stdout:
-            line = line.rstrip("\n")
-            print(prefix + line, flush=True)
-            tail = (tail + [line])[-20:]
+        _running[threading.get_ident()] = process
+        try:
+            for line in process.stdout:
+                line = line.rstrip("\n")
+                print(prefix + line, flush=True)
+                tail = (tail + [line])[-20:]
+        except BaseException:                         # stopped (a generation stopped from the UI): not left running
+            process.kill()
+            raise
+        finally:
+            _running.pop(threading.get_ident(), None)
     return process.returncode, "\n".join(tail)
