@@ -79,6 +79,8 @@ def run_generator(name: str, source: Path, target: Path, keys: Mapping, options:
         result = subprocess.run(command + [str(source), str(target), keys_file], capture_output=True, text=True)
     finally:
         Path(keys_file).unlink(missing_ok=True)
+    for line in (result.stdout + result.stderr).splitlines():
+        print("    | " + line)
     if result.returncode != 0:
         raise GeneratorError(f"generator script '{name}' failed (exit {result.returncode}): "
                              f"{(result.stderr or result.stdout).strip()[-500:]}")
