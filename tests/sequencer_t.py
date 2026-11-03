@@ -628,6 +628,29 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert tsq(["--server", url, "kill", "nope"]) == 2
 
 
+def test_ui_title_and_logo(tmp_path, no_git):
+    """server.title and server.logo reach the UI through /health; a logo file is served at /logo<ext>."""
+    from fastapi.testclient import TestClient
+
+    from testsuit.sequencer.api import create_app
+    bench = Bench(tmp_path, stages=1)
+    seq = bench.sequencer()
+    client = TestClient(create_app(seq))
+    assert client.get("/health").json()["title"] == "Test sequencer"
+    assert client.get("/health").json()["logo"] is None
+    write(tmp_path / "logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    seq.config.file = tmp_path / "tsq.yml"
+    seq.config.server.title = "Rail lab"
+    seq.config.server.logo = "logo.svg"
+    health = client.get("/health").json()
+    assert health["title"] == "Rail lab" and health["logo"] == "logo.svg"
+    assert client.get("/logo.svg").text.startswith("<svg")
+    seq.config.server.logo = "https://example.org/rail.png"
+    assert client.get("/health").json()["logo"] == "https://example.org/rail.png"
+    assert client.get("/logo.png").status_code == 404
+    asyncio.run(seq.close())
+
+
 def test_daemon_stops_with_an_event_stream_open(tmp_path, no_git):
     """Ctrl+C stops tsqd at once even while a browser follows its events (a response that never ends)."""
     import signal

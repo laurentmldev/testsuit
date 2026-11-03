@@ -299,6 +299,8 @@ server:
   ui: true
   editor: false                        # Editor mode of the UI (section 13.2)
   workspaces: [/srv/tsq/tests]         # git clones the Editor creates datapack definitions in
+  title: Test sequencer                # the UI's title, in its top bar and browser tab
+  logo: logo.png                       # optional image before the title: a file (relative to tsq.yml) or an http(s) URL
 queue: {default_priority: 50, priority_aging: off}
 selftest: {before_each_run: true, timeout: 60s, max_attempts: 3}   # section 7.5
 monitor: {interval: 30s}

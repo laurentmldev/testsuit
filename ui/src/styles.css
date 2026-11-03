@@ -98,7 +98,8 @@ input.priority { width: 80px; }
 .app { min-height: 100%; display: flex; flex-direction: column; }
 .app.full { height: 100%; }
 .topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: 46px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.topbar .brand { font-weight: 700; color: var(--text); }
+.topbar .brand { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.topbar .brand img { height: 28px; max-width: 120px; object-fit: contain; }
 .topbar nav, .topbar > div:not(.topbar-right) { display: flex; gap: 4px; }
 .topbar a.active { color: var(--accent); font-weight: 600; }
 .topbar a:not(.brand) { padding: 4px 8px; border-radius: 5px; color: var(--muted); }

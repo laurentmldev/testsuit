@@ -295,9 +295,27 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return [{"key": k, "value": v if isinstance(v, (int, float, str, bool, list, type(None))) else str(v),
                  "source": s} for k, v, s in seq.config.describe()]
 
+    def logo_url() -> str | None:
+        logo = seq.config.server.logo
+        if not logo:
+            return None
+        if logo.startswith(("http://", "https://")):
+            return logo
+        file = seq.config.logo_file
+        return f"logo{file.suffix}" if file and file.is_file() else None
+
     @app.get("/health")
     async def health():
-        return {"ok": True, "started_at": seq.started_at, "lab": seq.lab.git}
+        return {"ok": True, "started_at": seq.started_at, "lab": seq.lab.git,
+                "title": seq.config.server.title, "logo": logo_url()}
+
+    @app.get("/logo{suffix}", include_in_schema=False)
+    async def logo(suffix: str):
+        """The UI's logo image (server.logo), when it is a file."""
+        file = seq.config.logo_file
+        if file is None or not file.is_file():
+            raise HTTPException(404, "no logo file (server.logo)")
+        return FileResponse(file)
 
     # ── events ───────────────────────────────────────────────────────────
     @app.get("/events")
