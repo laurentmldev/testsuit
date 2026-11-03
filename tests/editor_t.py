@@ -63,6 +63,20 @@ def test_merge_keeps_lists_indented_as_written():
     assert merged.startswith("inputs:\n- source: a.txt   # first\n  target: a\n- source: c.txt\n"), merged
 
 
+def test_merge_empties_a_mapping_or_a_list():
+    """Removing the last item of a commented block leaves "key: {}" (or "[]"), not a bare "{}" line (a broken file)."""
+    text = ("all:\n  hosts:                 # ad hoc components (no stage)\n    abc:\n      ansible_host: 10.0.1.2\n"
+            "      tsq_role: plop\n  children:\n    st:\n      hosts: {x: {}}\n")
+    data = yaml.safe_load(text)
+    data["all"]["hosts"] = {}
+    merged = yamledit.merge(text, data)
+    assert yaml.safe_load(merged) == data
+    assert "  hosts: {}" in merged and "# ad hoc components" in merged and "\n{}" not in merged, merged
+    text = "steps:              # the steps\n  - id: a\n    run: true\nother: 1\n"
+    merged = yamledit.merge(text, {"steps": [], "other": 1})
+    assert yaml.safe_load(merged) == {"steps": [], "other": 1} and "steps: []" in merged, merged
+
+
 def test_merge_matches_list_items_by_id():
     data = yaml.safe_load(TEXT)
     steps = data["pipeline"]["phases"][0]["steps"]

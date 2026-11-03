@@ -126,6 +126,8 @@ class _Merger:
                         position = list(old).index(previous) + 1
                         break
                 old.insert(position, key, _build(new[key], siblings))
+        if not len(old):
+            old.fa.set_flow_style()                 # "key: {}": a block mapping left empty dumps a bare "{}" line
 
     def seq(self, old: CommentedSeq, new: list) -> None:
         old_ids, new_ids = _ids(list(old)), _ids(new)
@@ -143,6 +145,8 @@ class _Merger:
             old.ca.items.clear()
             old.extend(result)
             old.ca.items.update(comments)
+            if not len(old):
+                old.fa.set_flow_style()
             return
         for i, value in enumerate(new):
             if i < len(old):
@@ -155,6 +159,8 @@ class _Merger:
             old.pop()
         for i in [i for i in old.ca.items if i >= len(new)]:
             del old.ca.items[i]
+        if not len(old):
+            old.fa.set_flow_style()                 # "key: []"
 
 
 def _ids(items: list) -> list | None:
