@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { post, useResource } from "../api";
 import { Dialog } from "../fields";
-import { ago, attempt, Badge, time } from "../util";
+import { ago, attempt, Badge, navigate, time } from "../util";
 
 const ACTION_HELP: Record<string, string> = {
   hold: "Keep it out of new runs (a run holding it goes on). Resume to give it back.",
@@ -68,7 +68,7 @@ function SelftestDialog({ target, onClose }: { target: string | null; onClose: (
   );
 }
 
-export function LabPage() {
+export function LabPage({ editor }: { editor?: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
   const comps = useResource<any[]>("components", ["component", "resource", "release", "run", "lab", "selftest"]);
   const stages = useResource<any[]>("stages", ["resource", "release", "run", "lab"]);
@@ -87,6 +87,10 @@ export function LabPage() {
     setReloading(false);
     lab.refresh();
     refresh();
+  };
+  const editLab = async () => {
+    const s = await attempt(() => post("edit/sessions", { repo: "lab", local: true }));
+    if (s) navigate(`edit/${s.id}`);
   };
   const git = lab.data?.git;
   const row = (c: any) => (
@@ -113,6 +117,7 @@ export function LabPage() {
         <button disabled={reloading} onClick={() => reload(false)} title="Read the lab folder again as it is (tsq lab reload)">Reload</button>
         <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
+        {editor && <button onClick={editLab} title="Open the lab inventory and component types in the Editor, in place">Edit lab config</button>}
       </div>
       {(stages.data || []).map((s) => (
         <div key={s.id} className="card stage">

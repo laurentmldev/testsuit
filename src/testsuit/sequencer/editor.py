@@ -988,6 +988,148 @@ class Editor:
                 "keys": {k: (self.rel(session, Path(o)) if o.startswith("/") and Path(o).is_relative_to(session.root) else o)
                          for k, o in used.items()}}
 
+    # ── Datapacks page: what a test definition is made of, its baseline ──
+
+    def synthesis(self, session: EditSession, testdef_rel: str, setup_config: str | None = None) -> dict:
+        """A test definition at a glance: the logical configuration of its setup, the inputs of each
+        component, its dictionaries with their keys, and the datasets of its baseline with the versions
+        their importer offers."""
+        from testsuit.datatools.datapack.datapack_tools import _find_sources
+        from testsuit.datatools.datapack.templating import TemplateError
+        try:
+            builder, testdef, raw = self._builder(session, testdef_rel, setup_config)
+            keys = builder.keys()
+        except SequencerError:
+            raise
+        except Exception as e:
+            raise SequencerError(str(e)) from e
+
+        def shown(path: Path | str) -> str:
+            path = Path(path)
+            if path.is_absolute() and path.resolve().is_relative_to(session.root.resolve()):
+                return self.rel(session, path)
+            return path.as_posix()
+
+        def render(text: Any) -> str | None:
+            try:
+                return keys.render_string(str(text), where="synthesis")
+            except (TemplateError, Exception):
+                return None
+
+        setup_dir = builder.setup_file.parent
+        config = testdef.setup_config
+        cfg = (raw.get("configurations") or {}).get(config) or {}
+        types = raw.get("component_types") or {}
+        components = []
+        for comp_id, comp in (cfg.get("components") or {}).items():
+            comp = comp if isinstance(comp, dict) else {}
+            lab_type, seen = comp.get("type"), set()
+            while lab_type in types and lab_type not in seen:
+                seen.add(lab_type)
+                lab_type = (types[lab_type] or {}).get("extends") or ""
+            configuration = ((types.get(comp.get("type")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
+            inputs = []
+            for item in configuration.get("inputs") or []:
+                if not isinstance(item, dict):
+                    continue
+                source = str(item.get("source", ""))
+                resolved = render(source)
+                found = _find_sources(resolved, [builder.testdef_dir, setup_dir]) if resolved and "<" not in resolved else []
+                inputs.append({"source": source, "resolved": resolved, "target": item.get("target", ""),
+                               "method": item.get("method") or "template", "generator": item.get("generator"),
+                               "optional": bool(item.get("optional")),
+                               "files": [shown(f) for f in found[:20]],
+                               "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
+            components.append({"id": comp_id, "name": comp.get("name", ""), "type": comp.get("type", ""),
+                               "lab_type": lab_type, "configuration": comp.get("configuration", ""),
+                               "stage": comp.get("stage"), "role": comp.get("role"), "needs": comp.get("needs") or [],
+                               "inputs": inputs})
+        stages = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stages") or {}).items()}
+
+        dictionaries = []
+        for layer, path in builder.dictionaries:
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                data = {}
+            rows = []
+            for name, value in _flatten_keys(data if isinstance(data, dict) else {}):
+                text = value if isinstance(value, str) else json.dumps(value, default=str)
+                origin = keys.origins.get(name, "")
+                rows.append({"key": name, "value": text[:200],
+                             "overridden_by": shown(origin) if origin and origin != path.as_posix() else None})
+            dictionaries.append({"layer": layer, "path": shown(path), "keys": rows})
+
+        baseline = self._datasets(session, builder, raw, keys, shown, render)
+        ids = {d["id"] for d in baseline}
+        for comp in components:
+            for item in comp["inputs"]:
+                item["dataset"] = item["dataset"] if item["dataset"] in ids else None
+        return {"testdef": {"path": testdef_rel, "id": testdef.id, "name": testdef.name,
+                            "description": getattr(testdef, "description", "") or "",
+                            "setup_file": shown(builder.setup_file), "setup_config": config,
+                            "own_config": config == (yaml.safe_load(self.path(session, testdef_rel).read_text(encoding="utf-8")) or {}).get("setup_config"),
+                            "configurations": sorted(raw.get("configurations") or {})},
+                "setup": {"id": raw.get("id"), "name": raw.get("name")},
+                "stages": stages, "components": components, "dictionaries": dictionaries,
+                "baseline": baseline}
+
+    def _datasets(self, session: EditSession, builder, raw: dict, keys, shown, render) -> list[dict]:
+        from testsuit.datatools.datapack import importers
+        datasets = []
+        for r, repo in enumerate(raw.get("datarepositories") or []):
+            for s, src in enumerate(repo.get("datasources") or []):
+                source = render(src.get("source", "")) or str(src.get("source", ""))
+                if source and not source.startswith(("/", "~")) and "://" not in source and not re.match(r"^[\w.-]+@", source):
+                    local = (builder.setup_file.parent / source)
+                    source = local.as_posix() if local.exists() else source
+                versions, error = None, None
+                try:
+                    importer = importers.create_data_importer(str(src.get("importer", "")), "", source, "")
+                    if hasattr(importer, "listVersions"):
+                        versions = importer.listVersions()
+                except Exception as e:                       # unreachable remote, unknown importer...
+                    error = str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__
+                for d, ds in enumerate(src.get("datasets") or []):
+                    if not isinstance(ds, dict):
+                        continue
+                    written = str(ds.get("version", ""))
+                    match = re.fullmatch(r"\{\{\s*([\w.]+)\s*\}\}", written.strip())
+                    key = match.group(1) if match else None
+                    origin = keys.origins.get(key, "") if key else builder.setup_file.as_posix()
+                    editable = bool(origin) and origin.startswith("/") and Path(origin).resolve().is_relative_to(session.root.resolve()) \
+                        and (key is not None or "{{" not in written)
+                    datasets.append({"id": ds.get("id"), "datarepository": repo.get("id"), "datasource": src.get("id"),
+                                     "name": src.get("name", ""), "importer": src.get("importer", ""),
+                                     "source": shown(source) if source.startswith("/") else source,
+                                     "written": written, "version": render(written), "key": key,
+                                     "defined_in": shown(origin) if origin.startswith("/") else origin or None,
+                                     "editable": editable, "at": [r, s, d],
+                                     "versions": versions, "versions_error": error})
+        return datasets
+
+    def set_version(self, session: EditSession, testdef_rel: str, dataset: str, version: str,
+                    setup_config: str | None = None) -> dict:
+        """Change the version of a dataset of the baseline where it is written: the dictionary key its
+        version names (``version: "{{ key }}"``), or the setup file itself."""
+        version = str(version).strip()
+        if not version:
+            raise SequencerError("no version given")
+        found = next((d for d in self.synthesis(session, testdef_rel, setup_config)["baseline"] if d["id"] == dataset), None)
+        if found is None:
+            raise SequencerError(f"no dataset '{dataset}' in the setup of '{testdef_rel}'")
+        if not found["editable"]:
+            raise SequencerError(f"the version of '{dataset}' is not written in a file of this repository: change it in "
+                                 f"'{found['defined_in'] or found['written']}'")
+        rel = found["defined_in"]
+        if found["key"]:
+            at: list = found["key"].split(".")
+        else:
+            r, s, d = found["at"]
+            at = ["datarepositories", r, "datasources", s, "datasets", d, "version"]
+        result = self.write(session, rel, data=version, at=at)
+        return {"file": rel, "key": found["key"], "version": version, "problems": result.get("problems", [])}
+
     def generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                  nocheck: bool = True) -> dict:
         """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would."""

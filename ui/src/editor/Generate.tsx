@@ -9,12 +9,25 @@ import { useSession } from "./state";
 
 export function GenerateDialog({ onClose }: { onClose: () => void }) {
   const { sid, ctx, info } = useSession();
-  const testdefs: any[] = ctx.workspace?.testdefs || [];
-  const [testdef, setTestdef] = useState<string>(testdefs[0]?.path || "");
+  if (info.kind === "lab")
+    return (
+      <Dialog title="Generate a datapack" onClose={onClose}>
+        <p>Datapacks come from the test definitions of a tests repository: open an editing session on it. A datapack generated there is checked against the lab as it runs now.</p>
+      </Dialog>
+    );
+  return <GenerateDatapack sid={sid} workspace={ctx.workspace} onClose={onClose} />;
+}
+
+/** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
+export function GenerateDatapack({ sid, workspace, testdef: initial, config: initialConfig, onClose }: {
+  sid: string; workspace: any; testdef?: string; config?: string | null; onClose: () => void;
+}) {
+  const testdefs: any[] = workspace?.testdefs || [];
+  const [testdef, setTestdef] = useState<string>(initial || testdefs[0]?.path || "");
   const td = testdefs.find((t) => t.path === testdef);
-  const setup = (ctx.workspace?.setups || []).find((s: any) => s.path === td?.setup_file);
+  const setup = (workspace?.setups || []).find((s: any) => s.path === td?.setup_file);
   const configs = Object.keys(setup?.configurations || {});
-  const [config, setConfig] = useState<string | null>(null);
+  const [config, setConfig] = useState<string | null>(initialConfig && initialConfig !== td?.setup_config ? initialConfig : null);
   const [check, setCheck] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -38,12 +51,6 @@ export function GenerateDialog({ onClose }: { onClose: () => void }) {
     if (run) setPosted(run);
   };
 
-  if (info.kind === "lab")
-    return (
-      <Dialog title="Generate a datapack" onClose={onClose}>
-        <p>Datapacks come from the test definitions of a tests repository: open an editing session on it. A datapack generated there is checked against the lab as it runs now.</p>
-      </Dialog>
-    );
   const footer = result?.ok ? (
     <>
       <a className="button" href={url(`edit/sessions/${sid}/datapack/${result.name}`)} download>Download {result.zip}</a>

@@ -93,6 +93,15 @@ class ReleaseImporter(ADataImporter):
         keysFile.write_text("# written by the toytrain-release datapack importer\n" + yaml.safe_dump(keys, sort_keys=False))
         return True
 
+    def listVersions(self) -> list[str]:
+        """Versions in the release store: its ``<version>.zip`` archives and ``<version>/`` folders."""
+        from testsuit.datatools.datapack.importers import sort_versions
+        store = Path(os.path.expanduser(self._remotePath))
+        if not store.is_dir():
+            raise FileNotFoundError(f"no release store '{self._remotePath}'")
+        return sort_versions([p.stem if p.suffix == ".zip" else p.name for p in store.iterdir()
+                              if (p.is_dir() and not p.name.startswith(".")) or p.suffix == ".zip"])
+
     def getTag(self, testTag: bool = False) -> str | bool:
         marker = self._marker()
         if testTag:

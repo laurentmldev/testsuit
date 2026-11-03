@@ -38,6 +38,14 @@ class ADataImporter(metaclass=abc.ABCMeta):
         """Retrieve repo from reference location"""
         ...
 
+    def listVersions(self):
+        """Versions available at the reference location (``remotePath``), newest first when known.
+
+        Optional: an importer that cannot tell returns None (the default). The sequencer's Datapacks page
+        offers these versions when updating a baseline.
+        """
+        return None
+
     def isClean(self):
         """Return True if evcerything is clean tagged, no local modifs etc"""
         if not self.getChanges(testClean=True):

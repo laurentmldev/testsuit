@@ -167,6 +167,45 @@ def test_workspace_session(repos):
         "Ada <ada@example.com> Add the count test"
 
 
+def test_datapacks_synthesis_and_baseline(repos, tmp_path):
+    editor = repos.editor
+    session = editor.open("workspace0", local=True)
+    # a dataset from a git repository, its version written as a key of a setup dictionary
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "a.txt").write_text("a\n")
+    git(data, "init", "-q", "-b", "main")
+    git(data, "add", "-A")
+    git(data, "commit", "-qm", "data")
+    for tag in ("v1.9.0", "v1.10.0"):
+        git(data, "tag", tag)
+    setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
+    setup["datarepositories"] = [{"id": "repo", "path": str(tmp_path / "datarepo"), "datasources": [
+        {"id": "src", "importer": "git", "source": str(data), "datasets": [{"id": "ds", "version": "{{ data_version }}"}]}]}]
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    editor.write(session, "setup/globals.yml",
+                 content="duration: 0.5s\nmin_count: 3\ndata_version: v1.9.0   # the data in use\n")
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+
+    found = editor.synthesis(session, "testdef/count/testdef.yml")
+    assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
+    assert "dut" in {c["id"] for c in found["components"]}
+    assert any(i["files"] for c in found["components"] for i in c["inputs"])
+    dictionary = next(d for d in found["dictionaries"] if d["path"] == "setup/globals.yml")
+    assert {"key": "min_count", "value": "3", "overridden_by": None} in dictionary["keys"]
+    (ds,) = found["baseline"]
+    assert ds["version"] == "v1.9.0" and ds["key"] == "data_version" and ds["defined_in"] == "setup/globals.yml"
+    assert ds["editable"] and ds["versions"] == ["v1.10.0", "v1.9.0", "main"], ds
+
+    changed = editor.set_version(session, "testdef/count/testdef.yml", "ds", "v1.10.0")
+    assert changed["file"] == "setup/globals.yml"
+    assert "data_version: v1.10.0  # the data in use" in editor.read(session, "setup/globals.yml")["content"]
+    with pytest.raises(SequencerError, match="no dataset"):
+        editor.set_version(session, "testdef/count/testdef.yml", "other", "v1")
+
+
 def test_rejected_push_then_rebase(repos):
     editor = repos.editor
     first, second = editor.open("workspace0"), editor.open("workspace0")
