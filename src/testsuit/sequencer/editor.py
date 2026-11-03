@@ -739,6 +739,20 @@ class Editor:
             problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
         return problems
 
+    def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
+        """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
+        setup configuration (phases, logical stages and components, step targets), and what the lab cannot provide."""
+        from testsuit.sequencer.intake import check_against_lab
+        try:
+            _, _, _, _, needs, pipeline, flats = self._testdef_parts(session, testdef_rel, setup_config)
+        except SequencerError as e:
+            return [f"pipeline: {e}"]
+        except Exception as e:                    # an invalid pipeline (pydantic), a missing include...
+            return [f"pipeline: {_describe(e)}"]
+        lab, _ = self.lab_for(session)
+        problems = [f"lab: {p}" for p in check_against_lab(SimpleNamespace(needs=needs), lab)]
+        return problems + [f"pipeline: {p}" for p in self._flatten(lab, needs, pipeline, flats)["problems"]]
+
     def check_setup(self, session: EditSession, rel: str) -> list[dict]:
         from testsuit.datatools.datapack.datapack_tools import _find_sources
         from testsuit.datatools.datapack.model import Setup
@@ -1135,6 +1149,7 @@ class Editor:
                     problems.append(f"{where}: '{item['resolved']}' holds the datapack being generated (a key with an empty value?)")
                 elif not item["files"] and not item["optional"] and "<" not in item["resolved"]:   # <a dataset folder>: not checked
                     problems.append(f"{where}: '{item['resolved']}' not found")
+        problems += self._run_problems(session, testdef_rel, config)
         return {"testdef": {"path": testdef_rel, "id": testdef.id, "name": testdef.name,
                             "description": getattr(testdef, "description", "") or "",
                             "setup_file": shown(builder.setup_file), "setup_config": config,

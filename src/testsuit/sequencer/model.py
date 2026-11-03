@@ -330,7 +330,9 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
                                      f"(setup stages: {', '.join(needs.stages) or 'none'})")
         for comp in phase.components:
             if comp not in needs.components:
-                raise SequencerError(f"phase '{phase.id}': unknown logical component '{comp}'")
+                adhoc = [c.id for c in needs.components.values() if not c.stage]
+                raise SequencerError(f"phase '{phase.id}': unknown logical component '{comp}' "
+                                     f"(setup ad hoc components: {', '.join(adhoc) or 'none'})")
             if needs.components[comp].stage:
                 raise SequencerError(f"phase '{phase.id}': component '{comp}' belongs to stage "
                                      f"'{needs.components[comp].stage}': list the stage instead")

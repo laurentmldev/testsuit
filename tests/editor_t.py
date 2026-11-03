@@ -259,8 +259,20 @@ def test_generation_errors_and_stop(repos):
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
         "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+    assert editor.synthesis(session, "testdef/count/testdef.yml")["problems"] == []
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
     inputs = setup["component_types"]["dut_app"]["configurations"]["standard"]["inputs"]
+
+    # what the sequencer would refuse at posting (a phase naming a component the setup does not have): listed before generating
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "components": ["test_sequencer"],
+                                 "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+    problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
+    assert problems == ["pipeline: phase 'run': unknown logical component 'test_sequencer' (setup ad hoc components: analysis)"], problems
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
 
     # a missing template: the error, in the result and as the last line of the log
     inputs[1]["source"] = "files/nope.txt"
