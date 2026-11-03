@@ -56,6 +56,14 @@ def get_data_importers() -> list[str]:
     return list(_importers)
 
 
+def sort_versions(versions: list[str]) -> list[str]:
+    """Versions newest first, numbers compared as numbers (v1.10.0 after v1.9.2)."""
+    import re
+    def key(v: str):
+        return [(1, int(part), "") if part.isdigit() else (0, 0, part) for part in re.split(r"(\d+)", v)]
+    return sorted(set(versions), key=key, reverse=True)
+
+
 def create_data_importer(name: str, targetDir: str, remotePath: str, versionId: str) -> ADataImporter:
     """Create the importer of a dataset.
 

@@ -2,6 +2,7 @@
 import git,os,sys
 import subprocess
 from testsuit.datatools.datapack.ADataImporter import ADataImporter
+from testsuit.datatools.datapack.importers import sort_versions
 
 
 class GitImporter(ADataImporter):
@@ -49,6 +50,16 @@ class GitImporter(ADataImporter):
             return False
         
         return True
+
+    def listVersions(self):
+        """Tags of the remote repository, newest first, then its branches."""
+        def remote(kind):
+            out = subprocess.run(["git", "ls-remote", "--refs", kind, self._remotePath], capture_output=True,
+                                 text=True, timeout=20, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+            if out.returncode != 0:
+                raise RuntimeError(out.stderr.strip() or f"git ls-remote failed on '{self._remotePath}'")
+            return [line.split("\t", 1)[1].split("/", 2)[2] for line in out.stdout.splitlines() if "\t" in line]
+        return sort_versions(remote("--tags")) + sorted(remote("--heads"))
 
     def retrieve(self):
 

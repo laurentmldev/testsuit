@@ -10,6 +10,7 @@ import { RunPage } from "./pages/Run";
 import { LabPage } from "./pages/Lab";
 import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
+import { DatapacksPage } from "./pages/Datapacks";
 import { SessionPage } from "./editor/Session";
 
 function LabBanner() {
@@ -49,12 +50,13 @@ function App() {
   }, []);
   const page = route.parts[0] || "queue";
   const nav = [
-    ["queue", "Queue"], ["runs", "Runs"], ["lab", "Lab"], ...(editor ? [["edit", "Editor"]] : []), ["config", "Configuration"],
+    ["queue", "Queue"], ["runs", "Runs"], ["lab", "Lab"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["config", "Configuration"],
   ];
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
   else if (page === "runs") content = <RunsPage />;
-  else if (page === "lab") content = <LabPage />;
+  else if (page === "lab") content = <LabPage editor={editor} />;
+  else if (page === "datapacks") content = <DatapacksPage route={route} />;
   else if (page === "config") content = <ConfigPage />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
   else if (page === "edit") content = <EditorHome />;

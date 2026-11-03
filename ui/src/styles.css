@@ -380,3 +380,23 @@ button .spinner { width: 11px; height: 11px; vertical-align: -1px; margin-right:
 .key-help { color: var(--muted); }
 .key-origin { grid-column: 2; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pad-s { padding: 6px 9px; }
+
+/* Datapacks page */
+.datapacks { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
+.testdef-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 8px; }
+.testdef-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.testdef-item.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.testdef-item .mono { word-break: break-all; }
+.synthesis { min-width: 0; }
+.synthesis-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.synthesis-head h3 { margin: 0 0 2px; }
+.synthesis-head p { margin: 4px 0 0; }
+.synthesis .chip { margin-right: 4px; }
+.synthesis table.keys tr.off td { opacity: .55; text-decoration: line-through; }
+.version-edit { display: flex; gap: 6px; align-items: center; }
+.version-edit input { width: 12em; }
+@media (max-width: 760px) {
+  .datapacks { grid-template-columns: 1fr; }
+  .testdef-list { position: static; }
+}
+.synthesis .form-body { overflow-x: auto; }

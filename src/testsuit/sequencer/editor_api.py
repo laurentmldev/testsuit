@@ -110,6 +110,15 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return await run(editor.preview, session(sid), str(body["testdef"]), str(body["source"]), body.get("component"),
                          body.get("setup_config"))
 
+    @app.post("/edit/sessions/{sid}/synthesis")
+    async def synthesis(sid: str, body: dict):
+        return await run(editor.synthesis, session(sid), str(body["testdef"]), body.get("setup_config"))
+
+    @app.post("/edit/sessions/{sid}/baseline")
+    async def set_version(sid: str, body: dict):
+        return await run(editor.set_version, session(sid), str(body["testdef"]), str(body["dataset"]),
+                         str(body.get("version") or ""), body.get("setup_config"))
+
     @app.post("/edit/sessions/{sid}/datapack")
     async def generate(sid: str, body: dict):
         return await run(editor.generate, session(sid), str(body["testdef"]), body.get("setup_config"),

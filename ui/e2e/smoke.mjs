@@ -30,6 +30,7 @@ if (list.length) for (const tab of ["pipeline", "steps", "files"]) await visit(`
 const edit = await api("edit").catch(() => null);
 if (edit?.enabled) {
   await visit("edit");
+  await visit("datapacks", 4000);
   let sessions = edit.sessions || [];
   if (!sessions.length)
     for (const r of edit.repositories)

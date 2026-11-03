@@ -932,6 +932,7 @@ tsq config                                                  # settings in use, a
   - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository, or `local: true` to edit it in place), `GET|DELETE /edit/sessions/{id}`;
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `PUT` of `data` merges it into the file, keeping its comments), `POST .../rename`;
   - helpers: `GET .../context` (lab types, roles, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
+  - `POST .../synthesis` (a test definition's logical configuration, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
   - `GET .../diff`, `POST .../push` (credentials in the request body, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
 
@@ -950,6 +951,11 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 ### 13.2 Editor mode
 
 An optional mode of the same UI, enabled with `server.editor` (off by default, since it writes files). It edits the YAML files the CLI tools read, and adds nothing the files cannot express: whatever it does can also be done with a text editor and git.
+
+**Where it is.** Two entry points replace a separate Editor tab:
+- **Datapacks** (top-level tab) lists the test definitions of the `server.workspaces` repositories, through an in-place session on each. For the one selected it shows its baseline (each dataset, the version in use, the versions its importer lists, and the dictionary key or file that writes it, with a **Set** to change it there), its logical configuration (stages and components, with their lab type), its template and input files per component, and its dictionaries with their keys. **Generate…** runs the datapack tool on it; **Edit datapack definitions** opens the repository in the Editor. The versions come from the importer's optional `listVersions()`: tags then branches of the remote for `git` (`git ls-remote`), the releases of the store for the toy-train importer.
+- **Edit lab config**, on the Lab tab, opens the lab repository in the Editor, in place.
+The Editor home (`#/edit`, linked as **Editing sessions** on the Datapacks tab) still lists every session and can open a scratch clone.
 
 **Where it works.** An editing session works either in place, on the folder of the repository being edited (the lab repository, or one of `server.workspaces`), or in a scratch clone of it, on the branch it was opened on, so that a half-done change never reaches the running lab. On the Editor home, `in place (no clone)` is ticked by default; untick it for a scratch clone. `POST /edit/sessions` clones unless it is given `"local": true`.
 
