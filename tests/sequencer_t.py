@@ -732,6 +732,39 @@ def ssh_server(tmp_path):
     return start, key_file
 
 
+def test_ssh_login_failures_say_why(tmp_path):
+    """A refused or silent port gives a reason (a timeout has no message of its own), and a component on
+    localhost is told about the local transport."""
+    pytest.importorskip("asyncssh")
+    from testsuit.sequencer.inventory import Component
+    from testsuit.sequencer.transports import create_transport
+
+    async def main():
+        with socket.socket() as s:                   # a free port: nothing listens
+            s.bind(("127.0.0.1", 0))
+            closed = s.getsockname()[1]
+        held = []
+
+        async def never_answer(reader, writer):
+            held.append(writer)
+            await asyncio.sleep(30)
+        silent = await asyncio.start_server(never_answer, "127.0.0.1", 0)   # accepts, never answers
+        quiet = silent.sockets[0].getsockname()[1]
+        errors = []
+        for port in (closed, quiet):
+            comp = Component("box", {"ansible_host": "127.0.0.1", "ansible_port": port,
+                                     "tsq_ssh_options": {"known_hosts": None, "connect_timeout": 1}})
+            result = await create_transport("ssh", comp, str(tmp_path)).shell("true")
+            errors.append(result.error)
+        for writer in held:
+            writer.close()
+        silent.close()
+        return errors
+    refused, timeout = asyncio.run(main())
+    assert "connection refused on port" in refused and "tsq_transport: local" in refused, refused
+    assert "no answer on port" in timeout and "within 1 s" in timeout, timeout
+
+
 def test_ssh_transport(tmp_path, ssh_server):
     from testsuit.sequencer.inventory import Component
     from testsuit.sequencer.transports import create_transport
