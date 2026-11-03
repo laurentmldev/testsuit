@@ -356,9 +356,10 @@ export function Combo({
 }
 
 /** A list of short strings (needs, stages, components...) as removable tags, with suggestions. */
-export function Tags({ value, onChange, choices, placeholder, keys }: {
+export function Tags({ value, onChange, choices, placeholder, keys, onOpen, openTitle }: {
   value?: string[] | null; onChange: (v: string[]) => void; choices?: Choice[]; placeholder?: string;
   keys?: boolean;      // the items are rendered with keys: typing {{ proposes them
+  onOpen?: (item: string) => void; openTitle?: string;   // an item is a link (a file to look at)
 }) {
   const list = value || [];
   const [draft, setDraft] = useState("");
@@ -372,7 +373,7 @@ export function Tags({ value, onChange, choices, placeholder, keys }: {
     <div className="tags">
       {list.map((t) => (
         <span key={t} className="tag">
-          {t}
+          {onOpen ? <button type="button" className="tag-open" onClick={() => onOpen(t)} title={openTitle}>{t}</button> : t}
           <button type="button" onClick={() => onChange(list.filter((x) => x !== t))} title="Remove">×</button>
         </span>
       ))}

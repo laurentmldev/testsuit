@@ -5,6 +5,7 @@ import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { CommandsEditor } from "./commands";
+import { DictionaryDialog } from "./DictionaryDialog";
 import { clone, roleChoices, stageTypeChoices, typeChoices, useSession, type Doc } from "./state";
 
 type Sel = { kind: "general" } | { kind: "data" } | { kind: "type"; name: string } | { kind: "config"; name: string };
@@ -81,14 +82,17 @@ function General({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d: 
   const { files } = useSession();
   const help = useSetupHelp();
   const dictionaries = files.filter((f) => f.kind === "dictionary").map((f) => ({ value: relPath(doc.path, f.path), description: f.path }));
+  const [dictionary, setDictionary] = useState<string | null>(null);
   return (
     <div>
+      {dictionary && <DictionaryDialog fromFile={doc.path} entry={dictionary} onClose={() => setDictionary(null)} />}
       <h3>Setup</h3>
       <Field label="Id" help={help(["id"])}><IdText value={data.id} onChange={(v) => update((d) => (d.id = v))} /></Field>
       <Field label="Name" help={help(["name"])}><Text value={data.name} onChange={(v) => update((d) => (d.name = v || undefined))} /></Field>
       <Field label="Key files" help={help(["dictionaries"])} wide
         hint={<>Templates allowed: <code>{"platforms/{{ testdef.setup_config }}.yml"}</code> picks a file per configuration (what a platform changes, such as addresses).</>}>
         <Tags value={data.dictionaries} onChange={(v) => update((d) => (d.dictionaries = v.length ? v : undefined))}
+          onOpen={setDictionary} openTitle="View or edit this key file"
           choices={[...dictionaries, { value: "platforms/{{ testdef.setup_config }}.yml", description: "one file per setup configuration" }]} />
       </Field>
     </div>
