@@ -39,6 +39,17 @@ export function HelpPanel({ topic, fallback }: { topic: HelpTopic | null; fallba
   );
 }
 
+/** A "?" giving its help in the help panel (on hover, focus or click), for a control outside a Field. */
+export function HelpIcon({ title, text }: { title: string; text: string }) {
+  const setHelp = useHelp();
+  const show = () => setHelp({ title, text });
+  return (
+    <span className="q" role="button" tabIndex={0} title={`${title}: see the help panel`} onMouseEnter={show} onFocus={show} onClick={show}>
+      ?
+    </span>
+  );
+}
+
 // ── schema help lookup ─────────────────────────────────────────────────
 
 /** The schema node describing the data at path (keys and list indexes), following properties,

@@ -2,7 +2,7 @@
 // with their inputs and commands, and the configurations: logical stages and components bound by role.
 import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { CommandsEditor } from "./commands";
 import { DictionaryDialog } from "./DictionaryDialog";
@@ -303,6 +303,28 @@ const METHODS: Choice[] = [
   { value: "generate", description: "produced by a generator from the source and the keys" },
 ];
 
+const METHOD_HELP = `How the input file (or folder) is produced from its source:
+
+- **template** (default): rendered with Jinja2 and the datapack keys.
+- **copy**: copied as is (software, data files).
+- **generate**: produced by a **generator** you provide; there is no built-in one.
+
+**A generator can be a script**, given as a path relative to the **setup folder** (the folder of the setup file), so it is versioned with the setup:
+
+\`\`\`yaml
+- source: templates/profile.yml
+  target: profile.bin
+  method: generate
+  generator: scripts/compile_profile.py
+  options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
+\`\`\`
+
+It is run with 3 arguments: the source path, the target path and a JSON file of keys. \`.py\` runs with the sequencer's own Python, \`.sh\` with bash, anything else is executed directly. The JSON holds every resolved key, plus \`options\` (rendered) and \`component\` (its id, \`input_dir\`, and the components it needs). The script must write the target and exit with 0; its output, stderr included, is in the generation log.
+
+**A generator can also be a registered function**, from a plugin: \`register_generator("name", fn)\` in its \`testsuit.plugins\` entry point, then \`generator: name\` (the registered ones are proposed in the list). The function gets \`(source, target, keys, options, component)\`; the keys it reads are recorded in \`datapack.yml\`, which a script's are not (it gets them all).
+
+A script is the simplest; a registered function suits a generator shared by several setups, or keys that must be traced.`;
+
 function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: string; value: any[]; sources: Choice[]; onChange: (v: any[]) => void }) {
   const { ctx } = useSession();
   const [preview, setPreview] = useState<string | null>(null);
@@ -315,7 +337,7 @@ function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: strin
   return (
     <>
       <table className="grid compact inputs">
-        <thead><tr><th>Source</th><th>Target in the input folder</th><th>Method</th><th /></tr></thead>
+        <thead><tr><th>Source</th><th>Target in the input folder</th><th>Method <HelpIcon title="Input method" text={METHOD_HELP} /></th><th /></tr></thead>
         <tbody>
           {value.map((inp, i) => (
             <tr key={i}>
@@ -327,6 +349,7 @@ function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: strin
                 <select value={inp.method || "template"} onChange={(e) => set(i, "method", e.target.value)} title={METHODS.find((m) => m.value === (inp.method || "template"))?.description}>
                   {METHODS.map((m) => <option key={m.value} value={m.value}>{m.value}</option>)}
                 </select>
+                {inp.method === "generate" && <HelpIcon title="Generator" text={METHOD_HELP} />}
                 {inp.method === "generate" && <Combo value={inp.generator} onChange={(v) => set(i, "generator", v)} placeholder="generator or script.py"
                   choices={(ctx.generators || []).map((g: string) => ({ value: g, description: "registered generator" }))} />}
                 <Toggle value={inp.optional} onChange={(v) => set(i, "optional", v)} label="optional" />
