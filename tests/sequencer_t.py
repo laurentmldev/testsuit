@@ -409,6 +409,44 @@ def test_selftest_failure(tmp_path, no_git):
     assert done["verdict"] == "error" and "self-test failed 2 time(s)" in done["reason"]
 
 
+def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
+    """A failed self-test leaves the component broken while its probe says idle; becoming idle (or being
+    probed idle while kept broken) runs a self-test, and the one that passes brings it back."""
+    bench = Bench(tmp_path, stages=1)
+    flag = tmp_path / "healthy"
+    types = yaml.safe_load((tmp_path / "lab" / "types" / "bench.yml").read_text())
+    types["component_types"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"test -e {flag}"}]
+    write(tmp_path / "lab" / "types" / "bench.yml", yaml.safe_dump(types))
+
+    async def until(seq, state):
+        for _ in range(200):
+            if seq.monitor.state("counter_1") == state and "counter_1" not in seq.monitor._testing:
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.idle_retest = 0
+        [result] = await seq.selftest("counter_1")
+        seen = [result["ok"], seq.monitor.state("counter_1")]
+        seen.append(await seq.monitor.probe("counter_1"))          # probed idle, kept broken (and tested again: fails)
+        seen.append(await until(seq, "broken"))
+        detail = seq.store.resources("component")[("component", "counter_1")]["detail"]
+        flag.write_text("")                                         # repaired: the next test passes
+        await seq.monitor.probe("counter_1")
+        seen.append(await until(seq, "idle"))
+        flag.unlink()                                               # broken again, then idle: tested, broken
+        seq.store.set_state("counter_1", "offline")
+        await seq.monitor.probe("counter_1")
+        seen.append(await until(seq, "broken"))
+        await seq.close()
+        return seen, detail
+    seen, detail = asyncio.run(main())
+    assert seen == [False, "broken", "broken", True, True, True], seen
+    assert detail.startswith("self-test failed") and "healthy" in detail, detail
+
+
 def test_maintenance_blocks(bench):
     async def main():
         seq = bench.sequencer()
@@ -730,6 +768,39 @@ def ssh_server(tmp_path):
                                             authorized_client_keys=authorized, process_factory=handle,
                                             sftp_factory=True, encoding=None)
     return start, key_file
+
+
+def test_ssh_login_failures_say_why(tmp_path):
+    """A refused or silent port gives a reason (a timeout has no message of its own), and a component on
+    localhost is told about the local transport."""
+    pytest.importorskip("asyncssh")
+    from testsuit.sequencer.inventory import Component
+    from testsuit.sequencer.transports import create_transport
+
+    async def main():
+        with socket.socket() as s:                   # a free port: nothing listens
+            s.bind(("127.0.0.1", 0))
+            closed = s.getsockname()[1]
+        held = []
+
+        async def never_answer(reader, writer):
+            held.append(writer)
+            await asyncio.sleep(30)
+        silent = await asyncio.start_server(never_answer, "127.0.0.1", 0)   # accepts, never answers
+        quiet = silent.sockets[0].getsockname()[1]
+        errors = []
+        for port in (closed, quiet):
+            comp = Component("box", {"ansible_host": "127.0.0.1", "ansible_port": port,
+                                     "tsq_ssh_options": {"known_hosts": None, "connect_timeout": 1}})
+            result = await create_transport("ssh", comp, str(tmp_path)).shell("true")
+            errors.append(result.error)
+        for writer in held:
+            writer.close()
+        silent.close()
+        return errors
+    refused, timeout = asyncio.run(main())
+    assert "connection refused on port" in refused and "tsq_transport: local" in refused, refused
+    assert "no answer on port" in timeout and "within 1 s" in timeout, timeout
 
 
 def test_ssh_transport(tmp_path, ssh_server):

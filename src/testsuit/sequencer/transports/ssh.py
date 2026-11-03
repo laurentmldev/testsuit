@@ -48,9 +48,22 @@ class SshTransport(Transport):
             options.setdefault("connect_timeout", 15)
             try:
                 self._conn = await asyncssh.connect(self.host, **options)
-            except (OSError, asyncssh.Error) as e:
-                raise SequencerError(f"ssh to {self.host}: {e}") from e
+            except (OSError, asyncssh.Error, asyncio.TimeoutError) as e:
+                raise SequencerError(f"ssh to {self.host}: {self._why(e, options)}") from e
             return self._conn
+
+    def _why(self, e: BaseException, options: dict) -> str:
+        """The reason of a failed login, never empty (a timeout has no message), with what to check."""
+        port = options.get("port", 22)
+        if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+            why = f"no answer on port {port} within {options.get('connect_timeout')} s (sshd not running, or a firewall?)"
+        elif isinstance(e, ConnectionRefusedError):
+            why = f"connection refused on port {port} (sshd not running?)"
+        else:
+            why = str(e) or type(e).__name__
+        if self.host in ("localhost", "127.0.0.1", "::1"):
+            why += "; for a component on the sequencer host itself, set tsq_transport: local"
+        return why
 
     async def close(self) -> None:
         if self._conn is not None:

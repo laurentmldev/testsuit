@@ -100,6 +100,8 @@ class Sequencer:
         self.monitor = Monitor(self.store, config.monitor.interval, self.notify)
         self._transports: dict[str, Transport] = {}
         self.monitor.attach(self.lab, self.transport_for)
+        if config.selftest.when_idle:
+            self.monitor.on_idle = self._selftest_one
         self.executions: dict[str, "RunExecution"] = {}
         self.subscribers: set[asyncio.Queue] = set()
         self._wake: asyncio.Event | None = None
@@ -346,9 +348,19 @@ class Sequencer:
         resolved = self.lab.types.resolve(comp, stage)
         result = await selftest_component(comp, resolved, self.transport_for(comp_id), self.monitor,
                                           self.config.selftest.timeout)
+        failed = [c for c in result["checks"] if not c["ok"]]
         if not result["ok"]:
-            self.store.set_state(comp_id, result["state"] or "broken", "self-test failed")
-            self.notify("component", {"component": comp_id, "state": result["state"], "detail": "self-test failed"})
+            # kept until a self-test passes: the probes that follow do not turn it back to idle (monitor.probe)
+            detail = "; ".join(f"{c['id']}: {c['detail']}" if c["detail"] else c["id"] for c in failed) or "failed"
+            self.store.set_selftest_failed(comp_id, {"at": result["at"], "detail": detail})
+            state = result["state"] or "broken"
+            previous = self.store.set_state(comp_id, state, f"self-test failed: {detail}")
+            self.notify("component", {"component": comp_id, "state": state, "previous": previous,
+                                      "detail": f"self-test failed: {detail}"})
+        elif (self.store.resources("component").get(("component", comp_id)) or {}).get("selftest_failed"):
+            self.store.set_selftest_failed(comp_id, None)
+            self.notify("selftest", {"target": comp_id, "ok": True})
+            await self.monitor.probe(comp_id)               # back to its probed state now
         return result
 
     # ── restart recovery and housekeeping ───────────────────────────────

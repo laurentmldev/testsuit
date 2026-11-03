@@ -12,7 +12,7 @@ import logging
 import re
 import shlex
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component
@@ -25,6 +25,7 @@ log = logging.getLogger("testsuit.sequencer")
 probe_log = logging.getLogger("testsuit.probe")       # each probe: kept for the Lab page's log only (logbuffer)
 
 STATES = ("offline", "idle", "configured", "running", "broken", "unknown")
+HEALTHY_STATES = ("idle", "configured", "running")
 
 
 def component_keys(comp: Component, root: str) -> dict:
@@ -120,6 +121,11 @@ class Monitor:
         self.lab: Lab | None = None
         self.transports: Callable[[str], Transport] | None = None
         self.active: set[str] = set()                 # components of active runs: probed more often
+        # the self-test to run when a component becomes idle (set by the sequencer), and when it last ran
+        self.on_idle: Callable[[str], Awaitable[Any]] | None = None
+        self.idle_retest = 60.0                        # a component kept broken by its self-test: tested again at most this often
+        self._tested: dict[str, float] = {}
+        self._testing: set[str] = set()
         self._last: dict[str, float] = {}
         self._wake = asyncio.Event()
 
@@ -130,7 +136,10 @@ class Monitor:
         res = self.store.resources("component").get(("component", comp_id))
         return (res or {}).get("state") or "unknown"
 
-    async def probe(self, comp_id: str) -> str:
+    async def probe(self, comp_id: str, selftest: bool = False) -> str:
+        """Probe a component and record its state. A component whose last self-test failed stays
+        'broken' while its probe says it is healthy, until a self-test passes: one runs when it turns
+        idle. selftest=True: the probe of a self-test, which gets the probed state as it is."""
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.types.resolve(comp, stage)
@@ -149,6 +158,12 @@ class Monitor:
         line = (f"{comp_id}: {', '.join(trace) or 'no probe'} -> {state} ({time.monotonic() - started:.1f} s)"
                 + (f": {detail.strip()}" if detail and detail.strip() else ""))
         probe_log.log(logging.WARNING if failed or state in ("offline", "broken") else logging.DEBUG, line)
+        if selftest:
+            return state
+        probed = state
+        failure = res.get("selftest_failed")
+        if failure and state in HEALTHY_STATES:
+            state, detail = "broken", f"self-test failed ({failure.get('at', '')}): {failure.get('detail', '')}"
         previous = self.store.set_state(comp_id, state, detail)
         self._last[comp_id] = time.monotonic()
         self.notify("probe", {"component": comp_id, "state": state})      # the Lab page shows when, live
@@ -157,7 +172,28 @@ class Monitor:
         expected = res.get("expected")
         if expected and state not in (expected, "unknown") and not (expected == "idle" and state == "configured"):
             self.notify("state_mismatch", {"component": comp_id, "expected": expected, "state": state})
+        if probed == "idle" and (previous != "idle" or failure):
+            self._selftest_when_idle(comp_id, retest=bool(failure) and previous == "broken")
         return state
+
+    def _selftest_when_idle(self, comp_id: str, retest: bool) -> None:
+        """A self-test in the background, for a component that became idle (not one an active run holds:
+        the run tests its own); a component kept broken by its self-test is tested again at most every idle_retest."""
+        if self.on_idle is None or comp_id in self.active or comp_id in self._testing:
+            return
+        if retest and time.monotonic() - self._tested.get(comp_id, -1e9) < self.idle_retest:
+            return
+        self._testing.add(comp_id)
+        self._tested[comp_id] = time.monotonic()
+
+        async def run():
+            try:
+                await self.on_idle(comp_id)
+            except Exception as e:                       # never let it go unseen
+                probe_log.warning(f"{comp_id}: self-test when idle failed: {type(e).__name__}: {e}")
+            finally:
+                self._testing.discard(comp_id)
+        asyncio.ensure_future(run())
 
     def interval_of(self, comp_id: str) -> float:
         comp = self.lab.inventory.components[comp_id]
@@ -214,7 +250,8 @@ async def selftest_component(comp: Component, resolved: ResolvedType, transport:
                 if resolved.status is None:
                     detail = "no status probe"
                 else:
-                    state = await monitor.probe(comp.id) if monitor else (await probe_component(comp, resolved, transport))[0]
+                    state = (await monitor.probe(comp.id, selftest=True) if monitor
+                             else (await probe_component(comp, resolved, transport))[0])
                     ok, detail = state not in ("broken", "offline"), f"state {state}"
                     if not ok:
                         failed_state = failed_state or state
