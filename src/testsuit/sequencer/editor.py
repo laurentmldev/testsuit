@@ -148,12 +148,40 @@ def _flatten_keys(data: Any, prefix: str = "") -> list[tuple[str, Any]]:
     return [(prefix, data)]
 
 
+class _LiveLog(io.TextIOBase):
+    """Output of a generation, readable line by line while it is written (from another thread)."""
+
+    def __init__(self) -> None:
+        self._lines: list[str] = []
+        self._partial = ""
+        self._lock = threading.Lock()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        with self._lock:
+            parts = (self._partial + text.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
+            self._partial = parts.pop()
+            self._lines.extend(parts)
+        return len(text)
+
+    def lines(self, since: int = 0) -> list[str]:
+        with self._lock:
+            return self._lines[since:]
+
+    def text(self) -> str:
+        with self._lock:
+            return "\n".join(self._lines + ([self._partial] if self._partial else []))
+
+
 class Editor:
 
     _output_lock = threading.Lock()                 # stdout is captured while the datapack tool prints
 
     def __init__(self, seq):
         self.seq = seq
+        self.jobs: dict[str, dict] = {}                 # datapack generations in the background
         self.base = seq.config.root / "editor"
         self.base.mkdir(parents=True, exist_ok=True)
         self.askpass = self.base / "askpass.sh"
@@ -981,7 +1009,7 @@ class Editor:
         try:
             text, used = keys.render_file(path, [builder.testdef_dir, setup_dir], extra)
         except TemplateError as e:
-            message, _ = self._message_file(session, str(e), source)
+            _, message = self._message_file(session, str(e), source)
             line = re.search(r"line (\d+)", message)
             return {"ok": False, "error": message, "line": int(line.group(1)) if line else None, "component": component}
         return {"ok": True, "text": text, "component": component, "components": sorted(comps),
@@ -1173,19 +1201,67 @@ class Editor:
     def generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                  nocheck: bool = True) -> dict:
         """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would."""
+        log = _LiveLog()
+        with self._output_lock, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+            return self._generate(session, testdef_rel, setup_config, nocheck, log)
+
+    def start_generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
+                       nocheck: bool = True) -> dict:
+        """The same as generate, in the background: its log can be read while it runs (generation_job)."""
+        job_id = uuid.uuid4().hex[:8]
+        log = _LiveLog()
+        job: dict[str, Any] = {"session": session.id, "log": log, "result": None, "done": False}
+        finished = [k for k, v in self.jobs.items() if v["done"]]
+        for k in finished[:max(0, len(self.jobs) - 20)]:   # keep the last ones only
+            del self.jobs[k]
+        self.jobs[job_id] = job
+
+        def work() -> None:
+            try:
+                if self._output_lock.locked():
+                    log.write("(waiting for another generation or check of this server to end)\n")
+                with self._output_lock, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+                    job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, log)
+            except Exception as e:                       # never a silent end
+                job["result"] = {"ok": False, "error": f"{type(e).__name__}: {e}", "log": self._clean(session, log.text())}
+            finally:
+                job["done"] = True
+
+        threading.Thread(target=work, name=f"generate-{job_id}", daemon=True).start()
+        return {"job": job_id}
+
+    def generation_job(self, session: EditSession, job_id: str, since: int = 0) -> dict:
+        """The log lines of a generation from line since, and its result once it is done."""
+        job = self.jobs.get(job_id)
+        if job is None or job["session"] != session.id:
+            raise SequencerError(f"no generation '{job_id}' in this session")
+        done = job["done"]                                   # read before the lines: none is missed
+        lines = job["log"].lines(since)
+        return {"lines": [self._clean(session, line) for line in lines], "next": since + len(lines),
+                "done": done, "result": job["result"] if done else None}
+
+    @staticmethod
+    def _clean(session: EditSession, text: str) -> str:
+        return ANSI.sub("", text).replace(f"{session.folder}/", "").replace(f"{session.dir}/", "")
+
+    def _generate(self, session: EditSession, testdef_rel: str, setup_config: str | None, nocheck: bool,
+                  log: _LiveLog) -> dict:
         from testsuit.datatools.datapack.datapack_tools import DatapackError, datapack, read_baseline
         out_dir = Path(session.dir) / "generated"
         out_dir.mkdir(exist_ok=True)
-        with self._quiet() as log:
-            try:
-                zip_path = datapack(self.path(session, testdef_rel), nocheck=nocheck, output_dir=out_dir,
-                                    setup_config=setup_config)
-                error = None
-            except (DatapackError, SequencerError, OSError) as e:
-                zip_path, error = None, str(e)
-        text = ANSI.sub("", log.getvalue()).replace(f"{session.folder}/", "").replace(f"{session.dir}/", "")
+        try:
+            zip_path = datapack(self.path(session, testdef_rel), nocheck=nocheck, output_dir=out_dir,
+                                setup_config=setup_config)
+            error = None
+        except (DatapackError, SequencerError, OSError) as e:
+            zip_path, error = None, str(e)
+        except Exception as e:                               # a bug or a plugin error: say what it is
+            import traceback
+            print(traceback.format_exc())
+            zip_path, error = None, f"{type(e).__name__}: {e}"
+        text = self._clean(session, log.text())
         if zip_path is None:
-            message, _ = self._message_file(session, error or "", testdef_rel)
+            _, message = self._message_file(session, error or "", testdef_rel)
             return {"ok": False, "error": message, "log": text}
         import zipfile
         with zipfile.ZipFile(zip_path) as z:

@@ -31,7 +31,6 @@ from __future__ import annotations
 import re
 import shlex
 import stat
-import subprocess
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -88,9 +87,11 @@ def run_processor(spec: str, target: Path, scripts_folder: Path) -> None:
         command = ["bash", str(script)]
     else:
         command = [str(script)]
-    result = subprocess.run(command + [str(target)] + args, check=False)
-    if result.returncode != 0:
-        raise ProcessorError(f"script '{script}' failed on '{target}' (exit status {result.returncode})")
+    from testsuit.datatools.datapack.procs import run_logged
+    status, tail = run_logged(command + [str(target)] + args)
+    if status != 0:
+        raise ProcessorError(f"script '{script}' failed on '{target}' (exit status {status})"
+                             + (f": {tail.splitlines()[-1]}" if tail else ""))
 
 
 ########################## built-in processors ##########################

@@ -3,6 +3,7 @@ import git,os,sys
 import subprocess
 from testsuit.datatools.datapack.ADataImporter import ADataImporter
 from testsuit.datatools.datapack.importers import sort_versions
+from testsuit.datatools.datapack.procs import run_logged
 
 
 class GitImporter(ADataImporter):
@@ -69,15 +70,13 @@ class GitImporter(ADataImporter):
         print("# Branch="+str(self._versionId))
         print("############################")
         
-        # hangs out when expecting credentials to be filled by user
-        # repo = git.Repo.clone_from(self._remotePath,self._targetDir,branch=self._versionId,single_branch=True)
-                
-        my_env = os.environ.copy()
-        p = subprocess.Popen("git clone -v "+self._remotePath+" --single-branch -b "+self._versionId+" "+self._targetDir, shell=True, stdout=sys.stdout, stderr=sys.stderr,env=my_env)
-        retval = p.wait()
-        if retval!=0:
-            print("ERROR: Git command to retrieve repo faild, returning a non-zero value: "+str(retval))
+        # git never prompts (no terminal here): credentials come from the user's git setup
+        retval, tail = run_logged(["git", "clone", "-v", "--single-branch", "-b", str(self._versionId),
+                                   str(self._remotePath), str(self._targetDir)])
+        if retval != 0:
+            print(f"ERROR: git clone of '{self._remotePath}' at '{self._versionId}' failed (exit status {retval})"
+                  + (f": {tail.splitlines()[-1]}" if tail else ""))
             return False
-        
+
         return True            
 

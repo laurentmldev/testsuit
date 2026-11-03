@@ -1,7 +1,7 @@
 // Generate a datapack from the session's files (sequencer README, sections 9 and 13.2), look into it, then
 // download it or post it to the queue: a way to try a change before pushing it.
-import { useState } from "react";
-import { post, url } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { get, post, url } from "../api";
 import { Choices, Dialog, Field, Toggle } from "../fields";
 import { FileBrowser } from "../files";
 import { attempt, Markdown, navigate, size } from "../util";
@@ -34,12 +34,31 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   const [priority, setPriority] = useState("");
   const [posted, setPosted] = useState<any>(null);
 
+  const [lines, setLines] = useState<string[]>([]);
+  const live = useRef(true);
+  useEffect(() => () => {
+    live.current = false;
+  }, []);
   const generate = async () => {
     setBusy(true);
     setResult(null);
     setPosted(null);
+    setLines([]);
     try {
-      setResult(await post(`edit/sessions/${sid}/datapack`, { testdef, setup_config: config, nocheck: !check }));
+      // in the background: its log comes line by line, subprocess errors included
+      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check });
+      let since = 0;
+      for (;;) {
+        if (!live.current) return;
+        const r: any = await get(`edit/sessions/${sid}/datapack/jobs/${job}?since=${since}`);
+        if (r.lines.length) setLines((l) => [...l, ...r.lines]);
+        since = r.next;
+        if (r.done) {
+          setResult(r.result);
+          break;
+        }
+        await new Promise((ok) => setTimeout(ok, 400));
+      }
     } catch (e: any) {
       setResult({ ok: false, error: e.message, log: "" });
     } finally {
@@ -63,7 +82,8 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   );
   return (
     <Dialog title="Generate a datapack" onClose={onClose} footer={footer} wide>
-      {!result && (
+      {busy && <LiveLog lines={lines} />}
+      {!result && !busy && (
         <>
           <Markdown text="Runs the datapack tool on the files of this session, as `datapack <testdef>` would: nothing is pushed. A datapack generated from uncommitted files is a **draft**: the queue accepts it, its report says so." />
           <Field label="Test definition">
@@ -85,7 +105,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       {result && !result.ok && (
         <>
           <pre className="error-box">{result.error}</pre>
-          {result.log && <details><summary>Log</summary><pre className="log">{result.log}</pre></details>}
+          {result.log && <details open><summary>Log</summary><LiveLog lines={result.log.split("\n")} /></details>}
           <button onClick={() => setResult(null)}>Back</button>
         </>
       )}
@@ -112,5 +132,21 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
         </>
       )}
     </Dialog>
+  );
+}
+
+/** The log of the datapack tool, scrolled to its last line while it grows; error lines stand out. */
+function LiveLog({ lines }: { lines: string[] }) {
+  const box = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines.length]);
+  return (
+    <pre className="log live-log" ref={box}>
+      {lines.length === 0 ? <span className="muted">Starting…</span> : lines.map((line, i) => (
+        <div key={i} className={/\b(ERROR|Error|error:|fatal:|Traceback|failed)\b/.test(line) ? "log-error" : /WARNING|warning:/.test(line) ? "log-warn" : undefined}>{line || "\u00a0"}</div>
+      ))}
+    </pre>
   );
 }

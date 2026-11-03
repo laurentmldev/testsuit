@@ -146,7 +146,7 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
     else:
         _info(label + " [" + Fore.LIGHTYELLOW_EX + "importing" + Style.RESET_ALL + "]")
         if not importer.retrieve():
-            raise DatapackError(f"dataset '{dataset.id}': import failed")
+            raise DatapackError(f"dataset '{dataset.id}': import of version '{dataset.version}' from '{datasource.source}' failed (the importer's messages are above)")
         for spec in dataset.postprocess:
             _info(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + spec)
             try:

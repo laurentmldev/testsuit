@@ -3,6 +3,7 @@ the lab and tests repositories, their checks and helpers, and pushing to the ups
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -210,6 +211,23 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert "data_version: v1.10.0  # the data in use" in editor.read(session, "setup/globals.yml")["content"]
     with pytest.raises(SequencerError, match="no dataset"):
         editor.set_version(session, "testdef/count/testdef.yml", "other", "v1")
+
+    # generation in the background: the git output (stderr included) is in its log, line by line
+    editor.set_version(session, "testdef/count/testdef.yml", "ds", "v404")
+    job = editor.start_generate(session, "testdef/count/testdef.yml")["job"]
+    lines, since, state = [], 0, {"done": False}
+    for _ in range(300):
+        state = editor.generation_job(session, job, since)
+        lines += state["lines"]
+        since = state["next"]
+        if state["done"]:
+            break
+        time.sleep(0.1)
+    assert state["done"] and not state["result"]["ok"] and "v404" in state["result"]["error"]
+    assert any("v404" in line and "not found" in line.lower() for line in lines), lines
+    assert any("git clone" in line and "failed" in line for line in lines), lines
+    with pytest.raises(SequencerError, match="no generation"):
+        editor.generation_job(session, "nope")
 
 
 def test_rejected_push_then_rebase(repos):
