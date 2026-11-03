@@ -79,7 +79,7 @@ export function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 12) : id;
 }
 
-// ── light Markdown: `code`, **bold**, lists, paragraphs ────────────────
+// ── light Markdown: `code`, **bold**, lists, code blocks, paragraphs ────────────────
 
 function inline(text: string, key: number): ReactNode {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
@@ -116,6 +116,11 @@ export function Markdown({ text, className }: { text?: string | null; className?
     list = [];
   };
   for (const para of text.split(/\n\n+/)) {
+    if (para.trimStart().startsWith("```")) {              // a code block (without blank lines in it)
+      flush();
+      blocks.push(<pre key={blocks.length} className="md-code">{para.trim().split("\n").slice(1).filter((l, i, all) => i < all.length - 1 || !l.startsWith("```")).join("\n")}</pre>);
+      continue;
+    }
     for (const line of para.split("\n")) {
       if (/^\s*- /.test(line)) list.push(line.replace(/^\s*- /, ""));
       else {
