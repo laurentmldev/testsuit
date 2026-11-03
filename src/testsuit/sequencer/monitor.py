@@ -151,6 +151,7 @@ class Monitor:
         probe_log.log(logging.WARNING if failed or state in ("offline", "broken") else logging.DEBUG, line)
         previous = self.store.set_state(comp_id, state, detail)
         self._last[comp_id] = time.monotonic()
+        self.notify("probe", {"component": comp_id, "state": state})      # the Lab page shows when, live
         if previous != state:
             self.notify("component", {"component": comp_id, "state": state, "previous": previous, "detail": detail})
         expected = res.get("expected")

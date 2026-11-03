@@ -262,6 +262,12 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         """The last log lines of tsqd (events, warnings, errors, and the probes of the lab), after line since."""
         return log_buffer.lines(since, level, max(1, min(limit, 3000)), probes)
 
+    @app.post("/lab/probe")
+    async def probe_lab():
+        """Probe every component of the lab now (the Lab page, when it opens or on Probe now)."""
+        await seq.monitor.probe_all()
+        return {"probed": len(seq.lab.inventory.components)}
+
     @app.post("/lab/reload")
     async def reload(body: dict | None = None):
         body = body or {}
@@ -280,7 +286,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     # ── events ───────────────────────────────────────────────────────────
     @app.get("/events")
     async def events(request: Request, run: str | None = None, logs: bool = False):
-        """Server-Sent Events: run, phase, step, component and lab changes; log lines with logs=true."""
+        """Server-Sent Events: run, phase, step, component (and each probe) and lab changes; log lines with logs=true."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
         seq.subscribers.add(queue)
 

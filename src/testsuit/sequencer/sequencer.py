@@ -107,9 +107,9 @@ class Sequencer:
 
     # ── events ─────────────────────────────────────────────────────────
     def notify(self, kind: str, data: dict) -> None:
-        if kind != "log":
+        if kind not in ("log", "probe"):            # a probe is not an event worth keeping: every few seconds
             self.store.add_event(kind, data)
-        if kind not in ("log", "step"):            # the events in the log of tsqd too (Lab page, Logs)
+        if kind not in ("log", "step", "probe"):            # the events in the log of tsqd too (Lab page, Logs)
             log.log(logging.WARNING if kind == "state_mismatch" or str(data.get("verdict", "")).upper() == "ERROR"
                     else logging.INFO, _event_line(kind, data))
         event = {"kind": kind, "ts": now(), **data}
