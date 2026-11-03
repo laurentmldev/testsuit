@@ -74,7 +74,15 @@ class Sequencer:
         self.config = config
         self.local = local
         for name in ("incoming", "runs", "results"):
-            config.storage_path(name).mkdir(parents=True, exist_ok=True)
+            folder = config.storage_path(name)
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                where = (f"storage.root in {config.file}" if config.file else
+                         "no configuration file found (no --config, no $TSQ_CONFIG, no /etc/testsuit/tsq.yml), "
+                         "so the default storage.root")
+                raise SequencerError(f"cannot create the storage folder '{folder}': {e.strerror} ({where}). "
+                                     f"Create it for this user, or point storage.root elsewhere.") from e
         self.store = store or Store(config.storage_path("database"))
         self.lab: Lab = load_lab(config.lab_folder, config.inventory_file, config.lab.require_tag)
         self.monitor = Monitor(self.store, config.monitor.interval, self.notify)
