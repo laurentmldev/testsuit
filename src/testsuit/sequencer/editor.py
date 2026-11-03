@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -147,6 +148,9 @@ def _flatten_keys(data: Any, prefix: str = "") -> list[tuple[str, Any]]:
             out += _flatten_keys(v, f"{prefix}.{k}" if prefix else str(k))
         return out
     return [(prefix, data)]
+
+
+logger = logging.getLogger("testsuit.sequencer")
 
 
 class _LiveLog(io.TextIOBase):
@@ -1262,6 +1266,7 @@ class Editor:
         self.jobs[job_id] = job
 
         def work() -> None:
+            logger.info(f"editor: datapack generation of {testdef_rel} ({session.repo}) started")
             try:
                 job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job)
             except BaseException as e:                   # never a silent end
@@ -1272,6 +1277,10 @@ class Editor:
                                      "log": self._clean(session, log.text())}
                 if not job["result"]["ok"]:                  # the reason as the last line of the log too
                     log.write(f"ERROR: {job['result']['error']}\n")
+                    logger.warning(f"editor: datapack generation of {testdef_rel} ({session.repo}) failed: "
+                                   f"{job['result']['error']}")
+                else:
+                    logger.info(f"editor: datapack {job['result']['zip']} generated")
                 job["done"] = True
 
         job["thread"] = threading.Thread(target=work, name=f"generate-{job_id}", daemon=True)

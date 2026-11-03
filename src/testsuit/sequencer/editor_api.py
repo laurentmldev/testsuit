@@ -6,6 +6,7 @@ git process environment, never to a file, the logs or a response.
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import time
 
@@ -16,6 +17,8 @@ from testsuit.sequencer.api import zip_entry
 from testsuit.sequencer.editor import Editor
 from testsuit.sequencer.editor_schemas import schemas
 from testsuit.sequencer.util import SequencerError
+
+log = logging.getLogger("testsuit.sequencer")
 
 
 def add_editor_routes(app: FastAPI, seq) -> Editor:
@@ -164,8 +167,15 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.post("/edit/sessions/{sid}/push")
     async def push(sid: str, body: dict):
-        return await run(editor.push, session(sid), str(body.get("message") or ""), str(body.get("author_name") or ""),
-                         str(body.get("author_email") or ""), body.get("tag") or None, credentials(body))
+        s = session(sid)
+        result = await run(editor.push, s, str(body.get("message") or ""), str(body.get("author_name") or ""),
+                           str(body.get("author_email") or ""), body.get("tag") or None, credentials(body))
+        if result.get("ok"):
+            log.info(f"editor: {s.repo} pushed by {body.get('author_name')}: {result.get('commit', '')[:10]}"
+                     + (f" tag {body.get('tag')}" if body.get("tag") else ""))
+        else:
+            log.warning(f"editor: push of {s.repo} by {body.get('author_name')} refused: {result.get('error') or result.get('message')}")
+        return result
 
     @app.post("/edit/sessions/{sid}/rebase")
     async def rebase(sid: str, body: dict | None = None):

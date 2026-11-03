@@ -68,6 +68,18 @@ def new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
 
 
+def _event_line(kind: str, data: dict) -> str:
+    """An event as one log line: its kind, then its fields that have a value (long ones cut)."""
+    import json
+    fields = []
+    for key, value in data.items():
+        if value in (None, "", [], {}):
+            continue
+        text = value if isinstance(value, str) else json.dumps(value, default=str, separators=(",", ":"))
+        fields.append(f"{key}={text if len(text) <= 160 else text[:157] + '...'}")
+    return f"{kind}: " + " ".join(fields)
+
+
 class Sequencer:
 
     def __init__(self, config: Config, store: Store | None = None, local: bool = False):
@@ -97,6 +109,9 @@ class Sequencer:
     def notify(self, kind: str, data: dict) -> None:
         if kind != "log":
             self.store.add_event(kind, data)
+        if kind not in ("log", "step"):            # the events in the log of tsqd too (Lab page, Logs)
+            log.log(logging.WARNING if kind == "state_mismatch" or str(data.get("verdict", "")).upper() == "ERROR"
+                    else logging.INFO, _event_line(kind, data))
         event = {"kind": kind, "ts": now(), **data}
         for queue in list(self.subscribers):
             try:
