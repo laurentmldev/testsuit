@@ -1,7 +1,9 @@
 // Test definition form (sequencer README, section 8.3): what it is, the setup configuration it uses and its
 // key files. The pipeline itself has its own view (PipelineEditor).
+import { useState } from "react";
 import { Combo, Field, helpText, Section, Tags, Text, type Choice } from "../fields";
 import { joinPath, Markdown, relPath } from "../util";
+import { DictionaryDialog } from "./DictionaryDialog";
 import { clone, useSession, type Doc } from "./state";
 
 export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void } }) {
@@ -28,9 +30,11 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   }));
   const config = setup?.configurations?.[data.setup_config];
   const dictChoices: Choice[] = files.filter((f) => f.kind === "dictionary").map((f) => ({ value: relPath(doc.path, f.path), description: f.path }));
+  const [dictionary, setDictionary] = useState<string | null>(null);
   const usedIds = (ctx.workspace?.testdefs || []).filter((t: any) => t.path !== doc.path).map((t: any) => t.id);
   return (
     <div className="form pad">
+      {dictionary && <DictionaryDialog fromFile={doc.path} entry={dictionary} onClose={() => setDictionary(null)} />}
       <Section title="Test definition">
         <Field label="Id" help={help("id")} error={usedIds.includes(data.id) ? "another test definition has this id" : null}>
           <Text mono value={data.id} onChange={(v) => set("id", v)} />
@@ -73,7 +77,8 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       </Section>
       <Section title="Key files" collapsed={!data.dictionaries?.length}
         help="YAML files whose keys the templates and commands use, on top of those of the setup: `{{ section.key }}`. A later file overrides an earlier one.">
-        <Field label="Dictionaries" help={help("dictionaries")}><Tags value={data.dictionaries} onChange={(v) => set("dictionaries", v)} choices={dictChoices} /></Field>
+        <Field label="Dictionaries" help={help("dictionaries")}><Tags value={data.dictionaries} onChange={(v) => set("dictionaries", v)} choices={dictChoices}
+          onOpen={setDictionary} openTitle="View or edit this key file" /></Field>
       </Section>
       <Section title="Pipeline">
         <Markdown text={`${(data.pipeline?.phases || []).length} phase(s): ${(data.pipeline?.phases || []).map((p: any) => `\`${p.id}\``).join(", ") || "none yet"}. Open the **Pipeline** view above to edit it as a graph.`} />
