@@ -111,11 +111,22 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
             <Field label="Local folder" help={help(["datarepositories", 0, "path"])}><Text mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} /></Field>
           </div>
           {(repo.datasources || []).map((src: any, j: number) => (
-            <div key={j} className="sub-form">
+            <div key={j} className="sub-form datasource">
+              <div className="sub-form-head">
+                <strong>Data source {src.id || j + 1}</strong>
+                {src.importer && <span className="badge">{src.importer}</span>}
+                <span className="muted small">{(src.datasets || []).length} dataset(s)</span>
+                <span className="spacer" />
+                <button className="small danger" onClick={() => {
+                  if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
+                  update((d) => d.datarepositories[i].datasources.splice(j, 1));
+                }}>Remove data source</button>
+              </div>
               <div className="inline-fields">
                 <Field label="Source id"><IdText value={src.id} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].id = v))} /></Field>
                 <Field label="Importer" help={help(["datarepositories", 0, "datasources", 0, "importer"])}><Combo value={src.importer} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].importer = v))} choices={importers} /></Field>
               </div>
+              <Field label="Name"><Text value={src.name} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].name = v || undefined))} /></Field>
               <Field label="Read from" help={help(["datarepositories", 0, "datasources", 0, "source"])}><Text mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} /></Field>
               <Field label="Datasets" help="Each dataset gives the keys `<id>.path` and `<id>.version` to the templates.">
                 <table className="grid compact">
@@ -131,10 +142,6 @@ function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void)
                 </table>
                 <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
               </Field>
-              <button className="small danger" onClick={() => {
-                if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
-                update((d) => d.datarepositories[i].datasources.splice(j, 1));
-              }}>Remove data source</button>
             </div>
           ))}
           <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources ||= []).push({ id: "source", importer: "git", source: "", datasets: [] })))}>+ Data source</button>
