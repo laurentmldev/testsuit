@@ -2,11 +2,11 @@
 // with their inputs and commands, and the configurations: logical stages and components bound by role.
 import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, IdText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { CommandsEditor } from "./commands";
 import { DictionaryDialog } from "./DictionaryDialog";
-import { clone, roleChoices, stageTypeChoices, typeChoices, useSession, type Doc } from "./state";
+import { clone, roleChoices, stageTypeChoices, typeChoices, useSession, useTestKeys, type Doc } from "./state";
 
 type Sel = { kind: "general" } | { kind: "data" } | { kind: "type"; name: string } | { kind: "config"; name: string };
 
@@ -21,7 +21,12 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
   };
   const types: Record<string, any> = data.component_types || {};
   const configs: Record<string, any> = data.configurations || {};
+  // the keys a setup sees are those of a test definition using it (its dictionaries, the setup's own)
+  const session = useSession();
+  const testdef = (session.ctx.workspace?.testdefs || []).find((t: any) => t.setup_file === doc.path)?.path;
+  const keyItems = useTestKeys(session.sid, testdef, session.ctx, JSON.stringify(data.dictionaries || []));
   return (
+    <KeysProvider keys={keyItems}>
     <div className="form-split">
       <div className="form-nav">
         <div className={classes("nav-item", sel.kind === "general" && "selected")} onClick={() => setSel({ kind: "general" })}>General</div>
@@ -70,6 +75,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         setWizard(null);
       }} />}
     </div>
+    </KeysProvider>
   );
 }
 
@@ -146,7 +152,7 @@ function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d
           <div className="inline-fields">
             <Field label="Id"><IdText value={repo.id} onChange={(v) => update((d) => (d.datarepositories[i].id = v))} /></Field>
             <Field label="Download folder" help={help(["datarepositories", 0, "path"]) || "Where the datasets of this repository are downloaded (relative to the setup file)."}>
-              <Text mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} />
+              <Text keys mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} />
             </Field>
           </div>
           {repoPath(i) && <div className="resolved small">resolved: <code>{repoPath(i)}</code></div>}
@@ -170,7 +176,7 @@ function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d
                 </div>
                 <Field label="Name"><Text value={src.name} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].name = v || undefined))} /></Field>
                 <Field label="Base path" help={help(["datarepositories", 0, "datasources", 0, "source"]) || "What the connector reads: a git URL, a server, a folder…"}>
-                  <Text mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} />
+                  <Text keys mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} />
                 </Field>
                 {first?.source && first.source !== src.source && <div className="resolved small">resolved: <code>{first.source}</code></div>}
                 {first?.versions_error && <div className="resolved small muted">versions not listed: {first.versions_error}</div>}
@@ -185,8 +191,9 @@ function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d
                             <tr>
                               <td><IdText value={ds.id} placeholder="id" onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].id = v))} /></td>
                               <td className="version-cell">
-                                <input className="mono" list={`ds-versions-${i}-${j}`} value={ds.version || ""} placeholder="version, e.g. {{ sw_version }}"
-                                  onChange={(e) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].version = e.target.value))} />
+                                <Combo keys mono value={ds.version || ""} placeholder="version, e.g. {{ sw_version }}"
+                                  choices={(first?.versions || []).map((v: string) => ({ value: v, description: v === r?.version ? "current" : undefined }))}
+                                  onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].version = v))} />
                               </td>
                               <td><button className="icon" onClick={() => update((d) => d.datarepositories[i].datasources[j].datasets.splice(k, 1))}>×</button></td>
                             </tr>
@@ -206,7 +213,6 @@ function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d
                       })}
                     </tbody>
                   </table>
-                  <datalist id={`ds-versions-${i}-${j}`}>{(first?.versions || []).map((v: string) => <option key={v} value={v} />)}</datalist>
                   <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
                 </Field>
               </div>
@@ -313,7 +319,7 @@ function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: strin
         <tbody>
           {value.map((inp, i) => (
             <tr key={i}>
-              <td><Combo mono value={inp.source} onChange={(v) => set(i, "source", v)} choices={sources} placeholder="templates/config.yml" onPick={(v) => {
+              <td><Combo keys mono value={inp.source} onChange={(v) => set(i, "source", v)} choices={sources} placeholder="templates/config.yml" onPick={(v) => {
                 if (!inp.target) set(i, "target", v.endsWith("/") ? "app/" : v.split("/").pop());
               }} /></td>
               <td><input className="mono" value={inp.target || ""} placeholder="config.yml or app/" onChange={(e) => set(i, "target", e.target.value)} /></td>
