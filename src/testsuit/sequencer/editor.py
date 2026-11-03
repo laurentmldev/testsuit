@@ -739,10 +739,34 @@ class Editor:
             problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
         return problems
 
+    def _mismatches(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
+                    setup_path: Path | None = None) -> list[str]:
+        """Every logical stage and component a test definition's pipeline names that its setup
+        configuration does not define (empty when either cannot be read: other checks say why).
+        With setup_path, only for a test definition using that setup file."""
+        from testsuit.sequencer.model import load_pipeline, needs_from_setup, pipeline_mismatches
+        try:
+            path = self.path(session, testdef_rel)
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            setup_file = str(raw.get("setup_file") or "")
+            if not setup_file or "{{" in setup_file:
+                return []
+            own = (path.parent / setup_file).resolve()
+            if setup_path is not None and own != setup_path.resolve():
+                return []
+            needs = needs_from_setup(yaml.safe_load(own.read_text(encoding="utf-8")) or {},
+                                     setup_config or str(raw.get("setup_config") or ""))
+            return pipeline_mismatches(load_pipeline(raw.get("pipeline"), path.parent), needs)
+        except Exception:
+            return []
+
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
         setup configuration (phases, logical stages and components, step targets), and what the lab cannot provide."""
         from testsuit.sequencer.intake import check_against_lab
+        mismatches = self._mismatches(session, testdef_rel, setup_config)
+        if mismatches:
+            return [f"pipeline: {m}" for m in mismatches]
         try:
             _, _, _, _, needs, pipeline, flats = self._testdef_parts(session, testdef_rel, setup_config)
         except SequencerError as e:
@@ -805,6 +829,14 @@ class Editor:
                          if name else yamledit.locate(text, ["configurations", cfg_name])) or (1, 1)
                 problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                  "message": f"{cfg_name}: {problem}"})
+        for f in self.tree(session):                 # test definitions on this setup whose pipeline no longer matches it
+            if f["kind"] != "testdef":
+                continue
+            for mismatch in self._mismatches(session, f["path"], setup_path=path):
+                cfg_name = str((yaml.safe_load(self.path(session, f["path"]).read_text(encoding="utf-8")) or {}).get("setup_config") or "")
+                where = yamledit.locate(text, ["configurations", cfg_name]) or (1, 1)
+                problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
+                                 "message": f"{f['path']} ({cfg_name}): {mismatch}"})
         return problems
 
     def check_subpipelines(self, session: EditSession, rel: str, text: str) -> list[dict]:

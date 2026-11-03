@@ -313,6 +313,26 @@ def phase_components(phase: Phase, needs: Needs) -> list[str]:
     return result + [c for c in phase.components if c not in result]
 
 
+def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
+    """Every logical stage and component the phases name that the setup configuration does not define
+    as such (a setup changed without its pipeline, or the other way round)."""
+    problems = []
+    adhoc = [c.id for c in needs.components.values() if not c.stage]
+    for phase in pipeline.phases:
+        for stage in phase.stages:
+            if stage not in needs.stages:
+                problems.append(f"phase '{phase.id}': unknown logical stage '{stage}' "
+                                f"(setup stages: {', '.join(needs.stages) or 'none'})")
+        for comp in phase.components:
+            if comp not in needs.components:
+                problems.append(f"phase '{phase.id}': unknown logical component '{comp}' "
+                                f"(setup ad hoc components: {', '.join(adhoc) or 'none'})")
+            elif needs.components[comp].stage:
+                problems.append(f"phase '{phase.id}': component '{comp}' belongs to stage "
+                                f"'{needs.components[comp].stage}': list the stage instead")
+    return problems
+
+
 def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
     """Structural checks done at submission: phases, needs, sub-pipelines, resources, literal targets."""
     phase_ids = [p.id for p in pipeline.phases]
@@ -324,18 +344,9 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
         if unknown:
             raise SequencerError(f"phase '{phase.id}' needs unknown phase(s) {unknown}")
         graph[phase.id] = set(phase.needs)
-        for stage in phase.stages:
-            if stage not in needs.stages:
-                raise SequencerError(f"phase '{phase.id}': unknown logical stage '{stage}' "
-                                     f"(setup stages: {', '.join(needs.stages) or 'none'})")
-        for comp in phase.components:
-            if comp not in needs.components:
-                adhoc = [c.id for c in needs.components.values() if not c.stage]
-                raise SequencerError(f"phase '{phase.id}': unknown logical component '{comp}' "
-                                     f"(setup ad hoc components: {', '.join(adhoc) or 'none'})")
-            if needs.components[comp].stage:
-                raise SequencerError(f"phase '{phase.id}': component '{comp}' belongs to stage "
-                                     f"'{needs.components[comp].stage}': list the stage instead")
+    mismatches = pipeline_mismatches(pipeline, needs)
+    if mismatches:
+        raise SequencerError("; ".join(mismatches))
     try:
         tuple(graphlib.TopologicalSorter(graph).static_order())
     except graphlib.CycleError as e:
