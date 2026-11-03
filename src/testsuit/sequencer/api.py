@@ -125,6 +125,22 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 "components": {c.id: {"type": c.type, "role": c.role, "stage": c.stage, "name": c.name}
                                for c in dp.needs.components.values()}}
 
+    @app.get("/runs/{run_id}/resources")
+    async def run_resources(run_id: str):
+        """What the run's datapack expects of the lab against what the lab defines, and why what it
+        could use is not available now."""
+        from testsuit.sequencer.intake import check_against_lab, load_datapack
+        from testsuit.sequencer.scheduler import Binding, resource_overview
+        run = run_or_404(run_id)
+        if not Path(run["dir"]).is_dir():
+            raise HTTPException(404, f"run {run['id']}: the run folder is gone (retention), only its records remain")
+        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]))
+        bound = run.get("binding") or {}
+        binding = Binding(stages=dict(bound.get("stages") or {}), components=dict(bound.get("components") or {}))
+        overview = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"], binding)
+        return {**overview, "problems": check_against_lab(dp, seq.lab), "state": run["state"],
+                "waiting_for": run.get("waiting_for") or "", "reserve": dp.pipeline.reserve}
+
     @app.patch("/runs/{run_id}")
     async def patch(run_id: str, body: dict):
         if "priority" not in body:

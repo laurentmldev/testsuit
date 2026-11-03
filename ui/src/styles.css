@@ -429,3 +429,11 @@ table.datasets tr.dataset-resolved dd { margin: 0; min-width: 0; }
 .sequencer-log .log-message { white-space: pre-wrap; word-break: break-word; }
 .sequencer-log .log-probe { color: var(--muted); }
 .md pre.md-code { white-space: pre; background: var(--panel-2); padding: 6px 8px; border-radius: 4px; overflow-x: auto; font-size: 11.5px; }
+
+/* run page: Resources tab */
+.resources-tab h3 { margin: 16px 0 6px; }
+.resources-tab .need { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
+.resources-tab .need-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.resources-tab .need table { margin-top: 6px; }
+.resources-tab td .chip { margin: 1px 4px 1px 0; }
+.bad-text { color: var(--bad); }

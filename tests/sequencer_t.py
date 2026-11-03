@@ -426,6 +426,37 @@ def test_maintenance_blocks(bench):
     assert done["verdict"] == "succeeded" and done["binding"]["stages"]["bench"] == "bench_2"
 
 
+def test_resource_overview(bench):
+    """Each logical need with the lab's candidates and why they are not available; the bound ones once running."""
+    from testsuit.sequencer.intake import load_datapack
+    from testsuit.sequencer.scheduler import Binding, resource_overview
+
+    async def main():
+        seq = bench.sequencer()
+        seq.set_flag("bench_1", "maintenance", True)
+        seq.set_flag("bench_2", "maintenance", True)
+        run = seq.submit(bench.build())
+        seq.schedule()
+        dp = load_datapack(Path(run["dir"]))
+        waiting = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"])
+        seq.set_flag("bench_2", "maintenance", False)
+        [done] = await run_until_done(seq, [run["id"]])
+        binding = Binding(**done["binding"])
+        bound = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"], binding)
+        await seq.close()
+        return waiting, bound
+    waiting, bound = asyncio.run(main())
+    [stage] = waiting["stages"]
+    assert stage["logical"] == "bench" and stage["bound"] is None and stage["phases"]
+    assert {c["id"]: c["why"] for c in stage["candidates"]} == {
+        "bench_1": "bench_1 in maintenance or held", "bench_2": "bench_2 in maintenance or held"}
+    assert all(c["maintenance"] and c["roles"] for c in stage["candidates"])
+    [stage] = bound["stages"]
+    assert stage["bound"] == "bench_2"
+    assert {c["id"]: (c["bound"], c["why"]) for c in stage["candidates"]} == {
+        "bench_1": (False, "bench_1 in maintenance or held"), "bench_2": (True, None)}
+
+
 def test_rejected_datapack(bench):
     pipeline = {"phases": [{"id": "p", "stages": ["bench"], "steps": [{"id": "x", "run": "true", "needs": ["nope"]}]}]}
     seq = bench.sequencer()
@@ -578,6 +609,9 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert "run.yml" in {f["name"] for f in listed}
     assert yaml.safe_load(in_zip.text)["verdict"] == "succeeded"
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
+
+    resources = requests.get(f"{url}/runs/{run['id']}/resources").json()
+    assert resources["stages"][0]["bound"] == "bench_1" and resources["problems"] == []
 
     assert tsq(["--server", url, "stages"]) == 0
     assert "bench_1" in capsys.readouterr().out
