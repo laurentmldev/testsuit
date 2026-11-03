@@ -1006,7 +1006,7 @@ class Editor:
 
         def shown(path: Path | str) -> str:
             path = Path(path)
-            if path.is_absolute() and path.resolve().is_relative_to(session.root.resolve()):
+            if path.is_absolute() and path.resolve().is_relative_to(session.folder.resolve()):
                 return self.rel(session, path)
             return path.as_posix()
 
@@ -1074,22 +1074,56 @@ class Editor:
                 "stages": stages, "components": components, "dictionaries": dictionaries,
                 "baseline": baseline}
 
-    def _datasets(self, session: EditSession, builder, raw: dict, keys, shown, render) -> list[dict]:
+    _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
+
+    def _versions(self, importer_name: str, source: str) -> tuple[list[str] | None, str | None]:
+        """Versions an importer lists at a source (kept a minute: the forms ask again at each change)."""
+        import time
         from testsuit.datatools.datapack import importers
+        cached = self._version_cache.get((importer_name, source))
+        if cached and time.monotonic() - cached[0] < 60:
+            return cached[1], cached[2]
+        versions, error = None, None
+        try:
+            importer = importers.create_data_importer(importer_name, "", source, "")
+            if hasattr(importer, "listVersions"):
+                versions = importer.listVersions()
+        except Exception as e:                       # unreachable remote, unknown importer...
+            error = str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__
+        self._version_cache[(importer_name, source)] = (time.monotonic(), versions, error)
+        return versions, error
+
+    def datasets(self, session: EditSession, setup_rel: str, testdef_rel: str | None = None) -> dict:
+        """The datasets of a setup as the datapack tool will import them, with the keys of a test definition
+        that uses it (the first one, unless one is named): where each is read from and stored."""
+        testdefs = [t["path"] for t in self.scan_workspace(session.folder, session.folder)["testdefs"]
+                    if t.get("setup_file") == setup_rel]
+        if testdef_rel not in testdefs:
+            testdef_rel = testdefs[0] if testdefs else None
+        if testdef_rel is None:
+            return {"testdef": None, "testdefs": [], "datasets": [],
+                    "error": "no test definition uses this setup yet: the keys of its paths cannot be resolved"}
+        try:
+            found = self.synthesis(session, testdef_rel)
+        except SequencerError as e:
+            return {"testdef": testdef_rel, "testdefs": testdefs, "datasets": [], "error": str(e)}
+        return {"testdef": testdef_rel, "testdefs": testdefs, "setup_config": found["testdef"]["setup_config"],
+                "datasets": found["baseline"], "error": None}
+
+    def _datasets(self, session: EditSession, builder, raw: dict, keys, shown, render) -> list[dict]:
+        from testsuit.datatools.datapack.datapack_tools import _expand, normalize_dataset_path
         datasets = []
         for r, repo in enumerate(raw.get("datarepositories") or []):
+            rendered_path = render(repo.get("path", "")) if repo.get("path") else None
+            repo_path = _expand(rendered_path, builder.setup_file.parent) if rendered_path else None
             for s, src in enumerate(repo.get("datasources") or []):
                 source = render(src.get("source", "")) or str(src.get("source", ""))
                 if source and not source.startswith(("/", "~")) and "://" not in source and not re.match(r"^[\w.-]+@", source):
                     local = (builder.setup_file.parent / source)
                     source = local.as_posix() if local.exists() else source
-                versions, error = None, None
-                try:
-                    importer = importers.create_data_importer(str(src.get("importer", "")), "", source, "")
-                    if hasattr(importer, "listVersions"):
-                        versions = importer.listVersions()
-                except Exception as e:                       # unreachable remote, unknown importer...
-                    error = str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__
+                if source.startswith("/"):
+                    source = os.path.normpath(source)
+                versions, error = self._versions(str(src.get("importer", "")), source)
                 for d, ds in enumerate(src.get("datasets") or []):
                     if not isinstance(ds, dict):
                         continue
@@ -1099,10 +1133,16 @@ class Editor:
                     origin = keys.origins.get(key, "") if key else builder.setup_file.as_posix()
                     editable = bool(origin) and origin.startswith("/") and Path(origin).resolve().is_relative_to(session.root.resolve()) \
                         and (key is not None or "{{" not in written)
+                    version = render(written)
+                    local = None
+                    if repo_path is not None and version:
+                        local = shown(repo_path / str(ds.get("id")) / normalize_dataset_path(version))
                     datasets.append({"id": ds.get("id"), "datarepository": repo.get("id"), "datasource": src.get("id"),
+                                     "repository_path": shown(repo_path) if repo_path is not None else None,
+                                     "local_path": local, "imported": bool(local) and Path(repo_path / str(ds.get("id")) / normalize_dataset_path(version)).is_dir(),
                                      "name": src.get("name", ""), "importer": src.get("importer", ""),
-                                     "source": shown(source) if source.startswith("/") else source,
-                                     "written": written, "version": render(written), "key": key,
+                                     "source": source,
+                                     "written": written, "version": version, "key": key,
                                      "defined_in": shown(origin) if origin.startswith("/") else origin or None,
                                      "editable": editable, "at": [r, s, d],
                                      "versions": versions, "versions_error": error})
