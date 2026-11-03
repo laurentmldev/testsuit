@@ -213,7 +213,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   const logKey = logRecord ? stepKey(logRecord.phase, logRecord.id, logRecord.component) : null;
   if (run.error) return <div className="page"><div className="error-box">{run.error}</div></div>;
   if (!r) return <div className="page muted">Loading…</div>;
-  const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"]];
+  const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"], ["resources", "Resources"]];
   if (r.results) tabs.push(["results", "Results"]);
   return (
     <div className="page run-page">
@@ -285,6 +285,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         </div>
       )}
       {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} />}
+      {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
       {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" />}
     </div>
   );
@@ -311,6 +312,123 @@ function StepFacts({ record, records, onPick }: { record: any; records: any[]; o
           {record.started && <> · {duration(record.started, record.ended || null)}</>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── resources: what the datapack expects of the lab against what the lab has ────────────
+
+function needStatus(need: any): [string, string] {
+  if (need.bound) return ["bound", "ok"];
+  if (need.problem || !need.candidates.length) return ["missing in lab", "bad"];
+  if (need.candidates.some((c: any) => !c.why)) return ["available", "ok"];
+  return ["unavailable", "bad"];
+}
+
+function CandidateState({ c }: { c: any }) {
+  if (c.bound) return <span className="chip ok">bound</span>;
+  if (!c.why) return <span className="chip ok">available</span>;
+  return <span className="chip bad">unavailable</span>;
+}
+
+function CompChip({ c, logical }: { c: any; logical?: string }) {
+  const notes = [c.type, c.role && `role ${c.role}`, `lock ${c.lock}`, c.maintenance && "in maintenance", c.held_by?.length && `held by ${c.held_by.join(", ")}`];
+  const color = c.maintenance || ["broken", "offline"].includes(c.state) ? "bad" : c.held_by?.length ? "wait" : STATE_COLORS[c.state] || "muted";
+  return (
+    <span className={classes("chip", color)} title={notes.filter(Boolean).join(" · ")}>
+      {c.id}{logical && <> = {logical}</>} · {c.state}
+    </span>
+  );
+}
+
+function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
+  const res = useResource<any>(`runs/${runId}/resources`, ["run", "component", "resource", "lab"]);
+  const d = res.data;
+  if (res.error) return <div className="error-box">{res.error}</div>;
+  if (!d) return <p className="muted">Loading…</p>;
+  const needs = [...d.stages, ...d.components];
+  const ok = needs.filter((n) => needStatus(n)[1] === "ok").length;
+  return (
+    <div className="scroll resources-tab">
+      <div className={classes("banner", ok === needs.length ? "" : "warn")}>
+        <strong>{ok} of {needs.length}</strong> needed resources {d.state === "running" || d.state === "reserved" ? "bound or available" : "available now"}.
+        {d.waiting_for && <span>Waiting for: {d.waiting_for}</span>}
+        {d.reserve === "all" ? <span className="muted">Everything is reserved when the run starts.</span>
+          : <span className="muted">Each phase reserves what it needs when it starts.</span>}
+        {ended && <span className="muted">The run has ended: availability is the lab's as it is now.</span>}
+      </div>
+      {d.problems.length > 0 && (
+        <div className="banner warn list">
+          <strong>The lab cannot provide:</strong>
+          <ul className="problems">{d.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>
+        </div>
+      )}
+      {d.stages.length > 0 && <h3>Stages</h3>}
+      {d.stages.map((s: any) => {
+        const [label, color] = needStatus(s);
+        return (
+          <div key={s.logical} className="need">
+            <div className="need-head">
+              <code>{s.logical}</code> <span className="muted">stage of type</span> <code>{s.type}</code>
+              <span className={classes("chip", color)}>{label}{s.bound && <> on {s.bound}</>}</span>
+              <span className="spacer" />
+              <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>
+            </div>
+            {s.components.length > 0 && (
+              <div className="small muted">needs {s.components.map((c: any) => `${c.logical} (role ${c.role}, ${c.type || "any type"})`).join(", ")}</div>
+            )}
+            {s.problem ? <div className="small bad-text">{s.problem}</div> : (
+              <table className="grid compact">
+                <thead><tr><th>Lab stage</th><th>State</th><th>Why not</th><th>Components</th></tr></thead>
+                <tbody>
+                  {s.candidates.map((c: any) => {
+                    const logicalOf = Object.fromEntries(Object.entries(c.roles).map(([l, id]) => [id, l]));
+                    return (
+                      <tr key={c.id}>
+                        <td><code>{c.id}</code></td>
+                        <td><CandidateState c={c} /></td>
+                        <td className="reason">{c.why || ""}</td>
+                        <td>{c.components.map((k: any) => <CompChip key={k.id} c={k} logical={logicalOf[k.id] as string | undefined} />)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })}
+      {d.components.length > 0 && <h3>Ad hoc components</h3>}
+      {d.components.map((n: any) => {
+        const [label, color] = needStatus(n);
+        return (
+          <div key={n.logical} className="need">
+            <div className="need-head">
+              <code>{n.logical}</code> <span className="muted">role</span> <code>{n.role}</code>
+              {n.type && <><span className="muted">type</span> <code>{n.type}</code></>}
+              <span className={classes("chip", color)}>{label}{n.bound && <> on {n.bound}</>}</span>
+              <span className="spacer" />
+              <span className="muted small">{n.phases.length ? `phases ${n.phases.join(", ")}` : "used by no phase"}</span>
+            </div>
+            {n.problem ? <div className="small bad-text">{n.problem}</div> : (
+              <table className="grid compact">
+                <thead><tr><th>Lab component</th><th>State</th><th>Why not</th><th>Component</th></tr></thead>
+                <tbody>
+                  {n.candidates.map((c: any) => (
+                    <tr key={c.id}>
+                      <td><code>{c.id}</code></td>
+                      <td><CandidateState c={c} /></td>
+                      <td className="reason">{c.why || ""}</td>
+                      <td><CompChip c={c} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })}
+      {needs.length === 0 && <p className="muted">This datapack needs no lab resource.</p>}
     </div>
   );
 }

@@ -101,6 +101,45 @@ def phase_needs(phases: list[Phase]) -> tuple[list[str], list[str]]:
     return stages, adhoc
 
 
+def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Availability, run_id: str,
+                  avoid: set[tuple[str, str]] = frozenset(), check_free: bool = True) -> str | None:
+    """Why a concrete stage cannot be bound to a logical stage now (None when it can)."""
+    inv = lab.inventory
+    if ("stage", stage.id) in avail.maintenance:
+        return f"{stage.id} in maintenance or held"
+    if ("stage", stage.id) in avoid:
+        return f"{stage.id} kept for a higher-priority run"
+    for lc in needs.in_stage(logical):
+        comp = inv.component_in(stage, lc.role)
+        if comp is None:
+            return f"{stage.id} has no '{lc.role}'"
+        if not _type_ok(lab, needs, lc.type, comp):
+            return f"{stage.id}: {comp.id} ({comp.type}) cannot run '{lc.type}'"
+    for comp_id in stage.components:
+        comp = inv.components[comp_id]
+        why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
+        if why is None and ("component", comp_id) in avoid and comp.lock == "exclusive":
+            why = f"{comp_id} kept for a higher-priority run"
+        if why:
+            return why
+    if check_free:
+        for holder, _ in avail.holders.get(("stage", stage.id), []):
+            if holder != run_id:
+                return f"{stage.id} held by run {holder}"
+    return None
+
+
+def adhoc_problem(lab: Lab, needs: Needs, logical_type: str, comp: Component, avail: Availability, run_id: str,
+                  avoid: set[tuple[str, str]] = frozenset(), check_free: bool = True) -> str | None:
+    """Why an ad hoc component cannot be bound to a logical component now (None when it can)."""
+    if not _type_ok(lab, needs, logical_type, comp):
+        return f"{comp.id} ({comp.type}) cannot run '{logical_type}'"
+    why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
+    if why is None and ("component", comp.id) in avoid and comp.lock == "exclusive":
+        why = f"{comp.id} kept for a higher-priority run"
+    return why
+
+
 def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availability, run_id: str,
                  fixed: Binding | None = None, avoid: set[tuple[str, str]] | None = None,
                  testdef: str = "", check_free: bool = True) -> tuple[Binding | None, list[str]]:
@@ -126,30 +165,7 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
         if not stages:
             reasons.append(f"no stage of type '{stage_type}'")
         for stage in stages:
-            why = None
-            if ("stage", stage.id) in avail.maintenance:
-                why = f"{stage.id} in maintenance or held"
-            elif ("stage", stage.id) in avoid:
-                why = f"{stage.id} kept for a higher-priority run"
-            for lc in needs.in_stage(logical):
-                if why:
-                    break
-                comp = inv.component_in(stage, lc.role)
-                if comp is None:
-                    why = f"{stage.id} has no '{lc.role}'"
-                elif not _type_ok(lab, needs, lc.type, comp):
-                    why = f"{stage.id}: {comp.id} ({comp.type}) cannot run '{lc.type}'"
-            for comp_id in stage.components:
-                if why:
-                    break
-                comp = inv.components[comp_id]
-                why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
-                if why is None and ("component", comp_id) in avoid and comp.lock == "exclusive":
-                    why = f"{comp_id} kept for a higher-priority run"
-            if why is None and check_free:
-                for holder, _ in avail.holders.get(("stage", stage.id), []):
-                    if holder != run_id:
-                        why = f"{stage.id} held by run {holder}"
+            why = stage_problem(lab, needs, logical, stage, avail, run_id, avoid, check_free)
             if why:
                 reasons.append(why)
             else:
@@ -169,12 +185,7 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
         if not pool:
             reasons.append(f"no ad hoc component with role '{lc.role}'")
         for comp in pool:
-            why = None
-            if not _type_ok(lab, needs, lc.type, comp):
-                why = f"{comp.id} ({comp.type}) cannot run '{lc.type}'"
-            why = why or avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
-            if why is None and ("component", comp.id) in avoid and comp.lock == "exclusive":
-                why = f"{comp.id} kept for a higher-priority run"
+            why = adhoc_problem(lab, needs, lc.type, comp, avail, run_id, avoid, check_free)
             if why:
                 reasons.append(why)
             else:
@@ -219,6 +230,64 @@ def candidate_resources(lab: Lab, needs: Needs, phases: list[Phase], avail: Avai
             if comp.role == lc.role and avail.component_usable(comp) is None:
                 result.add(("component", comp.id))
     return result
+
+
+def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availability, run_id: str,
+                      binding: Binding | None = None) -> dict:
+    """What a run expects of the lab against what the lab has: each logical stage and ad hoc component
+    the datapack needs, the phases using it, what it is bound to, and each lab candidate with why it
+    is not available now (None when it is)."""
+    inv = lab.inventory
+    binding = binding or Binding()
+
+    def used_by(attr: str, logical: str) -> list[str]:
+        return [p.id for p in phases if logical in getattr(p, attr)]
+
+    def comp_facts(comp: Component) -> dict:
+        return {"id": comp.id, "type": comp.type, "role": comp.role, "lock": comp.lock,
+                "state": avail.states.get(comp.id, "unknown"),
+                "maintenance": ("component", comp.id) in avail.maintenance,
+                "held_by": [h for h, _ in avail.holders.get(("component", comp.id), []) if h != run_id]}
+
+    stages = []
+    for logical, stage_type in needs.stages.items():
+        candidates = []
+        for stage in inv.stages_of_type(stage_type):
+            roles = {}
+            for lc in needs.in_stage(logical):
+                comp = inv.component_in(stage, lc.role)
+                roles[lc.id] = comp.id if comp else None
+            candidates.append({
+                "id": stage.id, "bound": binding.stages.get(logical) == stage.id,
+                "why": None if binding.stages.get(logical) == stage.id
+                else stage_problem(lab, needs, logical, stage, avail, run_id),
+                "maintenance": ("stage", stage.id) in avail.maintenance,
+                "held_by": [h for h, _ in avail.holders.get(("stage", stage.id), []) if h != run_id],
+                "roles": roles, "components": [comp_facts(inv.components[c]) for c in stage.components]})
+        stages.append({
+            "logical": logical, "type": stage_type, "phases": used_by("stages", logical),
+            "bound": binding.stages.get(logical),
+            "components": [{"logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name}
+                           for lc in needs.in_stage(logical)],
+            "problem": None if candidates else f"no stage of type '{stage_type}' in the lab",
+            "candidates": candidates})
+    components = []
+    for lc in needs.components.values():
+        if lc.stage:
+            continue
+        candidates = []
+        for comp in inv.adhoc:
+            if comp.role != lc.role:
+                continue
+            bound = binding.components.get(lc.id) == comp.id
+            candidates.append({**comp_facts(comp), "bound": bound,
+                               "why": None if bound else adhoc_problem(lab, needs, lc.type, comp, avail, run_id)})
+        components.append({
+            "logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name,
+            "phases": used_by("components", lc.id), "bound": binding.components.get(lc.id),
+            "problem": None if candidates else f"no ad hoc component with role '{lc.role}' in the lab",
+            "candidates": candidates})
+    return {"stages": stages, "components": components}
 
 
 def effective_priority(run: dict, aging: tuple[int, float] | None, current: float) -> int:

@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
-import { get, post, useConnected, useResource } from "./api";
+import { get, post, url, useConnected, useResource } from "./api";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
 import { QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
@@ -48,6 +48,11 @@ function App() {
   useEffect(() => {
     get("edit").then(() => setEditor(true)).catch(() => setEditor(false));
   }, []);
+  const title = health.data?.title || "Test sequencer";
+  const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
   const page = route.parts[0] || "queue";
   const nav = [
     ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ["config", "Configuration"],
@@ -64,7 +69,10 @@ function App() {
   return (
     <div className={classes("app", page === "edit" && route.parts[1] && "full")}>
       <header className="topbar">
-        <a className="brand" href="#/">Test sequencer</a>
+        <a className="brand" href="#/">
+          {logo && <img src={logo} alt="" />}
+          {title}
+        </a>
         <nav>
           {nav.map(([key, label]) => (
             <a key={key} href={`#/${key}`} className={classes(page === key && "active")}>{label}</a>

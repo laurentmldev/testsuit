@@ -2,7 +2,7 @@
 
 Read from ``--config``, else ``$TSQ_CONFIG``, else ``/etc/testsuit/tsq.yml``. Every setting has a
 default. Relative paths are relative to ``storage.root`` for the storage settings, and to the
-configuration file for the others (``lab.folder``, ``server.workspaces``).
+configuration file for the others (``lab.folder``, ``server.workspaces``, ``server.logo``).
 """
 from __future__ import annotations
 
@@ -70,6 +70,8 @@ class ServerSettings(_Model):
     ui: bool = True
     editor: bool = False
     workspaces: list[str] = Field(default_factory=list)
+    title: str = "Test sequencer"             # the UI's title (top bar and browser tab)
+    logo: str | None = None                   # an image shown before the title: a file, or an http(s) URL
 
 
 class QueueSettings(_Model):
@@ -137,6 +139,14 @@ class Config(_Model):
     @property
     def workspaces(self) -> list[Path]:
         return [self._path(w, self.base_dir) for w in self.server.workspaces]
+
+    @property
+    def logo_file(self) -> Path | None:
+        """The logo image file (None when there is none, or when it is a URL)."""
+        logo = self.server.logo
+        if not logo or logo.startswith(("http://", "https://")):
+            return None
+        return self._path(logo, self.base_dir)
 
     @property
     def listen(self) -> tuple[str, int]:
