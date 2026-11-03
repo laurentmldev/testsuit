@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS locks (
 );
 CREATE TABLE IF NOT EXISTS resources (
     kind TEXT, id TEXT, state TEXT, expected TEXT, probed_at TEXT, detail TEXT,
-    maintenance INTEGER DEFAULT 0, hold INTEGER DEFAULT 0, note TEXT,
+    maintenance INTEGER DEFAULT 0, hold INTEGER DEFAULT 0, note TEXT, selftest_failed TEXT,
     PRIMARY KEY (kind, id)
 );
 CREATE TABLE IF NOT EXISTS usage (
@@ -56,6 +56,9 @@ class Store:
         with self._mutex:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(SCHEMA)
+            columns = {r["name"] for r in self._db.execute("PRAGMA table_info(resources)")}
+            if "selftest_failed" not in columns:         # a database from an older version
+                self._db.execute("ALTER TABLE resources ADD COLUMN selftest_failed TEXT")
 
     def close(self) -> None:
         self._db.close()
@@ -187,6 +190,12 @@ class Store:
                    [state, now(), detail, resource])
         return row["state"] if row else None
 
+    def set_selftest_failed(self, resource: str, failure: dict | None) -> None:
+        """Record a component's failed self-test (its failed checks), or clear it (None) once one passes."""
+        self._ensure("component", resource)
+        self._exec("UPDATE resources SET selftest_failed = ? WHERE kind = 'component' AND id = ?",
+                   [json.dumps(failure) if failure else None, resource])
+
     def set_expected(self, resource: str, state: str) -> None:
         self._ensure("component", resource)
         self._exec("UPDATE resources SET expected = ? WHERE kind = 'component' AND id = ?", [state, resource])
@@ -201,7 +210,10 @@ class Store:
         sql, args = "SELECT * FROM resources", []
         if kind:
             sql, args = sql + " WHERE kind = ?", [kind]
-        return {(r["kind"], r["id"]): dict(r) for r in self._exec(sql, args)}
+        rows = {(r["kind"], r["id"]): dict(r) for r in self._exec(sql, args)}
+        for row in rows.values():
+            row["selftest_failed"] = json.loads(row["selftest_failed"]) if row.get("selftest_failed") else None
+        return rows
 
     # ── usage, events ─────────────────────────────────────────────────────
     def add_usage(self, resource: str, testdef: str) -> None:

@@ -226,7 +226,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             else:
                 row.update(type=item.type, role=item.role, host=item.host, lock=item.lock, stages=item.stages,
                            label=item.label, adhoc=item.adhoc, state=res.get("state") or "unknown",
-                           expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"))
+                           expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"),
+                           selftest_failed=res.get("selftest_failed"))
             rows.append(row)
         return rows
 

@@ -302,7 +302,7 @@ server:
   title: Test sequencer                # the UI's title, in its top bar and browser tab
   logo: logo.png                       # optional image before the title: a file (relative to tsq.yml) or an http(s) URL
 queue: {default_priority: 50, priority_aging: off}
-selftest: {before_each_run: true, timeout: 60s, max_attempts: 3}   # section 7.5
+selftest: {before_each_run: true, when_idle: true, timeout: 60s, max_attempts: 3}   # section 7.5
 monitor: {interval: 30s}
 plugins: [toytrain]                    # in addition to the installed entry points
 ```
@@ -612,6 +612,8 @@ component_types:
 - **When it passes**, the run goes on, and the results are kept in the run record and in the results datapack (`selftest.yml`).
 - **When a check fails**, nothing is deployed. The failing component is marked `offline` or `broken`, the run's locks are released, and the run goes back to the head of the queue for its priority: it can then bind another stage, or wait. After `selftest.max_attempts` failed attempts (default 3), the run ends with the verdict `error`.
 - `tsq selftest [<stage | component>]` runs the same checks on demand, for example after maintenance, without any datapack.
+- A component whose self-test failed **stays** `broken` (or `offline`) even when its probe says it is healthy, until a self-test passes. Its detail tells which check failed.
+- With `selftest.when_idle` (default `true`), a self-test also runs when a component becomes `idle` (it was offline, broken, running...), except for a component an active run holds. A component kept broken by its self-test is tested again when its probe says it is idle, at most once a minute, and comes back once a test passes.
 
 ## 8. Datapack side: resources needed and pipeline
 

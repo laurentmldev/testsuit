@@ -409,6 +409,44 @@ def test_selftest_failure(tmp_path, no_git):
     assert done["verdict"] == "error" and "self-test failed 2 time(s)" in done["reason"]
 
 
+def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
+    """A failed self-test leaves the component broken while its probe says idle; becoming idle (or being
+    probed idle while kept broken) runs a self-test, and the one that passes brings it back."""
+    bench = Bench(tmp_path, stages=1)
+    flag = tmp_path / "healthy"
+    types = yaml.safe_load((tmp_path / "lab" / "types" / "bench.yml").read_text())
+    types["component_types"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"test -e {flag}"}]
+    write(tmp_path / "lab" / "types" / "bench.yml", yaml.safe_dump(types))
+
+    async def until(seq, state):
+        for _ in range(200):
+            if seq.monitor.state("counter_1") == state and "counter_1" not in seq.monitor._testing:
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.idle_retest = 0
+        [result] = await seq.selftest("counter_1")
+        seen = [result["ok"], seq.monitor.state("counter_1")]
+        seen.append(await seq.monitor.probe("counter_1"))          # probed idle, kept broken (and tested again: fails)
+        seen.append(await until(seq, "broken"))
+        detail = seq.store.resources("component")[("component", "counter_1")]["detail"]
+        flag.write_text("")                                         # repaired: the next test passes
+        await seq.monitor.probe("counter_1")
+        seen.append(await until(seq, "idle"))
+        flag.unlink()                                               # broken again, then idle: tested, broken
+        seq.store.set_state("counter_1", "offline")
+        await seq.monitor.probe("counter_1")
+        seen.append(await until(seq, "broken"))
+        await seq.close()
+        return seen, detail
+    seen, detail = asyncio.run(main())
+    assert seen == [False, "broken", "broken", True, True, True], seen
+    assert detail.startswith("self-test failed") and "healthy" in detail, detail
+
+
 def test_maintenance_blocks(bench):
     async def main():
         seq = bench.sequencer()
