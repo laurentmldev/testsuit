@@ -148,18 +148,30 @@ def _flatten_keys(data: Any, prefix: str = "") -> list[tuple[str, Any]]:
     return [(prefix, data)]
 
 
+class GenerationStopped(BaseException):
+    """A generation stopped from the UI (a BaseException: no handler of the datapack tool takes it for its own error)."""
+
+
 class _LiveLog(io.TextIOBase):
-    """Output of a generation, readable line by line while it is written (from another thread)."""
+    """Output of a generation, readable line by line while it is written (from another thread).
+
+    Once stopped, the next write of the generating thread raises GenerationStopped: the tool writes often (each
+    input, each line of a command, the progress of a long copy), so it stops there.
+    """
 
     def __init__(self) -> None:
         self._lines: list[str] = []
         self._partial = ""
         self._lock = threading.Lock()
+        self.thread: int | None = None
+        self.stopped = False
 
     def writable(self) -> bool:
         return True
 
     def write(self, text: str) -> int:
+        if self.stopped and threading.get_ident() == self.thread:
+            raise GenerationStopped()
         with self._lock:
             parts = (self._partial + text.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
             self._partial = parts.pop()
@@ -173,6 +185,12 @@ class _LiveLog(io.TextIOBase):
     def text(self) -> str:
         with self._lock:
             return "\n".join(self._lines + ([self._partial] if self._partial else []))
+
+
+def _describe(e: BaseException) -> str:
+    """An exception as a message that is never empty."""
+    text = str(e).strip()
+    return f"{type(e).__name__}: {text}" if text else f"{type(e).__name__} (no message: see the log)"
 
 
 class Editor:
@@ -1217,18 +1235,42 @@ class Editor:
         self.jobs[job_id] = job
 
         def work() -> None:
+            log.thread = threading.get_ident()
             try:
                 if self._output_lock.locked():
                     log.write("(waiting for another generation or check of this server to end)\n")
                 with self._output_lock, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
                     job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, log)
-            except Exception as e:                       # never a silent end
-                job["result"] = {"ok": False, "error": f"{type(e).__name__}: {e}", "log": self._clean(session, log.text())}
+                if log.stopped and not job["result"]["ok"]:     # its command killed: that is why it failed
+                    job["result"]["error"] = "Generation stopped."
+            except GenerationStopped:
+                job["result"] = {"ok": False, "error": "Generation stopped.", "log": self._clean(session, log.text())}
+            except BaseException as e:                   # never a silent end
+                job["result"] = {"ok": False, "error": _describe(e), "log": self._clean(session, log.text())}
             finally:
+                if job["result"] is None:
+                    job["result"] = {"ok": False, "error": "The generation ended without a result.",
+                                     "log": self._clean(session, log.text())}
+                if not job["result"]["ok"]:                  # the reason as the last line of the log too
+                    log.thread = None
+                    log.write(f"ERROR: {job['result']['error']}\n")
                 job["done"] = True
 
         threading.Thread(target=work, name=f"generate-{job_id}", daemon=True).start()
         return {"job": job_id}
+
+    def stop_generation(self, session: EditSession, job_id: str) -> dict:
+        """Stop a generation: at its next line of output, and the command it runs is killed."""
+        from testsuit.datatools.datapack.procs import kill_running
+        job = self.jobs.get(job_id)
+        if job is None or job["session"] != session.id:
+            raise SequencerError(f"no generation '{job_id}' in this session")
+        log = job["log"]
+        if not job["done"]:
+            log.stopped = True
+            if log.thread is not None:
+                kill_running(log.thread)
+        return {"stopping": not job["done"]}
 
     def generation_job(self, session: EditSession, job_id: str, since: int = 0) -> dict:
         """The log lines of a generation from line since, and its result once it is done."""
@@ -1254,11 +1296,13 @@ class Editor:
                                 setup_config=setup_config)
             error = None
         except (DatapackError, SequencerError, OSError) as e:
-            zip_path, error = None, str(e)
-        except Exception as e:                               # a bug or a plugin error: say what it is
+            zip_path, error = None, str(e) or _describe(e)
+        except GenerationStopped:
+            raise
+        except BaseException as e:                           # a bug or a plugin error: say what it is
             import traceback
             print(traceback.format_exc())
-            zip_path, error = None, f"{type(e).__name__}: {e}"
+            zip_path, error = None, _describe(e)
         text = self._clean(session, log.text())
         if zip_path is None:
             _, message = self._message_file(session, error or "", testdef_rel)

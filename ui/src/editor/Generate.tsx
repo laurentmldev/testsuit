@@ -35,6 +35,10 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   const [posted, setPosted] = useState<any>(null);
 
   const [lines, setLines] = useState<string[]>([]);
+  const [job, setJob] = useState<string | null>(null);
+  const [started, setStarted] = useState(0);
+  const [lastLine, setLastLine] = useState(0);
+  const [stopping, setStopping] = useState(false);
   const live = useRef(true);
   useEffect(() => () => {
     live.current = false;
@@ -44,26 +48,48 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
     setResult(null);
     setPosted(null);
     setLines([]);
+    setStopping(false);
+    setStarted(Date.now());
+    setLastLine(Date.now());
     try {
       // in the background: its log comes line by line, subprocess errors included
       const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check });
+      setJob(job);
       let since = 0;
+      let failures = 0;
       for (;;) {
         if (!live.current) return;
-        const r: any = await get(`edit/sessions/${sid}/datapack/jobs/${job}?since=${since}`);
-        if (r.lines.length) setLines((l) => [...l, ...r.lines]);
+        let r: any;
+        try {
+          r = await get(`edit/sessions/${sid}/datapack/jobs/${job}?since=${since}`);
+          failures = 0;
+        } catch (e: any) {
+          // the server is unreachable for a moment: try again, a few times only
+          if (++failures >= 5 || /no generation/.test(e.message)) throw e;
+          await new Promise((ok) => setTimeout(ok, 1000));
+          continue;
+        }
+        if (r.lines.length) {
+          setLines((l) => [...l, ...r.lines]);
+          setLastLine(Date.now());
+        }
         since = r.next;
         if (r.done) {
-          setResult(r.result);
+          setResult(r.result || { ok: false, error: "The generation ended without a result.", log: "" });
           break;
         }
         await new Promise((ok) => setTimeout(ok, 400));
       }
     } catch (e: any) {
-      setResult({ ok: false, error: e.message, log: "" });
+      setResult({ ok: false, error: `The generation cannot be followed: ${e.message}`, log: "" });
     } finally {
       setBusy(false);
+      setJob(null);
     }
+  };
+  const stop = async () => {
+    setStopping(true);
+    await attempt(() => post(`edit/sessions/${sid}/datapack/jobs/${job}/stop`, {}));
   };
   const submit = async () => {
     const run = await attempt(() => post(`edit/sessions/${sid}/datapack/${result.name}/submit`, priority ? { priority: Number(priority) } : {}), "posted to the queue");
@@ -78,11 +104,19 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       <button onClick={generate} disabled={busy}>Generate again</button>
     </>
   ) : (
-    <button className="primary" disabled={!testdef || busy} onClick={generate}>{busy ? "Generating…" : "Generate"}</button>
+    <>
+      {busy && <button onClick={stop} disabled={!job || stopping} title="Stop the generation: at its next line of output; a command it runs is killed">{stopping ? "Stopping…" : "Stop"}</button>}
+      <button className="primary" disabled={!testdef || busy} onClick={generate}>{busy ? "Generating…" : "Generate"}</button>
+    </>
   );
   return (
     <Dialog title="Generate a datapack" onClose={onClose} footer={footer} wide>
-      {busy && <LiveLog lines={lines} />}
+      {busy && (
+        <>
+          <LiveLog lines={lines} />
+          <Elapsed started={started} lastLine={lastLine} />
+        </>
+      )}
       {!result && !busy && (
         <>
           <Markdown text="Runs the datapack tool on the files of this session, as `datapack <testdef>` would: nothing is pushed. A datapack generated from uncommitted files is a **draft**: the queue accepts it, its report says so." />
@@ -132,6 +166,22 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
         </>
       )}
     </Dialog>
+  );
+}
+
+/** How long the generation has been running, and since when its log has not moved. */
+function Elapsed({ started, lastLine }: { started: number; lastLine: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const quiet = Math.round((now - lastLine) / 1000);
+  return (
+    <p className="muted small">
+      Running for {Math.round((now - started) / 1000)} s
+      {quiet >= 10 && <> · no output for {quiet} s: a long copy or command, or a stuck one (Stop ends it)</>}
+    </p>
   );
 }
 

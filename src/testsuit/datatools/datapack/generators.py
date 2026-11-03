@@ -21,11 +21,12 @@ the components it needs, ``components.<id>.input_dir``).
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
+
+from testsuit.datatools.datapack.procs import run_logged
 
 Generator = Callable[..., None]
 
@@ -76,14 +77,15 @@ def run_generator(name: str, source: Path, target: Path, keys: Mapping, options:
     else:
         command = [str(script)]
     try:
-        result = subprocess.run(command + [str(source), str(target), keys_file], capture_output=True, text=True)
+        # its output (stderr included) in the log as it comes; never waiting for an input
+        returncode, tail = run_logged(command + [str(source), str(target), keys_file])
+    except OSError as e:
+        raise GeneratorError(f"generator script '{name}' cannot be run: {e}") from e
     finally:
         Path(keys_file).unlink(missing_ok=True)
-    for line in (result.stdout + result.stderr).splitlines():
-        print("    | " + line)
-    if result.returncode != 0:
-        raise GeneratorError(f"generator script '{name}' failed (exit {result.returncode}): "
-                             f"{(result.stderr or result.stdout).strip()[-500:]}")
+    if returncode != 0:
+        last = tail.strip().splitlines()[-1] if tail.strip() else "no output"
+        raise GeneratorError(f"generator script '{name}' failed on '{source}' (exit status {returncode}): {last}")
     if not target.exists():
         raise GeneratorError(f"generator script '{name}' did not write '{target}'")
     return False

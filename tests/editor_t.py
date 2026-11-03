@@ -52,6 +52,16 @@ def test_merge_keeps_comments_and_style():
     assert len(changed) <= 6, changed
 
 
+def test_merge_keeps_lists_indented_as_written():
+    # lists right under their key ("- a"), as PyYAML writes them, while the dump indents them
+    text = "inputs:\n- source: a.txt   # first\n  target: a\n- source: b.txt\n  target: b\nother: 1\n"
+    data = {"inputs": [{"source": "a.txt", "target": "a"}, {"source": "c.txt", "target": "b"}, {"source": "d"}],
+            "other": 1}
+    merged = yamledit.merge(text, data)
+    assert yaml.safe_load(merged) == data
+    assert merged.startswith("inputs:\n- source: a.txt   # first\n  target: a\n- source: c.txt\n"), merged
+
+
 def test_merge_matches_list_items_by_id():
     data = yaml.safe_load(TEXT)
     steps = data["pipeline"]["phases"][0]["steps"]
@@ -228,6 +238,53 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert any("git clone" in line and "failed" in line for line in lines), lines
     with pytest.raises(SequencerError, match="no generation"):
         editor.generation_job(session, "nope")
+
+
+def _follow(editor, session, job):
+    lines, since, state = [], 0, {"done": False}
+    for _ in range(300):
+        state = editor.generation_job(session, job, since)
+        lines += state["lines"]
+        since = state["next"]
+        if state["done"]:
+            break
+        time.sleep(0.1)
+    return state, lines
+
+
+def test_generation_errors_and_stop(repos):
+    editor = repos.editor
+    session = editor.open("workspace0", local=True)
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+    setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
+    inputs = setup["component_types"]["dut_app"]["configurations"]["standard"]["inputs"]
+
+    # a missing template: the error, in the result and as the last line of the log
+    inputs[1]["source"] = "files/nope.txt"
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    state, lines = _follow(editor, session, editor.start_generate(session, "testdef/count/testdef.yml")["job"])
+    assert state["done"] and "files/nope.txt' not found" in state["result"]["error"]
+    assert lines[-1].startswith("ERROR: ") and "nope.txt" in lines[-1], lines
+
+    # a generator script that never ends: its output comes live, and Stop ends it
+    editor.write(session, "setup/files/slow.py", content="import time\nprint('working', flush=True)\ntime.sleep(60)\n")
+    inputs[1] = {"source": "files/conf.txt", "target": "conf.bin", "method": "generate", "generator": "files/slow.py"}
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    job = editor.start_generate(session, "testdef/count/testdef.yml")["job"]
+    for _ in range(200):
+        if any("| working" in line for line in editor.generation_job(session, job)["lines"]):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(editor.generation_job(session, job)["lines"])
+    started = time.monotonic()
+    assert editor.stop_generation(session, job) == {"stopping": True}
+    state, lines = _follow(editor, session, job)
+    assert state["done"] and state["result"]["error"] == "Generation stopped." and time.monotonic() - started < 10
+    assert any("[GENERATE]" in line and "conf.txt" in line for line in lines), lines
+    assert editor.stop_generation(session, job) == {"stopping": False}
 
 
 def test_rejected_push_then_rebase(repos):
