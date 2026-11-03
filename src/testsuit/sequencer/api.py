@@ -258,9 +258,9 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return described
 
     @app.get("/logs")
-    async def get_logs(since: int = 0, level: str | None = None, limit: int = 1000):
-        """The last log lines of tsqd (events, warnings, errors), after line since."""
-        return log_buffer.lines(since, level, max(1, min(limit, 2000)))
+    async def get_logs(since: int = 0, level: str | None = None, limit: int = 1000, probes: bool = True):
+        """The last log lines of tsqd (events, warnings, errors, and the probes of the lab), after line since."""
+        return log_buffer.lines(since, level, max(1, min(limit, 3000)), probes)
 
     @app.post("/lab/reload")
     async def reload(body: dict | None = None):

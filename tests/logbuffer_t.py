@@ -1,5 +1,7 @@
 import logging
 
+from sequencer_t import bench, no_git  # noqa: F401  (fixtures)
+
 from testsuit.sequencer.logbuffer import LogBuffer
 from testsuit.sequencer.sequencer import _event_line
 
@@ -32,3 +34,38 @@ def test_event_line():
     assert _event_line("run", {"run": "r1", "state": "done", "verdict": "passed", "reason": "", "binding": None}) == \
         "run: run=r1 state=done verdict=passed"
     assert len(_event_line("lab", {"git": {"commit": "x" * 300}})) < 200
+
+
+def test_probes_kept_apart_and_logged(bench):  # noqa: F811  (the fixture)
+    import asyncio
+
+    from testsuit.sequencer.logbuffer import PROBE_LOGGER
+
+    buffer = LogBuffer(size=2, probes=5)
+    probes = logging.getLogger(PROBE_LOGGER)
+    probes.addHandler(buffer)
+    level, probes.level = probes.level, logging.DEBUG
+    events = logging.getLogger("testsuit.test_logbuffer")
+    events.addHandler(buffer)
+    events.setLevel(logging.INFO)
+    try:
+        events.info("lab reloaded")
+        seq = bench.sequencer()
+
+        async def main():
+            await seq.monitor.probe_all()
+            await seq.close()
+        asyncio.run(main())
+        events.info("run r1 queued")
+    finally:
+        probes.removeHandler(buffer)
+        probes.level = level
+        events.removeHandler(buffer)
+
+    lines = buffer.lines()["lines"]
+    probed = [line for line in lines if line["probe"]]
+    # every component probed: what was run and the state found, in their own buffer (the events are kept)
+    assert probed and all(" -> " in line["message"] for line in probed), probed
+    assert {line["message"].split(":")[0] for line in probed} <= set(seq.lab.inventory.components)
+    assert [line["message"] for line in lines if not line["probe"]] == ["lab reloaded", "run r1 queued"]
+    assert all(not line["probe"] for line in buffer.lines(probes=False)["lines"])
