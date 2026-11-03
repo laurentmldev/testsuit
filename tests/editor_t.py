@@ -268,8 +268,25 @@ def test_generation_errors_and_stop(repos):
     assert state["done"] and "files/nope.txt' not found" in state["result"]["error"]
     assert lines[-1].startswith("ERROR: ") and "nope.txt" in lines[-1], lines
 
+    # empty source and target (keys with an empty value): listed before generating, an error when generating,
+    # skipped with a warning when generating anyway (lenient)
+    editor.write(session, "setup/globals.yml", content="duration: 0.5s\nmin_count: 3\nempty: ''\n")
+    inputs[0]["source"] = "{{ empty }}"
+    inputs[1]["target"] = ""
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
+    assert any("input 1: empty source" in p for p in problems) and any("input 2: empty target" in p for p in problems), problems
+    result = editor.generate(session, "testdef/count/testdef.yml")
+    assert not result["ok"] and "input 1: empty source" in result["error"], result["error"]
+    result = editor.generate(session, "testdef/count/testdef.yml", lenient=True)
+    assert result["ok"], result["error"]
+    assert len(result["datapack"]["skipped"]) == 2 and result["name"].endswith("_DRAFT")
+    inputs[0]["source"] = "files/app.sh"
+    inputs[1]["target"] = "conf.txt"
+
     # a generator script that never ends: its output comes live, and Stop ends it
-    editor.write(session, "setup/files/slow.py", content="import time\nprint('working', flush=True)\ntime.sleep(60)\n")
+    editor.write(session, "setup/files/slow.py", content="import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                 "print('working', flush=True)\ntime.sleep(60)\n")
     inputs[1] = {"source": "files/conf.txt", "target": "conf.bin", "method": "generate", "generator": "files/slow.py"}
     editor.write(session, "setup/bench_setup.yml", data=setup)
     job = editor.start_generate(session, "testdef/count/testdef.yml")["job"]

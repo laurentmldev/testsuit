@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -148,30 +149,18 @@ def _flatten_keys(data: Any, prefix: str = "") -> list[tuple[str, Any]]:
     return [(prefix, data)]
 
 
-class GenerationStopped(BaseException):
-    """A generation stopped from the UI (a BaseException: no handler of the datapack tool takes it for its own error)."""
-
-
 class _LiveLog(io.TextIOBase):
-    """Output of a generation, readable line by line while it is written (from another thread).
-
-    Once stopped, the next write of the generating thread raises GenerationStopped: the tool writes often (each
-    input, each line of a command, the progress of a long copy), so it stops there.
-    """
+    """Output of a generation, readable line by line while it is written (from another thread)."""
 
     def __init__(self) -> None:
         self._lines: list[str] = []
         self._partial = ""
         self._lock = threading.Lock()
-        self.thread: int | None = None
-        self.stopped = False
 
     def writable(self) -> bool:
         return True
 
     def write(self, text: str) -> int:
-        if self.stopped and threading.get_ident() == self.thread:
-            raise GenerationStopped()
         with self._lock:
             parts = (self._partial + text.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
             self._partial = parts.pop()
@@ -185,6 +174,18 @@ class _LiveLog(io.TextIOBase):
     def text(self) -> str:
         with self._lock:
             return "\n".join(self._lines + ([self._partial] if self._partial else []))
+
+
+def _signal_group(process: subprocess.Popen, name: str) -> None:
+    """Send a signal to a process and to the commands it started (its own session)."""
+    import signal
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(process.pid, getattr(signal, name))
+        else:                                       # no process groups (Windows): the process alone
+            process.kill()
+    except OSError:
+        pass
 
 
 def _describe(e: BaseException) -> str:
@@ -1085,6 +1086,7 @@ class Editor:
                                "method": item.get("method") or "template", "generator": item.get("generator"),
                                "optional": bool(item.get("optional")),
                                "files": [shown(f) for f in found[:20]],
+                               "holds_datapack": any(builder.work.resolve().is_relative_to(f.resolve()) for f in found),
                                "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
             components.append({"id": comp_id, "name": comp.get("name", ""), "type": comp.get("type", ""),
                                "lab_type": lab_type, "configuration": comp.get("configuration", ""),
@@ -1108,9 +1110,27 @@ class Editor:
 
         baseline = self._datasets(session, builder, raw, keys, shown, render)
         ids = {d["id"] for d in baseline}
+        problems = []
+        if config not in (raw.get("configurations") or {}):
+            problems.append(f"no setup configuration '{config}' in {shown(builder.setup_file)}")
         for comp in components:
-            for item in comp["inputs"]:
+            if comp["type"] not in types:
+                problems.append(f"component '{comp['id']}': no component type '{comp['type']}'")
+            elif comp["configuration"] not in ((types[comp["type"]] or {}).get("configurations") or {}):
+                problems.append(f"component '{comp['id']}': no configuration '{comp['configuration']}' for type '{comp['type']}'")
+            for number, item in enumerate(comp["inputs"], 1):
                 item["dataset"] = item["dataset"] if item["dataset"] in ids else None
+                where = f"component '{comp['id']}', input {number}"
+                if item["resolved"] is None:
+                    problems.append(f"{where}: source '{item['source']}' cannot be resolved (a key missing?)")
+                elif not item["resolved"].strip():
+                    problems.append(f"{where}: empty source{'' if not item['source'].strip() else ' (' + repr(item['source']) + ' has an empty value)'}")
+                elif not str(item["target"]).strip() or render(item["target"]) == "":
+                    problems.append(f"{where}: empty target for '{item['source']}'")
+                elif item["holds_datapack"]:
+                    problems.append(f"{where}: '{item['resolved']}' holds the datapack being generated (a key with an empty value?)")
+                elif not item["files"] and not item["optional"] and "<" not in item["resolved"]:   # <a dataset folder>: not checked
+                    problems.append(f"{where}: '{item['resolved']}' not found")
         return {"testdef": {"path": testdef_rel, "id": testdef.id, "name": testdef.name,
                             "description": getattr(testdef, "description", "") or "",
                             "setup_file": shown(builder.setup_file), "setup_config": config,
@@ -1118,7 +1138,7 @@ class Editor:
                             "configurations": sorted(raw.get("configurations") or {})},
                 "setup": {"id": raw.get("id"), "name": raw.get("name")},
                 "stages": stages, "components": components, "dictionaries": dictionaries,
-                "baseline": baseline}
+                "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
 
@@ -1216,35 +1236,34 @@ class Editor:
         result = self.write(session, rel, data=version, at=at)
         return {"file": rel, "key": found["key"], "version": version, "problems": result.get("problems", [])}
 
+    STOP_GRACE_S = 5          # a stopped generation is killed if it has not ended by then
+
     def generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                 nocheck: bool = True) -> dict:
+                 nocheck: bool = True, lenient: bool = False) -> dict:
         """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would."""
-        log = _LiveLog()
-        with self._output_lock, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
-            return self._generate(session, testdef_rel, setup_config, nocheck, log)
+        job_id = self.start_generate(session, testdef_rel, setup_config, nocheck, lenient)["job"]
+        self.jobs[job_id]["thread"].join()
+        return self.jobs[job_id]["result"]
 
     def start_generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                       nocheck: bool = True) -> dict:
-        """The same as generate, in the background: its log can be read while it runs (generation_job)."""
+                       nocheck: bool = True, lenient: bool = False) -> dict:
+        """The same as generate, in the background: its log can be read while it runs (generation_job).
+
+        The datapack tool runs in a process of its own: a stopped generation ends for sure (the process and
+        the commands it started are killed), whatever it was doing.
+        """
         job_id = uuid.uuid4().hex[:8]
         log = _LiveLog()
-        job: dict[str, Any] = {"session": session.id, "log": log, "result": None, "done": False}
+        job: dict[str, Any] = {"session": session.id, "log": log, "result": None, "done": False,
+                               "process": None, "stop": threading.Event()}
         finished = [k for k, v in self.jobs.items() if v["done"]]
         for k in finished[:max(0, len(self.jobs) - 20)]:   # keep the last ones only
             del self.jobs[k]
         self.jobs[job_id] = job
 
         def work() -> None:
-            log.thread = threading.get_ident()
             try:
-                if self._output_lock.locked():
-                    log.write("(waiting for another generation or check of this server to end)\n")
-                with self._output_lock, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
-                    job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, log)
-                if log.stopped and not job["result"]["ok"]:     # its command killed: that is why it failed
-                    job["result"]["error"] = "Generation stopped."
-            except GenerationStopped:
-                job["result"] = {"ok": False, "error": "Generation stopped.", "log": self._clean(session, log.text())}
+                job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job)
             except BaseException as e:                   # never a silent end
                 job["result"] = {"ok": False, "error": _describe(e), "log": self._clean(session, log.text())}
             finally:
@@ -1252,25 +1271,34 @@ class Editor:
                     job["result"] = {"ok": False, "error": "The generation ended without a result.",
                                      "log": self._clean(session, log.text())}
                 if not job["result"]["ok"]:                  # the reason as the last line of the log too
-                    log.thread = None
                     log.write(f"ERROR: {job['result']['error']}\n")
                 job["done"] = True
 
-        threading.Thread(target=work, name=f"generate-{job_id}", daemon=True).start()
+        job["thread"] = threading.Thread(target=work, name=f"generate-{job_id}", daemon=True)
+        job["thread"].start()
         return {"job": job_id}
 
     def stop_generation(self, session: EditSession, job_id: str) -> dict:
-        """Stop a generation: at its next line of output, and the command it runs is killed."""
-        from testsuit.datatools.datapack.procs import kill_running
+        """Stop a generation: its process (and every command it started) is terminated, then killed if it
+        has not ended after STOP_GRACE_S seconds."""
         job = self.jobs.get(job_id)
         if job is None or job["session"] != session.id:
             raise SequencerError(f"no generation '{job_id}' in this session")
-        log = job["log"]
-        if not job["done"]:
-            log.stopped = True
-            if log.thread is not None:
-                kill_running(log.thread)
-        return {"stopping": not job["done"]}
+        if job["done"]:
+            return {"stopping": False}
+        job["stop"].set()
+        process = job["process"]
+        if process is not None:
+            _signal_group(process, "SIGTERM")
+
+            def kill_later() -> None:
+                try:
+                    process.wait(self.STOP_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    job["log"].write(f"(still running {self.STOP_GRACE_S} s after Stop: killed)\n")
+                _signal_group(process, "SIGKILL")       # and any command it started that is left
+            threading.Thread(target=kill_later, daemon=True).start()
+        return {"stopping": True}
 
     def generation_job(self, session: EditSession, job_id: str, since: int = 0) -> dict:
         """The log lines of a generation from line since, and its result once it is done."""
@@ -1286,27 +1314,61 @@ class Editor:
     def _clean(session: EditSession, text: str) -> str:
         return ANSI.sub("", text).replace(f"{session.folder}/", "").replace(f"{session.dir}/", "")
 
+    _generation_lock = threading.Lock()     # one generation at a time: they may share a working folder
+
     def _generate(self, session: EditSession, testdef_rel: str, setup_config: str | None, nocheck: bool,
-                  log: _LiveLog) -> dict:
-        from testsuit.datatools.datapack.datapack_tools import DatapackError, datapack, read_baseline
+                  lenient: bool, job: dict) -> dict:
+        from testsuit.datatools.datapack.datapack_tools import read_baseline
+        log: _LiveLog = job["log"]
         out_dir = Path(session.dir) / "generated"
         out_dir.mkdir(exist_ok=True)
+        command = [sys.executable, "-m", "testsuit.cli.datapack", str(self.path(session, testdef_rel)),
+                   "--output-dir", str(out_dir)]
+        command += ["--nocheck"] if nocheck else []
+        command += ["--lenient"] if lenient else []
+        command += ["--setup-config", setup_config] if setup_config else []
+        popen_args: dict[str, Any] = {"start_new_session": True} if hasattr(os, "killpg") else {}
+
+        waited = False
+        while not self._generation_lock.acquire(timeout=0.5):
+            if job["stop"].is_set():
+                return {"ok": False, "error": "Generation stopped.", "log": self._clean(session, log.text())}
+            if not waited:
+                log.write("(waiting for another generation of this server to end)\n")
+                waited = True
         try:
-            zip_path = datapack(self.path(session, testdef_rel), nocheck=nocheck, output_dir=out_dir,
-                                setup_config=setup_config)
-            error = None
-        except (DatapackError, SequencerError, OSError) as e:
-            zip_path, error = None, str(e) or _describe(e)
-        except GenerationStopped:
-            raise
-        except BaseException as e:                           # a bug or a plugin error: say what it is
-            import traceback
-            print(traceback.format_exc())
-            zip_path, error = None, _describe(e)
+            if job["stop"].is_set():
+                return {"ok": False, "error": "Generation stopped.", "log": self._clean(session, log.text())}
+            output: list[str] = []
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                  text=True, errors="replace", bufsize=1, **popen_args,
+                                  env={**os.environ, "PYTHONUNBUFFERED": "1", "GIT_TERMINAL_PROMPT": "0"}) as process:
+                job["process"] = process
+                assert process.stdout is not None
+                for line in process.stdout:
+                    log.write(line)
+                    output.append(ANSI.sub("", line.rstrip("\n")))
+            returncode = process.returncode
+        finally:
+            job["process"] = None
+            self._generation_lock.release()
+
         text = self._clean(session, log.text())
-        if zip_path is None:
-            _, message = self._message_file(session, error or "", testdef_rel)
-            return {"ok": False, "error": message, "log": text}
+        if job["stop"].is_set():
+            return {"ok": False, "error": "Generation stopped.", "log": text}
+        zip_path = next((Path(line.split("Generated Datapack:", 1)[1].strip()) for line in reversed(output)
+                         if "Generated Datapack:" in line), None)
+        if returncode != 0 or zip_path is None or not zip_path.is_file():
+            # the tool's last error, with the lines it spans (a list of keys that cannot be resolved), or the
+            # last line it wrote (the exception of a traceback)
+            start = next((i for i in range(len(output) - 1, -1, -1) if output[i].startswith("ERROR: ")), None)
+            if start is not None:
+                error = "\n".join(output[start:]).removeprefix("ERROR: ").strip()
+            else:
+                last = next((line.strip() for line in reversed(output) if line.strip()), "no output")
+                error = f"the datapack tool failed (exit status {returncode}): {last}"
+            _, message = self._message_file(session, error, testdef_rel)
+            return {"ok": False, "error": self._clean(session, message), "log": text}
         import zipfile
         with zipfile.ZipFile(zip_path) as z:
             files = [{"path": n.split("/", 1)[1], "size": z.getinfo(n).file_size} for n in z.namelist()

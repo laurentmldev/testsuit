@@ -123,6 +123,12 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
         <button className="primary" disabled={!data} onClick={() => setGenerate(true)}>Generate…</button>
       </div>
       {error && <pre className="error-box">{error}</pre>}
+      {data?.problems?.length > 0 && (
+        <div className="banner warn list">
+          <strong>{data.problems.length === 1 ? "A problem" : `${data.problems.length} problems`} to fix before generating</strong>
+          <ul className="problems">{data.problems.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+        </div>
+      )}
       {!data && !error && <Spinner className="block" text="Reading the definition, its setup and dictionaries…" />}
       {data && (
         <>

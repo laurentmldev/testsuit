@@ -180,6 +180,18 @@ def _copy(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, copy_function=copy)
 
 
+def _input_problem(source: str, target: str, input_dir: Path) -> str | None:
+    """What makes an input unusable before looking for its files: an empty source or target (a key with
+    an empty value, typically), or a target out of the component's input folder."""
+    if not source.strip():
+        return "empty source (a key with an empty value?)"
+    if not target.strip():
+        return f"input '{source}': empty target (a key with an empty value?)"
+    if not (input_dir / target).resolve().is_relative_to(input_dir.resolve()):
+        return f"input '{source}': target '{target}' is out of the component's input folder"
+    return None
+
+
 def _find_sources(source: str, folders: list[Path]) -> list[Path]:
     """Files or folders matching source (absolute, or relative to one of folders, first match wins)."""
     candidates = [Path(os.path.expanduser(source))]
@@ -317,7 +329,10 @@ def _depth(comp_id: str, components: dict) -> int:
 class _Builder:
 
     def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None,
-                 expected_baseline: dict | None = None) -> None:
+                 expected_baseline: dict | None = None, lenient: bool = False) -> None:
+        self.lenient = lenient
+        self.skipped: list[str] = []                    # lenient: the inputs left out, and why
+        nocheck = nocheck or lenient
         self.testdef_file = testdef_file
         self.expected_baseline = expected_baseline
         self.setup_config = setup_config
@@ -484,15 +499,26 @@ class _Builder:
                          "configuration": component.configuration, "input_dir": input_dir.as_posix()}
             extra = {"component": comp_keys, "components": needed, "read_input": read_input}
             inputs = []
-            for input_file in comp_type.configurations[component.configuration].inputs:
-                sources = _find_sources(input_file.source, [self.testdef_dir, setup_dir])
+            for number, input_file in enumerate(comp_type.configurations[component.configuration].inputs, 1):
+                problem = _input_problem(input_file.source, input_file.target, input_dir)
+                sources = [] if problem else _find_sources(input_file.source, [self.testdef_dir, setup_dir])
+                if not problem and not sources and not input_file.optional:
+                    problem = (f"input '{input_file.source}' not found (absolute, or relative to "
+                               f"'{self.testdef_dir}' or '{setup_dir}')")
+                if not problem:
+                    problem = next((f"input '{input_file.source}': '{s}' holds the datapack being generated"
+                                    for s in sources if self.work.resolve().is_relative_to(s.resolve())), None)
+                if problem:
+                    problem = f"component '{comp_id}', input {number}: {problem}"
+                    if not self.lenient:
+                        raise DatapackError(problem)
+                    _warn(problem + ": skipped")
+                    self.skipped.append(problem)
+                    continue
                 target = input_dir / input_file.target
                 if not sources:
-                    if input_file.optional:
-                        _info(Fore.YELLOW + "    [OPTIONAL] " + Fore.LIGHTBLACK_EX + f"{input_file.source} not found, skipped")
-                        continue
-                    raise DatapackError(f"component '{comp_id}': input '{input_file.source}' not found (absolute, or "
-                                        f"relative to '{self.testdef_dir}' or '{setup_dir}')")
+                    _info(Fore.YELLOW + "    [OPTIONAL] " + Fore.LIGHTBLACK_EX + f"{input_file.source} not found, skipped")
+                    continue
                 used: dict[str, dict[str, str]] = {}
                 for source in sources:
                     # a glob pattern always gives a folder, even when it matches one file
@@ -655,6 +681,7 @@ class _Builder:
                       "file": self.setup_file.as_posix(), "git": self.setup_git},
             "datasets": self.datasets,
             "components": components,
+            **({"skipped": self.skipped} if self.skipped else {}),
         })
         baseline = self.baseline(name, components, testdef_git)
         _dump_yaml(self.work / "baseline.yml", baseline, "# where the contents of this datapack come from (sequencer README, section 5.3)\n")
@@ -665,13 +692,15 @@ class _Builder:
         zip_path = zip_folder(self.work, output_dir / f"{name}.zip", name)
 
         _info(Fore.LIGHTBLACK_EX + "\nGenerated Datapack: " + Style.RESET_ALL + zip_path.as_posix() + "\n")
+        if self.skipped:
+            _warn(f"{len(self.skipped)} input(s) skipped (lenient), this datapack is incomplete.")
         if self.nocheck:
             _warn("option 'nocheck' was activated, this datapack shall not be used for a production run.")
         return zip_path
 
 
 def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None,
-             setup_config: str | None = None, expected_baseline: dict | None = None) -> Path:
+             setup_config: str | None = None, expected_baseline: dict | None = None, lenient: bool = False) -> Path:
     """Generate the datapack of a test definition file.
 
     The datapack contents are left in '.current_datapack' next to the test definition file.
@@ -681,13 +710,15 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
     :param output_dir: where to write the zip (default: key 'datapack.output_dir')
     :param setup_config: setup configuration to use instead of the test definition's 'setup_config'
     :param expected_baseline: an expected baseline to check the datapack against (mismatches are warnings)
+    :param lenient: skip, with a warning, the inputs whose source is missing or empty, or whose target is
+        empty (listed under 'skipped' in datapack.yml); implies nocheck
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """
     # importers and processors declared by external libraries
     load_plugins()
     try:
-        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline).build(output_dir)
+        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline, lenient).build(output_dir)
     except TemplateError as e:
         raise DatapackError(str(e)) from e
 
