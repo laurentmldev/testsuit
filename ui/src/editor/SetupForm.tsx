@@ -1,6 +1,6 @@
 // Setup form (sequencer README, sections 5 and 8): where the inputs come from, the datapack component types
 // with their inputs and commands, and the configurations: logical stages and components bound by role.
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
@@ -48,7 +48,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
       </div>
       <div className="form-main">
         {sel.kind === "general" && <General doc={doc} data={data} update={update} />}
-        {sel.kind === "data" && <DataRepos data={data} update={update} />}
+        {sel.kind === "data" && <DataRepos doc={doc} data={data} update={update} />}
         {sel.kind === "type" && types[sel.name] !== undefined && (
           <DatapackType doc={doc} name={sel.name} value={types[sel.name]} update={update} onRenamed={(n) => setSel({ kind: "type", name: n })} onDeleted={() => setSel({ kind: "general" })} />
         )}
@@ -99,55 +99,119 @@ function General({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d: 
   );
 }
 
-function DataRepos({ data, update }: { data: any; update: (fn: (d: any) => void) => void }) {
-  const { ctx } = useSession();
+/** Where the datasets come from and where they go, resolved with the keys of a test definition using
+ * this setup: refreshed a moment after each change (the form saves its file first). */
+function useResolvedDatasets(sid: string, setup: string, data: any, testdef: string | null) {
+  const [resolved, setResolved] = useState<any>(null);
+  const signature = JSON.stringify(data.datarepositories || []) + JSON.stringify(data.dictionaries || []);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      post(`edit/sessions/${sid}/datasets`, { setup, testdef }).then(setResolved).catch((e) => setResolved({ error: e.message, datasets: [], testdefs: [] }));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [sid, setup, signature, testdef]);
+  return resolved;
+}
+
+function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d: any) => void) => void }) {
+  const { sid, ctx } = useSession();
   const help = useSetupHelp();
+  const [testdef, setTestdef] = useState<string | null>(null);
+  const resolved = useResolvedDatasets(sid, doc.path, data, testdef);
   const repos: any[] = data.datarepositories || [];
   const importers: Choice[] = (ctx.importers || []).map((i: string) => ({ value: i, description: i === "git" ? "a git repository: version is a tag or commit" : "plugin importer" }));
+  const at = (i: number, j: number, k: number) => (resolved?.datasets || []).find((d: any) => d.at?.[0] === i && d.at?.[1] === j && d.at?.[2] === k);
+  const repoPath = (i: number) => (resolved?.datasets || []).find((d: any) => d.at?.[0] === i)?.repository_path;
   return (
     <div>
       <h3>Data repositories</h3>
       <Markdown text={help(["datarepositories"])} />
+      <div className="data-legend small">
+        <span><strong>Repository</strong>: where the datasets are downloaded</span>
+        <span><strong>Data source</strong>: a connector (importer) and the base path it reads</span>
+        <span><strong>Dataset</strong>: a version of that source, downloaded to <code>{"<repository>/<dataset id>/<version>"}</code></span>
+      </div>
+      <p className="small muted">
+        {resolved?.testdef ? <>Paths resolved with the keys of{" "}
+          {resolved.testdefs.length > 1 ? (
+            <select value={resolved.testdef} onChange={(e) => setTestdef(e.target.value)}>
+              {resolved.testdefs.map((t: string) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          ) : <code>{resolved.testdef}</code>}{resolved.setup_config && <> (configuration {resolved.setup_config})</>}.</>
+          : resolved?.error ? <>Paths not resolved: {resolved.error}</> : resolved === null ? "Resolving the paths…" : null}
+      </p>
       {repos.map((repo, i) => (
-        <Section key={i} title={`Repository ${repo.id || i + 1}`} actions={<button className="small danger" onClick={() => update((d) => d.datarepositories.splice(i, 1))}>Remove</button>}>
+        <Section key={i} title={<>Repository {repo.id || i + 1} {repoPath(i) && <span className="muted small mono">→ {repoPath(i)}</span>}</>}
+          actions={<button className="small danger" onClick={() => update((d) => d.datarepositories.splice(i, 1))}>Remove</button>}>
           <div className="inline-fields">
             <Field label="Id"><IdText value={repo.id} onChange={(v) => update((d) => (d.datarepositories[i].id = v))} /></Field>
-            <Field label="Local folder" help={help(["datarepositories", 0, "path"])}><Text mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} /></Field>
+            <Field label="Download folder" help={help(["datarepositories", 0, "path"]) || "Where the datasets of this repository are downloaded (relative to the setup file)."}>
+              <Text mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} />
+            </Field>
           </div>
-          {(repo.datasources || []).map((src: any, j: number) => (
-            <div key={j} className="sub-form datasource">
-              <div className="sub-form-head">
-                <strong>Data source {src.id || j + 1}</strong>
-                {src.importer && <span className="badge">{src.importer}</span>}
-                <span className="muted small">{(src.datasets || []).length} dataset(s)</span>
-                <span className="spacer" />
-                <button className="small danger" onClick={() => {
-                  if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
-                  update((d) => d.datarepositories[i].datasources.splice(j, 1));
-                }}>Remove data source</button>
+          {repoPath(i) && <div className="resolved small">resolved: <code>{repoPath(i)}</code></div>}
+          {(repo.datasources || []).map((src: any, j: number) => {
+            const first = (src.datasets || []).map((_: any, k: number) => at(i, j, k)).find(Boolean);
+            return (
+              <div key={j} className="sub-form datasource">
+                <div className="sub-form-head">
+                  <strong>Data source {src.id || j + 1}</strong>
+                  {src.importer && <span className="badge">{src.importer}</span>}
+                  <span className="muted small">{(src.datasets || []).length} dataset(s)</span>
+                  <span className="spacer" />
+                  <button className="small danger" onClick={() => {
+                    if (!window.confirm(`Remove data source ${src.id || j + 1}?`)) return;
+                    update((d) => d.datarepositories[i].datasources.splice(j, 1));
+                  }}>Remove data source</button>
+                </div>
+                <div className="inline-fields">
+                  <Field label="Source id"><IdText value={src.id} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].id = v))} /></Field>
+                  <Field label="Connector (importer)" help={help(["datarepositories", 0, "datasources", 0, "importer"])}><Combo value={src.importer} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].importer = v))} choices={importers} /></Field>
+                </div>
+                <Field label="Name"><Text value={src.name} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].name = v || undefined))} /></Field>
+                <Field label="Base path" help={help(["datarepositories", 0, "datasources", 0, "source"]) || "What the connector reads: a git URL, a server, a folder…"}>
+                  <Text mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} />
+                </Field>
+                {first?.source && first.source !== src.source && <div className="resolved small">resolved: <code>{first.source}</code></div>}
+                {first?.versions_error && <div className="resolved small muted">versions not listed: {first.versions_error}</div>}
+                <Field label="Datasets" wide help="Each dataset is a version of the source (a git tag, a release…), downloaded to its own folder; it gives the keys `<id>.path` and `<id>.version` to the templates.">
+                  <table className="grid compact datasets">
+                    <thead><tr><th>Id</th><th>Version (completes the base path)</th><th /></tr></thead>
+                    <tbody>
+                      {(src.datasets || []).map((ds: any, k: number) => {
+                        const r = at(i, j, k);
+                        return (
+                          <Fragment key={k}>
+                            <tr>
+                              <td><IdText value={ds.id} placeholder="id" onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].id = v))} /></td>
+                              <td className="version-cell">
+                                <input className="mono" list={`ds-versions-${i}-${j}`} value={ds.version || ""} placeholder="version, e.g. {{ sw_version }}"
+                                  onChange={(e) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].version = e.target.value))} />
+                              </td>
+                              <td><button className="icon" onClick={() => update((d) => d.datarepositories[i].datasources[j].datasets.splice(k, 1))}>×</button></td>
+                            </tr>
+                            <tr className="dataset-resolved">
+                              <td colSpan={3} className="small">
+                                {r ? (
+                                  <dl>
+                                    <dt>version</dt><dd><code>{r.version ?? "?"}</code>{r.key && <span className="muted"> from key {r.key} in {r.defined_in}</span>}</dd>
+                                    <dt>read from</dt><dd><code>{r.source}</code> <span className="muted">at {r.version}</span></dd>
+                                    {r.local_path && <><dt>stored in</dt><dd><code>{r.local_path}</code> {r.imported ? <span className="badge ok">downloaded</span> : <span className="badge">not downloaded yet</span>}</dd></>}
+                                  </dl>
+                                ) : <span className="muted">{resolved ? "not resolved" : "resolving…"}</span>}
+                              </td>
+                            </tr>
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <datalist id={`ds-versions-${i}-${j}`}>{(first?.versions || []).map((v: string) => <option key={v} value={v} />)}</datalist>
+                  <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
+                </Field>
               </div>
-              <div className="inline-fields">
-                <Field label="Source id"><IdText value={src.id} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].id = v))} /></Field>
-                <Field label="Importer" help={help(["datarepositories", 0, "datasources", 0, "importer"])}><Combo value={src.importer} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].importer = v))} choices={importers} /></Field>
-              </div>
-              <Field label="Name"><Text value={src.name} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].name = v || undefined))} /></Field>
-              <Field label="Read from" help={help(["datarepositories", 0, "datasources", 0, "source"])}><Text mono value={src.source} onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].source = v))} /></Field>
-              <Field label="Datasets" help="Each dataset gives the keys `<id>.path` and `<id>.version` to the templates.">
-                <table className="grid compact">
-                  <tbody>
-                    {(src.datasets || []).map((ds: any, k: number) => (
-                      <tr key={k}>
-                        <td><IdText value={ds.id} placeholder="id" onChange={(v) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].id = v))} /></td>
-                        <td><input className="mono" value={ds.version || ""} placeholder="version, e.g. {{ sw_version }}" onChange={(e) => update((d) => (d.datarepositories[i].datasources[j].datasets[k].version = e.target.value))} /></td>
-                        <td><button className="icon" onClick={() => update((d) => d.datarepositories[i].datasources[j].datasets.splice(k, 1))}>×</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources[j].datasets ||= []).push({ id: "dataset", version: "" })))}>+ Dataset</button>
-              </Field>
-            </div>
-          ))}
+            );
+          })}
           <button className="small" onClick={() => update((d) => ((d.datarepositories[i].datasources ||= []).push({ id: "source", importer: "git", source: "", datasets: [] })))}>+ Data source</button>
         </Section>
       ))}

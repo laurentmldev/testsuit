@@ -199,6 +199,12 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert ds["version"] == "v1.9.0" and ds["key"] == "data_version" and ds["defined_in"] == "setup/globals.yml"
     assert ds["editable"] and ds["versions"] == ["v1.10.0", "v1.9.0", "main"], ds
 
+    assert ds["source"] == str(data) and ds["local_path"] == str((tmp_path / "datarepo" / "ds" / "v1.9.0").resolve())
+    assert ds["repository_path"] == str((tmp_path / "datarepo").resolve()) and not ds["imported"]
+    resolved = editor.datasets(session, "setup/bench_setup.yml")
+    assert resolved["testdef"] == "testdef/count/testdef.yml" and resolved["datasets"][0]["version"] == "v1.9.0"
+    assert editor.datasets(session, "setup/other.yml")["error"]
+
     changed = editor.set_version(session, "testdef/count/testdef.yml", "ds", "v1.10.0")
     assert changed["file"] == "setup/globals.yml"
     assert "data_version: v1.10.0  # the data in use" in editor.read(session, "setup/globals.yml")["content"]
