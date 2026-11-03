@@ -17,6 +17,7 @@ import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
+from testsuit.sequencer.logbuffer import install as install_log_buffer
 from testsuit.sequencer.sequencer import Sequencer
 from testsuit.sequencer.util import SequencerError
 
@@ -55,6 +56,7 @@ def zip_entry(zip_path: Path, path: str):
 
 def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     app = FastAPI(title="testsuit sequencer", version="1", lifespan=lifespan)
+    log_buffer = install_log_buffer()
     app.state.seq = seq
 
     @app.exception_handler(SequencerError)
@@ -254,6 +256,11 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             current = (seq.lab.git or {}).get("commit")
             described["published"] = {**published, "newer": published["commit"] != current}
         return described
+
+    @app.get("/logs")
+    async def get_logs(since: int = 0, level: str | None = None, limit: int = 1000):
+        """The last log lines of tsqd (events, warnings, errors), after line since."""
+        return log_buffer.lines(since, level, max(1, min(limit, 2000)))
 
     @app.post("/lab/reload")
     async def reload(body: dict | None = None):

@@ -1,6 +1,7 @@
 """Editor mode of the sequencer (README section 13.2): comment-keeping YAML edits, editing sessions on clones of
 the lab and tests repositories, their checks and helpers, and pushing to the upstream repository."""
 import json
+import logging
 import shutil
 import subprocess
 import time
@@ -456,7 +457,12 @@ def test_api(repos, tmp_path):
         # the pipeline of a queued run, for the run graph
         from sequencer_t import Bench
         zip_path = Bench(tmp_path / "other").build()
+        logging.getLogger("testsuit").setLevel(logging.INFO)
         run = seq.submit(zip_path)
+        # the event, in the log of the sequencer
+        logs = requests.get(f"{url}/logs").json()
+        assert any(line["message"].startswith(f"run: run={run['id']} state=queued") for line in logs["lines"]), logs
+        assert requests.get(f"{url}/logs", params={"since": logs["next"]}).json()["lines"] == []
         pipeline = requests.get(f"{url}/runs/{run['id']}/pipeline").json()
         assert [p["id"] for p in pipeline["phases"]] == ["test_run", "exploit"]
         start = next(s for s in pipeline["phases"][0]["steps"] if s["id"] == "start")

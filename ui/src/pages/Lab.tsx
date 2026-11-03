@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { post, useResource } from "../api";
 import { Dialog } from "../fields";
 import { ago, attempt, Badge, navigate, time } from "../util";
+import { LogsDialog } from "./Logs";
 
 const ACTION_HELP: Record<string, string> = {
   hold: "Keep it out of new runs (a run holding it goes on). Resume to give it back.",
@@ -74,6 +75,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const stages = useResource<any[]>("stages", ["resource", "release", "run", "lab"]);
   const [selftest, setSelftest] = useState<string | null | undefined>(undefined);
   const [reloading, setReloading] = useState(false);
+  const [logs, setLogs] = useState(false);
   const refresh = () => {
     comps.refresh();
     stages.refresh();
@@ -118,7 +120,9 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
         {editor && <button onClick={editLab} title="Open the lab inventory and component types in the Editor, in place">Edit lab config</button>}
+        <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
+      {logs && <LogsDialog onClose={() => setLogs(false)} />}
       {(stages.data || []).map((s) => (
         <div key={s.id} className="card stage">
           <div className="card-head">

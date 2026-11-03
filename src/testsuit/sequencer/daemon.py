@@ -28,6 +28,8 @@ def build(config_path: str | None = None):
     from testsuit.sequencer.api import create_app
     from testsuit.sequencer.sequencer import Sequencer, load_config_plugins
 
+    from testsuit.sequencer.logbuffer import install
+    install()                                   # from the first line: the log of the Lab page
     config = load_config(config_path)
     log.info(f"tsqd: configuration {config.file}" if config.file else
              "tsqd: no configuration file (no --config, no $TSQ_CONFIG, no /etc/testsuit/tsq.yml): defaults used")

@@ -50,7 +50,7 @@ function App() {
   }, []);
   const page = route.parts[0] || "queue";
   const nav = [
-    ["queue", "Queue"], ["runs", "Runs"], ["lab", "Lab"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["config", "Configuration"],
+    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ["config", "Configuration"],
   ];
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
