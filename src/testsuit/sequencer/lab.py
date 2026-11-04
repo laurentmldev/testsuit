@@ -74,6 +74,26 @@ class Lab:
     def resolve(self, component: Component, stage: Stage | None = None) -> Resolved:
         return self.library.resolve(component, stage, self.hosts)
 
+    def lab_keys(self, component: Component | None = None, stage: Stage | None = None) -> dict:
+        """The keys giving the other components to commands, probes and self-tests: ``lab.components.<host>``
+        (every host of the inventory) and ``stage`` (the component's stage: ``stage.components.<host>``,
+        ``stage.roles.<role>``, ``stage.vars``), each component with its id, host, role, label and variables
+        as seen in that stage (``{{ stage.roles.stage_server.host }}``, ``{{ stage.components.srv_1.vars.ip }}``)."""
+        def info(c: Component, where: Stage | None) -> dict:
+            return {"id": c.id, "host": c.host, "role": c.role, "label": c.label, "vars": c.vars_in(where)}
+        inv = self.inventory
+        keys: dict = {"lab": {"components": {c.id: info(c, inv.stages[c.stages[0]] if c.stages else None)
+                                             for c in inv.components.values()},
+                              "stages": {s.id: {"id": s.id, "type": s.type, "components": list(s.components)}
+                                         for s in inv.stages.values()}}}
+        if stage is not None:
+            members = {cid: info(inv.components[cid], stage) for cid in stage.components}
+            keys["stage"] = {"id": stage.id, "type": stage.type, "vars": dict(stage.vars), "components": members,
+                             "roles": {m["role"]: m for m in members.values() if m["role"]}}
+        else:
+            keys["stage"] = {"id": "", "type": "", "vars": {}, "components": {}, "roles": {}}
+        return keys
+
     def via(self, component: Component, stage: Stage | None = None, status: dict | None = None) -> Component | None:
         """The component a status probe (and its self-test) runs on when the component cannot be reached itself,
         for example in a sub-network behind the stage server: ``status.via`` names a role of its stage, or another

@@ -610,6 +610,13 @@ The commands of a component come from the lab only: its role lists them (with it
 
 A datapack does not redefine commands: what a test runs that the role does not offer is a `run:` step of its pipeline (the exploitation in section 8.3). A stage with a special way of deploying overrides the generic command for every datapack.
 
+The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
+- `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage, for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
+- `{{ stage.components.<host>.host }}`, `{{ stage.id }}`, `{{ stage.type }}`, `{{ stage.vars }}`: the stage itself and its components by inventory name;
+- `{{ lab.components.<host>.vars.ansible_host }}`: any host of the inventory; `{{ lab.stages.<stage>.components }}`: the hosts of a stage.
+
+A component's own variables (`{{ component.vars }}`) include those of its stage group in its status probe and self-test too.
+
 ### 7.5 State monitoring
 
 Each component has a monitored **state**:

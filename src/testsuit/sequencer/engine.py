@@ -159,6 +159,7 @@ class RunContext:
     detached: list = field(default_factory=list)  # processes started with detach, still running
     main_task: asyncio.Task | None = None         # the steps of the current phase (cancelled on abort)
     phase: str = ""
+    lab: Any = None                               # lab.Lab: the keys of the other lab components (lab, stage)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _running: dict[str, asyncio.Task] = field(default_factory=dict)
 
@@ -179,6 +180,9 @@ class RunContext:
             "skipped": lambda step: self.verdict_of(phase, step) == SKIPPED,
             "verdict": lambda step: self.verdict_of(phase, step),
         })
+        if self.lab is not None:
+            keys.update(self.lab.lab_keys(component.concrete if component else None,
+                                          component.stage if component else None))
         if component is not None:
             keys["component"] = component.keys()
             keys["remote_root"] = component.root

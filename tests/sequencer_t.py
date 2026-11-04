@@ -614,7 +614,8 @@ def test_probe_via(tmp_path, no_git):
     types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
     types["components"]["obc"] = {
         "extends": "component", "roles": ["obc"],
-        "status": {"via": "dut", "probe": {"run": f"cat {psu}; echo from {{{{ via.id }}}} to {{{{ component.host }}}}"},
+        "status": {"via": "dut", "probe": {"run": f"cat {psu}; echo from {{{{ via.id }}}} to {{{{ component.host }}}}; "
+                                           "echo {{ stage.roles.dut.id }} {{ lab.components.seq_host.vars.tsq_role }}"},
                    "states": {"running": {"regex": "^ON"}, "idle": {"regex": "^OFF"}}},
         "selftest": [{"id": "psu", "run": f"test -f {psu}"}]}
     write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
@@ -632,10 +633,18 @@ def test_probe_via(tmp_path, no_git):
         return reports, result
     (off, on), result = asyncio.run(main())
     assert off["state"] == "idle" and on["state"] == "running"
-    assert on["via"]["id"] == "counter_1" and on["steps"][-1]["output"] == "ON\nfrom counter_1 to 192.0.2.7\n"
+    assert on["via"]["id"] == "counter_1" and on["steps"][-1]["output"] == "ON\nfrom counter_1 to 192.0.2.7\ncounter_1 sequencer\n"
     assert "counter_1, for obc_1" in on["steps"][-1]["action"]
     psu_check = next(c for c in result["checks"] if c["id"] == "psu")
     assert result["ok"] and psu_check["ok"] and psu_check["command"] == f"test -f {psu}"
+
+    from testsuit.sequencer.engine import RunContext
+    lab = bench.sequencer().lab
+    keys = RunContext(run_id="r", bag=tmp_path, datapack=type("D", (), {"context": {}})(), bound={},
+                      stage_binding={}, lab=lab).keys("main")       # run steps get them too
+    assert keys["stage"]["id"] == "" and keys["lab"]["components"]["obc_1"]["host"] == "192.0.2.7"
+    assert lab.lab_keys(lab.inventory.components["obc_1"], lab.inventory.stages["bench_1"])["stage"]["roles"]["dut"]["id"] \
+        == "counter_1"
 
     types["components"]["obc"]["status"]["via"] = "nobody"
     write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
