@@ -1,7 +1,7 @@
 // Form controls of the Editor. Each field carries its help: it shows in the help panel when the field is
 // focused or hovered, and its choices come with a description (component types with their commands,
 // roles with the components that have them...).
-import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, CSSProperties, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { classes, idInput, idProblem, Markdown } from "./util";
 
 // ── help panel ──────────────────────────────────────────────────────────
@@ -291,6 +291,36 @@ export function Choices({ value, onChange, choices, allowNone }: {
   );
 }
 
+/** Where a drop-down list fits next to its input: fixed on the screen (no scrolling panel clips it), below the
+ * input, or above it when there is more room there, as tall as the room allows. Follows scrolls and resizes. */
+export function useDropPlacement(anchor: RefObject<HTMLElement | null>, open: boolean, minWidth = 300): CSSProperties | undefined {
+  const [style, setStyle] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom - 12;
+      const above = r.top - 12;
+      const up = below < 260 && above > below;
+      const width = Math.min(Math.max(r.width, minWidth), window.innerWidth - 16);
+      setStyle({
+        position: "fixed", left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), right: "auto", width,
+        maxHeight: Math.max(140, Math.min(440, up ? above : below)), margin: 0,
+        ...(up ? { top: "auto", bottom: window.innerHeight - r.top + 2 } : { top: r.bottom + 2, bottom: "auto" }),
+      });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, anchor, minWidth]);
+  return open ? style : undefined;
+}
+
 /** A text input with suggestions: each suggestion shows its description, free text stays possible
  * (strict: only the choices). */
 export function Combo({
@@ -305,6 +335,7 @@ export function Combo({
   const [active, setActive] = useState(0);
   const [typed, setTyped] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const v = value ?? "";
   const shown = useMemo(() => {
     const q = typed ? v.toLowerCase() : "";
@@ -322,9 +353,11 @@ export function Combo({
     setTyped(false);
   };
   const known = choices.find((c) => c.value === v);
+  const listOpen = open && !picker.open && shown.length > 0;
+  const placement = useDropPlacement(input, listOpen);
   return (
     <div className="combo" ref={box}>
-      <input className={classes(mono && "mono", strict && v && !known && "invalid")} value={v} placeholder={placeholder}
+      <input ref={input} className={classes(mono && "mono", strict && v && !known && "invalid")} value={v} placeholder={placeholder}
         autoFocus={autoFocus}
         onFocus={() => {
           setOpen(true);
@@ -345,8 +378,8 @@ export function Combo({
         }} />
       {known?.description && !open && <div className="combo-desc"><Markdown text={known.description} /></div>}
       {picker.picker}
-      {open && !picker.open && shown.length > 0 && (
-        <div className="combo-list">
+      {listOpen && (
+        <div className="combo-list" style={placement}>
           {shown.map((c, i) => (
             <div key={c.value} className={classes("combo-item", i === active && "active", c.value === v && "current")}
               onMouseDown={(e) => {
