@@ -95,7 +95,7 @@ def load_datapack(bag: Path) -> Datapack:
 
 
 def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
-    """What the lab cannot provide: stage types, roles (lab types), component types, commands used by the pipeline."""
+    """What the lab cannot provide: stage types, roles, component types, commands used by the pipeline."""
     problems = []
     inv = lab.inventory
     for logical_stage, stage_type in datapack.needs.stages.items():
@@ -108,8 +108,8 @@ def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
                 problems.append(f"component '{comp.id}': no component with role '{comp.role}' in the "
                                 f"'{stage_type}' stages ({', '.join(s.id for s in stages)})")
     for comp in datapack.needs.components.values():
-        if comp.role not in lab.types.types:
-            problems.append(f"component '{comp.id}': role '{comp.role}' is not a type of the lab")
+        if comp.role not in lab.library.roles:
+            problems.append(f"component '{comp.id}': role '{comp.role}' is not a role of the lab")
         if not comp.stage and not [c for c in inv.adhoc if c.role == comp.role]:
             problems.append(f"component '{comp.id}': no ad hoc component with role '{comp.role}' in the lab")
         if comp.type and comp.type not in datapack.needs.component_types:

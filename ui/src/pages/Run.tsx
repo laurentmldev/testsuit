@@ -332,7 +332,7 @@ function CandidateState({ c }: { c: any }) {
 }
 
 function CompChip({ c, logical }: { c: any; logical?: string }) {
-  const notes = [c.type, c.role && `role ${c.role}`, `lock ${c.lock}`, c.maintenance && "in maintenance", c.held_by?.length && `held by ${c.held_by.join(", ")}`];
+  const notes = [c.role && `role ${c.role}`, c.extends && `extends ${c.extends}`, `lock ${c.lock}`, c.maintenance && "in maintenance", c.held_by?.length && `held by ${c.held_by.join(", ")}`];
   const color = c.maintenance || ["broken", "offline"].includes(c.state) ? "bad" : c.held_by?.length ? "wait" : STATE_COLORS[c.state] || "muted";
   return (
     <span className={classes("chip", color)} title={notes.filter(Boolean).join(" · ")}>

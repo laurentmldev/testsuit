@@ -224,7 +224,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             if kind == "stage":
                 row.update(type=item.type, components=item.components)
             else:
-                row.update(type=item.type, role=item.role, host=item.host, lock=item.lock, stages=item.stages,
+                row.update(role=item.role, extends=item.extends, host=item.host, lock=item.lock, stages=item.stages,
                            label=item.label, adhoc=item.adhoc, state=res.get("state") or "unknown",
                            expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"),
                            selftest_failed=res.get("selftest_failed"))

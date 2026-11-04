@@ -1,0 +1,58 @@
+# Lab roles of the toy-train lab (sequencer README, section 7.1): what a component is for, as the
+# commands it offers, whatever the hardware. Datapacks bind their logical components by role
+# (role: pilot in a setup) and run these commands in their pipelines (do: start).
+# The lab components implement them (components/toytrain.yml on the lab, components_emulated/ on a dev
+# host): each inventory host has a role (tsq_role) and is a component (tsq_extends).
+# Built in: component (no command), and linux_system (deploy, collect, kill).
+
+roles:
+
+  toytrain_app:
+    # a toy-train application on a calculator (abstract: hosts take one of the roles below)
+    extends: linux_system
+    description: A toy-train application on a calculator
+    commands:
+      start:   Starts the application. State afterwards running.
+      stop:    Stops the application cleanly. State afterwards idle.
+      ready:   Waits until the application logs READY.
+      version: Prints the version of the application, recorded in the results baseline.
+
+  pilot:
+    extends: toytrain_app
+    description: CALC-Pilot, drives the train
+    commands:
+      install: Flashes the microcontroller part from the deployed inputs.
+
+  telemetry:
+    extends: toytrain_app
+    description: CALC-TM, telemetry
+
+  acquisition:
+    extends: toytrain_app
+    description: AU, acquisition of the piezo sensors
+
+  switch:
+    extends: component
+    description: The train network switch, only monitored
+
+  toytrain_sim:
+    # a simulation process (abstract: hosts take one of the roles below)
+    extends: linux_system
+    description: A toy-train simulation process
+    commands:
+      start:   Starts the simulation from the deployed configuration.
+      stop:    Stops the simulation.
+      ready:   Waits until the simulation logs READY.
+      version: Prints the version of the simulation release.
+
+  propulsion_sim:
+    extends: toytrain_sim
+    description: The simulated propulsion controller
+
+  piezo_sim:
+    extends: toytrain_sim
+    description: The simulated piezo sensors
+
+  sequencer:
+    extends: linux_system
+    description: The host running the sequencer, where the exploitation runs

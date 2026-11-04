@@ -7,7 +7,7 @@ import { CodeEditor } from "../monaco";
 import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
 import { runtimeKeyItems, SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
 import { InventoryForm } from "./InventoryForm";
-import { TypesForm } from "./TypesForm";
+import { LibraryForm } from "./LibraryForm";
 import { SetupForm } from "./SetupForm";
 import { TestdefForm } from "./TestdefForm";
 import { PipelineEditor } from "./PipelineEditor";
@@ -18,7 +18,7 @@ import { NewFileDialog } from "./wizards";
 
 const KIND_LABELS: [string, string, string][] = [
   ["inventory", "Lab inventory", "Stages, ad hoc components and their variables (Ansible YAML inventory)."],
-  ["types", "Component types", "The lab's type library: commands, status probe and self-test of each kind of component."],
+  ["library", "Lab roles and components", "Roles: the commands a component offers. Components: how they implement them, status probe and self-test."],
   ["testdef", "Test definitions", "A test: its setup configuration, key files and pipeline."],
   ["setup", "Setups", "Inputs of each component, datapack component types and the configurations tests choose from."],
   ["subpipelines", "Shared sub-pipelines", "Groups of steps used by several test definitions (pipeline.include)."],
@@ -28,7 +28,7 @@ const KIND_LABELS: [string, string, string][] = [
   ["other", "Other files", ""],
 ];
 
-const SCHEMA_OF: Record<string, string> = { inventory: "inventory", types: "types", setup: "setup", testdef: "testdef", subpipelines: "subpipelines" };
+const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "library", setup: "setup", testdef: "testdef", subpipelines: "subpipelines" };
 
 function FileTree({ files, current, problems, onNew }: { files: FileInfo[]; current: string | null; problems: Problem[]; onNew: () => void }) {
   const { open } = useSession();
@@ -85,7 +85,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   session: Session; doc: Doc; view: string; setView: (v: string) => void; api: ReturnType<typeof useDoc>; revealLine: number | null;
 }) {
   const schema = SCHEMA_OF[doc.kind] ? session.schemas[SCHEMA_OF[doc.kind]] : undefined;
-  const hasForm = ["inventory", "types", "setup", "testdef"].includes(doc.kind);
+  const hasForm = ["inventory", "library", "setup", "testdef"].includes(doc.kind);
   const hasPipeline = ["testdef", "subpipelines"].includes(doc.kind);
   const views: [string, string][] = [
     ...(hasForm ? [["form", "Form"] as [string, string]] : []),
@@ -104,7 +104,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   } else if (current === "template") body = <TemplateEditor doc={doc} api={api} />;
   else if (current === "pipeline") body = <PipelineEditor doc={doc} api={api} />;
   else if (doc.kind === "inventory") body = <InventoryForm doc={doc} api={api} />;
-  else if (doc.kind === "types") body = <TypesForm doc={doc} api={api} />;
+  else if (doc.kind === "library") body = <LibraryForm doc={doc} api={api} />;
   else if (doc.kind === "setup") body = <SetupForm doc={doc} api={api} />;
   else if (doc.kind === "testdef") body = <TestdefForm doc={doc} api={api} />;
   return (
@@ -144,7 +144,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const [checking, setChecking] = useState(false);
   const api = useDoc(id, path, (saved) => {
     setAllProblems((all) => [...all.filter((p) => p.file !== saved.path), ...(saved.problems || [])]);
-    if (["inventory", "types", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
+    if (["inventory", "library", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
     session?.refreshFiles();
   });
   // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo the form and pipeline edits; the YAML and text
@@ -239,9 +239,9 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
 }
 
 const KIND_HELP: Record<string, string> = {
-  inventory: "**Lab inventory.** Stages are groups with `tsq_stage_type`: datapacks ask for a stage by type and get any free one. Each component has a `tsq_role`: a type of the lab's type library, which gives its commands, and which datapacks bind to. Hosts directly under `all` are **ad hoc** components (simulations, the sequencer host). Pick an item on the left of the form to edit it.",
-  types: "**Component types.** A type is a role components take (`tsq_role`), or a base other types extend. It gives its components their commands (`do: <command>` in pipelines), its status probe and its self-test. A type `extends` another and redefines only what differs: start from `linux_system` for anything reachable over SSH.",
-  setup: "**Setup.** A configuration lists the logical stages (by stage type) and components (by role) a test needs; each component has a role, a lab type that gives its commands, and a datapack type that says which input files it gets. Use **Add from the lab** to create components for every role of a stage type.",
+  inventory: "**Lab inventory.** Stages are groups with `tsq_stage_type`: datapacks ask for a stage by type and get any free one. Each component has a `tsq_role`: a lab role, the commands it offers, which datapacks bind to; and it extends a lab component (`tsq_extends`), which implements them. Hosts directly under `all` are **ad hoc** components (simulations, the sequencer host). Pick an item on the left of the form to edit it.",
+  library: "**Lab roles and components.** A **role** is abstract: the commands a component offers (`do: <command>` in pipelines), each with what it does; hosts take one (`tsq_role`) and datapacks bind to it. A **component** is concrete: how it implements commands, its status probe and its self-test; hosts extend one (`tsq_extends`) and must implement every command of their role. Both `extend` another and redefine only what differs: start from `linux_system` for anything reachable over SSH.",
+  setup: "**Setup.** A configuration lists the logical stages (by stage type) and components (by role) a test needs; each component has a role, a lab role that gives its commands, and a datapack type that says which input files it gets. Use **Add from the lab** to create components for every role of a stage type.",
   testdef: "**Test definition.** It picks a setup configuration and gives the pipeline: phases that lock stages and components, and steps linked by `needs`. Open the **Pipeline** view to edit it as a graph.",
   subpipelines: "**Shared sub-pipelines.** Steps grouped under a name, used with `uses: <name>` by several test definitions that list this file in `pipeline.include`.",
   template: "**Template.** Rendered with the datapack keys when the datapack is generated. Type `{{` to get the keys, and look at the preview.",
@@ -264,7 +264,7 @@ function SessionWelcome({ session }: { session: Session }) {
           <p>This session edits {session.info.local ? <>the lab folder in place (<code>{session.info.source}</code>)</> : "a clone of the lab repository"}. Start with:</p>
           <ul>
             {inventory && <li><button className="link" onClick={() => open(inventory)}>the inventory ({inventory})</button>: stages, components, roles</li>}
-            {files.filter((f) => f.kind === "types").map((f) => <li key={f.path}><button className="link" onClick={() => open(f.path)}>{f.path}</button>: component types</li>)}
+            {files.filter((f) => f.kind === "library").map((f) => <li key={f.path}><button className="link" onClick={() => open(f.path)}>{f.path}</button>: lab roles and components</li>)}
           </ul>
         </>
       ) : (

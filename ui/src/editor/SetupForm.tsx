@@ -1,5 +1,5 @@
 // Setup form (sequencer README, sections 5 and 8): where the inputs come from, the datapack component types
-// with their inputs, and the configurations: logical stages and components bound by role (a lab type: their commands).
+// with their inputs, and the configurations: logical stages and components bound by role (a lab role: their commands).
 import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
@@ -284,7 +284,7 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
           </div>
         ))}
       </Section>
-      <p className="muted small">The commands of a component come from its role, a lab type: see the configurations.</p>
+      <p className="muted small">The commands of a component come from its lab role: see the configurations.</p>
     </div>
   );
 }
@@ -402,14 +402,14 @@ function NewDatapackType({ data, onClose, onCreate }: { data: any; onClose: () =
   );
 }
 
-/** The commands a role (a lab type) gives a component, as a short line. */
+/** The commands a lab role offers a component, as a short line (each with what it does on hover). */
 function RoleCommands({ role }: { role?: string }) {
   const { ctx } = useSession();
   if (!role) return null;
-  const t = ctx.lab.types?.[role];
-  if (!t) return <div className="error-text small">not a lab type</div>;
-  const cmds = Object.keys(t.commands || {});
-  return <div className="muted small" title={cmds.length ? `commands of the lab type ${role}: ${cmds.join(", ")}` : undefined}>{cmds.length ? `${cmds.length} commands` : "no command"}</div>;
+  const r = ctx.lab.roles?.[role];
+  if (!r) return <div className="error-text small">not a lab role</div>;
+  const cmds = Object.entries<any>(r.commands || {});
+  return <div className="muted small" title={cmds.length ? `commands of the role ${role}:\n${cmds.map(([c, i]) => `${c}: ${i.description || ""}`).join("\n")}` : undefined}>{cmds.length ? `${cmds.length} commands` : "no command"}</div>;
 }
 
 /** The datapack type for a role: the one other components of that role use, or a new one named after it. */

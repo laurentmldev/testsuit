@@ -171,7 +171,9 @@ def test_workspace_session(repos):
 
     palette = editor.palette(session, "testdef/count/testdef.yml")
     assert {"start", "stop", "ready", "deploy"} <= set(palette["components"]["dut"]["commands"])
-    assert palette["components"]["dut"]["commands"]["start"]["from"].endswith("counter_host")
+    start_cmd = palette["components"]["dut"]["commands"]["start"]
+    assert start_cmd["from"] == "role dut" and start_cmd["description"] == "Starts the counter."
+    assert start_cmd["implementations"]["counter_1"]["from"] == "component counter_host"
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
@@ -418,19 +420,26 @@ def test_lab_session(repos):
     session = editor.open("lab")
     assert session.branch == "main" and session.kind == "lab"          # the lab is on a tag: the default branch
     kinds = {f["path"]: f["kind"] for f in editor.tree(session)}
-    assert kinds["inventory.yml"] == "inventory" and kinds["types/bench.yml"] == "types"
+    assert kinds["inventory.yml"] == "inventory" and kinds["roles/bench.yml"] == "library"
 
     described = editor.describe_lab(editor.session_lab(session))
     assert described["stage_types"] == {"counter_bench": ["bench_1", "bench_2"]}
-    assert described["types"]["dut"]["commands"]["start"]["from"] == "counter_host"
-    assert described["types"]["dut"]["commands"]["deploy"]["from"] == "linux_system"
-    assert described["types"]["dut"]["used_by"] == ["counter_1", "counter_2"]
+    assert described["roles"]["dut"]["commands"]["start"]["from"] == "dut"
+    assert described["roles"]["dut"]["commands"]["deploy"]["from"] == "linux_system"
+    assert described["roles"]["dut"]["used_by"] == ["counter_1", "counter_2"]
+    assert described["library"]["counter_host"]["commands"]["start"]["from"] == "counter_host"
+    assert described["library"]["counter_host"]["used_by"] == ["counter_1", "counter_2"]
+    host = described["components"]["counter_1"]
+    assert host["chain"] == ["component", "linux_system", "counter_host", "counter_1"]
+    assert host["commands"]["deploy"]["from"] == "component linux_system" and host["missing"] == []
 
-    # the choices of the schemas come from the lab: the roles (lab types) a component can have
+    # the choices of the schemas come from the lab: the roles a host can have, the components it can extend
     ctx = editor.context(session)
     schema = schemas(ctx)["inventory"]
-    role = schema["properties"]["all"]["properties"]["hosts"]["additionalProperties"]["properties"]["tsq_role"]
-    assert {"dut", "counter_host", "sequencer"} <= set(role["enum"])
+    host_vars = schema["properties"]["all"]["properties"]["hosts"]["additionalProperties"]["properties"]
+    assert {"dut", "sequencer", "linux_system"} <= set(host_vars["tsq_role"]["enum"])
+    assert "counter_host" not in host_vars["tsq_role"]["enum"]
+    assert {"counter_host", "linux_system", "counter_1"} <= set(host_vars["tsq_extends"]["examples"])
 
     # an inventory naming an unknown role: a problem, and the push is refused
     inventory = editor.read(session, "inventory.yml")["data"]
@@ -447,32 +456,41 @@ def test_lab_session(repos):
     assert editor.published["lab"]["tag"] == "lab-2"
 
 
-def test_renaming_a_lab_type(repos):
-    """While the inventory still names a renamed role type, the helpers list the session's types (not the
-    running lab's); rename_type then makes the inventory and the deriving types follow."""
+def test_renaming_roles_and_components(repos):
+    """While the inventory still names a renamed role, the helpers list the session's roles (not the running
+    lab's); rename_references then makes the inventory and the deriving roles follow. Same for a component."""
     editor = repos.editor
     session = editor.open("lab")
-    types = editor.read(session, "types/bench.yml")["data"]
-    types["component_types"]["counter_dut"] = types["component_types"].pop("dut")
-    types["component_types"]["fast_counter"] = {"extends": "dut", "description": "derived"}
-    editor.write(session, "types/bench.yml", data=types)
+    roles = editor.read(session, "roles/bench.yml")["data"]
+    roles["roles"]["counter_dut"] = roles["roles"].pop("dut")
+    roles["roles"]["fast_counter"] = {"extends": "dut", "description": "derived"}
+    editor.write(session, "roles/bench.yml", data=roles)
     ctx = editor.context(session)
     assert ctx["lab_error"] and "dut" in ctx["lab_error"]
-    assert "counter_dut" in ctx["lab"]["types"] and "dut" not in ctx["lab"]["types"]
-    assert ctx["lab"]["types"]["fast_counter"]["chain"] == ["fast_counter"]      # its parent is gone: itself only
+    assert "counter_dut" in ctx["lab"]["roles"] and "dut" not in ctx["lab"]["roles"]
+    assert ctx["lab"]["roles"]["fast_counter"]["chain"] == ["fast_counter"]      # its parent is gone: itself only
 
-    types["component_types"]["fast_counter"]["extends"] = "counter_dut"        # the form renames those of its own file
-    editor.write(session, "types/bench.yml", data=types)
-    # another inventory with its own library, where dut is another type: left alone
-    other = "all:\n  vars: {tsq_types: [other_types/]}\n  hosts:\n    c9: {tsq_role: dut}\n"
+    roles["roles"]["fast_counter"]["extends"] = "counter_dut"        # the form renames those of its own file
+    editor.write(session, "roles/bench.yml", data=roles)
+    # another inventory with its own library, where dut is another role: left alone
+    other = "all:\n  vars: {tsq_library: [other_lib/]}\n  hosts:\n    c9: {tsq_role: dut}\n"
     editor.write(session, "other.yml", content=other)
-    editor.write(session, "other_types/t.yml", content="component_types:\n  dut: {extends: linux_system}\n")
-    assert editor.rename_type(session, "dut", "counter_dut", skip="types/bench.yml") == ["inventory.yml"]
+    editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
+    assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == ["inventory.yml"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
-    assert sorted(ctx["lab"]["types"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
+    assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
     assert "tsq_role: dut" not in editor.read(session, "inventory.yml")["content"]
     assert editor.read(session, "other.yml")["content"] == other
+
+    components = editor.read(session, "components/bench.yml")["data"]
+    components["components"]["counter_app"] = components["components"].pop("counter_host")
+    editor.write(session, "components/bench.yml", data=components)
+    assert editor.context(session)["lab_error"]
+    assert editor.rename_references(session, "component", "counter_host", "counter_app",
+                                    skip="components/bench.yml") == ["inventory.yml"]
+    ctx = editor.context(session)
+    assert ctx["lab_error"] is None and ctx["lab"]["library"]["counter_app"]["used_by"] == ["counter_1", "counter_2"]
 
 
 def test_sessions_survive_a_restart(repos):
@@ -514,7 +532,7 @@ def test_api(repos, tmp_path):
         assert {r["id"] for r in home["repositories"]} == {"lab", "workspace0"}
         sid = requests.post(f"{url}/edit/sessions", json={"repo": "workspace0"}).json()["id"]
         assert requests.get(f"{url}/edit/sessions/{sid}/schemas").json()["testdef"]["title"] == "Test definition"
-        assert "counter_host" in requests.get(f"{url}/edit/sessions/{sid}/context").json()["lab"]["types"]
+        assert "counter_host" in requests.get(f"{url}/edit/sessions/{sid}/context").json()["lab"]["library"]
         put = requests.put(f"{url}/edit/sessions/{sid}/files/setup/globals.yml",
                            json={"data": {"duration": "0.2s", "min_count": 2}})
         assert put.status_code == 200 and put.json()["data"]["min_count"] == 2

@@ -3,8 +3,7 @@
 Binding maps the logical stages and components a phase needs onto free concrete ones of the lab:
 - a logical stage binds a concrete stage of its type that has a component for each role it needs;
 - a logical component of a stage binds the component with its role in that stage;
-- an ad hoc logical component binds a free ad hoc component with its role;
-- a component must be of the lab type its datapack type ``extends`` (or derive from it).
+- an ad hoc logical component binds a free ad hoc component with its role.
 
 The scheduler walks the queue by priority, then submission time. A lower-priority run may start
 while a higher one waits, but only on resources the waiting one cannot use (backfilling).
@@ -226,7 +225,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
         return [p.id for p in phases if logical in getattr(p, attr)]
 
     def comp_facts(comp: Component) -> dict:
-        return {"id": comp.id, "type": comp.type, "role": comp.role, "lock": comp.lock,
+        return {"id": comp.id, "extends": comp.extends, "role": comp.role, "lock": comp.lock,
                 "state": avail.states.get(comp.id, "unknown"),
                 "maintenance": ("component", comp.id) in avail.maintenance,
                 "held_by": [h for h, _ in avail.holders.get(("component", comp.id), []) if h != run_id]}

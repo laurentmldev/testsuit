@@ -114,8 +114,8 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const row = (c: any) => (
     <tr key={c.id} className={c.hold || c.maintenance ? "off" : ""}>
       <td><strong>{c.id}</strong><div className="muted small">{c.label !== c.id ? c.label : ""}</div></td>
-      <td><code>{c.type}</code></td>
       <td>{c.role}</td>
+      <td><code>{c.extends}</code></td>
       <td>{c.host}</td>
       <td><Badge value={c.state} title={c.detail || ""} />{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
         <div className="muted small" title={time(c.probed_at)}>{c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
@@ -124,7 +124,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest} /></td>
     </tr>
   );
-  const head = <thead><tr><th>Component</th><th>Type</th><th>Role</th><th>Host</th><th>State</th><th>Lock</th><th>Held by</th><th /></tr></thead>;
+  const head = <thead><tr><th>Component</th><th>Role</th><th>Extends</th><th>Host</th><th>State</th><th>Lock</th><th>Held by</th><th /></tr></thead>;
   return (
     <div className="page">
       <div className="page-head">
@@ -136,7 +136,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
         <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
-        {editor && <button onClick={editLab} title="Open the lab inventory and component types in the Editor, in place">Edit lab config</button>}
+        {editor && <button onClick={editLab} title="Open the lab inventory, roles and components in the Editor, in place">Edit lab config</button>}
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}

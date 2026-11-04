@@ -206,7 +206,7 @@ export function idInput(text: string): string {
   return text.replace(/[^A-Za-z0-9_]+/g, "_");
 }
 
-/** The same for a lab id (stage, component, lab type, stage type, role): components (inventory host
+/** The same for a lab id (stage, component, lab role or component, stage type): components (inventory host
  * names) may also have "." and "-". */
 export function labIdInput(text: string): string {
   return text.replace(/[^A-Za-z0-9_.-]+/g, "_");

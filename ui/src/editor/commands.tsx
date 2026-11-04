@@ -1,4 +1,4 @@
-// Editors of command definitions (component types, stage and host overrides), ready checks
+// Editors of command definitions (lab components, stage and host overrides), ready checks
 // (wait_for) and expected results, used by every form that has commands.
 import { useState } from "react";
 import { Choices, Combo, Field, helpText, Section, Tags, Text, Toggle, type Choice } from "../fields";
@@ -6,7 +6,7 @@ import { CodeEditor } from "../monaco";
 import { classes, Markdown } from "../util";
 import { clone, useSession } from "./state";
 
-const CMD_PATH = ["component_types", "_", "commands", "_"];
+const CMD_PATH = ["components", "_", "commands", "_"];
 
 export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "deploy", "collect", "kill"];
 
@@ -84,11 +84,11 @@ export function summary(spec: any): string {
 
 export function useCommandHelp() {
   const { schemas } = useSession();
-  return (field: string) => helpText(schemas.types, [...CMD_PATH, field]);
+  return (field: string) => helpText(schemas.library, [...CMD_PATH, field]);
 }
 
 export function nameChoices(schemas: any, existing: string[]): Choice[] {
-  const props = schemas.types?.properties?.component_types?.additionalProperties?.properties?.commands?.properties || {};
+  const props = schemas.library?.properties?.components?.additionalProperties?.properties?.commands?.properties || {};
   return WELL_KNOWN.filter((n) => !existing.includes(n)).map((n) => ({ value: n, description: (props[n]?.markdownDescription || "").split("\n\n")[0] }));
 }
 
@@ -130,7 +130,7 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
   const v = value || {};
   const kinds = [...WAIT_KINDS, ...(ctx.ready_checks || []).map((r: string) => ({ value: r, description: "plugin ready check" }))];
   const kind = Object.keys(v).find((k) => !["timeout", "interval", "component"].includes(k)) || "";
-  const waitHelp = (k: string) => helpText(schemas.types, [...CMD_PATH, "wait_for", k]);
+  const waitHelp = (k: string) => helpText(schemas.library, [...CMD_PATH, "wait_for", k]);
   const setKind = (k: string | null) => {
     const next: any = { ...v };
     if (kind) delete next[kind];
@@ -145,7 +145,7 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
   const val = v[kind];
   return (
     <div className="sub-form">
-      <Field label="Wait for" help={helpText(schemas.types, [...CMD_PATH, "wait_for"])}>
+      <Field label="Wait for" help={helpText(schemas.library, [...CMD_PATH, "wait_for"])}>
         <Choices value={kind} onChange={setKind} choices={kinds} />
       </Field>
       {kind === "state" && (
@@ -237,7 +237,7 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
       {kind === "python" && (
         <>
           <PythonEditor value={s.python} onChange={(x) => set("python", x)} uri={`inmemory:///command/${name}.py`}
-            help={(f) => helpText(schemas.types, [...CMD_PATH, "python", ...(f ? [f] : [])])} />
+            help={(f) => helpText(schemas.library, [...CMD_PATH, "python", ...(f ? [f] : [])])} />
           <div className="inline-fields">
             <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
             <Field label="Timeout" help={help("timeout")}><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
@@ -274,16 +274,18 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
   );
 }
 
-/** Commands by name: inherited ones (read-only, can be overridden) and own ones (editable). */
-export function CommandsEditor({ value, onChange, inherited, title, help }: {
+/** Commands by name: inherited ones (read-only, can be overridden) and own ones (editable). With required (the
+ * commands a role lists, with what each does), those implemented nowhere are shown as missing. */
+export function CommandsEditor({ value, onChange, inherited, required, title, help }: {
   value: Record<string, any> | null | undefined; onChange: (v: Record<string, any>) => void;
-  inherited?: Record<string, { spec: any; from: string }>; title?: string; help?: string;
+  inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string }>;
+  title?: string; help?: string;
 }) {
   const { schemas } = useSession();
   const own = value || {};
   const [openName, setOpenName] = useState<string | null>(null);
   const [adding, setAdding] = useState("");
-  const names = [...new Set([...Object.keys(inherited || {}), ...Object.keys(own)])];
+  const names = [...new Set([...Object.keys(required || {}), ...Object.keys(inherited || {}), ...Object.keys(own)])];
   const set = (name: string, spec: any) => onChange({ ...own, [name]: spec });
   const remove = (name: string) => {
     const next = clone(own);
@@ -305,11 +307,21 @@ export function CommandsEditor({ value, onChange, inherited, title, help }: {
           {names.map((name) => {
             const mine = name in own;
             const from = inherited?.[name];
+            const role = required?.[name];
+            if (!mine && !from)
+              return (
+                <tr key={name} className="missing" title={role?.description}>
+                  <td><code>{name}</code></td>
+                  <td className="error-text small">not implemented{role?.description ? `: ${role.description}` : ""}</td>
+                  <td className="muted small">{role?.from ? `listed by role ${role.from}` : ""}</td>
+                  <td><button className="small" onClick={() => add(name)}>Implement</button></td>
+                </tr>
+              );
             return [
               <tr key={name} className={classes("clickable", !mine && "inherited", openName === name && "selected")} onClick={() => setOpenName(openName === name ? null : name)}>
                 <td><code>{name}</code></td>
                 <td className="mono small">{summary(mine ? own[name] : from?.spec)}</td>
-                <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}</td>
+                <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}{required && !role && <span className="warning-text"> · not in the role</span>}</td>
                 <td>
                   {mine ? <button className="small" onClick={(e) => {
                     e.stopPropagation();

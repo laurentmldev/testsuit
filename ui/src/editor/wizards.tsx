@@ -6,7 +6,7 @@ import { attempt, Markdown, relPath, slug } from "../util";
 import { createFile } from "./Session";
 import { useSession } from "./state";
 
-type Kind = "testdef" | "setup" | "types" | "subpipelines" | "dictionary" | "template";
+type Kind = "testdef" | "setup" | "library" | "subpipelines" | "dictionary" | "template";
 
 const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; workspace?: boolean }> = {
   testdef: { label: "Test definition", description: "a test, from a setup configuration, with a starting pipeline", workspace: true },
@@ -14,17 +14,17 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
   subpipelines: { label: "Shared sub-pipelines", description: "steps used by several test definitions", workspace: true },
   dictionary: { label: "Key file", description: "keys for the templates and commands", workspace: true },
   template: { label: "Template", description: "an input file rendered with the keys", workspace: true },
-  types: { label: "Component types", description: "a file of the lab's type library", lab: true },
+  library: { label: "Lab roles and components", description: "a file of the lab library: roles (the commands offered) and components (their implementations)", lab: true },
 };
 
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their
  * needs, wait until they are ready, run, then stop them and collect their outputs in finally. */
 export function starterPipeline(setup: any, configName: string, ctx: any): any {
   const cfg = setup.configurations[configName] || { stages: {}, components: {} };
-  const labTypes = ctx.lab.types || {};
+  const labRoles = ctx.lab.roles || {};
   const comps = Object.entries<any>(cfg.components);
-  // the commands of a component: those of its role's lab type
-  const has = (id: string, cmd: string) => Object.keys(labTypes[cfg.components[id]?.role || ""]?.commands || {}).includes(cmd);
+  // the commands of a component: those its lab role offers
+  const has = (id: string, cmd: string) => Object.keys(labRoles[cfg.components[id]?.role || ""]?.commands || {}).includes(cmd);
   const steps: any[] = [];
   const started: Record<string, string> = {};
   const order: string[] = [];
@@ -79,7 +79,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [config, setConfig] = useState<string>(Object.keys(setups[0]?.configurations || {})[0] || "");
   const [name, setName] = useState("");
   const [id, setId] = useState("");
-  const typeFolders: string[] = ctx.lab.type_folders || [];
+  const libraryFolders: string[] = (ctx.lab.library_folders || []).filter((f: string) => !f.startsWith("/"));
   const folders = useMemo(() => [...new Set(files.map((f) => f.path.split("/").slice(0, -1).join("/")).filter(Boolean))].sort(), [files]);
   const defaultFolder: Record<Kind, string> = {
     testdef: (ctx.workspace?.testdefs?.[0]?.path || "testdef/x/y").split("/").slice(0, -2).join("/") || "testdef",
@@ -87,7 +87,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
     subpipelines: "pipelines",
     dictionary: (setups[0]?.path || "setup/x").split("/").slice(0, -1).join("/") || ".",
     template: ((setups[0]?.path || "setup/x").split("/").slice(0, -1).join("/") || ".") + "/templates",
-    types: typeFolders[0] || "types",
+    library: libraryFolders[0] || "roles",
   };
   const [folder, setFolder] = useState<string | null>(null);
   const dir = folder ?? defaultFolder[kind];
@@ -110,7 +110,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
       };
     } else if (kind === "setup") {
       data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { stages: {}, components: {} } }, component_types: {} };
-    } else if (kind === "types") data = { component_types: {} };
+    } else if (kind === "library") data = { roles: {}, components: {} };
     else if (kind === "subpipelines") data = { subpipelines: {} };
     else if (kind === "dictionary") content = `# Keys for the templates and commands: {{ ${slug(id || name || "section")}.example }}\n${slug(id || name || "section")}:\n  example: value\n`;
     else content = "# Rendered with the datapack keys: type {{ to get them.\n";
@@ -135,7 +135,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
             }} choices={setups.map((s) => ({ value: s.path, label: s.name || s.id, description: s.path }))} />
           </Field>
           <Field label="Configuration"><Choices value={config} onChange={(v) => setConfig(v || "")} choices={configChoices} /></Field>
-          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stages and components of the configuration: each component is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the components and collects their outputs. Only the commands their roles have (their lab types) are used." />
+          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stages and components of the configuration: each component is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the components and collects their outputs. Only the commands their lab roles offer are used." />
         </>
       )}
       {["testdef", "setup", "dictionary"].includes(kind) && (
@@ -147,8 +147,8 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
         </div>
       )}
       {kind === "template" && <Field label="File name" help="The extension picks the highlighting: `.yml.j2`, `.ini`, `.sh`…"><Text mono value={name} onChange={setName} placeholder="input.yml.j2" /></Field>}
-      {["subpipelines", "types"].includes(kind) && <Field label="File name"><Text mono value={id} onChange={(v) => setId(slug(v))} placeholder={kind} /></Field>}
-      <Field label="Folder" error={exists ? `${path} exists` : null} hint={kind === "types" && typeFolders.length ? `type folders of the inventory: ${typeFolders.join(", ")}` : null}>
+      {["subpipelines", "library"].includes(kind) && <Field label="File name"><Text mono value={id} onChange={(v) => setId(slug(v))} placeholder={kind} /></Field>}
+      <Field label="Folder" error={exists ? `${path} exists` : null} hint={kind === "library" && libraryFolders.length ? `library folders of the inventory: ${libraryFolders.join(", ")}` : null}>
         <Combo mono value={dir} onChange={setFolder} choices={folders.map((f) => ({ value: f }))} />
       </Field>
     </Dialog>

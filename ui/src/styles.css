@@ -87,6 +87,7 @@ input.priority { width: 80px; }
 .banner.ok { background: var(--ok-soft); }
 .error-box { background: var(--bad-soft); color: var(--bad); padding: 8px 12px; border-radius: 6px; margin: 8px 0; white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; }
 .error-text { color: var(--bad); font-size: 12px; }
+.warning-text { color: var(--warn); font-size: 12px; }
 .warn-list { color: var(--warn); margin: 6px 0; }
 .hint, .hint-box { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .hint-box { background: var(--panel-2); padding: 8px 10px; border-radius: 6px; }

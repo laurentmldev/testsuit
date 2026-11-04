@@ -158,7 +158,7 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
         <p className="small">Stages: {Object.entries(data.stages).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role (lab type)</th><th>Component</th><th>Datapack type</th><th>Configuration</th><th>Stage</th><th>Needs</th></tr></thead>
+        <thead><tr><th>Role</th><th>Component</th><th>Datapack type</th><th>Configuration</th><th>Stage</th><th>Needs</th></tr></thead>
         <tbody>
           {data.components.map((c: any) => (
             <tr key={c.id}>

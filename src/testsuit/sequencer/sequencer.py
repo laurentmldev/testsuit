@@ -143,7 +143,7 @@ class Sequencer:
         if comp_id not in self._transports:
             comp = self.lab.inventory.components[comp_id]
             stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
-            resolved = self.lab.types.resolve(comp, stage)
+            resolved = self.lab.resolve(comp, stage)
             self._transports[comp_id] = create_transport(resolved.transport, comp)
         return self._transports[comp_id]
 
@@ -345,7 +345,7 @@ class Sequencer:
     async def _selftest_one(self, comp_id: str) -> dict:
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
-        resolved = self.lab.types.resolve(comp, stage)
+        resolved = self.lab.resolve(comp, stage)
         result = await selftest_component(comp, resolved, self.transport_for(comp_id), self.monitor,
                                           self.config.selftest.timeout)
         failed = [c for c in result["checks"] if not c["ok"]]
@@ -436,7 +436,7 @@ class RunExecution:
             concrete = inv.components[concrete_id]
             stage_logical = logical_to_stage.get(logical) or ""
             stage = inv.stages[self.binding.stages[stage_logical]] if stage_logical else None
-            resolved = self.seq.lab.types.resolve(concrete, stage)
+            resolved = self.seq.lab.resolve(concrete, stage)
             transport = self.seq.transport_for(concrete_id)
             bound = BoundComponent(logical=lc, concrete=concrete, stage=stage, logical_stage=stage_logical,
                                    resolved=resolved, transport=transport)
@@ -543,7 +543,7 @@ class RunExecution:
                 text = result.output.strip() if result.completed and result.exit_status == 0 else None
             except Exception:
                 text = None
-            self.versions[bound.concrete.id] = {"version": text, "logical": logical, "type": bound.concrete.type}
+            self.versions[bound.concrete.id] = {"version": text, "logical": logical, "role": bound.concrete.role}
         await asyncio.gather(*[one(l) for l in logical_ids if l in self.ctx.bound])
 
     def run_baseline(self) -> dict:

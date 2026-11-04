@@ -158,17 +158,17 @@ class Needs:
 
 
 def check_sequencer_fields(setup: dict) -> None:
-    """The fields the role replaced (a clean break: the lab's role type gives the commands)."""
+    """The fields the role replaced (a clean break: the lab role gives the commands)."""
     for name, t in (setup.get("component_types") or {}).items():
         for key in ("extends", "commands"):
             if isinstance(t, dict) and key in t:
                 raise SequencerError(f"setup component type '{name}': '{key}' is gone, the components' role gives "
-                                     "the lab type and its commands (move test-specific commands to pipeline steps)")
+                                     "the commands, implemented by the lab components (move test-specific commands to pipeline steps)")
     for config_name, config in (setup.get("configurations") or {}).items():
         for comp_id, comp in ((config or {}).get("components") or {}).items():
             if isinstance(comp, dict) and "commands" in comp:
                 raise SequencerError(f"setup configuration '{config_name}': component '{comp_id}': 'commands' is gone, "
-                                     "the role's lab type gives the commands (move test-specific ones to pipeline steps)")
+                                     "the lab role gives the commands (move test-specific ones to pipeline steps)")
 
 
 def needs_from_setup(setup: dict, configuration: str) -> Needs:

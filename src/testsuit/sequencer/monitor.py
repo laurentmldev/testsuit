@@ -1,4 +1,4 @@
-"""State monitoring (README section 7.4) and platform self-test (section 7.5).
+"""State monitoring (README section 7.5) and platform self-test (section 7.6).
 
 The monitor runs each component's ``status`` probe periodically (more often for the components of
 active runs) and records the state: offline, idle, configured, running, broken, unknown. A state
@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component
 from testsuit.sequencer.lab import Lab
-from testsuit.sequencer.component_types import ResolvedType
+from testsuit.sequencer.library import Resolved
 from testsuit.sequencer.transports import Transport
 from testsuit.sequencer.util import SequencerError, evaluate, now, parse_duration, parse_size, render, wait_event
 
@@ -29,7 +29,7 @@ HEALTHY_STATES = ("idle", "configured", "running")
 
 
 def component_keys(comp: Component, root: str) -> dict:
-    return {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "type": comp.type,
+    return {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "extends": comp.extends,
                           "label": comp.label, "vars": comp.vars, "remote_root": root, "stage": "",
                           "input_dir": f"{root}/{comp.id}/input", "output_dir": f"{root}/{comp.id}/output"},
             "remote_root": root}
@@ -51,7 +51,7 @@ def _match(states: dict, output: str, exit_status: int | None) -> str | None:
     return None
 
 
-async def probe_component(comp: Component, resolved: ResolvedType, transport: Transport,
+async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
                           expected: str | None = None, trace: list[str] | None = None) -> tuple[str, str]:
     """(state, detail) of a component, from its type's status probe; trace gets what was run."""
     trace = trace if trace is not None else []
@@ -142,7 +142,7 @@ class Monitor:
         idle. selftest=True: the probe of a self-test, which gets the probed state as it is."""
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
-        resolved = self.lab.types.resolve(comp, stage)
+        resolved = self.lab.resolve(comp, stage)
         res = self.store.resources("component").get(("component", comp_id)) or {}
         trace: list[str] = []
         started = time.monotonic()
@@ -198,7 +198,7 @@ class Monitor:
     def interval_of(self, comp_id: str) -> float:
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
-        resolved = self.lab.types.resolve(comp, stage)
+        resolved = self.lab.resolve(comp, stage)
         base = parse_duration((resolved.status or {}).get("interval")) or self.interval
         return max(1.0, base / 3 if comp_id in self.active else base)
 
@@ -218,7 +218,7 @@ class Monitor:
 
 # ── self-test ──────────────────────────────────────────────────────────────
 
-async def selftest_component(comp: Component, resolved: ResolvedType, transport: Transport,
+async def selftest_component(comp: Component, resolved: Resolved, transport: Transport,
                              monitor: Monitor | None = None, timeout: float = 60.0) -> dict:
     """Run a component's self-test checks; a failure tells which state to mark it."""
     checks = []
