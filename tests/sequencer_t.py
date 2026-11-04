@@ -588,7 +588,8 @@ def test_probe_report(tmp_path, no_git):
         return reports, result
     (running, unknown, offline, kept), result = asyncio.run(main())
     step = running["steps"][-1]
-    assert step["command"] == f"cat {answer}" and step["output"] == "RUNNING\n" and step["exit"] == 0
+    assert step["command"] == f"cat {answer}" and step["output"] == "RUNNING\n" and step["exit"] == 0 and step["ok"]
+    assert offline["steps"][-1]["ok"] is False                     # a single check is OK / FAILED too
     assert running["state"] == "running" and running["matched"] == "running" and "rule of state 'running'" in running["why"]
     assert sorted(running["rules"]) == ["idle", "offline", "running"]
     assert unknown["state"] == "unknown" and "matched" not in unknown and "matches none of the rules" in unknown["why"]
