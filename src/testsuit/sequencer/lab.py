@@ -74,6 +74,30 @@ class Lab:
     def resolve(self, component: Component, stage: Stage | None = None) -> Resolved:
         return self.library.resolve(component, stage, self.hosts)
 
+    def via(self, component: Component, stage: Stage | None = None, status: dict | None = None) -> Component | None:
+        """The component a status probe (and its self-test) runs on when the component cannot be reached itself,
+        for example in a sub-network behind the stage server: ``status.via`` names a role of its stage, or another
+        host of the inventory. None: the probe runs on the component itself."""
+        if status is None:
+            status = self.resolve(component, stage).status
+        name = (status or {}).get("via")
+        if not name:
+            return None
+        name = str(name)
+        where = f"component '{component.id}': its status probe goes via '{name}'"
+        if status.get("builtin") or "http" in (status.get("probe") or {}):
+            raise SequencerError(f"{where}: 'via' needs a 'run' or plugin probe (on the component it goes through, "
+                                 "'curl' does an HTTP check)")
+        for cid in stage.components if stage else []:
+            other = self.inventory.components[cid]
+            if cid != component.id and other.role == name:
+                return other
+        other = self.inventory.components.get(name)
+        if other is not None and other.id != component.id:
+            return other
+        raise SequencerError(f"{where}, which is neither the role of another component of "
+                             + (f"its stage '{stage.id}'" if stage else "its stage (it has none)") + " nor another host")
+
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
@@ -121,6 +145,11 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
                                      + (f" (in stage {stage.id})" if stage else ""))
             if extra:
                 lab.extra_commands[component.id] = extra
+            try:
+                lab.via(component, stage)
+            except SequencerError as e:
+                if strict:
+                    raise SequencerError(f"inventory '{inventory_file}': {e}") from e
     for warning in lab.warnings if strict else []:
         log.warning(warning)
     return lab

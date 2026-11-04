@@ -626,6 +626,17 @@ Each component has a monitored **state**:
 - The **state monitor** runs each component's `status` probe periodically: every `status.interval` (default 30 s), more often for the components of active runs. Results go to the event bus and the state store.
 - The sequencer also knows the **expected** state: `configured` after `deploy`, `running` after `start`, `idle` after `stop`. When the probed state differs from the expected one (expected `running`, probed `idle` or `broken`), an event is raised. The step fails or only warns, as set by `on_state_mismatch: fail | warn` (default `warn`).
 - A state can be waited for in a pipeline: `wait_for: {state: running}`.
+- A component the sequencer cannot reach itself, in a sub-network behind the stage server, is probed **through another component**: `status.via` names a role of its stage (or another host). The probe's command runs there, with that component's transport, and gets `{{ component.host }}` (the component probed) and `{{ via.host }}`. The `run` checks of its self-test run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped. `via` takes a `run` or plugin probe. A component that is off between runs is mapped to `idle`, not `offline`, so that its stage stays available:
+
+  ```yaml
+  obc:
+    extends: component
+    roles: [obc]
+    status:
+      via: stage_server                     # the stage's component of role stage_server
+      probe: {run: "psu-ctl get ch1; ping -c 1 -W 1 {{ component.host }} >/dev/null && echo UP || echo DOWN"}
+      states: {running: {regex: "ON[\\s\\S]*UP"}, broken: {regex: "ON[\\s\\S]*DOWN"}, idle: {regex: "OFF"}}
+  ```
 - A `broken` or `offline` component is not used for new runs. A stage is unavailable while one of its components is. A component that recovers becomes available again, unless an operator put it in `maintenance`.
 
 This is distinct from the **lock state** (free or held by a run), shown next to it.

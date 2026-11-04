@@ -161,8 +161,9 @@ STATUS = h(
     type="object",
     properties={
         "probe": h("The probe: `{run: <shell command>}`, `{http: <url>}`, or a plugin state probe.",
-                   type="object", properties={"run": h("Shell command run on the component (or locally with "
-                                                       "`transport: local`).", type="string"),
+                   type="object", properties={"run": h("Shell command run on the component (locally with "
+                                                       "`transport: local`, on the `via` component with `via`).",
+                                                       type="string"),
                                               "http": {"type": ["string", "object"]}, "timeout": DURATION}),
         "states": h("Rules giving a state from the probe result, first match wins: `{regex: ...}` on the output, "
                     "or `{exit: 0 | nonzero}`.", type="object",
@@ -172,6 +173,11 @@ STATUS = h(
                                 for s in STATES},
                     additionalProperties=False),
         "interval": DURATION,
+        "via": h("Run the probe on another component, for a component the sequencer cannot reach itself (in a "
+                 "sub-network behind the stage server): a role of its stage (`stage_server`), or another host. Its "
+                 "commands get `{{ component.host }}` (the component probed) and `{{ via.host }}`; the self-test's "
+                 "`run` checks run there too. Map a powered-off component to `idle` in `states`, not `offline`, "
+                 "so that its stage stays available.", type="string"),
         "builtin": h("`linux_system`: `offline` when the transport fails, `running` while processes the "
                      "sequencer started are alive, `idle` otherwise.", type="string", enum=["linux_system"]),
     },
@@ -180,7 +186,12 @@ STATUS = h(
         "states": {"running": {"regex": "^active"}, "broken": {"regex": "^failed"}, "idle": {"regex": "^inactive"}}}},
         {"label": "ping (offline when it fails)", "body": {"probe": {"run": "ping -c 1 -W 1 {{ component.host }}"},
                                                            "states": {"running": {"exit": 0},
-                                                                      "offline": {"exit": "nonzero"}}}}])
+                                                                      "offline": {"exit": "nonzero"}}}},
+        {"label": "probe through the stage server (a sub-network)", "body": {
+            "via": "${1:stage_server}",
+            "probe": {"run": "${2:psu-ctl get ch1}; ping -c 1 -W 1 {{ component.host }} >/dev/null && echo UP || echo DOWN"},
+            "states": {"running": {"regex": "ON[\\s\\S]*UP"}, "broken": {"regex": "ON[\\s\\S]*DOWN"},
+                       "idle": {"regex": "OFF"}}}}])
 
 SELFTEST = h(
     "Checks run on every bound component before each run, once its resources are locked and before anything is "

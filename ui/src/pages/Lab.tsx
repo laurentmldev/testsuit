@@ -150,7 +150,10 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
               <p className="muted small">
                 {p.kind ? <>status probe <code>{p.kind}</code></> : "no status probe"}
                 {p.chain?.length > 1 && <> of the lab component <code>{p.chain[p.chain.length - 2]}</code></>}
-                {" "}on <code>{p.host}</code> ({p.transport}), {time(p.at)}, {p.duration} s
+                {p.via
+                  ? <>{" "}for <code>{p.host}</code>, run on <code>{p.via.id}</code> ({p.via.host}, {p.transport}) which it is reached through</>
+                  : <>{" "}on <code>{p.host}</code> ({p.transport})</>}
+                , {time(p.at)}, {p.duration} s
               </p>
               {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} />)}
               {p.rules && Object.keys(p.rules).length > 0 && (

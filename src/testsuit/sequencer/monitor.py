@@ -28,11 +28,15 @@ STATES = ("offline", "idle", "configured", "running", "broken", "unknown")
 HEALTHY_STATES = ("idle", "configured", "running")
 
 
-def component_keys(comp: Component, root: str) -> dict:
-    return {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "extends": comp.extends,
+def component_keys(comp: Component, root: str, via: Component | None = None) -> dict:
+    """The keys of a status probe and self-test commands; via: the component they run on (``{{ via.host }}``)."""
+    keys = {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "extends": comp.extends,
                           "label": comp.label, "vars": comp.vars, "remote_root": root, "stage": "",
                           "input_dir": f"{root}/{comp.id}/input", "output_dir": f"{root}/{comp.id}/output"},
             "remote_root": root}
+    if via is not None:
+        keys["via"] = {"id": via.id, "host": via.host, "role": via.role, "label": via.label, "vars": via.vars}
+    return keys
 
 
 def _match(states: dict, output: str, exit_status: int | None) -> tuple[str | None, dict | None]:
@@ -70,22 +74,34 @@ def _matched(report: dict, states: dict, output: str, exit_status: int | None, a
 
 
 async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
-                          expected: str | None = None, report: dict | None = None) -> tuple[str, str]:
+                          expected: str | None = None, report: dict | None = None,
+                          via: Component | None = None) -> tuple[str, str]:
     """(state, detail) of a component, from the status probe of its lab component. report gets what was
     tested (steps: each action with its command, answer and exit status), the rules of the probe and the
-    one that matched, and why the state is what it is."""
+    one that matched, and why the state is what it is.
+
+    :param via: the component the probe runs on (``status.via``), transport being its own: a component that
+        cannot be reached itself, in a sub-network behind the stage server
+    """
     report = report if report is not None else {}
     report.setdefault("steps", [])
     steps = report["steps"]
     status = resolved.status
+    on = via or comp                                    # where the probe's commands run
     report["host"] = comp.host
     report["transport"] = transport.name
-    login = {"action": f"log in to {comp.host} ({transport.name}) and find the remote root"}
+    if via is not None:
+        report["via"] = {"id": via.id, "host": via.host, "role": via.role}
+    login = {"action": f"log in to {on.host} ({transport.name}) and find the remote root"
+                       + (f": {via.id}, which the probe of {comp.id} goes through" if via else "")}
     steps.append(login)
     try:
         root = await transport.resolve_root()
     except Exception as e:
         login["error"] = str(e)
+        if via is not None:
+            report["why"] = f"the sequencer cannot reach {via.id} ({via.host}), which the probe goes through: {e}"
+            return "offline", f"cannot reach {via.id} ({via.host}), the probe goes through it: {e}"
         report["why"] = f"the sequencer cannot reach {comp.host}: {e}"
         return "offline", f"cannot reach {comp.host}: {e}"
     login["output"] = root
@@ -120,12 +136,13 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
                          + (" (configured: a deploy was done and nothing runs yet)" if state == "configured" else ""))
         return state, ""
     probe = status.get("probe") or {}
-    keys = component_keys(comp, root)
+    keys = component_keys(comp, root, via)
     if "run" in probe:
         report["kind"] = "command"
         command = str(render(probe["run"], keys, f"{comp.id} status"))
         timeout = parse_duration(probe.get("timeout")) or 15
-        step = {"action": f"run the status command on {comp.host} (timeout {timeout:g} s)", "command": command}
+        step = {"action": f"run the status command on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
+                + f" (timeout {timeout:g} s)", "command": command}
         steps.append(step)
         result = await transport.shell(command, timeout=timeout)
         step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "")
@@ -139,7 +156,8 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
         fn = registry.state_probes.get(name.lower())
         if fn is not None:
             report["kind"] = f"probe {name}"
-            step = {"action": f"probe {name} on {comp.host}", "command": str(render(spec, keys))}
+            step = {"action": f"probe {name} on {on.host}" + (f" ({via.id}, for {comp.id})" if via else ""),
+                    "command": str(render(spec, keys))}
             steps.append(step)
             output, exit_status = await fn(transport, render(spec, keys), keys)
             step.update(exit=exit_status, output=str(output)[-4000:])
@@ -210,8 +228,10 @@ class Monitor:
         started = time.monotonic()
         failed = False
         try:
+            via = self.lab.via(comp, stage, resolved.status)
             state, detail = await asyncio.wait_for(
-                probe_component(comp, resolved, self.transports(comp_id), res.get("expected"), report), 60)
+                probe_component(comp, resolved, self.transports(via.id if via else comp_id), res.get("expected"),
+                                report, via), 60)
         except asyncio.TimeoutError:
             state, detail, failed = "offline", "probe timeout (60 s)", True
             report["why"] = "the probe got no answer within 60 s"
@@ -290,8 +310,13 @@ class Monitor:
 # ── self-test ──────────────────────────────────────────────────────────────
 
 async def selftest_component(comp: Component, resolved: Resolved, transport: Transport,
-                             monitor: Monitor | None = None, timeout: float = 60.0) -> dict:
-    """Run a component's self-test checks; a failure tells which state to mark it."""
+                             monitor: Monitor | None = None, timeout: float = 60.0,
+                             via: Component | None = None) -> dict:
+    """Run a component's self-test checks; a failure tells which state to mark it.
+
+    :param via: the component its status probe goes through (``status.via``), transport being its own: the
+        ``run`` checks run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped
+    """
     checks = []
     failed_state = None
     try:
@@ -299,7 +324,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
     except Exception as e:
         return {"component": comp.id, "ok": False, "state": "offline",
                 "checks": [{"id": "login", "ok": False, "detail": str(e)}], "at": now()}
-    keys = component_keys(comp, root)
+    keys = component_keys(comp, root, via)
 
     async def shell(command: str, limit: float | None = None):
         return await transport.shell(command, timeout=min(limit or timeout, timeout))
@@ -323,10 +348,12 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                     detail = "no status probe"
                 else:
                     state = (await monitor.probe(comp.id, selftest=True) if monitor
-                             else (await probe_component(comp, resolved, transport))[0])
+                             else (await probe_component(comp, resolved, transport, via=via))[0])
                     ok, detail = state not in ("broken", "offline"), f"state {state}"
                     if not ok:
                         failed_state = failed_state or state
+            elif via is not None and builtin in ("login", "remote_root", "disk", "clock"):
+                detail = f"skipped: the component is probed via {via.id}"
             elif builtin == "login":
                 r = await shell("true", 20)
                 ok, detail = r.completed and r.exit_status == 0, r.error or ""

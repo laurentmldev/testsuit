@@ -346,8 +346,9 @@ class Sequencer:
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
-        result = await selftest_component(comp, resolved, self.transport_for(comp_id), self.monitor,
-                                          self.config.selftest.timeout)
+        via = self.lab.via(comp, stage, resolved.status)     # a probe through another component: its checks too
+        result = await selftest_component(comp, resolved, self.transport_for(via.id if via else comp_id), self.monitor,
+                                          self.config.selftest.timeout, via)
         specs = {check["id"]: check for check in resolved.selftest}
         for check in result["checks"]:                  # what each check tested, for the Lab page
             if check["id"] in specs:
