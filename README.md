@@ -78,7 +78,7 @@ src/testsuit/           the installable package
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
     DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb, Clickhouse)
     datapack/           datapack generation: YAML dictionaries, Jinja2 templates, BagIt zip
-  exploit/
+  exploit/              checks of recorded data, see its README
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
   sequencer/            test sequencer: tsqd daemon, REST API, run engine, web UI and Editor (tsq command line in cli/, UI sources in ui/)
