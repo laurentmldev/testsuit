@@ -441,3 +441,13 @@ table.datasets tr.dataset-resolved dd { margin: 0; min-width: 0; }
 .resources-tab .need table { margin-top: 6px; }
 .resources-tab td .chip { margin: 1px 4px 1px 0; }
 .bad-text { color: var(--bad); }
+/* the state of a component, and the dialog telling why */
+button.state-button { cursor: pointer; }
+button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }
+.probe-why { background: var(--panel-2); border-radius: 6px; padding: 8px 10px; }
+.probe-step { margin: 6px 0 10px; }
+.probe-command { background: var(--panel-2); border-radius: 4px; padding: 4px 8px; margin-top: 3px; }
+.probe-answer { margin: 3px 0 0 14px; }
+.probe-answer pre { max-height: 220px; overflow: auto; border-left: 3px solid var(--border); padding-left: 8px; margin-top: 2px; }
+.probe-report tr.matched td { background: var(--accent-soft); }
+.probe-report td.reason pre { max-height: 120px; overflow: auto; }

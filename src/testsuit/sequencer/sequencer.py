@@ -348,11 +348,16 @@ class Sequencer:
         resolved = self.lab.resolve(comp, stage)
         result = await selftest_component(comp, resolved, self.transport_for(comp_id), self.monitor,
                                           self.config.selftest.timeout)
+        specs = {check["id"]: check for check in resolved.selftest}
+        for check in result["checks"]:                  # what each check tested, for the Lab page
+            if check["id"] in specs:
+                check["spec"] = specs[check["id"]]
+        self.monitor.selftests[comp_id] = result
         failed = [c for c in result["checks"] if not c["ok"]]
         if not result["ok"]:
             # kept until a self-test passes: the probes that follow do not turn it back to idle (monitor.probe)
             detail = "; ".join(f"{c['id']}: {c['detail']}" if c["detail"] else c["id"] for c in failed) or "failed"
-            self.store.set_selftest_failed(comp_id, {"at": result["at"], "detail": detail})
+            self.store.set_selftest_failed(comp_id, {"at": result["at"], "detail": detail, "checks": result["checks"]})
             state = result["state"] or "broken"
             previous = self.store.set_state(comp_id, state, f"self-test failed: {detail}")
             self.notify("component", {"component": comp_id, "state": state, "previous": previous,

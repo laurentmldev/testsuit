@@ -35,68 +35,123 @@ def component_keys(comp: Component, root: str) -> dict:
             "remote_root": root}
 
 
-def _match(states: dict, output: str, exit_status: int | None) -> str | None:
+def _match(states: dict, output: str, exit_status: int | None) -> tuple[str | None, dict | None]:
+    """The first state whose rule matches the probe's answer, and that rule (None, None: no rule matches)."""
     for state, rule in (states or {}).items():
         if not isinstance(rule, dict):
             continue
         if "regex" in rule and re.search(str(rule["regex"]), output, re.MULTILINE):
-            return state
+            return state, rule
         if "exit" in rule:
             wanted = rule["exit"]
             if wanted == "nonzero" and exit_status not in (None, 0):
-                return state
+                return state, rule
             codes = wanted if isinstance(wanted, list) else [wanted]
             if exit_status is not None and exit_status in [c for c in codes if isinstance(c, int)]:
-                return state
-    return None
+                return state, rule
+    return None, None
+
+
+def _rule_text(rule: dict) -> str:
+    return ", ".join(f"{k} {v!r}" if k == "regex" else f"{k} {v}" for k, v in rule.items())
+
+
+def _matched(report: dict, states: dict, output: str, exit_status: int | None, answer: str) -> str:
+    """The state the probe's answer gives, with why in the report: the rule that matched, or that none did."""
+    report["rules"] = {k: v for k, v in (states or {}).items() if isinstance(v, dict)}
+    state, rule = _match(states, output, exit_status)
+    if state:
+        report["matched"] = state
+        report["why"] = f"{answer} matches the rule of state '{state}' ({_rule_text(rule)})"
+        return state
+    report["why"] = (f"{answer} matches none of the rules of its status probe, so the state is unknown"
+                     if report["rules"] else f"{answer}, and its status probe gives no rule (states:), so the state is unknown")
+    return "unknown"
 
 
 async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
-                          expected: str | None = None, trace: list[str] | None = None) -> tuple[str, str]:
-    """(state, detail) of a component, from its type's status probe; trace gets what was run."""
-    trace = trace if trace is not None else []
+                          expected: str | None = None, report: dict | None = None) -> tuple[str, str]:
+    """(state, detail) of a component, from the status probe of its lab component. report gets what was
+    tested (steps: each action with its command, answer and exit status), the rules of the probe and the
+    one that matched, and why the state is what it is."""
+    report = report if report is not None else {}
+    report.setdefault("steps", [])
+    steps = report["steps"]
     status = resolved.status
-    trace.append(f"login to {comp.host}")
+    report["host"] = comp.host
+    report["transport"] = transport.name
+    login = {"action": f"log in to {comp.host} ({transport.name}) and find the remote root"}
+    steps.append(login)
     try:
         root = await transport.resolve_root()
     except Exception as e:
+        login["error"] = str(e)
+        report["why"] = f"the sequencer cannot reach {comp.host}: {e}"
         return "offline", f"cannot reach {comp.host}: {e}"
+    login["output"] = root
     if status is None:
+        report["kind"] = "none"
+        report["why"] = f"its lab component ({resolved.chain[-2] if len(resolved.chain) > 1 else '?'}) has no status probe"
         return "unknown", "no status probe"
     if status.get("builtin") == "linux_system":
-        trace[:] = [f"builtin linux_system on {comp.host}: 'true', then the process groups in {root}/.tsq"]
+        report["kind"] = "builtin linux_system"
+        step = {"action": "run a command", "command": "true"}
+        steps.append(step)
         result = await transport.shell("true", timeout=15)
+        step.update(exit=result.exit_status, output=result.output.strip()[-2000:], error=result.error or "")
         if not result.completed or result.exit_status:
+            report["why"] = ("the command 'true' did not complete: " + (result.error or "no answer") if not result.completed
+                             else f"the command 'true' exited with {result.exit_status}: the host does not run commands")
             return "offline", result.error or result.output.strip()
+        step = {"action": f"look for the process groups the sequencer started on it ({root}/.tsq/*/{comp.id}/*.pid)"}
+        steps.append(step)
         try:
             alive = await transport.alive_in(f"{root}/.tsq", f"*/{comp.id}/*.pid")
         except SequencerError as e:
+            step["error"] = str(e)
+            report["why"] = f"the process groups could not be listed: {e}"
             return "offline", str(e)
+        step["output"] = f"{len(alive)} alive" + (f": {', '.join(map(str, alive))}" if alive else "")
         if alive:
+            report["why"] = f"{len(alive)} process group(s) started by the sequencer are alive: running"
             return "running", f"{len(alive)} process group(s) started by the sequencer"
-        return ("configured" if expected == "configured" else "idle"), ""
+        state = "configured" if expected == "configured" else "idle"
+        report["why"] = (f"it answers and runs no process group of the sequencer: {state}"
+                         + (" (configured: a deploy was done and nothing runs yet)" if state == "configured" else ""))
+        return state, ""
     probe = status.get("probe") or {}
     keys = component_keys(comp, root)
     if "run" in probe:
-        command = render(probe["run"], keys, f"{comp.id} status")
-        trace[:] = [f"on {comp.host}: {command}"]
-        result = await transport.shell(str(command), timeout=parse_duration(probe.get("timeout")) or 15)
+        report["kind"] = "command"
+        command = str(render(probe["run"], keys, f"{comp.id} status"))
+        timeout = parse_duration(probe.get("timeout")) or 15
+        step = {"action": f"run the status command on {comp.host} (timeout {timeout:g} s)", "command": command}
+        steps.append(step)
+        result = await transport.shell(command, timeout=timeout)
+        step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "")
         if not result.completed:
+            report["why"] = f"the status command did not complete: {result.error or 'no answer'}"
             return "offline", result.error or ""
-        trace.append(f"exit status {result.exit_status}")
-        state = _match(status.get("states") or {}, result.output, result.exit_status)
-        return state or "unknown", result.output.strip()[-200:]
+        state = _matched(report, status.get("states") or {}, result.output, result.exit_status,
+                         f"its answer (exit status {result.exit_status})")
+        return state, result.output.strip()[-200:]
     for name, spec in probe.items():
         fn = registry.state_probes.get(name.lower())
         if fn is not None:
-            trace[:] = [f"probe {name} on {comp.host}: {render(spec, keys)}"]
+            report["kind"] = f"probe {name}"
+            step = {"action": f"probe {name} on {comp.host}", "command": str(render(spec, keys))}
+            steps.append(step)
             output, exit_status = await fn(transport, render(spec, keys), keys)
-            state = _match(status.get("states") or {}, output, exit_status)
-            return state or "unknown", str(output)[-200:]
+            step.update(exit=exit_status, output=str(output)[-4000:])
+            state = _matched(report, status.get("states") or {}, str(output), exit_status,
+                             f"its answer (status {exit_status})")
+            return state, str(output)[-200:]
     if "http" in probe:
         import urllib.request
+        report["kind"] = "http"
         url = render(probe["http"] if isinstance(probe["http"], str) else probe["http"]["url"], keys)
-        trace[:] = [f"GET {url}"]
+        step = {"action": "HTTP GET", "command": str(url)}
+        steps.append(step)
 
         def get():
             try:
@@ -105,9 +160,13 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
             except Exception as e:
                 return str(e), None
         output, code = await asyncio.to_thread(get)
+        step.update(exit=code, output=output[-4000:])
         if code is None:
+            step["error"] = output
+            report["why"] = f"the request failed: {output}"
             return "offline", output
-        return _match(status.get("states") or {}, output, code) or "unknown", output[-200:]
+        return _matched(report, status.get("states") or {}, output, code, f"its answer (HTTP code {code or '< 400'})"), output[-200:]
+    report["why"] = f"unsupported probe {sorted(probe)}"
     return "unknown", f"unsupported probe {sorted(probe)}"
 
 
@@ -127,6 +186,8 @@ class Monitor:
         self._tested: dict[str, float] = {}
         self._testing: set[str] = set()
         self._last: dict[str, float] = {}
+        self.reports: dict[str, dict] = {}            # the last probe of each component: what was tested, its answer, why
+        self.selftests: dict[str, dict] = {}          # the last self-test of each component, with its checks
         self._wake = asyncio.Event()
 
     def attach(self, lab: Lab, transports: Callable[[str], Transport]) -> None:
@@ -144,18 +205,23 @@ class Monitor:
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
         res = self.store.resources("component").get(("component", comp_id)) or {}
-        trace: list[str] = []
+        report: dict = {"component": comp_id, "at": now(), "expected": res.get("expected"), "chain": resolved.chain,
+                        "status": resolved.status, "steps": []}
         started = time.monotonic()
         failed = False
         try:
             state, detail = await asyncio.wait_for(
-                probe_component(comp, resolved, self.transports(comp_id), res.get("expected"), trace), 60)
+                probe_component(comp, resolved, self.transports(comp_id), res.get("expected"), report), 60)
         except asyncio.TimeoutError:
             state, detail, failed = "offline", "probe timeout (60 s)", True
+            report["why"] = "the probe got no answer within 60 s"
         except Exception as e:
             state, detail, failed = "unknown", f"probe failed: {type(e).__name__}: {e}", True
+            report["why"] = f"the probe itself failed: {type(e).__name__}: {e}"
+        report.update(duration=round(time.monotonic() - started, 3), probed=state)
         # every probe in the log of the Lab page (logger testsuit.probe, not on the console); errors as warnings
-        line = (f"{comp_id}: {', '.join(trace) or 'no probe'} -> {state} ({time.monotonic() - started:.1f} s)"
+        tested = ", ".join(st.get("command") or st["action"] for st in report["steps"][-1:]) or "no probe"
+        line = (f"{comp_id}: {tested} -> {state} ({report['duration']:.1f} s)"
                 + (f": {detail.strip()}" if detail and detail.strip() else ""))
         probe_log.log(logging.WARNING if failed or state in ("offline", "broken") else logging.DEBUG, line)
         if selftest:
@@ -164,6 +230,11 @@ class Monitor:
         failure = res.get("selftest_failed")
         if failure and state in HEALTHY_STATES:
             state, detail = "broken", f"self-test failed ({failure.get('at', '')}): {failure.get('detail', '')}"
+            report["kept_broken"] = failure
+            report["why"] = (f"the probe says {probed}, but its last self-test failed ({failure.get('at', '')}): it stays "
+                             "broken until a self-test passes")
+        report.update(state=state, detail=detail)
+        self.reports[comp_id] = report
         previous = self.store.set_state(comp_id, state, detail)
         self._last[comp_id] = time.monotonic()
         self.notify("probe", {"component": comp_id, "state": state})      # the Lab page shows when, live
@@ -244,6 +315,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 failed_state = failed_state or "broken"
                 continue
         ok, detail = True, ""
+        ran: dict = {}                                  # a run check: the command as rendered, its exit status
         builtin = check.get("builtin")
         try:
             if builtin == "status":
@@ -288,11 +360,12 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 codes = (check.get("expect") or {}).get("exit", [0])
                 ok = r.completed and r.exit_status in (codes if isinstance(codes, list) else [codes])
                 detail = r.error or r.output.strip()[-300:]
+                ran = {"command": str(command), "exit": r.exit_status}
             else:
                 ok, detail = False, f"check '{cid}' has no 'run'"
         except Exception as e:
             ok, detail = False, f"{type(e).__name__}: {e}"
-        checks.append({"id": cid, "ok": bool(ok), "detail": detail})
+        checks.append({"id": cid, "ok": bool(ok), "detail": detail, **ran})
         if not ok:
             failed_state = failed_state or "broken"
     return {"component": comp.id, "ok": failed_state is None, "state": failed_state, "checks": checks, "at": now()}
