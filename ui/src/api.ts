@@ -155,3 +155,35 @@ export function useConnected(): boolean {
   }, []);
   return connected;
 }
+
+// ── labels of the lab components (tsq_label): what the UI shows for a component, its id when it has none ──
+let labels: Record<string, string> = {};
+let labelsLoaded: Promise<void> | null = null;
+const labelListeners = new Set<() => void>();
+
+function loadLabels(): Promise<void> {
+  labelsLoaded = get<any>("lab")
+    .then((lab) => {
+      labels = Object.fromEntries(Object.entries<any>(lab?.components || {}).map(([id, c]) => [id, c?.label || id]));
+      labelListeners.forEach((l) => l());
+    })
+    .catch(() => {});
+  return labelsLoaded;
+}
+
+/** labelOf(id): the label of a lab component (tsq_label), else its id; follows lab reloads. */
+export function useLabels(): (id?: string | null) => string {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const l = () => setTick((t) => t + 1);
+    labelListeners.add(l);
+    if (!labelsLoaded) loadLabels();
+    return () => {
+      labelListeners.delete(l);
+    };
+  }, []);
+  useEvents((kind) => {
+    if (kind === "lab") loadLabels();
+  });
+  return (id) => (id ? labels[id] || id : "");
+}

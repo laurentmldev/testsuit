@@ -104,7 +104,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
             </div>
             {s.hosts.map((h) => (
               <div key={h} className={classes("nav-item sub", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-                {h} <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+                <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
               </div>
             ))}
             <div className="nav-item sub add" onClick={() => setWizard({ kind: "member", stage: s.name })}>+ component</div>
@@ -113,7 +113,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         <div className="nav-title">Ad hoc components <button className="small" onClick={() => setWizard({ kind: "adhoc" })}>+ Component</button></div>
         {adhoc.map((h) => (
           <div key={h} className={classes("nav-item", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-            {h} <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+            <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
           </div>
         ))}
         {plain.length > 0 && <div className="nav-title">Other groups</div>}
@@ -154,6 +154,11 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
 /** The role of a host: its tsq_role, else the one the lab resolved (the role of its component). */
 function hostRole(ctx: any, inv: Inv, host: string): string {
   return hostVars(inv, host).tsq_role || ctx.lab.components?.[host]?.role || "";
+}
+
+/** What lists show for a host: its label (tsq_label) when it has one, else its id. */
+function hostLabel(inv: Inv, host: string): string {
+  return hostVars(inv, host).tsq_label || host;
 }
 
 function hostVars(inv: Inv, host: string): any {
@@ -342,7 +347,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
               const shared = hostPlaces(inv, h).length > 1;
               return (
                 <tr key={h} className="clickable" onClick={() => onSelect({ kind: "host", name: h })}>
-                  <td><strong>{h}</strong>{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
+                  <td><strong title={h}>{v.tsq_label || h}</strong>{v.tsq_label && <span className="muted small"> {h}</span>}{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
                   <td>{(v.tsq_role || ctx.lab.components?.[h]?.role) ? <code>{v.tsq_role || ctx.lab.components[h].role}</code> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
                   <td><code>{v.tsq_extends || ctx.lab.components?.[h]?.extends || "linux_system"}</code></td>
                   <td>{v.ansible_host || h}</td><td>{v.tsq_lock || "exclusive"}</td>
@@ -358,7 +363,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
         {otherHosts.length > 0 && (
           <div className="add-row">
             <Combo value="" onChange={() => {}} placeholder="add an existing component (shared with its other groups)…"
-              choices={otherHosts.map((h) => ({ value: h, description: hostRole(ctx, inv, h) || "" }))}
+              choices={otherHosts.map((h) => ({ value: h, description: [hostVars(inv, h).tsq_label, hostRole(ctx, inv, h)].filter(Boolean).join(" · ") }))}
               onPick={(h) => update((d) => setAt(d, [...hostsPath, h], {}))} />
           </div>
         )}

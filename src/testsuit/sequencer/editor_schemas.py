@@ -105,6 +105,11 @@ COMMAND = h(
         "python": PYTHON,
         "detach": h("Start the command and go on without waiting for it to end (a server, a simulation). "
                     "Its processes are recorded, then stopped by `signal` or `kill`.", type="boolean"),
+        "via": h("Run the command on another component, for a component the sequencer cannot reach itself (in a "
+                 "sub-network behind the stage server): a role of its stage (`stage_server`), or another host. It "
+                 "gets `{{ component.host }}` (this component) and `{{ via.host }}`; its processes are recorded "
+                 "there, so `signal`, `kill` and the end of the run stop them. A `run` command only.",
+                 type="string"),
         "timeout": DURATION,
         "expect": EXPECT,
         "env": h("Environment variables of the command (templates allowed).", type="object",

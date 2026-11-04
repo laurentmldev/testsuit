@@ -5,7 +5,7 @@ import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text } 
 import { post } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, summary, WELL_KNOWN } from "./commands";
-import { clone, componentChoices, labRoleChoices, transportChoices, useSession, type Doc } from "./state";
+import { clone, componentChoices, hostLabel, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
 const TP = ["components", "_"];
 const RP = ["roles", "_"];
@@ -94,7 +94,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         {Object.entries(roles).map(([name, r]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
             <strong>{name}</strong> <span className="muted small">{r?.extends}</span>
-            {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of {ctx.lab.roles[name].used_by.join(", ")}</div> : null}
+            {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of {ctx.lab.roles[name].used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}</div> : null}
           </div>
         ))}
         <div className="nav-title">Components <button className="small" onClick={() => setCreating("component")}>+ Component</button></div>
@@ -102,7 +102,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
           <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
             <strong>{name}</strong> <span className="muted small">{c?.extends}</span>
             {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles {ctx.lab.library[name].roles.join(", ")}</div> : null}
-            {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by {ctx.lab.library[name].used_by.join(", ")}</div> : null}
+            {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by {ctx.lab.library[name].used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}</div> : null}
           </div>
         ))}
         <div className="nav-hint">
@@ -231,7 +231,7 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         <p className="muted small">A role lists commands only: the lab components implement them, and every host with this role must implement them all.</p>
       </Section>
       {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the components {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
-      {described?.used_by?.length > 0 && <div className="hint-box small">Role of {described.used_by.map((h: string) => <code key={h}>{h}</code>)}</div>}
+      {described?.used_by?.length > 0 && <div className="hint-box small">Role of {described.used_by.map((h: string) => <code key={h} title={h}>{hostLabel(ctx, h)}</code>)}</div>}
     </div>
   );
 }
@@ -282,7 +282,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
         <Field label="Only" help="Glob patterns of the output files to keep (relative to the output folder)."><Tags value={t.collect?.include} onChange={(v) => set("collect", { ...t.collect, include: v.length ? v : undefined })} placeholder="*.csv" /></Field>
         <Field label="Except" help="Glob patterns of the output files to drop."><Tags value={t.collect?.exclude} onChange={(v) => set("collect", { ...t.collect, exclude: v.length ? v : undefined })} placeholder="*.tmp" /></Field>
       </Section>
-      {described?.used_by?.length > 0 && <div className="hint-box small">Extended by {described.used_by.map((h: string) => <code key={h}>{h}</code>)}: the inventory shows, for each host, the commands of its role it does not implement.</div>}
+      {described?.used_by?.length > 0 && <div className="hint-box small">Extended by {described.used_by.map((h: string) => <code key={h} title={h}>{hostLabel(ctx, h)}</code>)}: the inventory shows, for each host, the commands of its role it does not implement.</div>}
     </div>
   );
 }
@@ -291,11 +291,6 @@ const STATES = ["running", "idle", "configured", "broken", "offline", "unknown"]
 
 export function StatusEditor({ value, onChange, inherited }: { value: any; onChange: (v: any) => void; inherited?: any }) {
   const { schemas, ctx } = useSession();
-  // where the probe can run instead of on the component itself: a role of its stage, or another host
-  const viaChoices = [
-    ...labRoleChoices(ctx).map((c) => ({ ...c, description: `the component of role ${c.value} in its stage` + (c.description ? ` · ${c.description}` : "") })),
-    ...Object.keys(ctx.lab.components || {}).map((h) => ({ value: h, description: "this host of the inventory" })),
-  ];
   const help = (p: string[]) => helpText(schemas.library, [...TP, "status", ...p]);
   const s = value || null;
   const states: Record<string, any> = s?.states || {};
@@ -317,7 +312,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
           <Field label="Probe command" help={help(["probe"])}><Text keys mono value={s.probe?.run} onChange={(v) => set("probe", { ...s.probe, run: v })} placeholder="systemctl is-active my-service" /></Field>
           <Field label="Run it through" help={help(["via"])}
             hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
-            <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices} placeholder="stage_server" mono />
+            <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices(ctx)} placeholder="stage_server" mono />
           </Field>
           <Field label="Every" help={help(["interval"])}><Text value={s.interval} onChange={(v) => set("interval", v)} placeholder="30s" /></Field>
           <Field label="States" help={help(["states"])} wide>
@@ -371,7 +366,7 @@ export function SelftestEditor({ value, onChange, inherited }: { value: any[] | 
             open === i && (
               <tr key={i + "e"} className="editing"><td colSpan={4}>
                 <Field label="Id"><IdText value={c.id} taken={list.map((x) => x.id)} onChange={(v) => set(i, { ...c, id: v })} /></Field>
-                <CommandEditor name={c.id} spec={c} onChange={(v) => set(i, { id: c.id, ...v })} />
+                <CommandEditor name={c.id} spec={c} noVia onChange={(v) => set(i, { id: c.id, ...v })} />
               </td></tr>
             ),
           ])}

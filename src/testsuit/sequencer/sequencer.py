@@ -446,7 +446,16 @@ class RunExecution:
             transport = self.seq.transport_for(concrete_id)
             bound = BoundComponent(logical=lc, concrete=concrete, stage=stage, logical_stage=stage_logical,
                                    resolved=resolved, transport=transport)
-            bound.root = await transport.resolve_root()
+            for via in self.seq.lab.command_vias(concrete, stage, resolved).values():
+                if via.id not in bound.vias:           # commands run through it: where their pid files go
+                    via_transport = self.seq.transport_for(via.id)
+                    bound.vias[via.id] = (via, via_transport, await via_transport.resolve_root())
+            try:
+                bound.root = await transport.resolve_root()
+            except Exception:
+                if not bound.vias:
+                    raise
+                bound.root = str(transport._root)    # reached through another component only: not needed
             if concrete.lock != "exclusive":
                 # Several runs may hold it at once: each gets its own input/output folders.
                 bound.work = f"{bound.root}/.tsq/{self.run_id}"
@@ -684,10 +693,15 @@ class RunExecution:
         self.seq.notify("run", {"run": self.run_id, "abort": mode})
 
         async def alive(bound: BoundComponent) -> bool:
-            try:
-                return bool(await bound.transport.alive_in(bound.pid_dir(self.run_id)))
-            except Exception:
-                return True
+            for transport, folder in bound.pid_places(self.run_id):
+                try:
+                    if await transport.alive_in(folder):
+                        return True
+                except Exception:
+                    if transport is bound.transport and bound.vias:
+                        continue                       # reached through another component only
+                    return True
+            return False
         bound = list(self.ctx.bound.values())
         if mode == "cancel":
             live = [b for b, a in zip(bound, await asyncio.gather(*[alive(b) for b in bound])) if a]
@@ -732,10 +746,11 @@ class RunExecution:
         self.reason = "sequencer restarted during the run"
         await self.bind_components()
         for bound in self.ctx.bound.values():
-            try:
-                await bound.transport.signal_dir(bound.pid_dir(self.run_id), "KILL")
-            except Exception:
-                pass
+            for transport, folder in bound.pid_places(self.run_id):
+                try:
+                    await transport.signal_dir(folder, "KILL")
+                except Exception:
+                    pass
         flat = next((f for f in self.datapack.phases if f.phase.id == phase_id), None)
         if flat is not None and flat.finally_:
             runner = PhaseRunner(self.ctx, flat)
@@ -780,13 +795,14 @@ class RunExecution:
     async def clean_remote(self) -> None:
         """Kill what is left of the run's processes, and remove their pid files."""
         for bound in self.ctx.bound.values():
-            folder = bound.pid_dir(self.run_id)
-            try:
-                await bound.transport.signal_dir(folder, "KILL")
-                await bound.transport.shell(f"rm -rf {shlex.quote(folder)}; rmdir {shlex.quote(folder.rsplit('/', 1)[0])} "
-                                            "2>/dev/null; true", timeout=20)
-            except Exception as e:
-                log.warning(f"run {self.run_id}: cleaning {bound.concrete.id}: {e}")
+            for transport, folder in bound.pid_places(self.run_id):
+                try:
+                    await transport.signal_dir(folder, "KILL")
+                    await transport.shell(f"rm -rf {shlex.quote(folder)}; rmdir {shlex.quote(folder.rsplit('/', 1)[0])} "
+                                          "2>/dev/null; true", timeout=20)
+                except Exception as e:
+                    if not (transport is bound.transport and bound.vias):
+                        log.warning(f"run {self.run_id}: cleaning {bound.concrete.id} on {transport.host}: {e}")
 
     def write_records(self, verdict: str, run: dict) -> None:
         bag = self.datapack.dir

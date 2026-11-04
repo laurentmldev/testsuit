@@ -508,6 +508,17 @@ The lab library has two levels, each a hierarchy where one `extends` another:
 - a **lab role** is abstract: what a component is for, as the commands it offers, each with what it does. A datapack binds a logical component by role, so the commands it can use are known from the role alone, whatever the hardware;
 - a **lab component** is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A component lists the roles it supports, and the library checks it implements all their commands. Each inventory host is a component too: it extends a component (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
 
+Like classes in object-oriented programming:
+
+| Lab | Object-oriented parallel | Example |
+|---|---|---|
+| lab role | abstract class (an interface): the commands offered, each with what it does, and no implementation | `pilot`: `install`, `start`, `stop`, `ready`, `version` |
+| lab component | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `arduino_unoq`, extending `linux_system`, supports `pilot` |
+| inventory component (host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `calc_pilot_1: {tsq_extends: arduino_unoq, ansible_host: 10.0.0.21}` |
+| datapack logical component | a variable typed by the abstract class: it uses only the commands of the role | `pilot: {type: pilot_app, stage: train, role: pilot}` in the setup |
+
+A datapack references roles only. When it is activated, the sequencer picks, for each logical component, a free inventory component of the required role (in a free stage of the required type), and runs the role's commands with that instance's implementation: the same datapack runs on any lab whose instances implement its roles, real hardware or emulation (section 6.2).
+
 Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `components:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
 
 ### 7.1 Lab roles
@@ -609,6 +620,8 @@ The commands of a component come from the lab only: its role lists them (with it
 4. an inline `run:` in a pipeline step.
 
 A datapack does not redefine commands: what a test runs that the role does not offer is a `run:` step of its pipeline (the exploitation in section 8.3). A stage with a special way of deploying overrides the generic command for every datapack.
+
+A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
 The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
 - `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage, for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
