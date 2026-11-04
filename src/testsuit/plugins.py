@@ -8,7 +8,7 @@ An external library extends testsuit by calling the registration functions:
 - ``testsuit.datatools.datapack.importers.register_data_importer()``
 - ``testsuit.datatools.datapack.processors.register_processor()``
 - ``testsuit.datatools.datapack.generators.register_generator()``
-- ``testsuit.sequencer.registry``: ``register_transport()``, ``register_component_type()``, ``register_state_probe()``,
+- ``testsuit.sequencer.registry``: ``register_transport()``, ``register_role()``, ``register_component()``, ``register_state_probe()``,
   ``register_step_type()``, ``register_ready_check()`` (test sequencer)
 
 Calling them from your own code is enough when everything runs in your process. The command-line

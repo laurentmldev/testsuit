@@ -54,7 +54,7 @@ RUNTIME_KEYS = {
     "component.id": "logical component id (setup configuration)",
     "component.name": "its name",
     "component.type": "its datapack component type",
-    "component.lab_type": "the type of the lab component it is bound to",
+    "component.extends": "the lab component the bound host extends (its implementation)",
     "component.role": "its role",
     "component.host": "address of the bound lab component (ansible_host)",
     "component.concrete": "id of the bound lab component",
@@ -223,7 +223,7 @@ class Editor:
     # ── repositories and sessions ────────────────────────────────────────
 
     def repositories(self) -> list[dict]:
-        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory and component types",
+        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and components",
                   "folder": str(self.seq.config.lab_folder), "git": git_state(self.seq.config.lab_folder)}]
         for i, folder in enumerate(self.seq.config.workspaces):
             repos.append({"id": f"workspace{i}", "kind": "workspace", "label": f"Tests: {folder.name}",
@@ -361,7 +361,7 @@ class Editor:
         return files
 
     def kind(self, session: EditSession, rel: str, text: str | None = None) -> str:
-        """What a file is: inventory, types, setup, testdef, subpipelines, dictionary, template, or other."""
+        """What a file is: inventory, library, setup, testdef, subpipelines, dictionary, template, or other."""
         path = self.path(session, rel)
         if session.kind == "lab" and path == self._inventory(session):
             return "inventory"
@@ -386,8 +386,8 @@ class Editor:
             return "testdef"
         if "configurations" in data and ("component_types" in data or "datarepositories" in data):
             return "setup"
-        if "component_types" in data:
-            return "types"
+        if ({"roles", "components"} & set(data)) and not set(data) - {"roles", "components"}:
+            return "library"
         if "subpipelines" in data:
             return "subpipelines"
         return "dictionary"
@@ -402,7 +402,7 @@ class Editor:
             raise SequencerError(f"'{rel}' is not a text file") from e
         kind = self.kind(session, rel, text)
         result = {"path": rel, "kind": kind, "content": text}
-        if kind in ("inventory", "types", "setup", "testdef", "subpipelines", "dictionary"):
+        if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary"):
             try:
                 result["data"] = yaml.safe_load(text)
                 result["aliases"] = "*" in text and bool(re.search(r"(^|\s)\*[A-Za-z_]", text))
@@ -449,7 +449,7 @@ class Editor:
 
     def lab_for(self, session: EditSession) -> tuple[Lab, str | None]:
         """The lab the session's helpers and checks use: its own files for a lab session, the running lab
-        for a workspace. A lab session whose files are inconsistent (a component of a type just renamed)
+        for a workspace. A lab session whose files are inconsistent (a role or a component just renamed)
         still gets its own files, read without that check; the running lab only when they do not load at all."""
         if session.kind == "lab":
             try:
@@ -461,10 +461,16 @@ class Editor:
                     return self.seq.lab, str(e)
         return self.seq.lab, None
 
-    def rename_type(self, session: EditSession, old: str, new: str, skip: str | None = None) -> list[str]:
-        """After a lab component type is renamed in its file: the references to it in the other files of the
-        session follow ('extends' in the type files, 'tsq_role' in the inventory). Returns the files changed.
-        (A datapack type of a setup is only referred to in its own file: its form renames them.)"""
+    def rename_references(self, session: EditSession, kind: str, old: str, new: str, skip: str | None = None) -> list[str]:
+        """After a lab role or a library component is renamed in its file: the references to it in the other
+        files of the session follow, where its library is used: the inventories reading it (``tsq_role`` for a
+        role, ``tsq_extends`` for a component) and the other library files of its folders (their ``extends``).
+        Returns the files changed. (A datapack type of a setup is only referred to in its own file.)"""
+        if kind not in ("role", "component"):
+            raise SequencerError(f"rename: 'role' or 'component', not '{kind}'")
+        host_key = "tsq_role" if kind == "role" else "tsq_extends"
+        section = "roles" if kind == "role" else "components"
+
         def follow(node: Any, keys: tuple[str, ...]) -> bool:
             changed = False
             if isinstance(node, dict):
@@ -479,7 +485,6 @@ class Editor:
                     changed = follow(v, keys) or changed
             return changed
 
-        # only where the renamed file's type library is used: the inventories reading it, and its other files
         from testsuit.sequencer.inventory import load_inventory
         files = self.tree(session)
         renamed = self.path(session, skip).resolve() if skip else None
@@ -488,12 +493,12 @@ class Editor:
             if f["kind"] != "inventory":
                 continue
             try:
-                folders = load_inventory(self.path(session, f["path"])).type_folders
+                folders = load_inventory(self.path(session, f["path"])).library_folders
             except Exception:
                 continue
             if renamed is None or any(renamed.is_relative_to(folder) for folder in folders):
                 targets.add(f["path"])
-                targets |= {t["path"] for t in files if t["kind"] == "types"
+                targets |= {t["path"] for t in files if t["kind"] == "library"
                             and any(self.path(session, t["path"]).resolve().is_relative_to(folder) for folder in folders)}
         changed = []
         for f in files:
@@ -504,23 +509,37 @@ class Editor:
             except (OSError, yaml.YAMLError):
                 continue
             if f["kind"] == "inventory":
-                hit = follow(data, ("tsq_role",))
+                hit = follow(data, (host_key,))
             else:
-                hit = follow((data or {}).get("component_types"), ("extends",))
+                hit = follow((data or {}).get(section), ("extends",))
             if hit:
                 self.write(session, f["path"], data=data)
                 changed.append(f["path"])
         return changed
 
     @staticmethod
-    def describe_types(lab: Lab) -> dict:
-        """Every type with what it inherits: commands (with the type each comes from), status, self-test."""
-        result = {}
-        for name, t in lab.types.types.items():
+    def describe_library(lab: Lab) -> dict:
+        """Every role with the commands it lists (and the role each comes from), every library component with
+        what it implements (and the component each comes from), status and self-test."""
+        lib = lab.library
+        roles = {}
+        for name, r in lib.roles.items():
             try:
-                chain = lab.types.chain(name)
-            except SequencerError:                        # extends a type that is not there (renamed?): itself only
-                chain = [t]
+                chain = [x.name for x in lib.role_chain(name)]
+                commands = lib.role_commands(name)
+            except SequencerError:                        # extends a role that is not there (renamed?): itself only
+                chain = [name]
+                commands = {c: {"description": d, "from": name} for c, d in r.commands.items()}
+            roles[name] = {"extends": r.extends, "description": r.description, "source": r.source, "chain": chain,
+                           "commands": commands, "own_commands": sorted(r.commands),
+                           "used_by": [c.id for c in lab.inventory.components.values() if c.role == name],
+                           "abstract": any(o.extends == name for o in lib.roles.values())}
+        components = {}
+        for name, c in lib.components.items():
+            try:
+                chain = lib.component_chain(name)
+            except SequencerError:
+                chain = [c]
             commands, status, selftest, transport = {}, None, {}, None
             for link in chain:
                 for cmd, spec in link.commands.items():
@@ -530,39 +549,53 @@ class Editor:
                 for check in link.selftest:
                     selftest[check["id"]] = {"spec": check, "from": link.name}
                 transport = link.transport or transport
-            used = [c.id for c in lab.inventory.components.values() if c.type == name]
-            result[name] = {"extends": t.extends, "description": t.description, "source": t.source,
-                            "chain": [link.name for link in chain], "transport": transport or "ssh",
-                            "commands": commands, "status": status, "selftest": list(selftest.values()),
-                            "own_commands": sorted(t.commands), "used_by": used,
-                            "abstract": not used and any(o.extends == name for o in lab.types.types.values())}
-        return result
+            components[name] = {"extends": c.extends, "description": c.description, "source": c.source,
+                                "chain": [link.name for link in chain], "transport": transport or "ssh",
+                                "commands": commands, "status": status, "selftest": list(selftest.values()),
+                                "own_commands": sorted(c.commands),
+                                "used_by": [h.id for h in lab.inventory.components.values() if h.extends == name]}
+        return {"roles": roles, "components": components}
 
     @classmethod
     def describe_lab(cls, lab: Lab) -> dict:
         inv = lab.inventory
-        roles: dict[str, list[str]] = {}
-        for c in inv.components.values():
-            if c.role:
-                roles.setdefault(c.role, []).append(c.id)
         stage_types: dict[str, list[str]] = {}
-        stage_type_roles: dict[str, dict[str, str]] = {}
+        stage_type_roles: dict[str, dict[str, list[str]]] = {}
         for s in inv.stages.values():
             stage_types.setdefault(s.type, []).append(s.id)
             for comp_id in s.components:
                 comp = inv.components[comp_id]
                 if comp.role:
-                    stage_type_roles.setdefault(s.type, {})[comp.role] = comp.type
+                    stage_type_roles.setdefault(s.type, {}).setdefault(comp.role, []).append(comp_id)
+        adhoc_roles: dict[str, list[str]] = {}
+        for c in inv.adhoc:
+            if c.role:
+                adhoc_roles.setdefault(c.role, []).append(c.id)
+        library = cls.describe_library(lab)
+        hosts = {}
+        for c in inv.components.values():
+            info = {"role": c.role, "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
+                    "stages": c.stages, "transport": str(c.vars.get("tsq_transport") or "")}
+            try:
+                stage = inv.stages[c.stages[0]] if c.stages else None
+                resolved = lab.resolve(c, stage)
+                offered = lab.library.role_commands(c.role) if c.role in lab.library.roles else {}
+                info.update(chain=resolved.chain,
+                            commands={k: {"spec": v, "from": resolved.command_sources.get(k, "")}
+                                      for k, v in resolved.commands.items()},
+                            status=resolved.status, selftest=[x["id"] for x in resolved.selftest],
+                            missing=sorted(set(offered) - set(resolved.commands)),
+                            extra=sorted(set(resolved.commands) - set(offered)))
+            except SequencerError as e:
+                info["error"] = str(e)
+            hosts[c.id] = info
         return {
-            "types": cls.describe_types(lab),
-            "roles": roles, "stage_types": stage_types, "stage_type_roles": stage_type_roles,
-            "adhoc_roles": {c.role: c.type for c in inv.adhoc if c.role},
+            "roles": library["roles"], "library": library["components"],
+            "stage_types": stage_types, "stage_type_roles": stage_type_roles, "adhoc_roles": adhoc_roles,
             "stages": {s.id: {"type": s.type, "components": s.components, "commands": sorted(s.commands)}
                        for s in inv.stages.values()},
-            "components": {c.id: {"type": c.type, "role": c.role, "host": c.host, "lock": c.lock, "label": c.label,
-                                  "stages": c.stages, "transport": str(c.vars.get("tsq_transport") or "")}
-                           for c in inv.components.values()},
-            "type_folders": [str(f) for f in inv.type_folders],
+            "components": hosts,
+            "library_folders": [str(f) for f in inv.library_folders],
         }
 
     # ── workspace side ───────────────────────────────────────────────────
@@ -606,7 +639,8 @@ class Editor:
                     result["subpipeline_files"].append(rel)
                     for sub, spec in data["subpipelines"].items():
                         result["subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
-                elif "component_types" not in data and "all" not in data:
+                elif "all" not in data and not (({"roles", "components"} & set(data))
+                                                 and not set(data) - {"roles", "components"}):
                     result["dictionaries"].append(rel)
         return result
 
@@ -648,12 +682,14 @@ class Editor:
                 found = self.scan_workspace(folder, folder)
                 workspace["setups"] += found["setups"]
         described = self.describe_lab(lab)
-        for t in described["types"].values():             # where each type is defined, as the user sees it
+        for t in [*described["roles"].values(), *described["library"].values()]:   # where each is defined, as the user sees it
             source = Path(t["source"]) if t["source"].startswith("/") else None
             if source is not None and source.is_relative_to(session.folder):
                 t["source"] = self.rel(session, source)
             elif source is not None and source.is_relative_to(self.seq.config.lab_folder):
                 t["source"] = "lab: " + os.path.relpath(source, self.seq.config.lab_folder)
+        described["library_folders"] = [self.rel(session, Path(f)) if Path(f).is_relative_to(session.folder) else f
+                                         for f in described["library_folders"]]
         return {
             "session": self.describe(session),
             "lab": described, "lab_error": lab_error,
@@ -682,7 +718,7 @@ class Editor:
         if error:
             return [{"file": rel, "severity": "error", **error}]
         try:
-            if kind in ("inventory", "types"):
+            if kind in ("inventory", "library"):
                 return self.check_lab(session, only=rel)
             if kind == "testdef":
                 return self.check_testdef(session, rel)
@@ -708,7 +744,8 @@ class Editor:
         return found, message
 
     def check_lab(self, session: EditSession, only: str | None = None) -> list[dict]:
-        """Like ``tsq lab reload``: the inventory and its type library load; plus what workspace datapacks would miss."""
+        """Like ``tsq lab reload``: the inventory and its library load, every host implements its role; plus
+        the commands a host implements that its role does not list, and what workspace datapacks would miss."""
         inventory = self._inventory(session)
         inv_rel = self.rel(session, inventory)
         try:
@@ -720,6 +757,12 @@ class Editor:
             return [{"file": file, "line": line, "column": column, "severity": "error", "message": message}]
         problems = []
         text = inventory.read_text(encoding="utf-8")
+        for host, extra in lab.extra_commands.items():
+            line, column = _find_line(text, f"'{host}'")
+            role = lab.inventory.components[host].role
+            problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
+                             "message": f"component '{host}' implements {', '.join(extra)}, which its role '{role}' "
+                                        "does not list: datapacks cannot use them (add them to the role?)"})
         for folder in self.seq.config.workspaces:
             for setup in self.scan_workspace(folder, folder)["setups"]:
                 for cfg_name, cfg in setup["configurations"].items():
@@ -905,7 +948,7 @@ class Editor:
         for f in self.tree(session):
             if f["kind"] in ("testdef", "setup", "subpipelines", "dictionary", "yaml"):
                 problems += self.check_file(session, f["path"])
-            elif f["kind"] in ("inventory", "types"):
+            elif f["kind"] in ("inventory", "library"):
                 text = self.path(session, f["path"]).read_text(encoding="utf-8", errors="replace")
                 error = yamledit.syntax_error(text)
                 if error:
@@ -945,10 +988,10 @@ class Editor:
                             concrete = lab.inventory.components[binding.components[target]]
                             lc = needs.components[target]
                             stage = lab.inventory.stages.get(binding.stages.get(lc.stage, ""))
-                            entry.update(concrete=concrete.id, lab_type=concrete.type)
+                            entry.update(concrete=concrete.id, role=concrete.role)
                             if step.action == "do":
                                 try:
-                                    resolved = lab.types.resolve(concrete, stage)
+                                    resolved = lab.resolve(concrete, stage)
                                 except SequencerError as e:
                                     problems.append(str(e))
                                     resolved = None
@@ -956,7 +999,7 @@ class Editor:
                                     spec = resolved.commands.get(step.do)
                                     if spec is None:
                                         problems.append(f"phase '{flat.phase.id}', step '{fs.id}': '{target}' "
-                                                        f"({concrete.type}) has no command '{step.do}' (it has: "
+                                                        f"(role {concrete.role}) has no command '{step.do}' (it has: "
                                                         f"{', '.join(sorted(resolved.commands)) or 'none'})")
                                     entry.update(command=spec, source=resolved.command_sources.get(step.do))
                         expanded.append(entry)
@@ -979,8 +1022,8 @@ class Editor:
         return result
 
     def palette(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
-        """What a step can do on each logical component of a test definition: the commands its role's lab
-        type gives, with the stage overrides (README section 13.2, pipelines)."""
+        """What a step can do on each logical component of a test definition: the commands its role lists, with
+        how each lab component that can be bound implements them (README section 13.2, pipelines)."""
         from testsuit.sequencer.model import needs_from_setup
         path = self.path(session, rel)
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -991,22 +1034,33 @@ class Editor:
         config = setup_config or str(raw.get("setup_config") or "")
         needs = needs_from_setup(setup_raw, config)
         lab, _ = self.lab_for(session)
-        lab_types = self.describe_types(lab)
         components = {}
         for lc in needs.components.values():
-            commands: dict[str, dict] = {}
-            current = lc.role
-            if current in lab_types:
-                for cmd, info in lab_types[current]["commands"].items():
-                    commands[cmd] = {"spec": info["spec"], "from": f"lab type {info['from']}"}
-            # lab overrides on the stages of that type
+            offered = lab.library.role_commands(lc.role) if lc.role in lab.library.roles else {}
+            # the lab components that can be bound, with how each implements the commands
             stage_type = needs.stages.get(lc.stage)
-            for stage in lab.inventory.stages_of_type(stage_type) if stage_type else []:
-                for cmd, spec in stage.commands.items():
-                    commands.setdefault(cmd, {"spec": spec, "from": f"stage {stage.id}"})
-            components[lc.id] = {"name": lc.name, "type": lc.type, "lab_type": current, "stage": lc.stage,
-                                 "role": lc.role, "commands": {c: {**v, "help": _command_help(c)}
-                                                                for c, v in sorted(commands.items())}}
+            if lc.stage:
+                hosts = [(lab.inventory.component_in(st, lc.role), st) for st in lab.inventory.stages_of_type(stage_type)]
+            else:
+                hosts = [(c, None) for c in lab.inventory.adhoc if c.role == lc.role]
+            implementations: dict[str, dict[str, Any]] = {}
+            for host, stage in hosts:
+                if host is None:
+                    continue
+                try:
+                    resolved = lab.resolve(host, stage)
+                except SequencerError:
+                    continue
+                for cmd in offered:
+                    if cmd in resolved.commands:
+                        implementations.setdefault(cmd, {})[host.id] = {"spec": resolved.commands[cmd],
+                                                                         "from": resolved.command_sources.get(cmd, "")}
+            commands = {cmd: {"description": info["description"], "from": f"role {info['from']}",
+                              "help": info["description"] or _command_help(cmd),
+                              "implementations": implementations.get(cmd, {})}
+                        for cmd, info in sorted(offered.items())}
+            components[lc.id] = {"name": lc.name, "type": lc.type, "stage": lc.stage, "role": lc.role,
+                                 "role_known": lc.role in lab.library.roles, "commands": commands}
         workspace = self.scan_workspace(session.folder, session.folder) if session.kind == "workspace" else {}
         own = (raw.get("pipeline") or {}).get("subpipelines") or {}
         subs = {n: self._sub_summary(s) | {"file": rel} for n, s in own.items()}
@@ -1156,7 +1210,6 @@ class Editor:
         components = []
         for comp_id, comp in (cfg.get("components") or {}).items():
             comp = comp if isinstance(comp, dict) else {}
-            lab_type = comp.get("role") or ""
             configuration = ((types.get(comp.get("type")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
             inputs = []
             for item in configuration.get("inputs") or []:
@@ -1172,7 +1225,7 @@ class Editor:
                                "holds_datapack": any(builder.work.resolve().is_relative_to(f.resolve()) for f in found),
                                "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
             components.append({"id": comp_id, "name": comp.get("name", ""), "type": comp.get("type", ""),
-                               "lab_type": lab_type, "configuration": comp.get("configuration", ""),
+                               "configuration": comp.get("configuration", ""),
                                "stage": comp.get("stage"), "role": comp.get("role"), "needs": comp.get("needs") or [],
                                "inputs": inputs})
         stages = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stages") or {}).items()}

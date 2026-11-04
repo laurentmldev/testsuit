@@ -81,7 +81,7 @@ class QueueSettings(_Model):
 
 class SelftestSettings(_Model):
     before_each_run: bool = True
-    when_idle: bool = True                    # also when a component becomes idle (README section 7.5)
+    when_idle: bool = True                    # also when a component becomes idle (README section 7.6)
     timeout: float = 60.0
     max_attempts: int = Field(3, ge=1)
 

@@ -29,7 +29,7 @@ Setup::
                 version: "{{ toytrain_sw_version }}"
                 postprocess: [finalize]
     component_types:
-      pilot_app:                          # what a component gets as inputs (its commands: its role's lab type)
+      pilot_app:                          # what a component gets as inputs (its commands: its lab role)
         configurations:
           standard:
             inputs:
@@ -49,7 +49,7 @@ Setup::
           train: {type: toytrain}
         components:
           pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
-                                          # role: for the test sequencer, a lab type (binding and commands)
+                                          # role: for the test sequencer, a lab role (binding and commands)
           telemetry:
             type: telemetry_app
             configuration: standard
@@ -122,7 +122,7 @@ class ComponentConfiguration(_Model):
     inputs: list[InputFile] = Field(default_factory=list)
 
 
-GONE = "is gone: the component's role is a lab type, which gives its commands (test-specific commands: pipeline steps)"
+GONE = "is gone: the component's lab role gives its commands, implemented by the lab components (test-specific commands: pipeline steps)"
 
 
 class ComponentType(_Model):
@@ -144,7 +144,7 @@ class Component(_Model):
     configuration: str
     # other components whose generated inputs this one reads (generated first)
     needs: list[str] = Field(default_factory=list)
-    # for the test sequencer: logical stage and role it is bound by (the role is a lab type: its commands)
+    # for the test sequencer: logical stage and role it is bound by (the lab role gives its commands)
     stage: str = ""
     role: str = ""
 

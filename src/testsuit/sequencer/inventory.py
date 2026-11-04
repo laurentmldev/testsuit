@@ -4,7 +4,8 @@
 - a host in several stage groups is a shared component;
 - a host directly under ``all`` (in no stage) is an **ad hoc component**;
 - variables follow Ansible precedence: host over group (child over parent) over ``all``;
-- a component's ``tsq_role`` names its type in the lab's type library (its commands, status, self-test).
+- a host is a lab component: ``tsq_role`` is its role (the commands datapacks can use), ``tsq_extends`` the
+  library component (or the other host) it inherits its implementation from (section 7).
 """
 from __future__ import annotations
 
@@ -29,12 +30,13 @@ class Component:
 
     @property
     def role(self) -> str:
-        """The role it plays, a type of the lab's type library: it gives the component its commands."""
+        """The role it plays (a lab role of the library): the commands datapacks can use on it."""
         return str(self.vars.get("tsq_role", ""))
 
     @property
-    def type(self) -> str:
-        return self.role
+    def extends(self) -> str:
+        """The component it inherits its implementation from: a library component or another host."""
+        return str(self.vars.get("tsq_extends") or "linux_system")
 
     @property
     def lock(self) -> str:
@@ -77,8 +79,11 @@ class Inventory:
     stages: dict[str, Stage]
 
     @property
-    def type_folders(self) -> list[Path]:
-        folders = self.vars.get("tsq_types") or []
+    def library_folders(self) -> list[Path]:
+        if "tsq_types" in self.vars:
+            raise SequencerError(f"inventory '{self.file}': 'tsq_types' is gone: 'tsq_library' gives the folders of "
+                                 "the lab library (roles and components)")
+        folders = self.vars.get("tsq_library") or []
         if isinstance(folders, str):
             folders = [folders]
         return [(self.file.parent / Path(f).expanduser()).resolve() for f in folders]
@@ -152,11 +157,12 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
-        if "tsq_type" in merged:
-            raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone, the role is the type: "
-                                 f"give 'tsq_role' a type of the lab (one that extends '{merged['tsq_type']}')")
         if not component.role:
-            raise SequencerError(f"inventory '{path}': component '{host}' has no 'tsq_role' (a type of the lab)")
+            raise SequencerError(f"inventory '{path}': component '{host}' has no 'tsq_role' (a lab role)")
+        if "tsq_type" in merged:
+            raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone: give 'tsq_role' (a lab "
+                                 f"role: its commands) and 'tsq_extends' (the component implementing them, "
+                                 f"'{merged['tsq_type']}' moved to the library's components)")
         if component.lock not in LOCK_MODES:
             raise SequencerError(f"inventory '{path}': component '{host}': tsq_lock '{component.lock}' "
                                  f"is not one of {', '.join(LOCK_MODES)}")

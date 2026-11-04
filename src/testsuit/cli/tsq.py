@@ -231,7 +231,7 @@ def cmd_resources(args, client: Client) -> int:
     if args.command == "stages":
         table(rows, ["id", "type", "components", "holder", "maintenance", "hold", "note"])
     else:
-        table(rows, ["id", "type", "role", "host", "state", "lock", "holder", "maintenance", "hold", "detail"])
+        table(rows, ["id", "role", "extends", "host", "state", "lock", "holder", "maintenance", "hold", "detail"])
     return 0
 
 
@@ -301,7 +301,7 @@ def cmd_lab(args, client: Client | None) -> int:
         print()
         table([{"id": k, **v} for k, v in lab["stages"].items()], ["id", "type", "components"])
         print()
-        table([{"id": k, **v} for k, v in lab["components"].items()], ["id", "type", "role", "host", "lock", "stages"])
+        table([{"id": k, **v} for k, v in lab["components"].items()], ["id", "role", "extends", "host", "lock", "stages"])
         return 0
     client = client or Client(server_url(args))
     body = {"pull": args.pull is not None, "revision": args.pull or None}
@@ -363,11 +363,11 @@ def cmd_validate(args, client: Client | None) -> int:
                         concrete = lab.inventory.components[binding.components[step.component]]
                         lc = dp.needs.components[step.component]
                         stage = lab.inventory.stages.get(binding.stages.get(lc.stage, ""))
-                        resolved = lab.types.resolve(concrete, stage)
+                        resolved = lab.resolve(concrete, stage)
                         spec = resolved.commands.get(step.do)
                         if spec is None:
                             problems.append(f"phase {flat.phase.id}, step {fs.id}: {step.component} "
-                                            f"({concrete.type}) has no command '{step.do}'")
+                                            f"(role {concrete.role}) has no command '{step.do}'")
                         command = f"  = {json.dumps(spec)} ({resolved.command_sources.get(step.do, '?')})"
                     if step.action == "python":
                         command = f"  = {json.dumps(step.python)}"

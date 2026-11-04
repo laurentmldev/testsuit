@@ -24,19 +24,20 @@ all:
     ansible_user: tsq                              # account created on every calculator for the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based only: no password prompt
     tsq_remote_root: /opt/testrun                  # <root>/<component>/{input,output}
-    tsq_types: [types/]                            # lab component types (types/toytrain.yml)
+    tsq_library: [roles/, components/]             # lab roles and components (roles/, components/toytrain.yml)
 
   hosts:                                           # ad hoc components (no stage)
     lab_srv:                                       # the sequencer component
       ansible_host: localhost
       tsq_transport: local
-      tsq_role: sequencer
+      tsq_role: sequencer                          # a plain linux_system (the default tsq_extends)
       tsq_lock: none
       tsq_label: lab-srv (sequencer, exploitation)
     sim_propulsion:                                # simulation processes on the same server
       ansible_host: localhost
       tsq_transport: local
       tsq_role: propulsion_sim
+      tsq_extends: propulsion_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated propulsion controller
       tsq_sim_address: 10.42.0.20                  # alias of eth0, address of the real propulsion controller
@@ -44,6 +45,7 @@ all:
       ansible_host: localhost
       tsq_transport: local
       tsq_role: piezo_sim
+      tsq_extends: piezo_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated piezo sensors
       tsq_gpio_adapter: /dev/serial/by-id/usb-FTDI_FT232H_TT01-if00   # wired to AU GPIO 17 (front), 27 (back)
@@ -56,16 +58,20 @@ all:
         calc_pilot:
           ansible_host: 10.42.0.10
           tsq_role: pilot
+          tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot
         calc_tm:
           ansible_host: 10.42.0.11
           tsq_role: telemetry
+          tsq_extends: rpi5
           tsq_label: CALC-TM
         au:
           ansible_host: 10.42.0.12
           tsq_role: acquisition
+          tsq_extends: rpi5
           tsq_label: AU
         switch:
           ansible_host: 10.42.0.2
           tsq_role: switch
+          tsq_extends: auvidea_m82
           tsq_label: Switch Auvidea M82

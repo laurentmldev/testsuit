@@ -1,6 +1,6 @@
 // Pipeline editor (sequencer README, sections 8.3, 8.4 and 13.2): a graph of the steps of a phase or of a
 // sub-pipeline, where `needs` are the edges; a palette of what a step can do on each logical component
-// (the commands its types give), a form per step, the phase resources, and the flattened pipeline.
+// (the commands its lab role offers), a form per step, the phase resources, and the flattened pipeline.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyEdgeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
@@ -450,10 +450,10 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`role ${c.role} (its lab type gives the commands), inputs of ${c.type}${c.stage ? `, stage ${c.stage}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
+          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.stage ? `, stage ${c.stage}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, component: id, do: cmd })}
-              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.help ? info.help + "\n\n" : ""}\`${summary(info.spec)}\`\n\nfrom ${info.from}` })}>
+              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})`).join("")}` })}>
               {cmd}
             </button>
           ))}
@@ -508,7 +508,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     if (!palette || !targets.length) return [];
     const sets = targets.map((t) => palette.components[t]?.commands || {});
     const names = Object.keys(sets[0]).filter((n) => sets.every((s) => n in s));
-    return names.map((n) => ({ value: n, description: `\`${summary(sets[0][n].spec)}\` (${sets[0][n].from})${sets[0][n].help ? " · " + sets[0][n].help : ""}` }));
+    return names.map((n) => ({ value: n, description: `${sets[0][n].description || sets[0][n].help || ""} (${sets[0][n].from})` }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette, JSON.stringify(targets)]);
   const setTarget = (mode: string | null) => {
@@ -561,7 +561,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         ]} />
       </Field>
       {action === "do" && (
-        <Field label="Command" help={help("do")} hint={!targets.length ? "pick the component(s) first: their types give the commands" : null}>
+        <Field label="Command" help={help("do")} hint={!targets.length ? "pick the component(s) first: their roles give the commands" : null}>
           <Combo value={step.do} onChange={(v) => set("do", v)} choices={commandChoices} strict={commandChoices.length > 0} />
         </Field>
       )}

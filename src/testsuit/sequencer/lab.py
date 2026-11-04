@@ -1,12 +1,12 @@
-"""The lab: inventory and type library read from the lab folder, a git clone (README section 6.1)."""
+"""The lab: inventory and library (roles and components) read from the lab folder, a git clone (README section 6.1)."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from testsuit.sequencer.inventory import Inventory, load_inventory
-from testsuit.sequencer.component_types import TypeLibrary
+from testsuit.sequencer.inventory import Component, Inventory, Stage, load_inventory
+from testsuit.sequencer.library import ComponentDef, Library, Resolved
 from testsuit.sequencer.util import SequencerError, now
 
 log = logging.getLogger("testsuit.sequencer")
@@ -44,10 +44,11 @@ def git_state(folder: Path) -> dict | None:
 class Lab:
     folder: Path
     inventory: Inventory
-    types: TypeLibrary
+    library: Library
     git: dict | None
     require_tag: bool = True
     loaded_at: str = field(default_factory=now)
+    extra_commands: dict[str, list[str]] = field(default_factory=dict)   # host -> commands its role does not list
 
     @property
     def warnings(self) -> list[str]:
@@ -61,35 +62,53 @@ class Lab:
                 problems.append(f"lab folder '{self.folder}' is not on a tag")
         return problems
 
+    @property
+    def hosts(self) -> dict[str, ComponentDef]:
+        """The inventory's hosts as components (a host can extend another one)."""
+        if self._hosts is None:
+            self._hosts = self.library.host_defs(self.inventory)
+        return self._hosts
+
+    _hosts: dict | None = field(default=None, repr=False)
+
+    def resolve(self, component: Component, stage: Stage | None = None) -> Resolved:
+        return self.library.resolve(component, stage, self.hosts)
+
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
                 "stages": {s.id: {"type": s.type, "components": s.components} for s in self.inventory.stages.values()},
-                "components": {c.id: {"type": c.role, "role": c.role, "host": c.host, "lock": c.lock,
+                "components": {c.id: {"role": c.role, "extends": c.extends, "host": c.host, "lock": c.lock,
                                       "stages": c.stages, "label": c.label}
                                for c in self.inventory.components.values()},
-                "types": {t.name: {"extends": t.extends, "source": t.source, "commands": sorted(t.commands)}
-                          for t in self.types.types.values()}}
+                "roles": {r.name: {"extends": r.extends, "source": r.source, "commands": sorted(r.commands)}
+                          for r in self.library.roles.values()}}
 
 
 def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, strict: bool = True) -> Lab:
-    """Read and check the inventory and its type library (every component's role must be a type).
+    """Read and check the inventory and its library: every host has a role, and implements its commands.
 
-    :param strict: False to accept unknown types, for components and parents (the Editor, while a type is renamed)
+    :param strict: False to accept unknown roles and components, for parents too (the Editor, while one is renamed)
     """
     if not inventory_file.is_file():
         raise SequencerError(f"lab inventory not found: '{inventory_file}'")
     inventory = load_inventory(inventory_file)
-    types = TypeLibrary.load(inventory.type_folders, strict)
-    for component in inventory.components.values() if strict else []:
-        try:
-            types.chain(component.type)
-        except SequencerError as e:
-            if component.role not in types.types:
-                e = SequencerError(f"role '{component.role}' is not a type of the lab (tsq_types: "
-                                   f"{', '.join(str(f) for f in inventory.type_folders) or 'none'})")
-            raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
-    lab = Lab(folder=folder, inventory=inventory, types=types, git=git_state(folder), require_tag=require_tag)
+    library = Library.load(inventory.library_folders, strict)
+    lab = Lab(folder=folder, inventory=inventory, library=library, git=git_state(folder), require_tag=require_tag)
+    for component in inventory.components.values():
+        for stage in [inventory.stages[s] for s in component.stages] or [None]:
+            try:
+                _, missing, extra = library.check_host(component, stage, lab.hosts)
+            except SequencerError as e:
+                if strict:
+                    raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
+                continue
+            if missing and strict:
+                raise SequencerError(f"inventory '{inventory_file}': component '{component.id}' does not implement "
+                                     f"{', '.join(missing)}, listed by its role '{component.role}'"
+                                     + (f" (in stage {stage.id})" if stage else ""))
+            if extra:
+                lab.extra_commands[component.id] = extra
     for warning in lab.warnings if strict else []:
         log.warning(warning)
     return lab

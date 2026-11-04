@@ -1,18 +1,19 @@
-# Lab component types of the toy-train lab (sequencer README, section 7).
-# They say how to drive and monitor each kind of hardware, whatever the test: the hardware types first,
-# then the roles the components take (tsq_role in the inventory), each extending its hardware type.
-# What a given test deploys is in the datapack setup (its component_types: inputs only).
+# Lab components of the toy-train lab (sequencer README, section 7.2): how each kind of hardware
+# implements the commands of the roles (roles/toytrain.yml), how it is monitored and self-tested.
+# Inventory hosts are components extending these (tsq_extends). What a given test deploys is in the
+# datapack setup (its component_types: inputs only).
 #
 # Assumed on the targets (prepared once by the lab operators, not by the tests):
 # - an account 'tsq' with the lab key, and sudo rights limited to the commands below;
 # - the toy-train software installed as systemd services, configured from <remote_root>/<component>/input/.
 
-component_types:
+components:
 
   arduino_unoq:
     # Arduino UNO Q: Debian on its MPU (reached over SSH like any Linux system) and a microcontroller
     # running the real-time part of the application. Ethernet through a W5500 module.
     extends: linux_system
+    description: Arduino UNO Q (Debian MPU and microcontroller)
     commands:
       # flash the microcontroller part from the deployed inputs (assumed helper of the toy-train software)
       install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
@@ -35,6 +36,7 @@ component_types:
   rpi5:
     # Raspberry Pi 5, Raspberry Pi OS: plain Linux system with the toy-train services.
     extends: linux_system
+    description: Raspberry Pi 5 with the toy-train services
     commands:
       start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
       stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
@@ -55,6 +57,7 @@ component_types:
     # Auvidea M82 Ethernet switch: not configured by the tests, only monitored.
     # Probed from the sequencer host, so its transport is local.
     extends: component
+    description: Auvidea M82 Ethernet switch
     transport: local
     # self-test: the inherited 'component' check, its status probe (a ping) answers
     status:
@@ -68,25 +71,13 @@ component_types:
     # Simulation processes on the lab server (python, from the toy-train test repository).
     # Each one runs as a transient systemd unit started by the sequencer (README, section 11).
     extends: linux_system
+    description: A simulation process on the lab server
     commands:
+      stop:    {signal: TERM, timeout: 10s}
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/sim.log", regex: "READY"}, timeout: 20s}}
       version: {run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
     selftest:
       - {id: sim_installed, run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
-
-  # ── roles: what datapacks bind to (role: <name> in a setup), and the commands they get ──
-
-  pilot:                               # CALC-Pilot
-    extends: arduino_unoq
-
-  telemetry:                           # CALC-TM
-    extends: rpi5
-
-  acquisition:                         # AU
-    extends: rpi5
-
-  switch:
-    extends: auvidea_m82
 
   propulsion_sim:
     # the simulated propulsion controller, from the inputs a datapack deploys (sim/, propulsion_sim.yml)
@@ -103,7 +94,3 @@ component_types:
       start: {run: "{{ remote_root }}/venv/bin/toytrain-sim piezo --config {{ component.input_dir }}/piezo_sim.yml --gpio {{ component.vars.tsq_gpio_adapter }} --out {{ component.output_dir }}", detach: true}
     selftest:
       - {id: gpio_adapter, run: "test -e {{ component.vars.tsq_gpio_adapter }}"}
-
-  sequencer:
-    # the lab server running the sequencer: the exploitation runs there (a pipeline step runs exploit_runner)
-    extends: linux_system

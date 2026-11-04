@@ -24,7 +24,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalComponent, phase_components
 from testsuit.sequencer.transports import Result, Transport
-from testsuit.sequencer.component_types import ResolvedType
+from testsuit.sequencer.library import Resolved
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
 log = logging.getLogger("testsuit.sequencer")
@@ -80,7 +80,7 @@ class BoundComponent:
     concrete: Component
     stage: Stage | None
     logical_stage: str
-    resolved: ResolvedType
+    resolved: Resolved
     transport: Transport
     root: str = ""                                # remote root, '~' resolved
     work: str = ""                                # where input/ and output/ live; the root unless shared
@@ -107,7 +107,7 @@ class BoundComponent:
 
     def keys(self, state: str = "unknown") -> dict:
         return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "type": self.logical.type,
-                "lab_type": self.concrete.type, "host": self.concrete.host, "concrete": self.concrete.id,
+                "extends": self.concrete.extends, "host": self.concrete.host, "concrete": self.concrete.id,
                 "label": self.concrete.label, "stage": self.logical_stage,
                 "concrete_stage": self.stage.id if self.stage else "", "role": self.logical.role,
                 "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root,
@@ -284,7 +284,7 @@ class StepRunner:
             raise SequencerError(f"step '{self.fs.id}': 'do: {name}' needs a component")
         spec = self.component.resolved.commands.get(name)
         if spec is None:
-            raise SequencerError(f"component '{self.component.id}' ({self.component.concrete.type}) has no "
+            raise SequencerError(f"component '{self.component.id}' (role {self.component.concrete.role}) has no "
                                  f"command '{name}' (has: {', '.join(sorted(self.component.resolved.commands)) or 'none'})")
         return dict(spec)
 

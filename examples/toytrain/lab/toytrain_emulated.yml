@@ -18,7 +18,7 @@ all:
     ansible_host: localhost
     tsq_transport: local                           # no SSH: commands run as the user running the sequencer
     tsq_remote_root: ~/.toytrain-emu/run           # <root>/<component>/{input,output}
-    tsq_types: [types_emulated/]                   # the emulated type library, with the lab's roles
+    tsq_library: [roles/, components_emulated/]    # the lab's roles, implemented by local processes
 
   hosts:                                           # ad hoc components
     dev_host:
@@ -27,10 +27,12 @@ all:
       tsq_label: dev host (sequencer, exploitation)
     sim_propulsion:
       tsq_role: propulsion_sim
+      tsq_extends: propulsion_sim
       tsq_remote_root: ~/.toytrain-emu/sim         # with venv/: pip install of the simulation release
       tsq_label: Simulated propulsion controller
     sim_piezo:
       tsq_role: piezo_sim
+      tsq_extends: piezo_sim
       tsq_remote_root: ~/.toytrain-emu/sim
       tsq_label: Simulated piezo sensors
       tsq_gpio_adapter: udp://127.0.0.12:5017      # in place of the USB GPIO adapter: AU's emulated inputs
@@ -42,12 +44,15 @@ all:
       hosts:
         calc_pilot:
           tsq_role: pilot
+          tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot (emulated)
           tsq_start_args: --mcu host               # microcontroller replaced by its host stub
         calc_tm:
           tsq_role: telemetry
+          tsq_extends: rpi5
           tsq_label: CALC-TM (emulated)
         au:
           tsq_role: acquisition
+          tsq_extends: rpi5
           tsq_label: AU (emulated)
           tsq_start_args: --gpio-backend udp://127.0.0.12:5017   # GPIO 17 / 27 edges sent by the piezo simulation

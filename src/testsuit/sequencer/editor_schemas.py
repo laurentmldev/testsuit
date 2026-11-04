@@ -37,7 +37,7 @@ EXPECT = h("What a successful command gives. `exit`: accepted exit codes (defaul
            defaultSnippets=[{"label": "exit codes", "body": {"exit": [0]}}])
 
 WAIT_KINDS = {
-    "state": h("The monitored state of the component (section 7.4): `running`, `idle`, `configured`, `broken`, "
+    "state": h("The monitored state of the component (section 7.5): `running`, `idle`, `configured`, `broken`, "
                "`offline`, `unknown`, or a list of them.", type=["string", "array"],
                examples=["running", "idle", ["idle", "configured"]]),
     "tcp": h("A TCP port accepting connections: `host:port`, or `{host, port}` (host: the component's by default).",
@@ -141,8 +141,9 @@ COMMAND_NAMES = {
     "version": "Prints the version of what runs on the component: recorded in the run part of the results baseline.",
 }
 
-COMMANDS = h("Commands of the type, by name, used by pipeline steps as `do: <name>`. A derived type inherits its "
-             "parent's commands and overrides those it redefines (section 7.3).", type="object",
+COMMANDS = h("How this component implements the commands of its role, by name (pipeline steps run them as "
+             "`do: <name>`). A component inherits its parent's implementations and overrides those it redefines "
+             "(section 7.4).", type="object",
              properties={name: {**COMMAND, "markdownDescription": f"**{name}**: {text}\n\n" + COMMAND["markdownDescription"],
                                 "description": f"{name}: {text.replace('`', '')}"}
                          for name, text in COMMAND_NAMES.items()},
@@ -154,7 +155,7 @@ STATE_HELP = {"offline": "unreachable", "idle": "reachable, nothing running", "c
               "unknown": "no probe can tell"}
 
 STATUS = h(
-    "How the state monitor finds the component's state (section 7.4): a `probe` command whose output and exit "
+    "How the state monitor finds the component's state (section 7.5): a `probe` command whose output and exit "
     "status are matched against `states`, first match wins. `interval`: time between probes (default 30 s, "
     "more often during runs).",
     type="object",
@@ -183,11 +184,11 @@ STATUS = h(
 
 SELFTEST = h(
     "Checks run on every bound component before each run, once its resources are locked and before anything is "
-    "deployed (section 7.5). A derived type adds to its parent's checks; a check with the same `id` replaces it. "
+    "deployed (section 7.6). A component adds to its parent's checks; a check with the same `id` replaces it. "
     "When a check fails, nothing is deployed and the run goes back to the queue.",
     type="array",
     items={"type": "object", "required": ["id"],
-           "properties": {"id": h("Name of the check, unique in the type chain.", type="string"),
+           "properties": {"id": h("Name of the check, unique in the component chain.", type="string"),
                           "run": h("Shell command run on the component: exit 0 passes.", type="string"),
                           "timeout": DURATION, "expect": EXPECT,
                           "builtin": h("A built-in check: `status`, `login`, `remote_root`, `disk`, `clock`.",
@@ -195,16 +196,17 @@ SELFTEST = h(
            "defaultSnippets": [{"label": "check command", "body": {"id": "${1:name}", "run": "${2:command}",
                                                                    "timeout": "20s"}}]})
 
-COMPONENT_TYPE = h(
-    "A component type: its commands, how its state is monitored, its self-test and its transport. A type "
-    "`extends` another one and redefines only what differs (section 7).",
+COMPONENT = h(
+    "A lab component: how it implements the commands of a role, how its state is monitored, its self-test and its "
+    "transport. A component `extends` another one and redefines only what differs (section 7.2). Inventory hosts "
+    "extend a component with `tsq_extends`.",
     type="object", additionalProperties=False,
     properties={
-        "extends": h("The parent type: `linux_system` for anything reachable over SSH (deploy, collect and kill "
-                     "built in), `component` for something that is not a Linux system (a switch, an instrument "
-                     "driven through its own API), or another type of the library.", type="string"),
-        "description": h("What this type is: shown in the Editor when a component type is chosen.", type="string"),
-        "transport": h("How the sequencer talks to components of this type: `ssh` (default), `local` (on the "
+        "extends": h("The parent component: `linux_system` for anything reachable over SSH (deploy, collect and "
+                     "kill built in), `component` for something that is not a Linux system (a switch, an instrument "
+                     "driven through its own API), or another component of the library.", type="string"),
+        "description": h("What this component is: shown in the Editor when a host extends it.", type="string"),
+        "transport": h("How the sequencer talks to this component: `ssh` (default), `local` (on the "
                        "sequencer host), or a plugin transport. The inventory variable `tsq_transport` overrides it.",
                        type="string"),
         "commands": COMMANDS,
@@ -230,12 +232,35 @@ COMPONENT_TYPE = h(
             "status": {"probe": {"run": "ping -c 1 -W 1 {{ component.host }}"},
                        "states": {"running": {"exit": 0}, "offline": {"exit": "nonzero"}}}}}])
 
-TYPES_FILE = {
-    "$schema": "http://json-schema.org/draft-07/schema#", "title": "Component type library file",
-    **h("A file of the lab's type library (the `tsq_types` folders of the inventory): `component_types`, by name."),
-    "type": "object", "required": ["component_types"], "additionalProperties": False,
-    "properties": {"component_types": h("Component types, by name. The built-in `component` and `linux_system` "
-                                        "cannot be redefined.", type="object", additionalProperties=COMPONENT_TYPE)},
+ROLE = h(
+    "A lab role: an abstract definition of a component, the commands it offers, by name, with what each does. "
+    "Lab components implement them; datapacks bind their logical components by role and run its commands. "
+    "A role `extends` another one and adds commands (section 7.1).",
+    type="object", additionalProperties=False,
+    properties={
+        "extends": h("The parent role: its commands are offered too. `linux_system` (deploy, collect, kill) for "
+                     "anything reachable over SSH, `component` (no command) otherwise.", type="string"),
+        "description": h("What this role is: shown in the Editor when a role is chosen.", type="string"),
+        "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
+                      "components.", type="object",
+                      properties={name: h(f"**{name}**: {text}", type=["string", "null"])
+                                  for name, text in COMMAND_NAMES.items()},
+                      additionalProperties=h("What the command does.", type=["string", "null"])),
+    },
+    defaultSnippets=[{"label": "application on a Linux computer", "body": {
+        "extends": "linux_system", "description": "${1:what it is}",
+        "commands": {"start": "Starts the application.", "stop": "Stops the application.",
+                     "ready": "Waits until the application is ready."}}}])
+
+LIBRARY_FILE = {
+    "$schema": "http://json-schema.org/draft-07/schema#", "title": "Lab library file",
+    **h("A file of the lab library (the `tsq_library` folders of the inventory): `roles` (abstract: the commands "
+        "offered) and/or `components` (concrete: their implementations), by name."),
+    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["components"]}],
+    "properties": {"roles": h("Lab roles, by name. The built-in `component` and `linux_system` cannot be redefined.",
+                              type="object", additionalProperties=ROLE),
+                   "components": h("Lab components, by name. The built-in `component` and `linux_system` cannot be "
+                                   "redefined.", type="object", additionalProperties=COMPONENT)},
 }
 
 # ── lab inventory ──────────────────────────────────────────────────────────
@@ -251,9 +276,12 @@ VARS = {
     "ansible_port": h("SSH port (default 22).", type="integer"),
     "ansible_ssh_private_key_file": h("Private key used to log in (no password prompt).", type="string",
                                       examples=["~/.ssh/id_lab"]),
-    "tsq_role": h("Role of the component, a type of the lab type library (section 7): it gives the commands, the "
-                  "status probe and the self-test. Datapacks bind their logical components by role (`role: pilot` "
-                  "binds the host with `tsq_role: pilot` in the stage). Unique within a stage.", type="string"),
+    "tsq_role": h("Role of the component, a role of the lab library (section 7.1): the commands it must implement. "
+                  "Datapacks bind their logical components by role (`role: pilot` binds the host with "
+                  "`tsq_role: pilot` in the stage). Unique within a stage.", type="string"),
+    "tsq_extends": h("The lab component this host is (section 7.2): a component of the library, or another host. "
+                     "It gives the implementations of the commands, the status probe and the self-test "
+                     "(default `linux_system`).", type="string"),
     "tsq_lock": LOCK,
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
     "tsq_transport": h("How the sequencer talks to the component: `ssh` (default) or `local` (commands run on the "
@@ -261,8 +289,12 @@ VARS = {
     "tsq_remote_root": h("Folder on the component under which each logical component gets "
                          "`<root>/<component>/input` and `output`.", type="string", examples=["/opt/testrun"]),
     "tsq_commands": h("Command overrides, by name. On a stage group they apply to every component of the stage; on a "
-                      "host, to that host only. They win over the component type and the datapack (section 7.3).",
+                      "host, to that host only. They win over the component it extends (section 7.4).",
                       type="object", additionalProperties=COMMAND),
+    "tsq_status": STATUS,
+    "tsq_selftest": SELFTEST,
+    "tsq_collect": h("Filters applied to what `collect` brings back from this host (`include`, `exclude`).",
+                     type="object"),
 }
 
 HOST_VARS = h("Variables of a host. `tsq_` variables are the sequencer's; any other variable is kept and reachable "
@@ -303,10 +335,10 @@ INVENTORY = {
                            "properties": {
                                **_group(0)["properties"],
                                "vars": h("Variables of every host (defaults).", type=["object", "null"],
-                                         properties={**VARS, "tsq_types": h(
-                                             "Folders of the component type library, relative to this file.",
-                                             type=["array", "string"], items={"type": "string"},
-                                             examples=[["types/"]])}),
+                                         properties={**VARS, "tsq_library": h(
+                                             "Folders of the lab library (roles and components), relative to "
+                                             "this file.", type=["array", "string"], items={"type": "string"},
+                                             examples=[["roles/", "components/"]])}),
                                "hosts": h("Ad hoc components: in no stage, bound by role on their own "
                                           "(`role: sequencer` for the analysis on the sequencer host, simulations...).",
                                           type=["object", "null"], additionalProperties=HOST_VARS)}}},
@@ -341,7 +373,7 @@ INPUT = h(
 
 DATAPACK_TYPE = h(
     "A datapack component type: the inputs each configuration of it gets (section 8.2). The commands come from "
-    "the lab type of the component's `role`.",
+    "the lab role of the component's `role`.",
     type="object", required=["configurations"], additionalProperties=False,
     properties={
         "description": h("What this component is in the test.", type="string"),
@@ -362,7 +394,7 @@ LOGICAL_COMPONENT = h(
                 "configuration": h("Configuration of that type to use (its inputs).", type="string"),
                 "stage": h("Logical stage it belongs to (`stages` of this configuration). Leave out for an ad hoc "
                            "component.", type="string"),
-                "role": h("Role it binds to in the lab (`tsq_role`): a lab type, which gives its commands.",
+                "role": h("Role it binds to in the lab (`tsq_role`): a lab role, which gives its commands.",
                           type="string"),
                 "needs": h("Components whose inputs are generated first, readable with `read_input('<id>/<file>')` "
                            "and `components.<id>.input_dir` (section 5.2).", type="array", items={"type": "string"}),
@@ -528,7 +560,7 @@ SUBPIPELINES_FILE = {
                                                        additionalProperties=SUBPIPELINE)},
 }
 
-BASE = {"inventory": INVENTORY, "types": TYPES_FILE, "setup": SETUP, "testdef": TESTDEF,
+BASE = {"inventory": INVENTORY, "library": LIBRARY_FILE, "setup": SETUP, "testdef": TESTDEF,
         "subpipelines": SUBPIPELINES_FILE}
 
 
@@ -557,18 +589,23 @@ def _walk(node: Any, fn) -> None:
 def schemas(context: dict) -> dict:
     """The schemas, with the choices of the lab and workspace of an editing session (``Editor.context``)."""
     lab = context.get("lab") or {}
-    types = {name: f"**{name}**" + (f" (extends {t['extends']})" if t.get("extends") else "")
-             + (f": {t['description']}" if t.get("description") else "")
-             + (f"\n\ncommands: {', '.join(sorted(t.get('commands') or {}))}" if t.get("commands") else "")
-             for name, t in (lab.get("types") or {}).items()}
-    roles = {name: text + (f"\n\nused by {', '.join((lab.get('roles') or {})[name])}" if name in (lab.get("roles") or {}) else "")
-             for name, text in types.items()}
+    def text(name: str, d: dict, commands) -> str:
+        return (f"**{name}**" + (f" (extends {d['extends']})" if d.get("extends") else "")
+                + (f": {d['description']}" if d.get("description") else "")
+                + (f"\n\ncommands: {', '.join(sorted(commands))}" if commands else ""))
+
+    lab_roles = lab.get("roles") or {}
+    roles = {name: text(name, r, r.get("commands") or {})
+             + (f"\n\nused by {', '.join(r['used_by'])}" if r.get("used_by") else "")
+             for name, r in lab_roles.items()}
+    components = {name: text(name, c, c.get("commands") or {}) for name, c in (lab.get("library") or {}).items()}
+    hosts = {name: f"host **{name}** (role {c.get('role')})" for name, c in (lab.get("components") or {}).items()}
     stage_types = {t: f"stages: {', '.join(s)}" for t, s in (lab.get("stage_types") or {}).items()}
     transports = {t: t for t in context.get("transports") or ["local", "ssh"]}
     commands: dict[str, str] = {}
-    for name, t in (lab.get("types") or {}).items():
-        for cmd in t.get("commands") or {}:
-            commands.setdefault(cmd, f"{COMMAND_NAMES.get(cmd, '')}\n\nprovided by: ")
+    for name, r in lab_roles.items():
+        for cmd, info in (r.get("commands") or {}).items():
+            commands.setdefault(cmd, f"{(info or {}).get('description') or COMMAND_NAMES.get(cmd, '')}\n\nroles: ")
             commands[cmd] += name + " "
     ws = context.get("workspace") or {}
     logical = {c: f"{c} ({v.get('type', '')}, role {v.get('role', '')})"
@@ -594,13 +631,17 @@ def schemas(context: dict) -> dict:
             props["tsq_stage_type"].update(_choices(stage_types, False))
         if "tsq_transport" in props:
             props["tsq_transport"].update(_choices(transports, True))
-        if "extends" in props and "commands" in props and types:
-            props["extends"].update(_choices(types, True))
+        if "tsq_extends" in props and (components or hosts):
+            props["tsq_extends"].update(_choices({**components, **hosts}, False))
+        if "extends" in props and "transport" in props and components:
+            props["extends"].update(_choices(components, True))
+        if "extends" in props and "transport" not in props and "commands" in props and roles:
+            props["extends"].update(_choices(roles, True))
         if "transport" in props and "commands" in props:
             props["transport"].update(_choices(transports, True))
 
     _walk(result["inventory"], lab_fields)
-    _walk(result["types"], lab_fields)
+    _walk(result["library"], lab_fields)
 
     def setup_fields(node: dict) -> None:
         props = node.get("properties") or {}
