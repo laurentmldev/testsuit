@@ -646,6 +646,22 @@ def test_probe_via(tmp_path, no_git):
     assert lab.lab_keys(lab.inventory.components["obc_1"], lab.inventory.stages["bench_1"])["stage"]["roles"]["dut"]["id"] \
         == "counter_1"
 
+    # several checks: each runs whatever the others gave, and the rules see all their outputs
+    types["components"]["obc"]["status"]["probe"] = {"run": [f"cat {psu}", "echo DOWN; exit 3", "echo UP"]}
+    types["components"]["obc"]["status"]["states"] = {"broken": {"regex": "^ON[\\s\\S]*DOWN"}, "idle": {"regex": "^OFF"}}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def checks():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        await seq.monitor.probe("obc_1")
+        await seq.close()
+        return seq.monitor.reports["obc_1"]
+    report = asyncio.run(checks())
+    ran = [s for s in report["steps"] if "ok" in s]
+    assert [s["ok"] for s in ran] == [True, False, True] and ran[1]["exit"] == 3
+    assert report["state"] == "broken" and report["detail"] == "1 of 3 checks failed" and "2 OK, 1 failed" in report["why"]
+
     types["components"]["obc"]["status"]["via"] = "nobody"
     write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
     from testsuit.sequencer.util import SequencerError

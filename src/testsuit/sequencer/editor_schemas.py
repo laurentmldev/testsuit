@@ -167,8 +167,12 @@ STATUS = h(
     properties={
         "probe": h("The probe: `{run: <shell command>}`, `{http: <url>}`, or a plugin state probe.",
                    type="object", properties={"run": h("Shell command run on the component (locally with "
-                                                       "`transport: local`, on the `via` component with `via`).",
-                                                       type="string"),
+                                                       "`transport: local`, on the `via` component with `via`). "
+                                                       "A list of commands: several checks, each run whatever the "
+                                                       "others gave and OK when it exits with 0; the rules match "
+                                                       "their outputs one after the other, `exit` rules the first "
+                                                       "non-zero exit status.",
+                                                       type=["string", "array"], items={"type": "string"}),
                                               "http": {"type": ["string", "object"]}, "timeout": DURATION}),
         "states": h("Rules giving a state from the probe result, first match wins: `{regex: ...}` on the output, "
                     "or `{exit: 0 | nonzero}`.", type="object",

@@ -188,7 +188,7 @@ export function classes(...names: (string | false | null | undefined)[]): string
 export const STATE_COLORS: Record<string, string> = {
   succeeded: "ok", passed: "ok", running: "run", active: "run", queued: "wait", waiting: "wait", pending: "wait",
   failed: "bad", error: "bad", broken: "bad", offline: "bad", cancelled: "muted", killed: "bad", skipped: "muted",
-  idle: "idle", configured: "info", unknown: "muted", done: "ok",
+  idle: "idle", configured: "info", unknown: "muted", done: "ok", OK: "ok", FAILED: "bad",
 };
 
 export function Badge({ value, title }: { value?: string | null; title?: string }) {

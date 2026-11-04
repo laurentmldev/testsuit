@@ -78,6 +78,40 @@ def _matched(report: dict, states: dict, output: str, exit_status: int | None, a
     return "unknown"
 
 
+async def _probe_commands(report: dict, status: dict, probe: dict, keys: dict, transport: Transport, on: Component,
+                          comp: Component, via: Component | None) -> tuple[str, str]:
+    """A status probe of several commands (``run: [...]``): each runs, whatever the others gave, and is OK when
+    it exits with 0. The rules match their outputs, one after the other; ``exit`` rules the first non-zero exit
+    status (0 when all are OK)."""
+    report["kind"] = "commands"
+    timeout = parse_duration(probe.get("timeout")) or 15
+    outputs, exits, errors = [], [], []
+    for i, item in enumerate(probe["run"]):
+        command = str(render(item, keys, f"{comp.id} status"))
+        step = {"action": f"check {i + 1} of {len(probe['run'])} on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
+                + f" (timeout {timeout:g} s)", "command": command}
+        report["steps"].append(step)
+        result = await transport.shell(command, timeout=timeout)
+        step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
+                    ok=result.completed and result.exit_status == 0)
+        if result.completed:
+            outputs.append(result.output)
+            exits.append(result.exit_status)
+        else:
+            errors.append(result.error or "no answer")
+    if not outputs:
+        report["why"] = f"none of the status commands completed: {errors[0] if errors else 'no command'}"
+        return "offline", errors[0] if errors else ""
+    checks = [s for s in report["steps"] if "ok" in s]
+    failed = [s for s in checks if not s["ok"]]
+    exit_status = next((e for e in exits if e), 0)
+    output = "".join(o if o.endswith("\n") else o + "\n" for o in outputs)
+    state = _matched(report, status.get("states") or {}, output, exit_status,
+                     f"their answers ({len(checks) - len(failed)} OK, {len(failed)} failed"
+                     + (f", first non-zero exit status {exit_status}" if exit_status else "") + ")")
+    return state, f"{len(failed)} of {len(probe['run'])} checks failed" if failed else "all checks OK"
+
+
 async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
                           expected: str | None = None, report: dict | None = None,
                           via: Component | None = None, lab: Lab | None = None) -> tuple[str, str]:
@@ -142,6 +176,8 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
         return state, ""
     probe = status.get("probe") or {}
     keys = component_keys(comp, root, via, lab)
+    if "run" in probe and isinstance(probe["run"], list):
+        return await _probe_commands(report, status, probe, keys, transport, on, comp, via)
     if "run" in probe:
         report["kind"] = "command"
         command = str(render(probe["run"], keys, f"{comp.id} status"))
@@ -314,6 +350,12 @@ class Monitor:
 
 # ── self-test ──────────────────────────────────────────────────────────────
 
+def _not_run(selftest: list[dict], done: set[str], why: str) -> list[dict]:
+    """The checks left after one that stops the self-test, listed as not run: the report shows every check."""
+    return [{"id": c["id"], "ok": False, "skipped": True, "detail": f"not run: {why}"}
+            for c in selftest if c["id"] not in done]
+
+
 async def selftest_component(comp: Component, resolved: Resolved, transport: Transport,
                              monitor: Monitor | None = None, timeout: float = 60.0,
                              via: Component | None = None) -> dict:
@@ -328,7 +370,8 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
         root = await transport.resolve_root()
     except Exception as e:
         return {"component": comp.id, "ok": False, "state": "offline",
-                "checks": [{"id": "login", "ok": False, "detail": str(e)}], "at": now()}
+                "checks": [{"id": "login", "ok": False, "detail": str(e)},
+                           *_not_run(resolved.selftest, {"login"}, "the component cannot be reached")], "at": now()}
     keys = component_keys(comp, root, via, monitor.lab if monitor is not None else None)
 
     async def shell(command: str, limit: float | None = None):
@@ -364,6 +407,8 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 ok, detail = r.completed and r.exit_status == 0, r.error or ""
                 if not ok:
                     checks.append({"id": cid, "ok": False, "detail": detail or "login failed"})
+                    later = [c["id"] for c in resolved.selftest]
+                    checks += _not_run(resolved.selftest, set(later[:later.index(cid) + 1]), "the login failed")
                     return {"component": comp.id, "ok": False, "state": "offline", "checks": checks, "at": now()}
             elif builtin == "remote_root":
                 q = shlex.quote(root)
