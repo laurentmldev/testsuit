@@ -1,6 +1,7 @@
 # Lab component types of the toy-train lab (sequencer README, section 7).
-# They say how to drive and monitor each kind of hardware, whatever the test.
-# What a given test deploys and starts is in the datapack setup (component_types extending these).
+# They say how to drive and monitor each kind of hardware, whatever the test: the hardware types first,
+# then the roles the components take (tsq_role in the inventory), each extending its hardware type.
+# What a given test deploys is in the datapack setup (its component_types: inputs only).
 #
 # Assumed on the targets (prepared once by the lab operators, not by the tests):
 # - an account 'tsq' with the lab key, and sudo rights limited to the commands below;
@@ -72,6 +73,37 @@ component_types:
       version: {run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
     selftest:
       - {id: sim_installed, run: "{{ remote_root }}/venv/bin/toytrain-sim --version"}
-      - {id: propulsion_address, run: "ip -o addr show | grep -q ' {{ component.vars.tsq_sim_address }}/'",
-         if: "component.role == 'propulsion_sim'"}
-      - {id: gpio_adapter, run: "test -e {{ component.vars.tsq_gpio_adapter }}", if: "component.role == 'piezo_sim'"}
+
+  # ── roles: what datapacks bind to (role: <name> in a setup), and the commands they get ──
+
+  pilot:                               # CALC-Pilot
+    extends: arduino_unoq
+
+  telemetry:                           # CALC-TM
+    extends: rpi5
+
+  acquisition:                         # AU
+    extends: rpi5
+
+  switch:
+    extends: auvidea_m82
+
+  propulsion_sim:
+    # the simulated propulsion controller, from the inputs a datapack deploys (sim/, propulsion_sim.yml)
+    extends: toytrain_sim
+    commands:
+      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml --out {{ component.output_dir }}", detach: true}
+    selftest:
+      - {id: propulsion_address, run: "ip -o addr show | grep -q ' {{ component.vars.tsq_sim_address }}/'"}
+
+  piezo_sim:
+    # the simulated piezo sensors, from the inputs a datapack deploys (sim/, piezo_sim.yml)
+    extends: toytrain_sim
+    commands:
+      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim piezo --config {{ component.input_dir }}/piezo_sim.yml --gpio {{ component.vars.tsq_gpio_adapter }} --out {{ component.output_dir }}", detach: true}
+    selftest:
+      - {id: gpio_adapter, run: "test -e {{ component.vars.tsq_gpio_adapter }}"}
+
+  sequencer:
+    # the lab server running the sequencer: the exploitation runs there (a pipeline step runs exploit_runner)
+    extends: linux_system

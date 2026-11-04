@@ -463,7 +463,7 @@ class Editor:
 
     def rename_type(self, session: EditSession, old: str, new: str, skip: str | None = None) -> list[str]:
         """After a lab component type is renamed in its file: the references to it in the other files of the
-        session follow ('extends' in the type files, 'tsq_type' in the inventory). Returns the files changed.
+        session follow ('extends' in the type files, 'tsq_role' in the inventory). Returns the files changed.
         (A datapack type of a setup is only referred to in its own file: its form renames them.)"""
         def follow(node: Any, keys: tuple[str, ...]) -> bool:
             changed = False
@@ -504,7 +504,7 @@ class Editor:
             except (OSError, yaml.YAMLError):
                 continue
             if f["kind"] == "inventory":
-                hit = follow(data, ("tsq_type",))
+                hit = follow(data, ("tsq_role",))
             else:
                 hit = follow((data or {}).get("component_types"), ("extends",))
             if hit:
@@ -628,8 +628,8 @@ class Editor:
         types = {}
         for name, t in (data.get("component_types") or {}).items():
             t = t if isinstance(t, dict) else {}
-            types[name] = {"extends": t.get("extends", ""), "configurations": sorted(t.get("configurations") or {}),
-                           "commands": sorted(t.get("commands") or {}), "description": t.get("description", "")}
+            types[name] = {"configurations": sorted(t.get("configurations") or {}),
+                           "description": t.get("description", "")}
         datasets = [{"id": ds.get("id"), "version": ds.get("version")}
                     for repo in data.get("datarepositories") or [] for src in repo.get("datasources") or []
                     for ds in src.get("datasets") or [] if isinstance(ds, dict)]
@@ -731,11 +731,6 @@ class Editor:
                         line, column = _find_line(text, problem)
                         problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
                                          "message": f"setup {setup['id']} ({cfg_name}), in {folder.name}: {problem}"})
-        for comp in lab.inventory.components.values():
-            if not comp.role and not comp.adhoc:
-                line, column = _find_line(text, f"'{comp.id}'")
-                problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
-                                 "message": f"component '{comp.id}' has no tsq_role: no datapack can bind it"})
         return [p for p in problems if only is None or p["file"] == only or only == inv_rel] if only else problems
 
     def _needs_or_none(self, setup: dict, cfg_name: str, folder: Path):
@@ -851,12 +846,6 @@ class Editor:
         lab, _ = self.lab_for(session)
         types = raw.get("component_types") or {}
         for name, t in types.items():
-            base = t.get("extends") or ""
-            if base and base not in types and base not in lab.types.types:
-                where = yamledit.locate(text, ["component_types", name, "extends"]) or (1, 1)
-                problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "error",
-                                 "message": f"type '{name}' extends '{base}', unknown in the lab type library "
-                                            f"({', '.join(sorted(lab.types.types))})"})
             for cfg_name, cfg in (t.get("configurations") or {}).items():
                 for i, inp in enumerate((cfg or {}).get("inputs") or []):
                     source = str(inp.get("source", ""))
@@ -959,8 +948,7 @@ class Editor:
                             entry.update(concrete=concrete.id, lab_type=concrete.type)
                             if step.action == "do":
                                 try:
-                                    resolved = lab.types.resolve(concrete, stage, needs.component_types, lc.type,
-                                                                 lc.commands)
+                                    resolved = lab.types.resolve(concrete, stage)
                                 except SequencerError as e:
                                     problems.append(str(e))
                                     resolved = None
@@ -991,8 +979,8 @@ class Editor:
         return result
 
     def palette(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
-        """What a step can do on each logical component of a test definition: the commands its datapack type
-        and lab type give (README section 13.2, pipelines)."""
+        """What a step can do on each logical component of a test definition: the commands its role's lab
+        type gives, with the stage overrides (README section 13.2, pipelines)."""
         from testsuit.sequencer.model import needs_from_setup
         path = self.path(session, rel)
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -1007,20 +995,10 @@ class Editor:
         components = {}
         for lc in needs.components.values():
             commands: dict[str, dict] = {}
-            chain = []
-            current, seen = lc.type, set()
-            while current in needs.component_types and current not in seen:
-                seen.add(current)
-                chain.insert(0, current)
-                current = (needs.component_types[current] or {}).get("extends") or ""
+            current = lc.role
             if current in lab_types:
                 for cmd, info in lab_types[current]["commands"].items():
                     commands[cmd] = {"spec": info["spec"], "from": f"lab type {info['from']}"}
-            for t in chain:
-                for cmd, spec in ((needs.component_types[t] or {}).get("commands") or {}).items():
-                    commands[cmd] = {"spec": spec, "from": f"datapack type {t}"}
-            for cmd, spec in (lc.commands or {}).items():
-                commands[cmd] = {"spec": spec, "from": "setup component"}
             # lab overrides on the stages of that type
             stage_type = needs.stages.get(lc.stage)
             for stage in lab.inventory.stages_of_type(stage_type) if stage_type else []:
@@ -1178,10 +1156,7 @@ class Editor:
         components = []
         for comp_id, comp in (cfg.get("components") or {}).items():
             comp = comp if isinstance(comp, dict) else {}
-            lab_type, seen = comp.get("type"), set()
-            while lab_type in types and lab_type not in seen:
-                seen.add(lab_type)
-                lab_type = (types[lab_type] or {}).get("extends") or ""
+            lab_type = comp.get("role") or ""
             configuration = ((types.get(comp.get("type")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
             inputs = []
             for item in configuration.get("inputs") or []:

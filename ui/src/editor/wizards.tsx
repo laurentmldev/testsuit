@@ -17,28 +17,14 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
   types: { label: "Component types", description: "a file of the lab's type library", lab: true },
 };
 
-/** The lab type a datapack component type ends up extending, through the setup's own types. */
-function labTypeOf(setup: any, type: string, labTypes: Record<string, any>): string | null {
-  let t = type;
-  for (let i = 0; i < 10 && t; i++) {
-    if (labTypes[t]) return t;
-    t = setup.component_types?.[t]?.extends;
-  }
-  return null;
-}
-
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their
  * needs, wait until they are ready, run, then stop them and collect their outputs in finally. */
 export function starterPipeline(setup: any, configName: string, ctx: any): any {
   const cfg = setup.configurations[configName] || { stages: {}, components: {} };
   const labTypes = ctx.lab.types || {};
   const comps = Object.entries<any>(cfg.components);
-  const has = (id: string, cmd: string) => {
-    const comp = cfg.components[id];
-    const own: string[] = setup.component_types?.[comp.type]?.commands || [];
-    const lab = labTypeOf(setup, comp.type, labTypes);
-    return own.includes(cmd) || Object.keys(labTypes[lab || ""]?.commands || {}).includes(cmd);
-  };
+  // the commands of a component: those of its role's lab type
+  const has = (id: string, cmd: string) => Object.keys(labTypes[cfg.components[id]?.role || ""]?.commands || {}).includes(cmd);
   const steps: any[] = [];
   const started: Record<string, string> = {};
   const order: string[] = [];
@@ -149,7 +135,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
             }} choices={setups.map((s) => ({ value: s.path, label: s.name || s.id, description: s.path }))} />
           </Field>
           <Field label="Configuration"><Choices value={config} onChange={(v) => setConfig(v || "")} choices={configChoices} /></Field>
-          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stages and components of the configuration: each component is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the components and collects their outputs. Only the commands their types have are used." />
+          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stages and components of the configuration: each component is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the components and collects their outputs. Only the commands their roles have (their lab types) are used." />
         </>
       )}
       {["testdef", "setup", "dictionary"].includes(kind) && (

@@ -66,6 +66,12 @@ pipeline:
           python:
             script: "{{ component.input_dir }}/check_data.py"
             args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]
-        - {id: analyse, component: analysis, do: start, needs: [check_data]}   # exit 0: criteria ok, else failed
+        # exploit_runner on the criteria: exit 0 when they are met, the test failed otherwise
+        - id: analyse
+          component: analysis
+          needs: [check_data]
+          run: "exploit_runner {{ component.input_dir }}/exploit.yml"
+          timeout: 15m
+          expect: {exit: [0]}
       finally:
         - {id: collect, component: analysis, do: collect}

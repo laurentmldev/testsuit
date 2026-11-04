@@ -210,7 +210,7 @@ export function typeChoices(ctx: any, filter?: (name: string, t: any) => boolean
 export function stageTypeChoices(ctx: any): Choice[] {
   const result: Record<string, Choice> = {};
   for (const [type, stages] of Object.entries<any>(ctx.lab.stage_types || {})) {
-    const roles = Object.entries(ctx.lab.stage_type_roles?.[type] || {}).map(([r, t]) => `${r} (${t})`).join(", ");
+    const roles = Object.keys(ctx.lab.stage_type_roles?.[type] || {}).join(", ");
     result[type] = { value: type, description: `in the lab: ${stages.join(", ")}${roles ? ` · roles ${roles}` : ""}` };
   }
   for (const setup of ctx.workspace?.setups || [])
@@ -220,31 +220,23 @@ export function stageTypeChoices(ctx: any): Choice[] {
   return Object.values(result);
 }
 
-/** Roles: those used in the lab, then those datapack setups ask for. stageType narrows to the roles of
- * stages of that type; adhoc to the ad hoc components; labType to the roles held by a component of
- * that lab type or of a type extending it (a datapack type that extends it binds only to those). */
-export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?: boolean; labType?: string | null } = {}): Choice[] {
+/** Roles: the lab types components take as `tsq_role`. stageType narrows to the roles of the stages of
+ * that type, adhoc to those of the ad hoc components; otherwise every lab type. The roles datapack setups
+ * ask for and no lab component has come after. */
+export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?: boolean } = {}): Choice[] {
   const result: Record<string, Choice> = {};
-  const fits = (type: string) => !opts.labType || (ctx.lab.types?.[type]?.chain || [type]).includes(opts.labType);
-  if (opts.stageType) {
-    for (const [role, type] of Object.entries<any>(ctx.lab.stage_type_roles?.[opts.stageType] || {}))
-      if (fits(type)) result[role] = { value: role, description: `in the ${opts.stageType} stages: a \`${type}\`` };
-  } else if (opts.adhoc) {
-    for (const [role, type] of Object.entries<any>(ctx.lab.adhoc_roles || {}))
-      if (fits(type)) result[role] = { value: role, description: `ad hoc component of type \`${type}\`` };
-  } else {
-    for (const [role, comps] of Object.entries<any>(ctx.lab.roles || {}))
-      result[role] = { value: role, description: `used by ${comps.join(", ")}` };
-  }
+  const types = Object.fromEntries(typeChoices(ctx).map((c) => [c.value, c]));
+  const roles = opts.stageType ? Object.keys(ctx.lab.stage_type_roles?.[opts.stageType] || {})
+    : opts.adhoc ? Object.keys(ctx.lab.adhoc_roles || {}) : Object.keys(types);
+  for (const role of roles)
+    result[role] = { value: role, description: (opts.stageType ? `in the ${opts.stageType} stages · ` : opts.adhoc ? "ad hoc · " : "") + (types[role]?.description || "not a lab type") };
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
       for (const [id, comp] of Object.entries<any>(c.components || {})) {
         if (!comp.role || result[comp.role]) continue;
-        const asked = setup.component_types?.[comp.type]?.extends;
-        if (opts.labType && asked && !fits(asked)) continue;
         const stageType = comp.stage ? c.stages?.[comp.stage] : null;
         if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.stage)) continue;
-        result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), component ${id}: no lab component has it yet` };
+        result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), component ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab type of that name"}` };
       }
   return Object.values(result);
 }

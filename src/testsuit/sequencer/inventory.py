@@ -3,7 +3,8 @@
 - a group with ``tsq_stage_type`` is a **stage**, its hosts being the stage's components;
 - a host in several stage groups is a shared component;
 - a host directly under ``all`` (in no stage) is an **ad hoc component**;
-- variables follow Ansible precedence: host over group (child over parent) over ``all``.
+- variables follow Ansible precedence: host over group (child over parent) over ``all``;
+- a component's ``tsq_role`` names its type in the lab's type library (its commands, status, self-test).
 """
 from __future__ import annotations
 
@@ -27,12 +28,13 @@ class Component:
         return str(self.vars.get("ansible_host", self.id))
 
     @property
-    def type(self) -> str:
-        return str(self.vars.get("tsq_type", "linux_system"))
+    def role(self) -> str:
+        """The role it plays, a type of the lab's type library: it gives the component its commands."""
+        return str(self.vars.get("tsq_role", ""))
 
     @property
-    def role(self) -> str:
-        return str(self.vars.get("tsq_role", ""))
+    def type(self) -> str:
+        return self.role
 
     @property
     def lock(self) -> str:
@@ -150,6 +152,11 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
+        if "tsq_type" in merged:
+            raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone, the role is the type: "
+                                 f"give 'tsq_role' a type of the lab (one that extends '{merged['tsq_type']}')")
+        if not component.role:
+            raise SequencerError(f"inventory '{path}': component '{host}' has no 'tsq_role' (a type of the lab)")
         if component.lock not in LOCK_MODES:
             raise SequencerError(f"inventory '{path}': component '{host}': tsq_lock '{component.lock}' "
                                  f"is not one of {', '.join(LOCK_MODES)}")

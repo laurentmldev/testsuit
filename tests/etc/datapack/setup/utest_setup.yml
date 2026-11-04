@@ -26,9 +26,6 @@ component_types:
           - source: utest_ref_files/ref1.txt
             target: replaced.txt
             postprocess: ["replace s/sample/replaced/g"]
-    # not read by datapack: kept as is for the test sequencer
-    commands:
-      start: {run: "start {{ component.id }}"}
 
 configurations:
   nominal:

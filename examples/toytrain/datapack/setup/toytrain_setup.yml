@@ -2,8 +2,8 @@
 # It says what each component gets as inputs and how this test drives it; the lab inventory says
 # where the components are.
 #
-# The sequencer fields (extends, commands, stages, stage, role) are kept in the datapack as
-# written, for the sequencer to use at run time (commands are not rendered by the datapack tool).
+# The sequencer fields (stages, stage, role) are kept in the datapack as written, for the sequencer
+# to use at run time. A component's role is a type of the lab: it gives the component its commands.
 
 id: toytrain_setup
 name: Toy train (simulated propulsion and sensors)
@@ -34,7 +34,6 @@ datarepositories:
 component_types:
 
   pilot_app:                                  # CALC-Pilot application
-    extends: arduino_unoq                     # lab type: binds only to an Arduino UNO Q
     configurations:
       standard:
         inputs:
@@ -42,7 +41,6 @@ component_types:
           - {source: templates/pilot.yml, target: pilot.yml}
 
   telemetry_app:                              # CALC-TM application
-    extends: rpi5
     configurations:
       standard:
         inputs:
@@ -50,7 +48,6 @@ component_types:
           - {source: templates/telemetry.yml, target: telemetry.yml}
 
   acquisition_app:                            # AU application
-    extends: rpi5
     configurations:
       standard:
         inputs:
@@ -58,35 +55,26 @@ component_types:
           - {source: templates/acquisition.yml, target: acquisition.yml}
 
   propulsion_sim:
-    extends: toytrain_sim
     configurations:
       standard:
         inputs:
           - {source: "{{ toytrain_sim.path }}/", target: sim/, method: copy}
           - {source: templates/propulsion_sim.yml, target: propulsion_sim.yml}
-    commands:
-      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml --out {{ component.output_dir }}", detach: true}
 
   piezo_sim:
-    extends: toytrain_sim
     configurations:
       standard:
         inputs:
           - {source: "{{ toytrain_sim.path }}/", target: sim/, method: copy}
           - {source: templates/piezo_sim.yml, target: piezo_sim.yml}
-    commands:
-      start: {run: "{{ remote_root }}/venv/bin/toytrain-sim piezo --config {{ component.input_dir }}/piezo_sim.yml --gpio {{ component.vars.tsq_gpio_adapter }} --out {{ component.output_dir }}", detach: true}
 
   exploit:                                    # exploitation with testsuit's exploit_runner
-    extends: linux_system
     configurations:
       standard:
         inputs:
           - {source: templates/exploit.yml, target: exploit.yml}
           - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
           - {source: scripts/check_data.py, target: check_data.py, method: copy}   # a python step (testdef pipeline)
-    commands:
-      start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m, expect: {exit: [0]}}
 
 # The datapack does not drive the train's switch: on the lab it is locked with its stage all the same.
 configurations:

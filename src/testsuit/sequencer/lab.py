@@ -65,7 +65,7 @@ class Lab:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
                 "stages": {s.id: {"type": s.type, "components": s.components} for s in self.inventory.stages.values()},
-                "components": {c.id: {"type": c.type, "role": c.role, "host": c.host, "lock": c.lock,
+                "components": {c.id: {"type": c.role, "role": c.role, "host": c.host, "lock": c.lock,
                                       "stages": c.stages, "label": c.label}
                                for c in self.inventory.components.values()},
                 "types": {t.name: {"extends": t.extends, "source": t.source, "commands": sorted(t.commands)}
@@ -73,7 +73,7 @@ class Lab:
 
 
 def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, strict: bool = True) -> Lab:
-    """Read and check the inventory and its type library (every component's type must exist).
+    """Read and check the inventory and its type library (every component's role must be a type).
 
     :param strict: False to accept unknown types, for components and parents (the Editor, while a type is renamed)
     """
@@ -85,6 +85,9 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
         try:
             types.chain(component.type)
         except SequencerError as e:
+            if component.role not in types.types:
+                e = SequencerError(f"role '{component.role}' is not a type of the lab (tsq_types: "
+                                   f"{', '.join(str(f) for f in inventory.type_folders) or 'none'})")
             raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
     lab = Lab(folder=folder, inventory=inventory, types=types, git=git_state(folder), require_tag=require_tag)
     for warning in lab.warnings if strict else []:

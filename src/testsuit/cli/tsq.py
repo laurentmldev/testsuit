@@ -363,7 +363,7 @@ def cmd_validate(args, client: Client | None) -> int:
                         concrete = lab.inventory.components[binding.components[step.component]]
                         lc = dp.needs.components[step.component]
                         stage = lab.inventory.stages.get(binding.stages.get(lc.stage, ""))
-                        resolved = lab.types.resolve(concrete, stage, dp.needs.component_types, lc.type, lc.commands)
+                        resolved = lab.types.resolve(concrete, stage)
                         spec = resolved.commands.get(step.do)
                         if spec is None:
                             problems.append(f"phase {flat.phase.id}, step {fs.id}: {step.component} "

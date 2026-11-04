@@ -51,11 +51,11 @@ src/toytrain/
   assets/toytrain_logo.svg             report logo
 lab/                                   owned by the lab operators
   toytrain_lab.yml                     inventory: stage train_1, ad hoc components on lab-srv
-  types/toytrain.yml                   lab types: arduino_unoq, rpi5, auvidea_m82, toytrain_sim
+  types/toytrain.yml                   lab types: hardware (arduino_unoq, rpi5...) and the roles extending it (pilot...)
   toytrain_emulated.yml                inventory of the emulated mode: everything on the dev host
-  types_emulated/toytrain.yml          the same type names, as local processes
+  types_emulated/toytrain.yml          the same roles, as local processes
 datapack/                              owned by the test authors
-  setup/toytrain_setup.yml             test component types (extending the lab types), inputs, resources
+  setup/toytrain_setup.yml             test component types (their inputs), resources bound by role
   setup/globals.yml                    train characteristics, network plan, versions
   setup/platforms/<configuration>.yml  what the platform changes: sim_bench (the lab), emulated (dev host)
   setup/templates/                     configuration of each component, rendered by the datapack tool
@@ -190,7 +190,7 @@ tsq --config tsq.dev.yml run .work/datapacks/toytrain_front_contact_toytrain_set
 What changes, and what does not:
 - **The datapack** is built from the same test definitions and setup. Only the setup configuration differs: `emulated` adds the dictionary `platforms/emulated.yml`, which moves every address to the loopback interface (`127.0.0.10` to `127.0.0.30`). Linux routes all of `127.0.0.0/8` to it, multicast included, so this needs no network setup. Ports and the multicast group are unchanged.
 - **The lab** is `lab/toytrain_emulated.yml`. Its stage `train_emu` has the type `toytrain` and the roles pilot, telemetry and acquisition, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
-- **The component types** in `lab/types_emulated/` keep the lab's type names. Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
+- **The component types** in `lab/types_emulated/` define the lab's roles. Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
 - **The hardware** is simplified away:
   - the CALC-Pilot microcontroller is replaced by its host stub (`--mcu host`), so flashing only checks the firmware image;
   - the AU GPIO inputs are replaced by UDP datagrams from the piezo simulation, in place of the USB GPIO adapter;
@@ -219,7 +219,7 @@ This sample also uses a few details that the sequencer README leaves open:
 - `install` and `version` are ordinary named commands;
 - `wait_for: {state: ...}` names its component.
 
-The datapack tool keeps the sequencer fields (`extends`, `stages`, `stage`, `role`, `commands`, `pipeline`) in the datapack as written, for the sequencer to use.
+The datapack tool keeps the sequencer fields (`stages`, `stage`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A component's role is a type of the lab (`lab/types/toytrain.yml`), which gives it its commands.
 
 ## Writing your own
 

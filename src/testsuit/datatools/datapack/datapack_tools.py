@@ -57,7 +57,7 @@ from pydantic import ValidationError
 from testsuit.datatools.datapack.baseline import check_baseline, tool_versions
 from testsuit.datatools.datapack.generators import GeneratorError, run_generator
 from testsuit.datatools.datapack.importers import create_data_importer
-from testsuit.datatools.datapack.model import DataRepository, Setup, Testdef
+from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
 from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping
 from testsuit.plugins import load_plugins
@@ -438,19 +438,20 @@ class _Builder:
                     self.dataset_keys.append(({dataset.id: {"path": record["path"], "version": dataset.version}}, "<datapack>"))
 
         keys = self.keys()
-        # sequencer commands are kept as written: rendered at run time, with the run's keys
-        commands = {}
+        for type_id, type_def in (raw.get("component_types") or {}).items():       # before rendering: a clear error
+            for key in ("extends", "commands"):
+                if isinstance(type_def, dict) and key in type_def:
+                    raise DatapackError(f"setup '{self.setup_file}': component type '{type_id}': '{key}' {GONE}")
         for config_id, config in (raw.get("configurations") or {}).items():
             for comp_id, comp in ((config or {}).get("components") or {}).items():
                 if isinstance(comp, dict) and "commands" in comp:
-                    commands[(config_id, comp_id)] = comp.pop("commands")
+                    raise DatapackError(f"setup '{self.setup_file}': configuration '{config_id}', component "
+                                        f"'{comp_id}': 'commands' {GONE}")
         rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "component_types"}),
                     "component_types": {
-                        type_id: {**keys.render_data({k: v for k, v in type_def.items() if k != "commands"}, where=f"component_types.{type_id}"),
-                                  "commands": type_def.get("commands", {})}
+                        type_id: keys.render_data(type_def, where=f"component_types.{type_id}") if isinstance(type_def, dict)
+                        else type_def
                         for type_id, type_def in (raw.get("component_types") or {}).items()}}
-        for (config_id, comp_id), value in commands.items():
-            rendered["configurations"][config_id]["components"][comp_id]["commands"] = value
         setup = _validate(Setup, rendered, f"setup '{self.setup_file}'")
         if testdef.setup_config not in setup.configurations:
             raise DatapackError(f"no configuration '{testdef.setup_config}' in setup '{self.setup_file}' "

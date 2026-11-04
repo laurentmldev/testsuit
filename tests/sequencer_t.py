@@ -45,6 +45,8 @@ LAB_TYPES = {
                 "version": {"run": "echo counter-1.2.0"},
             },
         },
+        "dut": {"extends": "counter_host"},              # the roles: what components are (tsq_role)
+        "sequencer": {"extends": "linux_system"},
     },
 }
 
@@ -53,13 +55,11 @@ SETUP = {
     "name": "Counter bench",
     "dictionaries": ["globals.yml"],
     "component_types": {
-        "dut_app": {"extends": "counter_host", "configurations": {"standard": {"inputs": [
+        "dut_app": {"configurations": {"standard": {"inputs": [
             {"source": "files/app.sh", "target": "app.sh", "method": "copy"},
             {"source": "files/conf.txt", "target": "conf.txt"}]}}},
-        "analysis": {"extends": "linux_system", "configurations": {"standard": {"inputs": [
-            {"source": "files/check.sh", "target": "check.sh"}]}},
-            "commands": {"start": {"run": "sh {{ component.input_dir }}/check.sh {{ component.input_dir }} "
-                                          "{{ component.output_dir }}"}}},
+        "analysis": {"configurations": {"standard": {"inputs": [
+            {"source": "files/check.sh", "target": "check.sh"}]}}},
     },
     "configurations": {"bench": {
         "stages": {"bench": {"type": "counter_bench"}},
@@ -84,7 +84,8 @@ PIPELINE = {
         {"id": "exploit", "needs": ["test_run"], "components": ["analysis"],
          "inputs": [{"from": "test_run:dut/output/count.txt", "to": "analysis/input/data/"}],
          "steps": [{"id": "deploy", "component": "analysis", "do": "deploy"},
-                   {"id": "analyse", "component": "analysis", "do": "start", "needs": ["deploy"]}],
+                   {"id": "analyse", "component": "analysis", "needs": ["deploy"],
+                    "run": "sh {{ component.input_dir }}/check.sh {{ component.input_dir }} {{ component.output_dir }}"}],
          "finally": [{"id": "collect", "component": "analysis", "do": "collect"}]},
     ],
 }
@@ -107,7 +108,7 @@ class Bench:
             "hosts": {"seq_host": {"tsq_role": "sequencer", "tsq_lock": "none",
                                    "tsq_remote_root": str(root / "remote" / "seq_host")}},
             "children": {f"bench_{i}": {"vars": {"tsq_stage_type": "counter_bench"}, "hosts": {
-                f"counter_{i}": {"tsq_type": "counter_host", "tsq_role": "dut",
+                f"counter_{i}": {"tsq_role": "dut",
                                  "tsq_remote_root": str(root / "remote" / f"counter_{i}")}}}
                 for i in range(1, stages + 1)}}}
         write(lab / "inventory.yml", yaml.safe_dump(inventory))
@@ -187,7 +188,44 @@ def read_member(run: dict, name: str) -> str:
 def test_inventory(bench):
     inv = load_inventory(bench.config.inventory_file)
     assert sorted(inv.stages) == ["bench_1", "bench_2"]
-    assert inv.components["counter_1"].type == "counter_host" and inv.components["seq_host"].adhoc
+    assert inv.components["counter_1"].type == "dut" and inv.components["seq_host"].adhoc
+
+
+def test_the_role_is_the_type(bench):
+    """A component's role is a lab type, which gives its commands: tsq_type, and a datapack type's
+    extends or commands, are refused with what to write instead."""
+    from types import SimpleNamespace
+
+    from testsuit.datatools.datapack.datapack_tools import DatapackError
+    from testsuit.sequencer.intake import check_against_lab
+    from testsuit.sequencer.lab import load_lab
+    from testsuit.sequencer.model import needs_from_setup
+    from testsuit.sequencer.util import SequencerError
+
+    lab = load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
+    assert sorted(lab.types.resolve(lab.inventory.components["counter_1"]).commands) == \
+        ["collect", "deploy", "kill", "ready", "start", "stop", "version"]
+    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"] = "counter_host"
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="'tsq_type' is gone"):
+        load_inventory(bench.config.inventory_file)
+    del inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"]
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "nope"
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="role 'nope' is not a type of the lab"):
+        load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
+
+    setup = copy.deepcopy(SETUP)
+    setup["configurations"]["bench"]["components"]["dut"]["role"] = "counter"
+    needs = needs_from_setup(setup, "bench")
+    assert "component 'dut': role 'counter' is not a type of the lab" in check_against_lab(SimpleNamespace(needs=needs), lab)
+    setup["component_types"]["dut_app"]["extends"] = "counter_host"
+    with pytest.raises(SequencerError, match="'extends' is gone"):
+        needs_from_setup(setup, "bench")
+    write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
+    with pytest.raises(DatapackError, match="'extends' is gone"):
+        bench.build()
 
 
 def test_run_succeeded(bench):

@@ -422,22 +422,24 @@ def test_lab_session(repos):
 
     described = editor.describe_lab(editor.session_lab(session))
     assert described["stage_types"] == {"counter_bench": ["bench_1", "bench_2"]}
-    assert described["types"]["counter_host"]["commands"]["start"]["from"] == "counter_host"
-    assert described["types"]["counter_host"]["commands"]["deploy"]["from"] == "linux_system"
+    assert described["types"]["dut"]["commands"]["start"]["from"] == "counter_host"
+    assert described["types"]["dut"]["commands"]["deploy"]["from"] == "linux_system"
+    assert described["types"]["dut"]["used_by"] == ["counter_1", "counter_2"]
 
-    # the choices of the schemas come from the lab: the types a component can have
+    # the choices of the schemas come from the lab: the roles (lab types) a component can have
     ctx = editor.context(session)
     schema = schemas(ctx)["inventory"]
-    assert "counter_host" in yaml.safe_dump(schema)
+    role = schema["properties"]["all"]["properties"]["hosts"]["additionalProperties"]["properties"]["tsq_role"]
+    assert {"dut", "counter_host", "sequencer"} <= set(role["enum"])
 
-    # an inventory naming an unknown type: a problem, and the push is refused
+    # an inventory naming an unknown role: a problem, and the push is refused
     inventory = editor.read(session, "inventory.yml")["data"]
-    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"] = "nope"
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "nope"
     problems = editor.write(session, "inventory.yml", data=inventory)["problems"]
     assert any("nope" in p["message"] for p in problems)
     with pytest.raises(Exception, match="invalid"):
         editor.push(session, "Break it", "Ada", "ada@example.com")
-    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"] = "counter_host"
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "dut"
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_label"] = "Counter 1"
     editor.write(session, "inventory.yml", data=inventory)
     pushed = editor.push(session, "Label counter_1", "Ada", "ada@example.com", tag="lab-2")
@@ -446,30 +448,30 @@ def test_lab_session(repos):
 
 
 def test_renaming_a_lab_type(repos):
-    """While the inventory still names a renamed type, the helpers list the session's types (not the running
-    lab's); rename_type then makes the inventory and the deriving types follow."""
+    """While the inventory still names a renamed role type, the helpers list the session's types (not the
+    running lab's); rename_type then makes the inventory and the deriving types follow."""
     editor = repos.editor
     session = editor.open("lab")
     types = editor.read(session, "types/bench.yml")["data"]
-    types["component_types"]["counter_box"] = types["component_types"].pop("counter_host")
-    types["component_types"]["fast_counter"] = {"extends": "counter_host", "description": "derived"}
+    types["component_types"]["counter_dut"] = types["component_types"].pop("dut")
+    types["component_types"]["fast_counter"] = {"extends": "dut", "description": "derived"}
     editor.write(session, "types/bench.yml", data=types)
     ctx = editor.context(session)
-    assert ctx["lab_error"] and "counter_host" in ctx["lab_error"]
-    assert "counter_box" in ctx["lab"]["types"] and "counter_host" not in ctx["lab"]["types"]
+    assert ctx["lab_error"] and "dut" in ctx["lab_error"]
+    assert "counter_dut" in ctx["lab"]["types"] and "dut" not in ctx["lab"]["types"]
     assert ctx["lab"]["types"]["fast_counter"]["chain"] == ["fast_counter"]      # its parent is gone: itself only
 
-    types["component_types"]["fast_counter"]["extends"] = "counter_box"        # the form renames those of its own file
+    types["component_types"]["fast_counter"]["extends"] = "counter_dut"        # the form renames those of its own file
     editor.write(session, "types/bench.yml", data=types)
-    # another inventory with its own library, where counter_host is another type: left alone
-    other = "all:\n  vars: {tsq_types: [other_types/]}\n  hosts:\n    c9: {tsq_type: counter_host}\n"
+    # another inventory with its own library, where dut is another type: left alone
+    other = "all:\n  vars: {tsq_types: [other_types/]}\n  hosts:\n    c9: {tsq_role: dut}\n"
     editor.write(session, "other.yml", content=other)
-    editor.write(session, "other_types/t.yml", content="component_types:\n  counter_host: {extends: linux_system}\n")
-    assert editor.rename_type(session, "counter_host", "counter_box", skip="types/bench.yml") == ["inventory.yml"]
+    editor.write(session, "other_types/t.yml", content="component_types:\n  dut: {extends: linux_system}\n")
+    assert editor.rename_type(session, "dut", "counter_dut", skip="types/bench.yml") == ["inventory.yml"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
-    assert sorted(ctx["lab"]["types"]["counter_box"]["used_by"]) == ["counter_1", "counter_2"]
-    assert "counter_host" not in editor.read(session, "inventory.yml")["content"]
+    assert sorted(ctx["lab"]["types"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
+    assert "tsq_role: dut" not in editor.read(session, "inventory.yml")["content"]
     assert editor.read(session, "other.yml")["content"] == other
 
 

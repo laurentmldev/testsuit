@@ -450,7 +450,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`${c.type} on a ${c.lab_type}, role ${c.role}${c.stage ? `, stage ${c.stage}` : ", ad hoc"}`}>{id} <span className="muted small">{c.lab_type}</span></summary>
+          <summary className="palette-title" title={`role ${c.role} (its lab type gives the commands), inputs of ${c.type}${c.stage ? `, stage ${c.stage}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, component: id, do: cmd })}
               onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.help ? info.help + "\n\n" : ""}\`${summary(info.spec)}\`\n\nfrom ${info.from}` })}>
@@ -498,7 +498,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     onChange(next);
   };
   const comps: Choice[] = (palette ? Object.entries<any>(palette.components) : []).filter(([id]) => isSub || held.includes(id))
-    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · ${c.type} on a ${c.lab_type} · role ${c.role}${c.stage ? ` · stage ${c.stage}` : " · ad hoc"}` }));
+    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.type}${c.stage ? ` · stage ${c.stage}` : " · ad hoc"}` }));
   const roles = [...new Set(comps.map((c) => palette.components[c.value].role))];
   const targetMode = step.component ? "component" : step.for_each === "components" ? "all" : Array.isArray(step.for_each) ? "list"
     : typeof step.for_each === "string" && roles.includes(step.for_each) ? "role" : typeof step.for_each === "string" ? "expr" : "none";
@@ -628,7 +628,7 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
     else ph[k] = v;
   });
   const stageChoices: Choice[] = Object.entries<any>(palette?.stages || {}).map(([s, t]) => ({ value: s, description: `stage type ${t}: ${Object.entries<any>(palette.components).filter(([, c]) => c.stage === s).map(([id]) => id).join(", ")}` }));
-  const adhocChoices: Choice[] = Object.entries<any>(palette?.components || {}).filter(([, c]) => !c.stage).map(([id, c]) => ({ value: id, description: `role ${c.role}, ${c.lab_type}` }));
+  const adhocChoices: Choice[] = Object.entries<any>(palette?.components || {}).filter(([, c]) => !c.stage).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
   const earlier = phases.slice(0, index);
   const fromChoices: Choice[] = earlier.flatMap((p: any) => {
     const comps = palette ? Object.entries<any>(palette.components).filter(([id, c]) => (c.stage && (p.stages || []).includes(c.stage)) || (p.components || []).includes(id)).map(([id]) => id) : [];

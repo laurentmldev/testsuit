@@ -17,9 +17,8 @@ all:
   vars:
     ansible_host: localhost
     tsq_transport: local                           # no SSH: commands run as the user running the sequencer
-    tsq_type: linux_system
     tsq_remote_root: ~/.toytrain-emu/run           # <root>/<component>/{input,output}
-    tsq_types: [types_emulated/]                   # the emulated type library, with the lab's type names
+    tsq_types: [types_emulated/]                   # the emulated type library, with the lab's roles
 
   hosts:                                           # ad hoc components
     dev_host:
@@ -27,12 +26,10 @@ all:
       tsq_lock: none
       tsq_label: dev host (sequencer, exploitation)
     sim_propulsion:
-      tsq_type: toytrain_sim
       tsq_role: propulsion_sim
       tsq_remote_root: ~/.toytrain-emu/sim         # with venv/: pip install of the simulation release
       tsq_label: Simulated propulsion controller
     sim_piezo:
-      tsq_type: toytrain_sim
       tsq_role: piezo_sim
       tsq_remote_root: ~/.toytrain-emu/sim
       tsq_label: Simulated piezo sensors
@@ -44,16 +41,13 @@ all:
         tsq_stage_type: toytrain
       hosts:
         calc_pilot:
-          tsq_type: arduino_unoq
           tsq_role: pilot
           tsq_label: CALC-Pilot (emulated)
           tsq_start_args: --mcu host               # microcontroller replaced by its host stub
         calc_tm:
-          tsq_type: rpi5
           tsq_role: telemetry
           tsq_label: CALC-TM (emulated)
         au:
-          tsq_type: rpi5
           tsq_role: acquisition
           tsq_label: AU (emulated)
           tsq_start_args: --gpio-backend udp://127.0.0.12:5017   # GPIO 17 / 27 edges sent by the piezo simulation
