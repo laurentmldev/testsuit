@@ -62,7 +62,7 @@ function App() {
   else if (page === "runs") content = <RunsPage />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
-  else if (page === "config") content = <ConfigPage />;
+  else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
   else if (page === "edit") content = <EditorHome />;
   else content = <QueuePage />;

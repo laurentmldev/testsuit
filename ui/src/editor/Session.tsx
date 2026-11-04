@@ -178,13 +178,25 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   };
   const problems = doc ? [...doc.problems, ...allProblems.filter((p) => p.file !== doc.path)] : allProblems;
   const info = session.info;
+  // where a session belongs: the Lab page for the lab, the Datapacks page (on its repository) for tests
+  const back = info.repo === "lab" ? { path: "lab", label: "Lab" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };
+  // leaving a lab session offers to reload the lab, so that tsqd runs what was edited: the folder as it is
+  // (in place), or the latest pushed commit (a clone on a branch, once pushed)
+  const leave = async () => {
+    if (info.repo === "lab" && window.confirm(info.local
+      ? "Reload the lab now, so that the sequencer uses the files as they are?"
+      : "Reload the lab now from its latest pushed commit (tsq lab reload --pull)?")) {
+      await attempt(() => post("lab/reload", { pull: !info.local, revision: null }), "lab reloaded");
+    }
+    navigate(back.path, back.query);
+  };
   return (
     <SessionContext.Provider value={session}>
       <HelpProvider>
         {(topic) => (
           <div className="session">
             <div className="session-bar">
-              <a href="#/edit" className="muted">Editor</a>
+              <button className="link muted" onClick={leave} title={`Back to the ${back.label} page`}>{back.label}</button>
               <strong>{info.repo === "lab" ? "Lab" : `Tests (${info.folder})`}</strong>
               {info.local && <span className="badge info" title={`Files are saved directly in ${info.source}, where the sequencer reads them. Closing the session keeps them.`}>in place</span>}
               {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
@@ -198,8 +210,8 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               <button onClick={async () => {
                 if (!info.local && info.changed && !window.confirm("Close the session and drop the changes that were not pushed?")) return;
                 await attempt(() => del(`edit/sessions/${id}`));
-                navigate("edit");
-              }}>Close</button>
+                await leave();
+              }} title={`Close the session and go back to the ${back.label} page`}>Close</button>
             </div>
             <div className="session-main">
               <FileTree files={session.files} current={path} problems={problems} onNew={() => setDialog("new")} />
