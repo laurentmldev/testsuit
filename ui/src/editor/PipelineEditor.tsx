@@ -10,7 +10,7 @@ import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValue
 import { layout } from "../graph";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, notify, relPath, slug } from "../util";
 import { ExpectEditor, PythonEditor, pythonSummary, summary, WaitForEditor } from "./commands";
-import { clone, useSession, useTestKeys, type Doc } from "./state";
+import { clone, hostLabel, useSession, useTestKeys, type Doc } from "./state";
 
 type Scope = { kind: "phase"; index: number } | { kind: "sub"; name: string } | { kind: "settings" } | { kind: "flat" };
 const ACTIONS = ["do", "run", "python", "push", "pull", "delay", "wait_for", "uses"];
@@ -746,7 +746,7 @@ function PipelineSettings({ doc, pipeline, write, files }: { doc: Doc; pipeline:
 }
 
 function Flattened({ testdef, config }: { testdef: string; config: string | null }) {
-  const { sid } = useSession();
+  const { sid, ctx } = useSession();
   const [flat, setFlat] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -771,7 +771,7 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
                   {i === 0 && <td rowSpan={s.targets.length}><code>{s.part === "finally" ? "finally " : ""}{s.id}</code></td>}
                   {i === 0 && <td rowSpan={s.targets.length} className="small">{s.needs.join(", ")}</td>}
                   {i === 0 && <td rowSpan={s.targets.length}>{s.action}{s.do ? ` ${s.do}` : ""}</td>}
-                  <td>{t.component ? <>{t.component}{t.concrete && <span className="muted small"> = {t.concrete}</span>}</> : "-"}</td>
+                  <td>{t.component ? <>{t.component}{t.concrete && <span className="muted small" title={t.concrete}> = {hostLabel(ctx, t.concrete)}</span>}</> : "-"}</td>
                   <td className="mono small">{t.command ? summary(t.command) : s.action !== "do" ? summary(s.step) : ""}</td>
                   <td className="muted small">{t.source || ""}</td>
                 </tr>

@@ -1,7 +1,7 @@
 // Components and stages (sequencer README, section 13.1): monitored state, lock state and holder,
 // self-test results; hold, release, maintenance, resume and self-test.
 import { useEffect, useState } from "react";
-import { get, post, useResource } from "../api";
+import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { ago, attempt, Badge, navigate, time } from "../util";
 import { LogsDialog } from "./Logs";
@@ -44,18 +44,19 @@ function Holders({ item }: { item: any }) {
 }
 
 function SelftestDialog({ target, onClose }: { target: string | null; onClose: () => void }) {
+  const labelOf = useLabels();
   const [results, setResults] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     post<any[]>("selftest", target ? { target } : {}).then(setResults).catch((e) => setError(e.message));
   }, [target]);
   return (
-    <Dialog title={`Self-test of ${target || "the whole lab"}`} onClose={onClose} wide>
+    <Dialog title={`Self-test of ${labelOf(target) || "the whole lab"}`} onClose={onClose} wide>
       {error && <div className="error-box">{error}</div>}
       {!results && !error && <p className="muted">Running the checks…</p>}
       {results?.map((r) => (
         <div key={r.component} className="selftest">
-          <h4>{r.component} <Badge value={r.ok ? "passed" : "failed"} /> {r.state && <Badge value={r.state} />}</h4>
+          <h4 title={r.component}>{labelOf(r.component)} <Badge value={r.ok ? "passed" : "failed"} /> {r.state && <Badge value={r.state} />}</h4>
           <table className="grid compact">
             <tbody>
               {(r.checks || []).map((c: any) => (
@@ -116,6 +117,7 @@ function Checks({ checks }: { checks: any[] }) {
 /** Why a component has its state: what its last probe tested, what it answered, the rules of its probe and
  * the one that matched; and its last self-test, when it keeps the component broken. */
 function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const labelOf = useLabels();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
@@ -132,7 +134,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const failure = p?.kept_broken || data?.selftest_failed;
   const selftest = data?.selftest;
   return (
-    <Dialog title={`State of ${id}`} onClose={onClose} wide
+    <Dialog title={`State of ${labelOf(id)}`} onClose={onClose} wide
       footer={<button disabled={probing} onClick={again}>{probing ? "Probing…" : "Probe again"}</button>}>
       {error && <div className="error-box">{error}</div>}
       {!data && !error && <p className="muted">Reading its last probe…</p>}
@@ -240,7 +242,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const git = lab.data?.git;
   const row = (c: any) => (
     <tr key={c.id} className={c.hold || c.maintenance ? "off" : ""}>
-      <td><strong>{c.id}</strong><div className="muted small">{c.label !== c.id ? c.label : ""}</div></td>
+      <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div></td>
       <td>{c.role}</td>
       <td><code>{c.extends}</code></td>
       <td>{c.host}</td>

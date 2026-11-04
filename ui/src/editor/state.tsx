@@ -204,7 +204,7 @@ export function labRoleChoices(ctx: any, filter?: (name: string, r: any) => bool
         r.description,
         r.extends ? `extends \`${r.extends}\`` : "",
         Object.keys(r.commands || {}).length ? `commands: ${Object.keys(r.commands).map((c) => `\`${c}\``).join(" ")}` : "no command",
-        r.used_by?.length ? `used by ${r.used_by.join(", ")}` : "",
+        r.used_by?.length ? `used by ${r.used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}` : "",
       ].filter(Boolean).join(" · "),
       group: sourceGroup(r.source),
     }));
@@ -212,6 +212,11 @@ export function labRoleChoices(ctx: any, filter?: (name: string, r: any) => bool
 
 /** Lab components (concrete): what a library component's `extends` names. With hosts, the inventory hosts
  * too (a host's `tsq_extends` can name another host). */
+/** What the editor shows for a lab host: its label (tsq_label), else its id. */
+export function hostLabel(ctx: any, id: string): string {
+  return ctx?.lab?.components?.[id]?.label || id;
+}
+
 export function componentChoices(ctx: any, opts: { filter?: (name: string) => boolean; hosts?: boolean } = {}): Choice[] {
   const result: Choice[] = Object.entries(ctx.lab.library || {})
     .filter(([name]) => !opts.filter || opts.filter(name))
@@ -221,7 +226,7 @@ export function componentChoices(ctx: any, opts: { filter?: (name: string) => bo
         c.description,
         c.extends ? `extends \`${c.extends}\`` : "",
         Object.keys(c.commands || {}).length ? `implements: ${Object.keys(c.commands).map((x) => `\`${x}\``).join(" ")}` : "implements nothing",
-        c.used_by?.length ? `extended by ${c.used_by.join(", ")}` : "",
+        c.used_by?.length ? `extended by ${c.used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}` : "",
       ].filter(Boolean).join(" · "),
       group: sourceGroup(c.source),
     }));

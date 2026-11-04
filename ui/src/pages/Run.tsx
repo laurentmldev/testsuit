@@ -2,7 +2,7 @@
 // the logs of each step, its files before, during and after the run.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
-import { getText, url, useResource } from "../api";
+import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
 import { ago, Badge, classes, duration, setQuery, STATE_COLORS, time } from "../util";
@@ -203,6 +203,7 @@ export function LogTail({ runId, step, live }: { runId: string; step: string; li
 export function RunPage({ id, tab }: { id: string; tab: string }) {
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
+  const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
   const r = run.data;
   const records: any[] = r?.steps || [];
@@ -233,7 +234,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         <span title={time(r.submitted_at)}>submitted {ago(r.submitted_at)}</span>
         {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} {duration(r.activated_at, r.ended_at)}</span>}
         {r.phase && <span>phase <strong>{r.phase}</strong></span>}
-        {r.binding && <span>on {Object.entries(r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.components || {}).map(([l, c]) => `${l}=${c}`).join(", ")}</span>}
+        {r.binding && <span>on {Object.entries(r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
       {r.reason && <div className="banner warn">{r.reason}</div>}
@@ -332,16 +333,18 @@ function CandidateState({ c }: { c: any }) {
 }
 
 function CompChip({ c, logical }: { c: any; logical?: string }) {
+  const labelOf = useLabels();
   const notes = [c.role && `role ${c.role}`, c.extends && `extends ${c.extends}`, `lock ${c.lock}`, c.maintenance && "in maintenance", c.held_by?.length && `held by ${c.held_by.join(", ")}`];
   const color = c.maintenance || ["broken", "offline"].includes(c.state) ? "bad" : c.held_by?.length ? "wait" : STATE_COLORS[c.state] || "muted";
   return (
     <span className={classes("chip", color)} title={notes.filter(Boolean).join(" · ")}>
-      {c.id}{logical && <> = {logical}</>} · {c.state}
+      {labelOf(c.id)}{logical && <> = {logical}</>} · {c.state}
     </span>
   );
 }
 
 function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
+  const labelOf = useLabels();
   const res = useResource<any>(`runs/${runId}/resources`, ["run", "component", "resource", "lab"]);
   const d = res.data;
   if (res.error) return <div className="error-box">{res.error}</div>;
@@ -406,7 +409,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
             <div className="need-head">
               <code>{n.logical}</code> <span className="muted">role</span> <code>{n.role}</code>
               {n.type && <><span className="muted">type</span> <code>{n.type}</code></>}
-              <span className={classes("chip", color)}>{label}{n.bound && <> on {n.bound}</>}</span>
+              <span className={classes("chip", color)}>{label}{n.bound && <> on {labelOf(n.bound)}</>}</span>
               <span className="spacer" />
               <span className="muted small">{n.phases.length ? `phases ${n.phases.join(", ")}` : "used by no phase"}</span>
             </div>
@@ -416,7 +419,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
                 <tbody>
                   {n.candidates.map((c: any) => (
                     <tr key={c.id}>
-                      <td><code>{c.id}</code></td>
+                      <td title={c.id}>{labelOf(c.id)}</td>
                       <td><CandidateState c={c} /></td>
                       <td className="reason">{c.why || ""}</td>
                       <td><CompChip c={c} /></td>
