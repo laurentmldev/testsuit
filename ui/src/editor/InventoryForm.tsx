@@ -265,7 +265,7 @@ function ComponentCard({ name }: { name?: string | null }) {
           ))}
         </tbody>
       </table>
-      <div className="small">state: {c.status ? `${c.status.spec.builtin ? `built-in ${c.status.spec.builtin}` : `probe ${summary(c.status.spec.probe || {})}`} (from ${c.status.from})` : "unknown (no status probe)"}</div>
+      <div className="small">state: {c.status ? `${c.status.spec.builtin ? `built-in ${c.status.spec.builtin}` : `probe ${summary(c.status.spec.probe || {})}${c.status.spec.via ? ` via ${c.status.spec.via}` : ""}`} (from ${c.status.from})` : "unknown (no status probe)"}</div>
       <div className="small">self-test: {c.selftest.map((x: any) => x.spec.id).join(", ") || "none"}</div>
     </div>
   );
@@ -291,7 +291,7 @@ function HostCard({ name }: { name: string }) {
           ))}
         </tbody>
       </table>
-      <div className="small">state: {h.status ? (h.status.builtin ? `built-in ${h.status.builtin}` : `probe ${summary(h.status.probe || {})}`) : "unknown (no status probe)"}</div>
+      <div className="small">state: {h.status ? (h.status.builtin ? `built-in ${h.status.builtin}` : `probe ${summary(h.status.probe || {})}${h.status.via ? ` via ${h.status.via}` : ""}`) : "unknown (no status probe)"}</div>
       <div className="small">self-test: {h.selftest?.join(", ") || "none"}</div>
     </div>
   );
