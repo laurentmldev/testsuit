@@ -27,12 +27,14 @@ components:
 
   arduino_unoq:
     extends: emulated_app
+    roles: [pilot]
     description: Arduino UNO Q, emulated (microcontroller host stub)
     commands:
       install: {run: "{{ component.input_dir }}/app/bin/toytrain-install --mcu host --input {{ component.input_dir }}"}   # checks the firmware image only
 
   rpi5:
     extends: emulated_app
+    roles: [telemetry, acquisition]
     description: Raspberry Pi 5, emulated
 
   toytrain_sim:
@@ -48,10 +50,12 @@ components:
 
   propulsion_sim:
     extends: toytrain_sim
+    roles: [propulsion_sim]
     commands:
       start: {run: "{{ remote_root }}/venv/bin/toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml --out {{ component.output_dir }}", detach: true}
 
   piezo_sim:
     extends: toytrain_sim
+    roles: [piezo_sim]
     commands:
       start: {run: "{{ remote_root }}/venv/bin/toytrain-sim piezo --config {{ component.input_dir }}/piezo_sim.yml --gpio {{ component.vars.tsq_gpio_adapter }} --out {{ component.output_dir }}", detach: true}

@@ -22,7 +22,7 @@ from testsuit.sequencer.inventory import Component, Inventory, Stage
 from testsuit.sequencer.util import SequencerError, load_yaml
 
 ROLE_KEYS = {"extends", "description", "commands"}
-COMPONENT_KEYS = {"extends", "description", "transport", "commands", "status", "selftest", "collect"}
+COMPONENT_KEYS = {"extends", "roles", "description", "transport", "commands", "status", "selftest", "collect"}
 HOST_KEYS = {"tsq_commands": "commands", "tsq_status": "status", "tsq_selftest": "selftest", "tsq_collect": "collect"}
 
 BUILTIN_ROLES: dict[str, dict] = {
@@ -103,6 +103,7 @@ class ComponentDef:
     collect: dict | None = None
     source: str = "<builtin>"
     host: bool = False                       # a host of the inventory (not a library component)
+    roles: list[str] | None = None           # the roles it supports (None: those of the component it extends)
 
     @classmethod
     def from_dict(cls, name: str, data: Any, source: str, host: bool = False) -> "ComponentDef":
@@ -124,7 +125,12 @@ class ComponentDef:
         selftest = data.get("selftest") or []
         if not isinstance(selftest, list) or not all(isinstance(c, dict) and c.get("id") for c in selftest):
             raise SequencerError(f"{source}: component '{name}': 'selftest' must be a list of checks with an 'id'")
-        return cls(name=name, extends=str(data.get("extends") or ""),
+        roles = data.get("roles")
+        if isinstance(roles, str):
+            roles = [roles]
+        if roles is not None and (not isinstance(roles, list) or not all(isinstance(r, str) and r for r in roles)):
+            raise SequencerError(f"{source}: component '{name}': 'roles' must be a list of role names")
+        return cls(name=name, extends=str(data.get("extends") or ""), roles=list(roles) if roles is not None else None,
                    description=str(data.get("description") or ""), transport=data.get("transport"),
                    commands=dict(commands), status=data.get("status"), selftest=list(selftest),
                    collect=data.get("collect"), source=source, host=host)
@@ -159,6 +165,10 @@ class Library:
             self.role_chain(name)          # unknown parents and cycles
         for name in components if strict else []:
             self.component_chain(name)
+            for role, missing in self.check_component(name).items():
+                if missing:
+                    raise SequencerError(f"component '{name}' ({components[name].source}) does not implement "
+                                         f"{', '.join(missing)}, listed by its role '{role}'")
 
     @classmethod
     def load(cls, folders: list[Path], strict: bool = True) -> "Library":
@@ -238,6 +248,45 @@ class Library:
                 raise SequencerError(f"unknown component '{parent}' (extended by '{current.name}')")
             current = nxt
         return result
+
+    def component_roles(self, name: str, hosts: dict[str, ComponentDef] | None = None) -> list[str]:
+        """The roles a component supports: those it lists, else those of the nearest component it extends
+        that lists some (none: a base, or a host that must give its role with tsq_role)."""
+        for c in reversed(self.component_chain(name, hosts)):
+            if c.roles is not None:
+                return list(c.roles)
+        return []
+
+    def check_component(self, name: str) -> dict[str, list[str]]:
+        """A library component against the roles it supports: the commands of each it does not implement."""
+        chain = self.component_chain(name)
+        implemented = {cmd for c in chain for cmd in c.commands}
+        result = {}
+        for role in self.component_roles(name):
+            if role not in self.roles:
+                raise SequencerError(f"component '{name}' ({chain[-1].source}): unknown role '{role}'")
+            result[role] = sorted(set(self.role_commands(role)) - implemented)
+        return result
+
+    def host_role(self, component: Component, hosts: dict[str, ComponentDef] | None = None) -> str:
+        """The role of a host: its tsq_role, which must be one its component supports when it lists some;
+        without tsq_role, the one role its component supports."""
+        hosts = dict(hosts or {})
+        hosts.setdefault(component.id, ComponentDef.from_host(component, "<inventory>"))
+        roles = self.component_roles(component.id, hosts)
+        given = str(component.vars.get("tsq_role") or "")
+        if given:
+            if roles and given not in roles:
+                raise SequencerError(f"role '{given}' (tsq_role) is not one its component '{component.extends}' "
+                                     f"supports: {', '.join(roles)}")
+            return given
+        if len(roles) == 1:
+            return roles[0]
+        if roles:
+            raise SequencerError(f"its component '{component.extends}' supports several roles ({', '.join(roles)}): "
+                                 "pick one with tsq_role")
+        raise SequencerError(f"no role: give tsq_role, or extend a component that lists its roles "
+                             f"('{component.extends}' lists none)")
 
     def host_defs(self, inventory: Inventory) -> dict[str, ComponentDef]:
         return {c.id: ComponentDef.from_host(c, str(inventory.file)) for c in inventory.components.values()}

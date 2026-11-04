@@ -95,6 +95,18 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
     inventory = load_inventory(inventory_file)
     library = Library.load(inventory.library_folders, strict)
     lab = Lab(folder=folder, inventory=inventory, library=library, git=git_state(folder), require_tag=require_tag)
+    for component in inventory.components.values():           # roles first: the stage checks need them
+        try:
+            component._role = library.host_role(component, lab.hosts)
+        except SequencerError as e:
+            if strict:
+                raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
+    for stage in inventory.stages.values() if strict else []:
+        roles = [inventory.components[c].role for c in stage.components if inventory.components[c].role]
+        duplicates = sorted({r for r in roles if roles.count(r) > 1})
+        if duplicates:
+            raise SequencerError(f"inventory '{inventory_file}': stage '{stage.id}' has several components with "
+                                 f"role(s) {duplicates}")
     for component in inventory.components.values():
         for stage in [inventory.stages[s] for s in component.stages] or [None]:
             try:

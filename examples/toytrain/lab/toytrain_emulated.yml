@@ -26,12 +26,10 @@ all:
       tsq_lock: none
       tsq_label: dev host (sequencer, exploitation)
     sim_propulsion:
-      tsq_role: propulsion_sim
       tsq_extends: propulsion_sim
       tsq_remote_root: ~/.toytrain-emu/sim         # with venv/: pip install of the simulation release
       tsq_label: Simulated propulsion controller
     sim_piezo:
-      tsq_role: piezo_sim
       tsq_extends: piezo_sim
       tsq_remote_root: ~/.toytrain-emu/sim
       tsq_label: Simulated piezo sensors
@@ -43,7 +41,6 @@ all:
         tsq_stage_type: toytrain
       hosts:
         calc_pilot:
-          tsq_role: pilot
           tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot (emulated)
           tsq_start_args: --mcu host               # microcontroller replaced by its host stub

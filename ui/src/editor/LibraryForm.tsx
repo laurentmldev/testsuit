@@ -101,11 +101,12 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         {Object.entries(components).map(([name, c]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
             <strong>{name}</strong> <span className="muted small">{c?.extends}</span>
+            {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles {ctx.lab.library[name].roles.join(", ")}</div> : null}
             {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by {ctx.lab.library[name].used_by.join(", ")}</div> : null}
           </div>
         ))}
         <div className="nav-hint">
-          <Markdown text={"Roles are abstract: the commands a component offers, with what each does. Components are concrete: how they implement them. Inventory hosts take a role (`tsq_role`) and extend a component (`tsq_extends`).\n\nEvery role: " + Object.keys(ctx.lab.roles || {}).map((t) => `\`${t}\``).join(", ") + "\n\nEvery component: " + Object.keys(ctx.lab.library || {}).map((t) => `\`${t}\``).join(", ")} />
+          <Markdown text={"Roles are abstract: the commands a component offers, with what each does. Components are concrete: the roles they support, and how they implement their commands. Inventory hosts extend a component (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`).\n\nEvery role: " + Object.keys(ctx.lab.roles || {}).map((t) => `\`${t}\``).join(", ") + "\n\nEvery component: " + Object.keys(ctx.lab.library || {}).map((t) => `\`${t}\``).join(", ")} />
         </div>
       </div>
       <div className="form-main">
@@ -229,6 +230,7 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         </div>
         <p className="muted small">A role lists commands only: the lab components implement them, and every host with this role must implement them all.</p>
       </Section>
+      {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the components {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
       {described?.used_by?.length > 0 && <div className="hint-box small">Role of {described.used_by.map((h: string) => <code key={h}>{h}</code>)}</div>}
     </div>
   );
@@ -248,6 +250,10 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
   const inherited: Record<string, any> = parent ? Object.fromEntries(Object.entries<any>(parent.commands).map(([c, i]) => [c, { spec: i.spec, from: i.from }])) : {};
   const described = ctx.lab.library?.[name];
   const nameInput = useNameEdit(name, Object.keys(ctx.lab.library || {}), onRename);
+  // the roles it supports (its own list, else its parent's): their commands are required
+  const roles: string[] = t.roles ?? parent?.roles ?? [];
+  const required: Record<string, { description?: string; from?: string }> = {};
+  for (const r of roles) for (const [c, i] of Object.entries<any>(ctx.lab.roles?.[r]?.commands || {})) required[c] = { description: i.description, from: r };
   return (
     <div>
       <div className="form-title">
@@ -257,12 +263,19 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
       <Field label="Extends" help={help(["extends"])}>
         <Combo value={t.extends} onChange={(v) => set("extends", v)} choices={componentChoices(ctx, { filter: (n) => n !== name })} strict />
       </Field>
+      <Field label="Roles it supports" help={help(["roles"])}
+        hint={t.roles === undefined && parent?.roles?.length ? `inherited from ${t.extends}: ${parent.roles.join(", ")}` : !roles.length ? "none: a base, whose hosts give their role (tsq_role)" : roles.length > 1 ? "its hosts pick one (tsq_role)" : null}>
+        <Tags value={t.roles} onChange={(v) => set("roles", v.length ? v : undefined)} choices={labRoleChoices(ctx)} placeholder="add a role it supports" />
+      </Field>
+      {Object.entries<any>(described?.role_missing || {}).filter(([, m]) => m.length).map(([r, m]) => (
+        <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {r}: the lab does not load.</div>
+      ))}
       {parent && <div className="hint-box small">Inherits from <code>{parent.chain.join(" → ")}</code>: {Object.keys(parent.commands).map((c) => <code key={c}>{c}</code>)}{parent.status && <>, status from {parent.status.from}</>}{parent.selftest.length > 0 && <>, self-test {parent.selftest.map((c: any) => c.spec.id).join(", ")}</>}</div>}
       <Field label="Description" help={help(["description"])}><Text multiline value={t.description} onChange={(v) => set("description", v)} placeholder="What kind of component this is" /></Field>
       <Field label="Transport" help={help(["transport"])}>
         <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone={`inherited (${parent?.transport || "ssh"})`} />
       </Field>
-      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} help={help(["commands"])} />
+      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} />
       <StatusEditor value={t.status} onChange={(v) => set("status", v)} inherited={parent?.status} />
       <SelftestEditor value={t.selftest} onChange={(v) => set("selftest", v)} inherited={parent?.selftest || []} />
       <Section title="Collect filters" help={help(["collect"])} collapsed={!t.collect}>

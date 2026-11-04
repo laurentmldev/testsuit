@@ -432,6 +432,8 @@ def test_lab_session(repos):
     host = described["components"]["counter_1"]
     assert host["chain"] == ["component", "linux_system", "counter_host", "counter_1"]
     assert host["commands"]["deploy"]["from"] == "component linux_system" and host["missing"] == []
+    assert described["library"]["counter_host"]["roles"] == ["dut"] and described["roles"]["dut"]["implemented_by"] == ["counter_host"]
+    assert (host["role"], host["role_given"], host["role_choices"]) == ("dut", "", ["dut"])   # the role of its component
 
     # the choices of the schemas come from the lab: the roles a host can have, the components it can extend
     ctx = editor.context(session)
@@ -476,7 +478,9 @@ def test_renaming_roles_and_components(repos):
     other = "all:\n  vars: {tsq_library: [other_lib/]}\n  hosts:\n    c9: {tsq_role: dut}\n"
     editor.write(session, "other.yml", content=other)
     editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
-    assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == ["inventory.yml"]
+    assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == \
+        ["components/bench.yml"]                                  # the roles its components list
+    assert editor.read(session, "components/bench.yml")["data"]["components"]["counter_host"]["roles"] == ["counter_dut"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
     assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]

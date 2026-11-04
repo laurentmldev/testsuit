@@ -104,7 +104,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
             </div>
             {s.hosts.map((h) => (
               <div key={h} className={classes("nav-item sub", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-                {h} <span className="muted small">{hostVars(inv, h).tsq_role || "no role"}</span>
+                {h} <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
               </div>
             ))}
             <div className="nav-item sub add" onClick={() => setWizard({ kind: "member", stage: s.name })}>+ component</div>
@@ -113,7 +113,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         <div className="nav-title">Ad hoc components <button className="small" onClick={() => setWizard({ kind: "adhoc" })}>+ Component</button></div>
         {adhoc.map((h) => (
           <div key={h} className={classes("nav-item", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-            {h} <span className="muted small">{hostVars(inv, h).tsq_role || "no role"}</span>
+            {h} <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
           </div>
         ))}
         {plain.length > 0 && <div className="nav-title">Other groups</div>}
@@ -151,6 +151,11 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
   );
 }
 
+/** The role of a host: its tsq_role, else the one the lab resolved (the role of its component). */
+function hostRole(ctx: any, inv: Inv, host: string): string {
+  return hostVars(inv, host).tsq_role || ctx.lab.components?.[host]?.role || "";
+}
+
 function hostVars(inv: Inv, host: string): any {
   const p = hostVarsPath(inv, host);
   return (p && getAt(inv, p)) || {};
@@ -161,9 +166,9 @@ function missingFromLab(ctx: any, inv: Inv): string[] {
   const gs = groups(inv);
   const stageTypes = new Map<string, string[]>();
   for (const s of gs.filter((g) => g.stage)) stageTypes.set(s.vars.tsq_stage_type, [...(stageTypes.get(s.vars.tsq_stage_type) || []), s.name]);
-  const roleIn = (stage: GroupInfo) => stage.hosts.map((h) => hostVars(inv, h).tsq_role);
+  const roleIn = (stage: GroupInfo) => stage.hosts.map((h) => hostRole(ctx, inv, h));
   const staged = new Set(gs.filter((g) => g.stage).flatMap((s) => s.hosts));
-  const adhocRoles = Object.keys(inv?.all?.hosts || {}).filter((h) => !staged.has(h)).map((h) => hostVars(inv, h).tsq_role);
+  const adhocRoles = Object.keys(inv?.all?.hosts || {}).filter((h) => !staged.has(h)).map((h) => hostRole(ctx, inv, h));
   const out = new Set<string>();
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {})) {
@@ -338,7 +343,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
               return (
                 <tr key={h} className="clickable" onClick={() => onSelect({ kind: "host", name: h })}>
                   <td><strong>{h}</strong>{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
-                  <td>{v.tsq_role ? <code>{v.tsq_role}</code> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
+                  <td>{(v.tsq_role || ctx.lab.components?.[h]?.role) ? <code>{v.tsq_role || ctx.lab.components[h].role}</code> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
                   <td><code>{v.tsq_extends || ctx.lab.components?.[h]?.extends || "linux_system"}</code></td>
                   <td>{v.ansible_host || h}</td><td>{v.tsq_lock || "exclusive"}</td>
                   <td><button className="small" onClick={(e) => {
@@ -353,7 +358,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
         {otherHosts.length > 0 && (
           <div className="add-row">
             <Combo value="" onChange={() => {}} placeholder="add an existing component (shared with its other groups)…"
-              choices={otherHosts.map((h) => ({ value: h, description: hostVars(inv, h).tsq_role || "" }))}
+              choices={otherHosts.map((h) => ({ value: h, description: hostRole(ctx, inv, h) || "" }))}
               onPick={(h) => update((d) => setAt(d, [...hostsPath, h], {}))} />
           </div>
         )}
@@ -416,8 +421,10 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
     const r = await attempt(() => post("edit/reachability", { host: effective("ansible_host") || name, port: effective("ansible_port") || 22, transport }));
     setReach(r || null);
   };
-  const role = effective("tsq_role") || "";
   const ext = effective("tsq_extends") || "";
+  const host = ctx.lab.components?.[name];
+  const supported: string[] = host?.role_choices ?? (ext ? ctx.lab.library?.[ext]?.roles : null) ?? [];
+  const role = effective("tsq_role") || (supported.length === 1 ? supported[0] : "") || host?.role || "";
   // what the component it extends gives (a library component, or another host)
   const base = ext ? (ctx.lab.library?.[ext] || ctx.lab.components?.[ext]) : ctx.lab.library?.linux_system;
   const baseName = ext || "linux_system";
@@ -437,14 +444,16 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           <button className="small" onClick={check} title="Whether the host answers on its SSH port (or is local)">Check reachability</button>
         </div>
       </Field>
-      <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}>
-        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={roleChoices(ctx)} strict placeholder={role ? `${role} (inherited)` : undefined}
-          onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
-      </Field>
       <Field label="Extends" help={help(["all", "hosts", "_", "tsq_extends"])}>
         <Combo value={vars.tsq_extends} onChange={(v) => set("tsq_extends", v)} choices={componentChoices(ctx, { hosts: true, filter: (n) => n !== name })} strict
           placeholder={ext ? `${ext} (inherited)` : "linux_system (default)"}
           onPick={(v) => setHelp({ title: v, text: ctx.lab.library?.[v]?.description, extra: <ComponentCard name={v} /> })} />
+      </Field>
+      <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}
+        hint={supported.length === 1 ? `the role of its component: no tsq_role needed` : supported.length > 1 ? `its component supports ${supported.join(", ")}: pick one` : "its component lists no role: give one"}>
+        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={supported.length ? roleChoices(ctx).filter((r) => supported.includes(r.value)) : roleChoices(ctx)} strict
+          placeholder={role ? `${role} (${supported.length === 1 ? "from its component" : "inherited"})` : undefined}
+          onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
         <Choices value={vars.tsq_lock} onChange={(v) => set("tsq_lock", v ?? undefined)} allowNone="exclusive (default)" choices={[
@@ -540,13 +549,14 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
   const { ctx } = useSession();
   const group = stage ? groups(inv).find((g) => g.name === stage) : null;
   const stageType = group?.vars.tsq_stage_type;
-  const present = (group?.hosts || []).map((h) => hostVars(inv, h).tsq_role);
+  const present = (group?.hosts || []).map((h) => hostRole(ctx, inv, h));
   // the roles the stages of this type (or the ad hoc components) already have first, then every other lab role
   const usual = roleChoices(ctx, stageType ? { stageType } : { adhoc: true }).filter((r) => ctx.lab.roles?.[r.value]);
   const roles = [...usual, ...roleChoices(ctx).filter((r) => !usual.some((u) => u.value === r.value))].filter((r) => !present.includes(r.value));
   const [role, setRoleState] = useState(usual.find((r) => !present.includes(r.value))?.value || "");
   // the component the other hosts with that role extend, as a start
-  const usualExtends = (r: string) => Object.values<any>(ctx.lab.components || {}).find((c) => c.role === r)?.extends || "";
+  const usualExtends = (r: string) => Object.values<any>(ctx.lab.components || {}).find((c) => c.role === r)?.extends
+    || ctx.lab.roles?.[r]?.implemented_by?.[0] || "";
   const [ext, setExt] = useState(usualExtends(role));
   const setRole = (r: string) => {
     setRoleState(r);
@@ -560,8 +570,9 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
     const draft = clone(inv);
     const vars: any = {};
     if (host) vars.ansible_host = host;
-    if (role) vars.tsq_role = role;
     if (ext && ext !== "linux_system") vars.tsq_extends = ext;
+    const supported: string[] = ctx.lab.library?.[ext]?.roles ?? ctx.lab.components?.[ext]?.role_choices ?? [];
+    if (role && !(supported.length === 1 && supported[0] === role)) vars.tsq_role = role;   // else its component's
     if (transport) vars.tsq_transport = transport;
     if (group) setAt(draft, [...group.path, "hosts", name], vars);
     else setAt(draft, ["all", "hosts", name], vars);
@@ -574,7 +585,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Combo value={role} onChange={setRole} choices={roles} strict />
         <RoleCard name={role} />
       </Field>
-      <Field label="Extends" help="The lab component it is: it implements the commands of the role, and gives the status probe and the self-test.">
+      <Field label="Extends" help="The lab component it is: it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the host needs no tsq_role.">
         <Combo value={ext} onChange={setExt} choices={componentChoices(ctx, { hosts: true })} strict placeholder="linux_system (default)" />
         <ComponentCard name={ext} />
       </Field>
