@@ -2,7 +2,8 @@
 # commands it offers, whatever the hardware. Datapacks bind their logical components by role
 # (role: pilot in a setup) and run these commands in their pipelines (do: start).
 # The lab components implement them (components/toytrain.yml on the lab, components_emulated/ on a dev
-# host): each inventory host has a role (tsq_role) and is a component (tsq_extends).
+# host), which list the roles they support: each inventory host is a component (tsq_extends) and has its
+# role, or picks one with tsq_role when it supports several (rpi5: telemetry or acquisition).
 # Built in: component (no command), and linux_system (deploy, collect, kill).
 
 roles:

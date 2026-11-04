@@ -36,7 +36,6 @@ all:
     sim_propulsion:                                # simulation processes on the same server
       ansible_host: localhost
       tsq_transport: local
-      tsq_role: propulsion_sim
       tsq_extends: propulsion_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated propulsion controller
@@ -44,7 +43,6 @@ all:
     sim_piezo:
       ansible_host: localhost
       tsq_transport: local
-      tsq_role: piezo_sim
       tsq_extends: piezo_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated piezo sensors
@@ -57,7 +55,6 @@ all:
       hosts:
         calc_pilot:
           ansible_host: 10.42.0.10
-          tsq_role: pilot
           tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot
         calc_tm:
@@ -72,6 +69,5 @@ all:
           tsq_label: AU
         switch:
           ansible_host: 10.42.0.2
-          tsq_role: switch
           tsq_extends: auvidea_m82
           tsq_label: Switch Auvidea M82

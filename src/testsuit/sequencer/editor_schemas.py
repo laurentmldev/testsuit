@@ -205,6 +205,11 @@ COMPONENT = h(
         "extends": h("The parent component: `linux_system` for anything reachable over SSH (deploy, collect and "
                      "kill built in), `component` for something that is not a Linux system (a switch, an instrument "
                      "driven through its own API), or another component of the library.", type="string"),
+        "roles": h("The roles it supports (section 7.2): it must implement every command each lists. Inherited by "
+                   "the components extending it, unless they list their own. A host extending a component with "
+                   "one role has that role; with several, it picks one with `tsq_role`. Leave out for a base "
+                   "component (`rpi5` hardware) whose hosts give their role.", type="array",
+                   items={"type": "string"}),
         "description": h("What this component is: shown in the Editor when a host extends it.", type="string"),
         "transport": h("How the sequencer talks to this component: `ssh` (default), `local` (on the "
                        "sequencer host), or a plugin transport. The inventory variable `tsq_transport` overrides it.",
@@ -277,8 +282,10 @@ VARS = {
     "ansible_ssh_private_key_file": h("Private key used to log in (no password prompt).", type="string",
                                       examples=["~/.ssh/id_lab"]),
     "tsq_role": h("Role of the component, a role of the lab library (section 7.1): the commands it must implement. "
-                  "Datapacks bind their logical components by role (`role: pilot` binds the host with "
-                  "`tsq_role: pilot` in the stage). Unique within a stage.", type="string"),
+                  "Not needed when the component it extends supports one role (it has that one); one of them when "
+                  "it supports several; any role when it lists none. Datapacks bind their logical components by "
+                  "role (`role: pilot` binds the host with role pilot in the stage). Unique within a stage.",
+                  type="string"),
     "tsq_extends": h("The lab component this host is (section 7.2): a component of the library, or another host. "
                      "It gives the implementations of the commands, the status probe and the self-test "
                      "(default `linux_system`).", type="string"),
@@ -322,7 +329,7 @@ def _group(depth: int) -> dict:
                                             type=["object", "null"], additionalProperties=_group(depth + 1),
                                             defaultSnippets=[{"label": "stage", "body": {
                                                 "${1:stage_1}": {"vars": {"tsq_stage_type": "${2:type}"},
-                                                                 "hosts": {"${3:host}": {"tsq_role": "${4:role}"}}}}}])
+                                                                 "hosts": {"${3:host}": {"tsq_extends": "${4:component}"}}}}}])
     return group
 
 
@@ -635,6 +642,8 @@ def schemas(context: dict) -> dict:
             props["tsq_extends"].update(_choices({**components, **hosts}, False))
         if "extends" in props and "transport" in props and components:
             props["extends"].update(_choices(components, True))
+        if "roles" in props and "transport" in props and roles:
+            props["roles"]["items"] = {"type": "string", **_choices(roles, True)}
         if "extends" in props and "transport" not in props and "commands" in props and roles:
             props["extends"].update(_choices(roles, True))
         if "transport" in props and "commands" in props:

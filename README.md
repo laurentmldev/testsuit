@@ -68,7 +68,7 @@ setup_config: sim_bench
 dictionaries: [scenario.yml]
 ```
 
-Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. `examples/toytrain/datapack` is a complete example, and `testsuit.datatools.datapack.model` documents the file formats.
+Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. `examples/toytrain/datapack` is a complete example. The [datapack README](src/testsuit/datatools/datapack/README.md) gives the usage, the file formats and the architecture.
 
 ## Repository layout
 
@@ -78,7 +78,7 @@ src/testsuit/           the installable package
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
     DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb, Clickhouse)
     datapack/           datapack generation: YAML dictionaries, Jinja2 templates, BagIt zip
-  exploit/
+  exploit/              checks of recorded data, see its README
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
   sequencer/            test sequencer: tsqd daemon, REST API, run engine, web UI and Editor (tsq command line in cli/, UI sources in ui/)
@@ -123,7 +123,7 @@ dfs = loadDataframeFromFile("tests/etc/data/csv/flags.csv", ".*")  # one DataFra
 rc = mexploit("tests/etc/mexploit/scenarii/mxp_OK_main_functions", "tests/etc/data", "out/", force=True)
 ```
 
-The scenarios under `tests/etc/mexploit/scenarii/` are working examples of every check type.
+The scenarios under `tests/etc/mexploit/scenarii/` are working examples of every check type. The [exploit README](src/testsuit/exploit/README.md) gives the usage of `mxp` and `exploit_runner`, the scenario and configuration formats, and the architecture.
 
 ## Running the tests
 

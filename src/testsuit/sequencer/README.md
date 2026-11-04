@@ -215,13 +215,13 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | Term | Meaning |
 |---|---|
 | **lab library** | the lab's roles and components, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/components/`). |
-| **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one (`tsq_role`); datapacks bind their logical components by role and run its commands. |
-| **lab component** | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2). A component `extends` another one and overrides what differs. Hardware components (`rpi5`) are the usual bases. An inventory host is itself a component: it extends one with `tsq_extends`, and can add its own `tsq_commands`. A host must implement every command its role lists. |
+| **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one; datapacks bind their logical components by role and run its commands. |
+| **lab component** | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2). A component `extends` another one and overrides what differs. A component lists the roles it supports (`roles: [telemetry, acquisition]`) and must implement their commands; a base component lists none. An inventory host is itself a component: it extends one with `tsq_extends`, and can add its own `tsq_commands`. A host must implement every command its role lists. |
 | **built-ins** | the roles and components `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and component ends up extending (section 7.3). |
 | **`extends`** | the parent of a role (whose commands it offers too) or of a component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a role adds (`install`, `feed`...). Its implementation is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | the role lists it; its implementation is resolved in this order, last wins: the host's component chain, the stage `tsq_commands`, the host's own `tsq_commands`, and an inline `run:` in a step (section 7.4). The Editor shows the source of each command. |
-| **role** | the job of a component (`pilot`, `telemetry`, `lab_network`...), set with `tsq_role`: a lab role, so a role always offers the same commands, whatever the hardware. Logical components are bound to concrete ones by role. Unique within a stage. |
+| **role** | the job of a component (`pilot`, `telemetry`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Logical components are bound to concrete ones by role. Unique within a stage. |
 | **stage type** | the kind of a stage (`toytrain`, `counter_bench`...): a datapack asks for a stage type, and any free stage of that type can be bound. |
 | **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
 | **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
@@ -438,36 +438,36 @@ all:
 
   hosts:                                           # ad hoc components: in no stage
     lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
-    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_role: propulsion_sim, tsq_extends: propulsion_sim}
-    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_role: piezo_sim, tsq_extends: piezo_sim}
+    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_extends: propulsion_sim}
+    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_extends: piezo_sim}
 
   children:
     train_1:                                       # a stage
       vars:
         tsq_stage_type: toytrain                   # what datapacks ask for
       hosts:
-        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_role: pilot, tsq_extends: arduino_unoq}
-        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_role: telemetry, tsq_extends: rpi5}
-        au_1:         {ansible_host: 10.42.1.12, tsq_role: acquisition, tsq_extends: rpi5}
-        switch_1:     {ansible_host: 10.42.1.2, tsq_role: switch, tsq_extends: auvidea_m82}
-        lab_switch:   {ansible_host: 10.42.0.2, tsq_role: lab_network, tsq_extends: auvidea_m82, tsq_lock: shared}
+        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_extends: arduino_unoq}
+        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_extends: rpi5, tsq_role: telemetry}
+        au_1:         {ansible_host: 10.42.1.12, tsq_extends: rpi5, tsq_role: acquisition}
+        switch_1:     {ansible_host: 10.42.1.2, tsq_extends: auvidea_m82, tsq_role: switch}
+        lab_switch:   {ansible_host: 10.42.0.2, tsq_extends: auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
     train_2:                                       # a second stage of the same type
       vars:
         tsq_stage_type: toytrain
         tsq_commands:                              # stage override: this train's pilot has no flashing helper
           install: {run: "arduino-cli upload --input-dir {{ component.input_dir }}/app"}
       hosts:
-        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_role: pilot, tsq_extends: arduino_unoq}
-        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_role: telemetry, tsq_extends: rpi5}
-        au_2:         {ansible_host: 10.42.2.12, tsq_role: acquisition, tsq_extends: rpi5}
-        switch_2:     {ansible_host: 10.42.2.2, tsq_role: switch, tsq_extends: auvidea_m82}
+        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_extends: arduino_unoq}
+        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_extends: rpi5, tsq_role: telemetry}
+        au_2:         {ansible_host: 10.42.2.12, tsq_extends: rpi5, tsq_role: acquisition}
+        switch_2:     {ansible_host: 10.42.2.2, tsq_extends: auvidea_m82, tsq_role: switch}
         lab_switch: {}                             # shared with train_1: joins both trains to lab_srv
 ```
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
 - Variables follow Ansible precedence: host over stage group over `all`.
-- `tsq_role` is the role of each component, a lab role (section 7.1): the commands it offers. It is required (on the host or its groups), and unique within a stage.
 - `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
+- Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`calc_pilot_1` is a pilot, as `arduino_unoq` supports only that role); when it supports several, `tsq_role` picks one (`rpi5`: telemetry or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Roles are unique within a stage.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
@@ -506,7 +506,7 @@ A run on an emulated lab is flagged non-conform against the campaign's expected 
 
 The lab library has two levels, each a hierarchy where one `extends` another:
 - a **lab role** is abstract: what a component is for, as the commands it offers, each with what it does. A datapack binds a logical component by role, so the commands it can use are known from the role alone, whatever the hardware;
-- a **lab component** is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. Each inventory host is a component too: it has a role (`tsq_role`), extends a component (`tsq_extends`) and must implement every command its role lists.
+- a **lab component** is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A component lists the roles it supports, and the library checks it implements all their commands. Each inventory host is a component too: it extends a component (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
 
 Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `components:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
 
@@ -530,6 +530,9 @@ roles:
   telemetry:   {extends: toytrain_app}
   switch:      {extends: component}        # only monitored: no command
   lab_network: {extends: component}
+  propulsion:                              # the propulsion controller, real or simulated
+    extends: component
+    commands: {stop: Stops the train., kill: Stops the train at once.}
   sequencer:   {extends: linux_system}     # the sequencer host: where the exploitation runs
 ```
 
@@ -540,6 +543,7 @@ roles:
 components:
   rpi5:
     extends: linux_system
+    roles: [telemetry, acquisition]        # the roles it supports: it implements their commands
     commands:
       start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
       stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
@@ -554,6 +558,7 @@ components:
 
   arduino_unoq:
     extends: linux_system                  # Debian on the MPU, plus a microcontroller to flash
+    roles: [pilot]                         # its hosts are pilots, without tsq_role
     commands:
       install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
       start:   {run: "sudo systemctl start toytrain-{{ component.role }}"}
@@ -562,6 +567,7 @@ components:
 
   auvidea_m82:
     extends: component                     # an unmanaged switch: only monitored
+    roles: [switch, lab_network]
     transport: local                       # probed from the sequencer host
     status:
       probe: {run: "ping -c 1 -W 1 {{ component.host }}"}
@@ -569,6 +575,7 @@ components:
 
   propulsion_controller:                   # the real one, on the real train
     extends: component                     # not a Linux system: its own protocol
+    roles: [propulsion]
     transport: toytrain-udp                # plugin (section 12)
     commands:
       stop:  {run: "stop"}
@@ -578,12 +585,13 @@ components:
       states: {running: {regex: "^[1-9]"}, idle: {regex: "^0"}}
 
   propulsion_sim:                          # a simulation, from the inputs a datapack deploys
-    extends: toytrain_sim
+    extends: toytrain_sim                  # the base of the simulations, listing no role
+    roles: [propulsion_sim]
     commands:
       start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
 ```
 
-An inventory host extends one of them (`calc_pilot_1: {tsq_role: pilot, tsq_extends: arduino_unoq}`), or another host. The same roles can be implemented by other components in another lab: the emulated toy train implements them with local processes (`lab/components_emulated/`), so the datapacks bind to it unchanged (section 6.2).
+`roles` is inherited by the components extending one, unless they list their own; a base component (`toytrain_sim`) lists none. An inventory host extends one of them (`calc_pilot_1: {tsq_extends: arduino_unoq}`, a pilot), or another host. The same roles can be implemented by other components in another lab: the emulated toy train implements them with local processes (`lab/components_emulated/`), so the datapacks bind to it unchanged (section 6.2).
 
 ### 7.3 Built-ins
 

@@ -464,7 +464,8 @@ class Editor:
     def rename_references(self, session: EditSession, kind: str, old: str, new: str, skip: str | None = None) -> list[str]:
         """After a lab role or a library component is renamed in its file: the references to it in the other
         files of the session follow, where its library is used: the inventories reading it (``tsq_role`` for a
-        role, ``tsq_extends`` for a component) and the other library files of its folders (their ``extends``).
+        role, ``tsq_extends`` for a component) and the other library files of its folders (their ``extends``,
+        and for a role the ``roles`` its components list).
         Returns the files changed. (A datapack type of a setup is only referred to in its own file.)"""
         if kind not in ("role", "component"):
             raise SequencerError(f"rename: 'role' or 'component', not '{kind}'")
@@ -477,6 +478,9 @@ class Editor:
                 for k, v in node.items():
                     if k in keys and v == old:
                         node[k] = new
+                        changed = True
+                    elif k in keys and isinstance(v, list) and old in v:
+                        node[k] = [new if x == old else x for x in v]
                         changed = True
                     else:
                         changed = follow(v, keys) or changed
@@ -512,6 +516,8 @@ class Editor:
                 hit = follow(data, (host_key,))
             else:
                 hit = follow((data or {}).get(section), ("extends",))
+                if kind == "role":
+                    hit = follow((data or {}).get("components"), ("roles",)) or hit
             if hit:
                 self.write(session, f["path"], data=data)
                 changed.append(f["path"])
@@ -522,6 +528,13 @@ class Editor:
         """Every role with the commands it lists (and the role each comes from), every library component with
         what it implements (and the component each comes from), status and self-test."""
         lib = lab.library
+
+        def self_roles(name: str) -> list[str]:
+            try:
+                return lib.component_roles(name)
+            except SequencerError:
+                return list(lib.components[name].roles or [])
+
         roles = {}
         for name, r in lib.roles.items():
             try:
@@ -533,6 +546,7 @@ class Editor:
             roles[name] = {"extends": r.extends, "description": r.description, "source": r.source, "chain": chain,
                            "commands": commands, "own_commands": sorted(r.commands),
                            "used_by": [c.id for c in lab.inventory.components.values() if c.role == name],
+                           "implemented_by": [c for c in lib.components if name in self_roles(c)],
                            "abstract": any(o.extends == name for o in lib.roles.values())}
         components = {}
         for name, c in lib.components.items():
@@ -549,7 +563,12 @@ class Editor:
                 for check in link.selftest:
                     selftest[check["id"]] = {"spec": check, "from": link.name}
                 transport = link.transport or transport
-            components[name] = {"extends": c.extends, "description": c.description, "source": c.source,
+            try:
+                role_missing = lib.check_component(name)
+            except SequencerError:
+                role_missing = {}
+            components[name] = {"extends": c.extends, "roles": self_roles(name), "own_roles": c.roles,
+                                "role_missing": role_missing, "description": c.description, "source": c.source,
                                 "chain": [link.name for link in chain], "transport": transport or "ssh",
                                 "commands": commands, "status": status, "selftest": list(selftest.values()),
                                 "own_commands": sorted(c.commands),
@@ -574,12 +593,13 @@ class Editor:
         library = cls.describe_library(lab)
         hosts = {}
         for c in inv.components.values():
-            info = {"role": c.role, "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
+            info = {"role": c.role, "role_given": str(c.vars.get("tsq_role") or ""), "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
                     "stages": c.stages, "transport": str(c.vars.get("tsq_transport") or "")}
             try:
                 stage = inv.stages[c.stages[0]] if c.stages else None
                 resolved = lab.resolve(c, stage)
                 offered = lab.library.role_commands(c.role) if c.role in lab.library.roles else {}
+                info["role_choices"] = lab.library.component_roles(c.id, {**lab.hosts})
                 info.update(chain=resolved.chain,
                             commands={k: {"spec": v, "from": resolved.command_sources.get(k, "")}
                                       for k, v in resolved.commands.items()},

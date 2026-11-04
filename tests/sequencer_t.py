@@ -45,6 +45,7 @@ LAB_COMPONENTS = {                                       # concrete: how they ar
     "components": {
         "counter_host": {
             "extends": "linux_system",
+            "roles": ["dut"],                            # the roles it implements: its hosts are duts
             "commands": {
                 "start": {"run": "sh {{ component.input_dir }}/app.sh {{ component.output_dir }}", "detach": True},
                 "stop": {"signal": "TERM", "timeout": "5s"},
@@ -114,7 +115,7 @@ class Bench:
             "hosts": {"seq_host": {"tsq_role": "sequencer", "tsq_lock": "none",
                                    "tsq_remote_root": str(root / "remote" / "seq_host")}},
             "children": {f"bench_{i}": {"vars": {"tsq_stage_type": "counter_bench"}, "hosts": {
-                f"counter_{i}": {"tsq_role": "dut", "tsq_extends": "counter_host",
+                f"counter_{i}": {"tsq_extends": "counter_host",
                                  "tsq_remote_root": str(root / "remote" / f"counter_{i}")}}}
                 for i in range(1, stages + 1)}}}
         write(lab / "inventory.yml", yaml.safe_dump(inventory))
@@ -195,13 +196,13 @@ def read_member(run: dict, name: str) -> str:
 def test_inventory(bench):
     inv = load_inventory(bench.config.inventory_file)
     assert sorted(inv.stages) == ["bench_1", "bench_2"]
-    assert inv.components["counter_1"].role == "dut" and inv.components["seq_host"].adhoc
+    assert inv.components["counter_1"].extends == "counter_host" and inv.components["seq_host"].adhoc
 
 
 def test_roles_and_components(bench):
-    """A role lists commands, the components implement them: a host missing one of its role's commands does not
-    load; tsq_type and tsq_types, and a datapack type's extends or commands, are refused with what to write
-    instead."""
+    """A role lists commands, the components implement them: a component, or a host, missing one of its role's
+    commands does not load; a host has the role of its component, or picks one of its roles; tsq_type and
+    tsq_types, and a datapack type's extends or commands, are refused with what to write instead."""
     from types import SimpleNamespace
 
     from testsuit.datatools.datapack.datapack_tools import DatapackError
@@ -221,10 +222,48 @@ def test_roles_and_components(bench):
     del components["components"]["counter_host"]["commands"]["ready"]
     components["components"]["counter_host"]["commands"]["reset"] = {"run": "true"}
     write(lab_folder / "components" / "bench.yml", yaml.safe_dump(components))
-    with pytest.raises(SequencerError, match="'counter_1' does not implement ready, listed by its role 'dut'"):
+    with pytest.raises(SequencerError, match="component 'counter_host' .* does not implement ready, listed by its role 'dut'"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False, strict=False)
     assert lab.extra_commands["counter_1"] == ["reset"]
+    del components["components"]["counter_host"]["roles"]          # a base: its hosts give their role
+    write(lab_folder / "components" / "bench.yml", yaml.safe_dump(components))
+    with pytest.raises(SequencerError, match="'counter_1': no role: give tsq_role"):
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
+    for i in (1, 2):
+        inventory["all"]["children"][f"bench_{i}"]["hosts"][f"counter_{i}"]["tsq_role"] = "dut"
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="'counter_1' does not implement ready, listed by its role 'dut'"):
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+
+    # a component supporting several roles: its hosts pick one
+    roles = copy.deepcopy(LAB_ROLES)
+    roles["roles"]["spare"] = {"extends": "linux_system", "commands": {"start": "Starts it."}}
+    write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(roles))
+    components = copy.deepcopy(LAB_COMPONENTS)
+    components["components"]["counter_host"]["roles"] = ["dut", "spare"]
+    write(lab_folder / "components" / "bench.yml", yaml.safe_dump(components))
+    del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match=r"'counter_2': its component 'counter_host' supports several roles "
+                                             r"\(dut, spare\): pick one with tsq_role"):
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "spare"
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    assert (lab.inventory.components["counter_1"].role, lab.inventory.components["counter_2"].role) == ("dut", "spare")
+    inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "sequencer"
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its component 'counter_host' "
+                                             "supports: dut, spare"):
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    components["components"]["counter_host"]["roles"] = ["dut", "nope"]
+    write(lab_folder / "components" / "bench.yml", yaml.safe_dump(components))
+    with pytest.raises(SequencerError, match="component 'counter_host' .*: unknown role 'nope'"):
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     write(lab_folder / "components" / "bench.yml", yaml.safe_dump(LAB_COMPONENTS))
     roles = copy.deepcopy(LAB_ROLES)
     roles["roles"]["dut"]["commands"]["start"] = {"run": "x"}
@@ -233,7 +272,6 @@ def test_roles_and_components(bench):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(LAB_ROLES))
 
-    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
     inventory["all"]["vars"]["tsq_types"] = ["types/"]
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
     with pytest.raises(SequencerError, match="'tsq_types' is gone"):
@@ -246,7 +284,7 @@ def test_roles_and_components(bench):
     del inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"]
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "nope"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match="unknown role 'nope'"):
+    with pytest.raises(SequencerError, match="role 'nope' \\(tsq_role\\) is not one its component"):
         load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
 
     setup = copy.deepcopy(SETUP)

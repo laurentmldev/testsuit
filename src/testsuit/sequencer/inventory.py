@@ -4,8 +4,9 @@
 - a host in several stage groups is a shared component;
 - a host directly under ``all`` (in no stage) is an **ad hoc component**;
 - variables follow Ansible precedence: host over group (child over parent) over ``all``;
-- a host is a lab component: ``tsq_role`` is its role (the commands datapacks can use), ``tsq_extends`` the
-  library component (or the other host) it inherits its implementation from (section 7).
+- a host is a lab component: ``tsq_extends`` is the library component (or the other host) it inherits its
+  implementation from, ``tsq_role`` its role (the commands datapacks can use) when that component supports
+  several roles or none (section 7); the lab resolves it.
 """
 from __future__ import annotations
 
@@ -30,8 +31,9 @@ class Component:
 
     @property
     def role(self) -> str:
-        """The role it plays (a lab role of the library): the commands datapacks can use on it."""
-        return str(self.vars.get("tsq_role", ""))
+        """The role it plays (a lab role of the library): the commands datapacks can use on it. Its tsq_role,
+        or the role of its component, once the lab has resolved it (``Library.host_role``)."""
+        return self._role or str(self.vars.get("tsq_role", ""))
 
     @property
     def extends(self) -> str:
@@ -57,6 +59,7 @@ class Component:
         return {**self.vars, **{k: v for k, v in stage.vars.items() if k not in self._host_vars}}
 
     _host_vars: set = field(default_factory=set, repr=False)
+    _role: str = field(default="", repr=False)
 
 
 @dataclass
@@ -157,8 +160,6 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
-        if not component.role:
-            raise SequencerError(f"inventory '{path}': component '{host}' has no 'tsq_role' (a lab role)")
         if "tsq_type" in merged:
             raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone: give 'tsq_role' (a lab "
                                  f"role: its commands) and 'tsq_extends' (the component implementing them, "
@@ -170,9 +171,4 @@ def load_inventory(path: Path) -> Inventory:
 
     stages = {name: Stage(id=name, type=str(d["vars"]["tsq_stage_type"]), components=d["hosts"], vars=d["vars"])
               for name, d in stage_defs.items()}
-    for stage in stages.values():
-        roles = [components[c].role for c in stage.components if components[c].role]
-        duplicates = sorted({r for r in roles if roles.count(r) > 1})
-        if duplicates:
-            raise SequencerError(f"inventory '{path}': stage '{stage.id}' has several components with role(s) {duplicates}")
     return Inventory(file=path.resolve(), vars=root_vars, components=components, stages=stages)
