@@ -290,7 +290,12 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
 const STATES = ["running", "idle", "configured", "broken", "offline", "unknown"];
 
 export function StatusEditor({ value, onChange, inherited }: { value: any; onChange: (v: any) => void; inherited?: any }) {
-  const { schemas } = useSession();
+  const { schemas, ctx } = useSession();
+  // where the probe can run instead of on the component itself: a role of its stage, or another host
+  const viaChoices = [
+    ...labRoleChoices(ctx).map((c) => ({ ...c, description: `the component of role ${c.value} in its stage` + (c.description ? ` · ${c.description}` : "") })),
+    ...Object.keys(ctx.lab.components || {}).map((h) => ({ value: h, description: "this host of the inventory" })),
+  ];
   const help = (p: string[]) => helpText(schemas.library, [...TP, "status", ...p]);
   const s = value || null;
   const states: Record<string, any> = s?.states || {};
@@ -310,6 +315,10 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
       {s && (
         <>
           <Field label="Probe command" help={help(["probe"])}><Text keys mono value={s.probe?.run} onChange={(v) => set("probe", { ...s.probe, run: v })} placeholder="systemctl is-active my-service" /></Field>
+          <Field label="Run it through" help={help(["via"])}
+            hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
+            <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices} placeholder="stage_server" mono />
+          </Field>
           <Field label="Every" help={help(["interval"])}><Text value={s.interval} onChange={(v) => set("interval", v)} placeholder="30s" /></Field>
           <Field label="States" help={help(["states"])} wide>
             <table className="grid compact">
