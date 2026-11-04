@@ -7,6 +7,7 @@ import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown }
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
+import { ItemLink, ItemLinks, extendsKind, useItemRequest } from "./links";
 
 type Inv = any;
 type Path = (string | number)[];
@@ -81,6 +82,9 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
   const inv = doc.data || {};
   const [sel, setSel] = useState<Selection>({ kind: "defaults" });
   const [wizard, setWizard] = useState<null | { kind: "stage" } | { kind: "adhoc" } | { kind: "member"; stage: string }>(null);
+  useItemRequest(doc.path, (kind, name) => {
+    if (kind === "host" && allHosts(inv).includes(name)) setSel({ kind: "host", name });
+  });
   const gs = groups(inv);
   const stages = gs.filter((g) => g.stage);
   const plain = gs.filter((g) => !g.stage);
@@ -348,8 +352,8 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
               return (
                 <tr key={h} className="clickable" onClick={() => onSelect({ kind: "host", name: h })}>
                   <td><strong title={h}>{v.tsq_label || h}</strong>{v.tsq_label && <span className="muted small"> {h}</span>}{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
-                  <td>{(v.tsq_role || ctx.lab.components?.[h]?.role) ? <code>{v.tsq_role || ctx.lab.components[h].role}</code> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
-                  <td><code>{v.tsq_extends || ctx.lab.components?.[h]?.extends || "linux_system"}</code></td>
+                  <td>{(v.tsq_role || ctx.lab.components?.[h]?.role) ? <ItemLink kind="role" name={v.tsq_role || ctx.lab.components[h].role} /> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
+                  <td><ExtendsLink name={v.tsq_extends || ctx.lab.components?.[h]?.extends || "linux_system"} /></td>
                   <td>{v.ansible_host || h}</td><td>{v.tsq_lock || "exclusive"}</td>
                   <td><button className="small" onClick={(e) => {
                     e.stopPropagation();
@@ -433,6 +437,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
   // what the component it extends gives (a library component, or another host)
   const base = ext ? (ctx.lab.library?.[ext] || ctx.lab.components?.[ext]) : ctx.lab.library?.linux_system;
   const baseName = ext || "linux_system";
+  const extendedBy = Object.keys(ctx.lab.components || {}).filter((h) => ctx.lab.components[h]?.extends === name);
   const inherited = Object.fromEntries(Object.entries<any>(base?.commands || {}).map(([k, v]) => [k, { spec: v.spec, from: v.from }]));
   const required = Object.fromEntries(Object.entries<any>(ctx.lab.roles?.[role]?.commands || {}).map(([k, v]) => [k, { description: v.description, from: v.from }]));
   return (
@@ -449,13 +454,13 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           <button className="small" onClick={check} title="Whether the host answers on its SSH port (or is local)">Check reachability</button>
         </div>
       </Field>
-      <Field label="Extends" help={help(["all", "hosts", "_", "tsq_extends"])}>
+      <Field label="Extends" help={help(["all", "hosts", "_", "tsq_extends"])} hint={<>edit <ExtendsLink name={baseName} />{extendedBy.length > 0 && <>{" · "}extended by <ItemLinks kind="host" names={extendedBy} /></>}</>}>
         <Combo value={vars.tsq_extends} onChange={(v) => set("tsq_extends", v)} choices={componentChoices(ctx, { hosts: true, filter: (n) => n !== name })} strict
           placeholder={ext ? `${ext} (inherited)` : "linux_system (default)"}
           onPick={(v) => setHelp({ title: v, text: ctx.lab.library?.[v]?.description, extra: <ComponentCard name={v} /> })} />
       </Field>
       <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}
-        hint={supported.length === 1 ? `the role of its component: no tsq_role needed` : supported.length > 1 ? `its component supports ${supported.join(", ")}: pick one` : "its component lists no role: give one"}>
+        hint={<>{role && <>edit <ItemLink kind="role" name={role} />{" · "}</>}{supported.length === 1 ? `the role of its component: no tsq_role needed` : supported.length > 1 ? `its component supports ${supported.join(", ")}: pick one` : "its component lists no role: give one"}</>}>
         <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={supported.length ? roleChoices(ctx).filter((r) => supported.includes(r.value)) : roleChoices(ctx)} strict
           placeholder={role ? `${role} (${supported.length === 1 ? "from its component" : "inherited"})` : undefined}
           onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
@@ -605,3 +610,9 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
 }
 
 export { VAR_KEYS };
+
+/** What an inventory component extends (a library component, or another inventory component), as a link. */
+function ExtendsLink({ name }: { name: string }) {
+  const session = useSession();
+  return <ItemLink kind={extendsKind(session, name)} name={name} />;
+}

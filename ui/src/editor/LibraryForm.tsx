@@ -5,7 +5,8 @@ import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text } 
 import { post } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, summary, WELL_KNOWN } from "./commands";
-import { clone, componentChoices, hostLabel, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
+import { ItemLink, ItemLinks, useItemRequest } from "./links";
+import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
 const TP = ["components", "_"];
 const RP = ["roles", "_"];
@@ -55,6 +56,9 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
     : Object.keys(components).length ? { kind: "component", name: Object.keys(components)[0] } : null;
   const [sel, setSel] = useState<{ kind: Kind; name: string } | null>(first);
   const [creating, setCreating] = useState<Kind | null>(null);
+  useItemRequest(doc.path, (kind, name) => {
+    if ((kind === "role" && name in roles) || (kind === "component" && name in components)) setSel({ kind, name });
+  });
   const known = (kind: Kind): Record<string, any> => (kind === "role" ? ctx.lab.roles : ctx.lab.library) || {};
   const setItem = (kind: Kind, name: string, value: any) => {
     const draft = clone(data);
@@ -94,15 +98,15 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         {Object.entries(roles).map(([name, r]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
             <strong>{name}</strong> <span className="muted small">{r?.extends}</span>
-            {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of {ctx.lab.roles[name].used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}</div> : null}
+            {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of <ItemLinks kind="host" names={ctx.lab.roles[name].used_by} /></div> : null}
           </div>
         ))}
         <div className="nav-title">Components <button className="small" onClick={() => setCreating("component")}>+ Component</button></div>
         {Object.entries(components).map(([name, c]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
             <strong>{name}</strong> <span className="muted small">{c?.extends}</span>
-            {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles {ctx.lab.library[name].roles.join(", ")}</div> : null}
-            {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by {ctx.lab.library[name].used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}</div> : null}
+            {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles <ItemLinks kind="role" names={ctx.lab.library[name].roles} /></div> : null}
+            {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by <ItemLinks kind="host" names={ctx.lab.library[name].used_by} /></div> : null}
           </div>
         ))}
         <div className="nav-hint">
@@ -200,9 +204,13 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         <h3>Role {nameInput}</h3>
         <button className="small danger" onClick={onDelete}>Delete</button>
       </div>
-      <Field label="Extends" help={help(["extends"])}>
+      <Field label="Extends" help={help(["extends"])} hint={r.extends ? <>edit <ItemLink kind="role" name={r.extends} /></> : null}>
         <Combo value={r.extends} onChange={(v) => set("extends", v)} choices={labRoleChoices(ctx, (n) => n !== name)} strict />
       </Field>
+      <RelatedItems groups={[
+        ["extended by the roles", "role", Object.keys(ctx.lab.roles || {}).filter((n) => ctx.lab.roles[n]?.extends === name)],
+        ["implemented by the components", "component", described?.implemented_by || []],
+      ]} />
       <Field label="Description" help={help(["description"])}><Text multiline value={r.description} onChange={(v) => set("description", v)} placeholder="What components with this role are for" /></Field>
       <Section title="Commands offered" help={help(["commands"])}>
         <table className="grid compact commands">
@@ -231,7 +239,7 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         <p className="muted small">A role lists commands only: the lab components implement them, and every host with this role must implement them all.</p>
       </Section>
       {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the components {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
-      {described?.used_by?.length > 0 && <div className="hint-box small">Role of {described.used_by.map((h: string) => <code key={h} title={h}>{hostLabel(ctx, h)}</code>)}</div>}
+      {described?.used_by?.length > 0 && <div className="hint-box small">Role of <ItemLinks kind="host" names={described.used_by} /></div>}
     </div>
   );
 }
@@ -260,17 +268,23 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
         <h3>Component {nameInput}</h3>
         <button className="small danger" onClick={onDelete}>Delete</button>
       </div>
-      <Field label="Extends" help={help(["extends"])}>
+      <Field label="Extends" help={help(["extends"])} hint={t.extends ? <>edit <ItemLink kind="component" name={t.extends} /></> : null}>
         <Combo value={t.extends} onChange={(v) => set("extends", v)} choices={componentChoices(ctx, { filter: (n) => n !== name })} strict />
       </Field>
       <Field label="Roles it supports" help={help(["roles"])}
-        hint={t.roles === undefined && parent?.roles?.length ? `inherited from ${t.extends}: ${parent.roles.join(", ")}` : !roles.length ? "none: a base, whose hosts give their role (tsq_role)" : roles.length > 1 ? "its hosts pick one (tsq_role)" : null}>
+        hint={<>{roles.length > 0 && <>edit <ItemLinks kind="role" names={roles} /></>}{(() => {
+          const note = t.roles === undefined && parent?.roles?.length ? `inherited from ${t.extends}` : !roles.length ? "none: a base, whose hosts give their role (tsq_role)" : roles.length > 1 ? "its hosts pick one (tsq_role)" : null;
+          return note && <>{roles.length > 0 && " · "}{note}</>;
+        })()}</>}>
         <Tags value={t.roles} onChange={(v) => set("roles", v.length ? v : undefined)} choices={labRoleChoices(ctx)} placeholder="add a role it supports" />
       </Field>
       {Object.entries<any>(described?.role_missing || {}).filter(([, m]) => m.length).map(([r, m]) => (
         <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {r}: the lab does not load.</div>
       ))}
-      {parent && <div className="hint-box small">Inherits from <code>{parent.chain.join(" → ")}</code>: {Object.keys(parent.commands).map((c) => <code key={c}>{c}</code>)}{parent.status && <>, status from {parent.status.from}</>}{parent.selftest.length > 0 && <>, self-test {parent.selftest.map((c: any) => c.spec.id).join(", ")}</>}</div>}
+      <RelatedItems groups={[
+        ["extended by the components", "component", Object.keys(ctx.lab.library || {}).filter((n) => ctx.lab.library[n]?.extends === name)],
+      ]} />
+      {parent && <div className="hint-box small">Inherits from {parent.chain.map((c: string, i: number) => <span key={c}>{i > 0 && " → "}<ItemLink kind="component" name={c} /></span>)}: {Object.keys(parent.commands).map((c) => <code key={c}>{c}</code>)}{parent.status && <>, status from {parent.status.from}</>}{parent.selftest.length > 0 && <>, self-test {parent.selftest.map((c: any) => c.spec.id).join(", ")}</>}</div>}
       <Field label="Description" help={help(["description"])}><Text multiline value={t.description} onChange={(v) => set("description", v)} placeholder="What kind of component this is" /></Field>
       <Field label="Transport" help={help(["transport"])}>
         <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone={`inherited (${parent?.transport || "ssh"})`} />
@@ -282,7 +296,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
         <Field label="Only" help="Glob patterns of the output files to keep (relative to the output folder)."><Tags value={t.collect?.include} onChange={(v) => set("collect", { ...t.collect, include: v.length ? v : undefined })} placeholder="*.csv" /></Field>
         <Field label="Except" help="Glob patterns of the output files to drop."><Tags value={t.collect?.exclude} onChange={(v) => set("collect", { ...t.collect, exclude: v.length ? v : undefined })} placeholder="*.tmp" /></Field>
       </Section>
-      {described?.used_by?.length > 0 && <div className="hint-box small">Extended by {described.used_by.map((h: string) => <code key={h} title={h}>{hostLabel(ctx, h)}</code>)}: the inventory shows, for each host, the commands of its role it does not implement.</div>}
+      {described?.used_by?.length > 0 && <div className="hint-box small">Extended by <ItemLinks kind="host" names={described.used_by} />: the inventory shows, for each host, the commands of its role it does not implement.</div>}
     </div>
   );
 }
@@ -389,5 +403,16 @@ export function SelftestEditor({ value, onChange, inherited }: { value: any[] | 
         setOpen(list.length);
       }}>+ Check</button>
     </Section>
+  );
+}
+
+/** What else points at the item being edited, each name opening its editor. */
+function RelatedItems({ groups }: { groups: [string, "role" | "component" | "host", string[]][] }) {
+  const shown = groups.filter(([, , names]) => names.length);
+  if (!shown.length) return null;
+  return (
+    <div className="hint-box small related">
+      {shown.map(([label, kind, names]) => <div key={label}>{label[0].toUpperCase() + label.slice(1)}: <ItemLinks kind={kind} names={names} /></div>)}
+    </div>
   );
 }
