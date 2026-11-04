@@ -469,7 +469,7 @@ export function KeyValues({ value, onChange, known, exclude, valueChoices }: {
       })}
       <div className="kv-row">
         <div className="kv-key">
-          <Combo value={newKey} onChange={setNewKey} choices={(known || []).filter((c) => !(c.value in (value || {})))}
+          <Combo value={newKey} onChange={setNewKey} choices={(known || []).filter((c) => !(c.value in (value || {})) && !(exclude || []).includes(c.value))}
             placeholder="new variable…" mono onPick={(k) => {
               set(k, "");
               setNewKey("");
