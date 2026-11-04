@@ -186,7 +186,8 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
                 + f" (timeout {timeout:g} s)", "command": command}
         steps.append(step)
         result = await transport.shell(command, timeout=timeout)
-        step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "")
+        step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
+                    ok=result.completed and result.exit_status == 0)      # OK / FAILED, as each of several checks
         if not result.completed:
             report["why"] = f"the status command did not complete: {result.error or 'no answer'}"
             return "offline", result.error or ""
@@ -219,7 +220,7 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
             except Exception as e:
                 return str(e), None
         output, code = await asyncio.to_thread(get)
-        step.update(exit=code, output=output[-4000:])
+        step.update(exit=code, output=output[-4000:], ok=code == 0)
         if code is None:
             step["error"] = output
             report["why"] = f"the request failed: {output}"
