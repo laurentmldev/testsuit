@@ -212,6 +212,14 @@ export function labRoleChoices(ctx: any, filter?: (name: string, r: any) => bool
 
 /** Lab components (concrete): what a library component's `extends` names. With hosts, the inventory hosts
  * too (a host's `tsq_extends` can name another host). */
+/** Where a probe or command can run instead of on its component (`via`): a role of its stage, or a host. */
+export function viaChoices(ctx: any): Choice[] {
+  return [
+    ...labRoleChoices(ctx).map((c) => ({ ...c, description: `the component of role ${c.value} in its stage` + (c.description ? ` · ${c.description}` : "") })),
+    ...Object.keys(ctx.lab.components || {}).map((h) => ({ value: h, description: (hostLabel(ctx, h) !== h ? `${hostLabel(ctx, h)} · ` : "") + "this host of the inventory" })),
+  ];
+}
+
 /** What the editor shows for a lab host: its label (tsq_label), else its id. */
 export function hostLabel(ctx: any, id: string): string {
   return ctx?.lab?.components?.[id]?.label || id;

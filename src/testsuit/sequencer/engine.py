@@ -84,6 +84,8 @@ class BoundComponent:
     transport: Transport
     root: str = ""                                # remote root, '~' resolved
     work: str = ""                                # where input/ and output/ live; the root unless shared
+    vias: dict = field(default_factory=dict)      # commands run through another component (a command's via):
+                                                  # its id -> (Component, Transport, its remote root)
 
     @property
     def base(self) -> str:
@@ -104,6 +106,12 @@ class BoundComponent:
     def pid_dir(self, run_id: str) -> str:
         """Pid files of the processes a run started (by concrete id: components may share a remote root)."""
         return f"{self.root}/.tsq/{run_id}/{self.concrete.id}"
+
+    def pid_places(self, run_id: str) -> list[tuple[Transport, str]]:
+        """Where the processes a run started for it are: on itself, and on the components its commands run
+        through (``via``), each a transport and the folder of their pid files there."""
+        return [(self.transport, self.pid_dir(run_id))] + [
+            (transport, f"{root}/.tsq/{run_id}/{self.concrete.id}") for _, transport, root in self.vias.values()]
 
     def keys(self, state: str = "unknown") -> dict:
         return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "type": self.logical.type,
@@ -310,10 +318,21 @@ class StepRunner:
         if "python" in spec:
             return await self.python(spec, keys, timeout)
         if "run" in spec:
+            on = None
+            if spec.get("via"):                        # on another component: one in a sub-network behind it
+                on = self.via_place(str(spec["via"]))
+                via = on[0]
+                keys = {**keys, "via": {"id": via.id, "host": via.host, "role": via.role, "label": via.label,
+                                        "vars": via.vars}}
             command = render(spec["run"], keys, self.fs.id)
             env = {**render(spec.get("env") or {}, keys, self.fs.id), **render(step.env, keys, self.fs.id)}
             detach = step.detach if step.detach is not None else bool(spec.get("detach", False))
             expect = step.expect if step.expect is not None else spec.get("expect")
+            if on is not None:
+                via, transport, root = on
+                pidfile = f"{root}/.tsq/{self.ctx.run_id}/{self.component.concrete.id}/{self.fs.id}.pid"
+                self.note(f"through {via.id} ({via.host}), for {self.component.concrete.id}")
+                return await self.shell(str(command), env, timeout, detach, expect, (transport, pidfile))
             return await self.shell(str(command), env, timeout, detach, expect)
         for name, value in spec.items():
             if name.lower() in registry.step_types:
@@ -359,13 +378,31 @@ class StepRunner:
             return ERROR, "python exception"
         return verdict, reason
 
+    def via_place(self, name: str) -> tuple:
+        """The component a command's via names, its transport and remote root (bound with the component)."""
+        comp = self.component
+        if comp is None:
+            raise SequencerError(f"step '{self.fs.id}': 'via' needs a component")
+        lab = self.ctx.lab
+        if lab is None:
+            raise SequencerError(f"step '{self.fs.id}': 'via' needs the lab")
+        via = lab.find_via(comp.concrete, comp.stage, name, f"step '{self.fs.id}': its command goes via '{name}'")
+        if via.id not in comp.vias:
+            raise SequencerError(f"step '{self.fs.id}': {via.id} is not bound for {comp.concrete.id}: 'via' is for "
+                                 "the commands of lab components")
+        return comp.vias[via.id]
+
     def transport(self) -> Transport:
         if self.component is None:
             raise SequencerError(f"step '{self.fs.id}' needs a component")
         return self.component.transport
 
-    async def shell(self, command: str, env: dict, timeout: float | None, detach: bool, expect: dict | None):
-        if self.component is None:                 # no component: on the sequencer host, in the run folder
+    async def shell(self, command: str, env: dict, timeout: float | None, detach: bool, expect: dict | None,
+                    on: tuple[Transport, str] | None = None):
+        """on: the transport and pid file to run it with, for a command run through another component."""
+        if on is not None:
+            transport, pidfile = on
+        elif self.component is None:                 # no component: on the sequencer host, in the run folder
             from testsuit.sequencer.inventory import Component as _Component
             from testsuit.sequencer.transports.local import LocalTransport
             transport = LocalTransport(_Component("sequencer", {}), str(self.ctx.bag))
@@ -442,9 +479,16 @@ class StepRunner:
                 return ERROR, f"collected outputs over storage.max_run_output ({self.ctx.max_output} bytes)"
             return SUCCEEDED, ""
         if name == "kill":
-            self.note(f"kill every process started by run {self.ctx.run_id} on {comp.transport.host}")
+            self.note(f"kill every process started by run {self.ctx.run_id} on {comp.transport.host}"
+                      + "".join(f" and {t.host}" for t, _ in comp.pid_places(self.ctx.run_id)[1:]))
             try:
-                await comp.transport.signal_dir(comp.pid_dir(self.ctx.run_id), "KILL")
+                places = comp.pid_places(self.ctx.run_id)
+                for i, (transport, folder) in enumerate(places):
+                    try:
+                        await transport.signal_dir(folder, "KILL")
+                    except Exception:
+                        if not (i == 0 and comp.vias):  # reached through another component only
+                            raise
             except Exception as e:
                 return ERROR, f"transport: {e}"
             self.ctx.expect_state(comp.concrete.id, "idle")
@@ -465,19 +509,31 @@ class StepRunner:
         comp = self.component
         if comp is None:
             raise SequencerError("'signal' needs a component")
-        folder = comp.pid_dir(self.ctx.run_id)
+        places = comp.pid_places(self.ctx.run_id)
         sig = sig.upper().removeprefix("SIG")
-        self.note(f"signal {sig} to the processes of {comp.id} on {comp.transport.host}")
+        self.note(f"signal {sig} to the processes of {comp.id} on " + " and ".join(t.host for t, _ in places))
+        if comp.vias:                                 # reached through another component: its own host may not answer
+            reachable = []
+            for i, (transport, folder) in enumerate(places):
+                try:
+                    await transport.alive_in(folder)
+                    reachable.append((transport, folder))
+                except Exception:
+                    if i:
+                        raise
+            places = reachable
         try:
-            await comp.transport.signal_dir(folder, sig)
+            for transport, folder in places:
+                await transport.signal_dir(folder, sig)
             deadline = time.monotonic() + grace
             while time.monotonic() < deadline:
-                if not await comp.transport.alive_in(folder):
+                if not any([await transport.alive_in(folder) for transport, folder in places]):
                     break
                 await asyncio.sleep(0.2)
             else:
                 self.note(f"still alive after {grace:g}s: KILL")
-                await comp.transport.signal_dir(folder, "KILL")
+                for transport, folder in places:
+                    await transport.signal_dir(folder, "KILL")
         except Exception as e:
             return ERROR, f"transport: {e}"
         self.ctx.expect_state(comp.concrete.id, "idle")

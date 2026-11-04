@@ -653,6 +653,34 @@ def test_probe_via(tmp_path, no_git):
         bench.sequencer()
 
 
+def test_commands_via(tmp_path, no_git):
+    """A command with 'via' runs on another component (a role of the stage, or a host): its process and pid
+    file are there, and stop (a signal) and the end of the run reach it there."""
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    start = dict(LAB_COMPONENTS["components"]["counter_host"]["commands"]["start"], via="seq_host")
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"start": start}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build())
+        [done] = await run_until_done(seq, [run["id"]])
+        await seq.close()
+        return done
+    done = asyncio.run(main())
+    assert done["verdict"] == "succeeded", done["reason"]
+    logs = "\n".join(p.read_text() for p in (tmp_path / "storage").rglob("*.log") if "start" in p.name)
+    assert "through seq_host" in logs
+    assert not list((tmp_path / "remote" / "seq_host" / ".tsq").glob(f"{done['id']}/counter_1/*.pid"))
+
+    start["via"] = "nobody"
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    from testsuit.sequencer.util import SequencerError
+    with pytest.raises(SequencerError, match="command 'start' goes via 'nobody'"):
+        bench.sequencer()
+
+
 def test_maintenance_blocks(bench):
     async def main():
         seq = bench.sequencer()

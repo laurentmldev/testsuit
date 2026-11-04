@@ -610,6 +610,8 @@ The commands of a component come from the lab only: its role lists them (with it
 
 A datapack does not redefine commands: what a test runs that the role does not offer is a `run:` step of its pipeline (the exploitation in section 8.3). A stage with a special way of deploying overrides the generic command for every datapack.
 
+A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
+
 The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
 - `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage, for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
 - `{{ stage.components.<host>.host }}`, `{{ stage.id }}`, `{{ stage.type }}`, `{{ stage.vars }}`: the stage itself and its components by inventory name;

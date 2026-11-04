@@ -108,6 +108,10 @@ class Lab:
         if status.get("builtin") or "http" in (status.get("probe") or {}):
             raise SequencerError(f"{where}: 'via' needs a 'run' or plugin probe (on the component it goes through, "
                                  "'curl' does an HTTP check)")
+        return self.find_via(component, stage, name, where)
+
+    def find_via(self, component: Component, stage: Stage | None, name: str, where: str) -> Component:
+        """The component a 'via' names: the component of that role in the stage, or another host."""
         for cid in stage.components if stage else []:
             other = self.inventory.components[cid]
             if cid != component.id and other.role == name:
@@ -117,6 +121,21 @@ class Lab:
             return other
         raise SequencerError(f"{where}, which is neither the role of another component of "
                              + (f"its stage '{stage.id}'" if stage else "its stage (it has none)") + " nor another host")
+
+    def command_vias(self, component: Component, stage: Stage | None = None,
+                     resolved: Resolved | None = None) -> dict[str, Component]:
+        """The components a component's commands run through (a command's ``via``), by command name: for a
+        component the sequencer cannot reach itself, in a sub-network behind the stage server."""
+        resolved = resolved or self.resolve(component, stage)
+        vias = {}
+        for name, spec in resolved.commands.items():
+            if not isinstance(spec, dict) or not spec.get("via"):
+                continue
+            where = f"component '{component.id}': its command '{name}' goes via '{spec['via']}'"
+            if "run" not in spec:
+                raise SequencerError(f"{where}: 'via' needs a 'run' command")
+            vias[name] = self.find_via(component, stage, str(spec["via"]), where)
+        return vias
 
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
@@ -167,6 +186,7 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
                 lab.extra_commands[component.id] = extra
             try:
                 lab.via(component, stage)
+                lab.command_vias(component, stage)
             except SequencerError as e:
                 if strict:
                     raise SequencerError(f"inventory '{inventory_file}': {e}") from e

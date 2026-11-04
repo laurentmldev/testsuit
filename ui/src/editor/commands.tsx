@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Choices, Combo, Field, helpText, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { CodeEditor } from "../monaco";
 import { classes, Markdown } from "../util";
-import { clone, useSession } from "./state";
+import { clone, useSession, viaChoices } from "./state";
 
 const CMD_PATH = ["components", "_", "commands", "_"];
 
@@ -13,7 +13,7 @@ export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "depl
 export function commandKind(spec: any): string {
   if (!spec || typeof spec !== "object") return "run";
   for (const k of ["builtin", "wait_for", "signal", "run", "python"]) if (k in spec) return k;
-  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env"].includes(k)) || "run";
+  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via"].includes(k)) || "run";
 }
 
 export function pythonSummary(py: any): string {
@@ -70,7 +70,7 @@ export function PythonEditor({ value, onChange, help, uri }: {
 export function summary(spec: any): string {
   if (!spec || typeof spec !== "object") return String(spec ?? "");
   const kind = commandKind(spec);
-  if (kind === "run") return `${spec.detach ? "start " : ""}${spec.run ?? ""}`;
+  if (kind === "run") return `${spec.detach ? "start " : ""}${spec.run ?? ""}${spec.via ? ` (via ${spec.via})` : ""}`;
   if (kind === "python") return `python ${pythonSummary(spec.python)}`;
   if (kind === "builtin") return `built-in ${spec.builtin}`;
   if (kind === "signal") return `signal ${spec.signal}${spec.timeout ? `, then KILL after ${spec.timeout}` : ""}`;
@@ -196,7 +196,7 @@ const KINDS: Choice[] = [
   { value: "builtin", label: "built-in", description: "deploy, collect or kill, as linux_system does them." },
 ];
 
-export function CommandEditor({ name, spec, onChange }: { name: string; spec: any; onChange: (v: any) => void }) {
+export function CommandEditor({ name, spec, onChange, noVia }: { name: string; spec: any; onChange: (v: any) => void; noVia?: boolean }) {
   const help = useCommandHelp();
   const { ctx, schemas } = useSession();
   const kinds = [...KINDS, ...(ctx.step_types || []).map((s: string) => ({ value: s, label: s, description: "plugin step type" }))];
@@ -231,6 +231,12 @@ export function CommandEditor({ name, spec, onChange }: { name: string; spec: an
             <Field label="Detach" help={help("detach")}><Toggle value={s.detach} onChange={(x) => set("detach", x)} label="start and go on" /></Field>
             <Field label="Timeout" help={help("timeout")}><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="none" /></Field>
           </div>
+          {!noVia && (
+            <Field label="Run it through" help={help("via")}
+              hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for this component, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
+              <Combo value={s.via} onChange={(x) => set("via", x)} choices={viaChoices(ctx)} placeholder="stage_server" mono />
+            </Field>
+          )}
           <ExpectEditor value={s.expect} onChange={(x) => set("expect", x)} />
         </>
       )}
