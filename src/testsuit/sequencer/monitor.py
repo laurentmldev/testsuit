@@ -28,14 +28,19 @@ STATES = ("offline", "idle", "configured", "running", "broken", "unknown")
 HEALTHY_STATES = ("idle", "configured", "running")
 
 
-def component_keys(comp: Component, root: str, via: Component | None = None) -> dict:
-    """The keys of a status probe and self-test commands; via: the component they run on (``{{ via.host }}``)."""
+def component_keys(comp: Component, root: str, via: Component | None = None, lab: Lab | None = None) -> dict:
+    """The keys of a status probe and self-test commands; via: the component they run on (``{{ via.host }}``);
+    lab: the lab, for the other components (``{{ stage.roles.<role>.host }}``, ``{{ lab.components.<host> }}``)."""
+    stage = lab.inventory.stages[comp.stages[0]] if lab is not None and comp.stages else None
     keys = {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "extends": comp.extends,
-                          "label": comp.label, "vars": comp.vars, "remote_root": root, "stage": "",
+                          "label": comp.label, "vars": comp.vars_in(stage), "remote_root": root,
+                          "stage": stage.id if stage else "",
                           "input_dir": f"{root}/{comp.id}/input", "output_dir": f"{root}/{comp.id}/output"},
             "remote_root": root}
     if via is not None:
         keys["via"] = {"id": via.id, "host": via.host, "role": via.role, "label": via.label, "vars": via.vars}
+    if lab is not None:
+        keys.update(lab.lab_keys(comp, stage))
     return keys
 
 
@@ -75,7 +80,7 @@ def _matched(report: dict, states: dict, output: str, exit_status: int | None, a
 
 async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
                           expected: str | None = None, report: dict | None = None,
-                          via: Component | None = None) -> tuple[str, str]:
+                          via: Component | None = None, lab: Lab | None = None) -> tuple[str, str]:
     """(state, detail) of a component, from the status probe of its lab component. report gets what was
     tested (steps: each action with its command, answer and exit status), the rules of the probe and the
     one that matched, and why the state is what it is.
@@ -136,7 +141,7 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
                          + (" (configured: a deploy was done and nothing runs yet)" if state == "configured" else ""))
         return state, ""
     probe = status.get("probe") or {}
-    keys = component_keys(comp, root, via)
+    keys = component_keys(comp, root, via, lab)
     if "run" in probe:
         report["kind"] = "command"
         command = str(render(probe["run"], keys, f"{comp.id} status"))
@@ -231,7 +236,7 @@ class Monitor:
             via = self.lab.via(comp, stage, resolved.status)
             state, detail = await asyncio.wait_for(
                 probe_component(comp, resolved, self.transports(via.id if via else comp_id), res.get("expected"),
-                                report, via), 60)
+                                report, via, self.lab), 60)
         except asyncio.TimeoutError:
             state, detail, failed = "offline", "probe timeout (60 s)", True
             report["why"] = "the probe got no answer within 60 s"
@@ -324,7 +329,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
     except Exception as e:
         return {"component": comp.id, "ok": False, "state": "offline",
                 "checks": [{"id": "login", "ok": False, "detail": str(e)}], "at": now()}
-    keys = component_keys(comp, root, via)
+    keys = component_keys(comp, root, via, monitor.lab if monitor is not None else None)
 
     async def shell(command: str, limit: float | None = None):
         return await transport.shell(command, timeout=min(limit or timeout, timeout))

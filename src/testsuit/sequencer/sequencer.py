@@ -469,7 +469,7 @@ class RunExecution:
                           stage_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
                           expect_state=lambda concrete, state: self.store.set_expected(concrete, state),
                           on_state_mismatch=self.datapack.pipeline.on_state_mismatch,
-                          max_output=self.seq.config.storage.max_run_output)
+                          max_output=self.seq.config.storage.max_run_output, lab=self.seq.lab)
 
     def snapshot_steps(self) -> None:
         if self.ctx is not None:

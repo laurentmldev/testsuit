@@ -71,6 +71,13 @@ RUNTIME_KEYS = {
     "phase.id": "current phase",
     "components.<id>": "the same keys for any component of the run (components.pilot.host)",
     "stages.<id>.id": "lab stage a logical stage is bound to",
+    "stage.roles.<role>": "the component of that role in the component's lab stage: id, host, role, label, vars "
+                          "(stage.roles.stage_server.host)",
+    "stage.components.<host>": "a component of the component's lab stage by inventory name (also stage.id, "
+                               "stage.type, stage.vars)",
+    "lab.components.<host>": "any host of the lab inventory: id, host, role, label, vars "
+                             "(lab.components.psu_1.vars.ansible_host)",
+    "via.host": "in a status probe with 'via': the component it runs on (also via.id, via.vars)",
     "params.<name>": "parameters of the sub-pipeline (uses ... with:)",
     "succeeded('<step>')": "in 'if': the step succeeded (also failed, errored, skipped, verdict)",
 }
