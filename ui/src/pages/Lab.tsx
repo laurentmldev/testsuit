@@ -1,7 +1,7 @@
 // Components and stages (sequencer README, section 13.1): monitored state, lock state and holder,
 // self-test results; hold, release, maintenance, resume and self-test.
 import { useEffect, useState } from "react";
-import { post, useResource } from "../api";
+import { get, post, useResource } from "../api";
 import { Dialog } from "../fields";
 import { ago, attempt, Badge, navigate, time } from "../util";
 import { LogsDialog } from "./Logs";
@@ -69,6 +69,132 @@ function SelftestDialog({ target, onClose }: { target: string | null; onClose: (
   );
 }
 
+const STATE_HELP: Record<string, string> = {
+  idle: "it answers and runs nothing the sequencer started",
+  configured: "deployed, and nothing runs yet",
+  running: "something the sequencer started runs on it",
+  offline: "the sequencer cannot reach it, or its probe says so",
+  broken: "it answers, but its probe or its last self-test says it cannot be used",
+  unknown: "its probe gives no state (no probe, or no rule matches its answer)",
+};
+
+/** One action of a probe: what was run, and what the component answered. */
+function ProbeStep({ step, index }: { step: any; index: number }) {
+  const answer = [step.output, step.error].filter((x) => x && String(x).trim()).join("\n");
+  return (
+    <div className="probe-step">
+      <div><span className="muted">{index + 1}.</span> {step.action}</div>
+      {step.command && <pre className="probe-command">{step.command}</pre>}
+      {(answer || step.exit !== undefined) && (
+        <div className="probe-answer">
+          {step.exit !== undefined && step.exit !== null && <span className="muted small">exit status <code>{step.exit}</code></span>}
+          {answer ? <pre className={step.error ? "bad-text" : ""}>{answer}</pre> : <span className="muted small"> no output</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Checks({ checks }: { checks: any[] }) {
+  return (
+    <table className="grid compact">
+      <thead><tr><th>Check</th><th>Result</th><th>What it tested</th><th>Answer</th></tr></thead>
+      <tbody>
+        {checks.map((c) => (
+          <tr key={c.id}>
+            <td><code>{c.id}</code></td>
+            <td><Badge value={c.ok ? "passed" : "failed"} /></td>
+            <td className="mono small">{c.command || c.spec?.run || (c.spec?.builtin ? `built-in ${c.spec.builtin}` : c.spec ? JSON.stringify(c.spec) : "")}</td>
+            <td className="reason">{c.exit !== undefined && c.exit !== null && <span className="muted small">exit status <code>{c.exit}</code></span>}<pre>{c.detail}</pre></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** Why a component has its state: what its last probe tested, what it answered, the rules of its probe and
+ * the one that matched; and its last self-test, when it keeps the component broken. */
+function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [probing, setProbing] = useState(false);
+  useEffect(() => {
+    get(`components/${id}/probe`).then(setData).catch((e) => setError(e.message));
+  }, [id]);
+  const again = async () => {
+    setProbing(true);
+    const fresh = await attempt(() => post(`components/${id}/probe`));
+    setProbing(false);
+    if (fresh) setData(fresh);
+  };
+  const p = data?.probe;
+  const failure = p?.kept_broken || data?.selftest_failed;
+  const selftest = data?.selftest;
+  return (
+    <Dialog title={`State of ${id}`} onClose={onClose} wide
+      footer={<button disabled={probing} onClick={again}>{probing ? "Probing…" : "Probe again"}</button>}>
+      {error && <div className="error-box">{error}</div>}
+      {!data && !error && <p className="muted">Reading its last probe…</p>}
+      {data && (
+        <div className="probe-report">
+          <p>
+            <Badge value={data.state} /> <span className="muted">{STATE_HELP[data.state] || ""}</span>
+            {data.expected && data.expected !== data.state && <> · <span className="warning-text">expected {data.expected}</span></>}
+          </p>
+          {p?.why && <p className="probe-why"><strong>Why:</strong> {p.why}.</p>}
+          {!p && <p className="muted">Not probed since tsqd started{data.detail ? <>: last recorded detail <code>{data.detail}</code></> : ""}. Probe it again to see what is tested.</p>}
+          {p && (
+            <>
+              <h4>What was tested</h4>
+              <p className="muted small">
+                {p.kind ? <>status probe <code>{p.kind}</code></> : "no status probe"}
+                {p.chain?.length > 1 && <> of the lab component <code>{p.chain[p.chain.length - 2]}</code></>}
+                {p.via
+                  ? <>{" "}for <code>{p.host}</code>, run on <code>{p.via.id}</code> ({p.via.host}, {p.transport}) which it is reached through</>
+                  : <>{" "}on <code>{p.host}</code> ({p.transport})</>}
+                , {time(p.at)}, {p.duration} s
+              </p>
+              {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} />)}
+              {p.rules && Object.keys(p.rules).length > 0 && (
+                <>
+                  <h4>How its answer gives the state</h4>
+                  <p className="muted small">The first rule that matches the answer gives the state; no match gives unknown.</p>
+                  <table className="grid compact">
+                    <thead><tr><th>State</th><th>Rule</th><th /></tr></thead>
+                    <tbody>
+                      {Object.entries<any>(p.rules).map(([state, rule]) => (
+                        <tr key={state} className={p.matched === state ? "matched" : ""}>
+                          <td><Badge value={state} /></td>
+                          <td className="mono small">{Object.entries(rule).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ")}</td>
+                          <td>{p.matched === state ? <strong>matched</strong> : <span className="muted">no match</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </>
+          )}
+          {failure && (
+            <>
+              <h4>Failed self-test ({time(failure.at)})</h4>
+              <p className="muted small">It keeps the component broken whatever its probe says, until a self-test passes (one runs when it turns idle, or with Self-test).</p>
+              {failure.checks ? <Checks checks={failure.checks} /> : <pre>{failure.detail}</pre>}
+            </>
+          )}
+          {!failure && selftest && (
+            <>
+              <h4>Last self-test ({time(selftest.at)}) <Badge value={selftest.ok ? "passed" : "failed"} /></h4>
+              <Checks checks={selftest.checks || []} />
+            </>
+          )}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 export function LabPage({ editor }: { editor?: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
   const comps = useResource<any[]>("components", ["component", "probe", "resource", "release", "run", "lab", "selftest"]);
@@ -77,6 +203,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const [reloading, setReloading] = useState(false);
   const [logs, setLogs] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [details, setDetails] = useState<string | null>(null);
   // "probed 3s ago" kept true: redrawn every second, the components read again after each probe (events),
   // and every component probed when the page opens
   const [, setTick] = useState(0);
@@ -117,7 +244,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td>{c.role}</td>
       <td><code>{c.extends}</code></td>
       <td>{c.host}</td>
-      <td><Badge value={c.state} title={c.detail || ""} />{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
+      <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
         <div className="muted small" title={time(c.probed_at)}>{c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>
       <td><Holders item={c} /></td>
@@ -158,6 +285,10 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <div className="card-head"><h3>Ad hoc components</h3><span className="muted small">in no stage, bound by role on their own</span></div>
         <table className="grid">{head}<tbody>{(comps.data || []).filter((c) => c.adhoc).map(row)}</tbody></table>
       </div>
+      {details && <ProbeDialog id={details} onClose={() => {
+        setDetails(null);
+        refresh();
+      }} />}
       {selftest !== undefined && <SelftestDialog target={selftest} onClose={() => {
         setSelftest(undefined);
         refresh();

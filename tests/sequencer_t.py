@@ -557,6 +557,93 @@ def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
     assert detail.startswith("self-test failed") and "healthy" in detail, detail
 
 
+def test_probe_report(tmp_path, no_git):
+    """Each probe leaves a report for the Lab page: what was tested, the answer, the rule that gave the state
+    (or that none did), and why; a component kept broken says so, with its failed self-test checks."""
+    bench = Bench(tmp_path, stages=1)
+    answer = tmp_path / "answer"
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["status"] = {
+        "probe": {"run": f"cat {answer}"},
+        "states": {"running": {"regex": "^RUN"}, "idle": {"regex": "^IDLE"}, "offline": {"exit": "nonzero"}}}
+    types["components"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"grep -q OK {answer}"}]
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None                                  # no background self-test
+        reports = []
+        for text in ("RUNNING\n", "WHAT\n", None):
+            if text is None:
+                answer.unlink()
+            else:
+                answer.write_text(text)
+            await seq.monitor.probe("counter_1")
+            reports.append(seq.monitor.reports["counter_1"])
+        answer.write_text("IDLE\n")
+        [result] = await seq.selftest("counter_1")                  # fails: no OK in the answer
+        await seq.monitor.probe("counter_1")
+        reports.append(seq.monitor.reports["counter_1"])
+        await seq.close()
+        return reports, result
+    (running, unknown, offline, kept), result = asyncio.run(main())
+    step = running["steps"][-1]
+    assert step["command"] == f"cat {answer}" and step["output"] == "RUNNING\n" and step["exit"] == 0
+    assert running["state"] == "running" and running["matched"] == "running" and "rule of state 'running'" in running["why"]
+    assert sorted(running["rules"]) == ["idle", "offline", "running"]
+    assert unknown["state"] == "unknown" and "matched" not in unknown and "matches none of the rules" in unknown["why"]
+    assert offline["state"] == "offline" and offline["steps"][-1]["exit"] != 0 and "rule of state 'offline'" in offline["why"]
+    healthy = next(c for c in result["checks"] if c["id"] == "healthy")
+    assert not result["ok"] and not healthy["ok"] and healthy["spec"]["run"] == f"grep -q OK {answer}"
+    assert kept["probed"] == "idle" and kept["state"] == "broken" and "stays broken" in kept["why"]
+    assert [c["id"] for c in kept["kept_broken"]["checks"] if not c["ok"]] == ["healthy"]
+
+
+def test_probe_via(tmp_path, no_git):
+    """A component in a sub-network is probed through another component of its stage (status.via: its role,
+    or a host): the commands run there, never on the component itself; its self-test's run checks too."""
+    bench = Bench(tmp_path, stages=1)
+    psu = tmp_path / "psu"
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["obc_1"] = {
+        "tsq_extends": "obc", "tsq_transport": "ssh", "ansible_host": "192.0.2.7", "tsq_lock": "none"}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    roles = yaml.safe_load((tmp_path / "lab" / "roles" / "bench.yml").read_text())
+    roles["roles"]["obc"] = {"extends": "component"}
+    write(tmp_path / "lab" / "roles" / "bench.yml", yaml.safe_dump(roles))
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["obc"] = {
+        "extends": "component", "roles": ["obc"],
+        "status": {"via": "dut", "probe": {"run": f"cat {psu}; echo from {{{{ via.id }}}} to {{{{ component.host }}}}"},
+                   "states": {"running": {"regex": "^ON"}, "idle": {"regex": "^OFF"}}},
+        "selftest": [{"id": "psu", "run": f"test -f {psu}"}]}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        reports = []
+        for text in ("OFF\n", "ON\n"):
+            psu.write_text(text)
+            await seq.monitor.probe("obc_1")
+            reports.append(seq.monitor.reports["obc_1"])
+        [result] = await seq.selftest("obc_1")
+        await seq.close()
+        return reports, result
+    (off, on), result = asyncio.run(main())
+    assert off["state"] == "idle" and on["state"] == "running"
+    assert on["via"]["id"] == "counter_1" and on["steps"][-1]["output"] == "ON\nfrom counter_1 to 192.0.2.7\n"
+    assert "counter_1, for obc_1" in on["steps"][-1]["action"]
+    psu_check = next(c for c in result["checks"] if c["id"] == "psu")
+    assert result["ok"] and psu_check["ok"] and psu_check["command"] == f"test -f {psu}"
+
+    types["components"]["obc"]["status"]["via"] = "nobody"
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+    from testsuit.sequencer.util import SequencerError
+    with pytest.raises(SequencerError, match="goes via 'nobody'"):
+        bench.sequencer()
+
+
 def test_maintenance_blocks(bench):
     async def main():
         seq = bench.sequencer()

@@ -626,6 +626,17 @@ Each component has a monitored **state**:
 - The **state monitor** runs each component's `status` probe periodically: every `status.interval` (default 30 s), more often for the components of active runs. Results go to the event bus and the state store.
 - The sequencer also knows the **expected** state: `configured` after `deploy`, `running` after `start`, `idle` after `stop`. When the probed state differs from the expected one (expected `running`, probed `idle` or `broken`), an event is raised. The step fails or only warns, as set by `on_state_mismatch: fail | warn` (default `warn`).
 - A state can be waited for in a pipeline: `wait_for: {state: running}`.
+- A component the sequencer cannot reach itself, in a sub-network behind the stage server, is probed **through another component**: `status.via` names a role of its stage (or another host). The probe's command runs there, with that component's transport, and gets `{{ component.host }}` (the component probed) and `{{ via.host }}`. The `run` checks of its self-test run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped. `via` takes a `run` or plugin probe. A component that is off between runs is mapped to `idle`, not `offline`, so that its stage stays available:
+
+  ```yaml
+  obc:
+    extends: component
+    roles: [obc]
+    status:
+      via: stage_server                     # the stage's component of role stage_server
+      probe: {run: "psu-ctl get ch1; ping -c 1 -W 1 {{ component.host }} >/dev/null && echo UP || echo DOWN"}
+      states: {running: {regex: "ON[\\s\\S]*UP"}, broken: {regex: "ON[\\s\\S]*DOWN"}, idle: {regex: "OFF"}}
+  ```
 - A `broken` or `offline` component is not used for new runs. A stage is unavailable while one of its components is. A component that recovers becomes available again, unless an operator put it in `maintenance`.
 
 This is distinct from the **lock state** (free or held by a run), shown next to it.
@@ -967,6 +978,7 @@ tsq config                                                  # settings in use, a
 **REST API** (FastAPI, OpenAPI generated):
 - `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill`, `GET /runs/{id}/logs/{step}`;
 - `GET /stages`, `GET /components`, `POST /stages/{id}|/components/{id}/hold|release|maintenance|resume`;
+- `GET /components/{id}/probe` (the last probe's report: what was tested, on which host and transport, each command and its answer, the rule that matched and why, plus the last self-test), `POST /components/{id}/probe` (probe now, and return the new report);
 - `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
 - `POST /selftest`, `GET /lab` (inventory, roles, git state), `POST /lab/reload`;
 - `GET /events` (Server-Sent Events: run and component state changes, log lines);
@@ -986,7 +998,7 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 | Use case | What the UI offers |
 |---|---|
 | Post a datapack | upload a zip, set its priority and an optional expected baseline; see at once whether it is valid, conform, and which stage types it waits for |
-| Manage and monitor components | stages and components with their monitored state, lock state and holder, self-test results, history of state changes; hold, release, maintenance, resume and self-test buttons |
+| Manage and monitor components | stages and components with their monitored state, lock state and holder, self-test results, history of state changes; hold, release, maintenance, resume and self-test buttons. Clicking a component's state opens its probe report: what was tested (probe kind, host, transport, each command), the system's answer and exit status, the state rules with the one that matched, why the state is what it is (a failed self-test keeping it broken, with the failed checks, their command and answer), and a *Probe again* button |
 | Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
 | Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs; cancel and kill |
 | Access a datapack's contents | before the run (queued: inputs, definition, keys, baseline), during the run (inputs, outputs collected so far, logs) and after it (the results datapack): a file tree with viewers for text, YAML, CSV and logs, and downloads for the rest, large files included |

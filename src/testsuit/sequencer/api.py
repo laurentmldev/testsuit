@@ -239,6 +239,21 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     async def components():
         return resources("component")
 
+    def probe_report(name: str) -> dict:
+        res = seq.store.resources("component").get(("component", name)) or {}
+        return {"component": name, "state": res.get("state") or "unknown", "detail": res.get("detail"),
+                "expected": res.get("expected"), "probed_at": res.get("probed_at"),
+                "probe": seq.monitor.reports.get(name), "selftest": seq.monitor.selftests.get(name),
+                "selftest_failed": res.get("selftest_failed")}
+
+    @app.get("/components/{name}/probe")
+    async def component_probe(name: str):
+        """The last probe of a component: what was tested, its answer, the rule that gave its state and why;
+        and its last self-test, with each check."""
+        if name not in seq.lab.inventory.components:
+            raise HTTPException(404, f"no component '{name}'")
+        return probe_report(name)
+
     def resource_action(kind: str):
         async def endpoint(name: str, action: str, body: dict | None = None):
             items = seq.lab.inventory.stages if kind == "stages" else seq.lab.inventory.components
@@ -254,7 +269,11 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 return seq.set_flag(name, "hold", False)
             if action == "release":
                 return seq.release(name)
-            raise HTTPException(404, f"unknown action '{action}' (hold, release, maintenance, resume)")
+            if action == "probe" and kind == "components":
+                await seq.monitor.probe(name)
+                return probe_report(name)
+            raise HTTPException(404, f"unknown action '{action}' (hold, release, maintenance, resume"
+                                     + (", probe)" if kind == "components" else ")"))
         return endpoint
 
     for kind in ("stages", "components"):
