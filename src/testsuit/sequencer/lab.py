@@ -72,19 +72,22 @@ class Lab:
                           for t in self.types.types.values()}}
 
 
-def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True) -> Lab:
-    """Read and check the inventory and its type library (every component's type must exist)."""
+def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, strict: bool = True) -> Lab:
+    """Read and check the inventory and its type library (every component's type must exist).
+
+    :param strict: False to accept unknown types, for components and parents (the Editor, while a type is renamed)
+    """
     if not inventory_file.is_file():
         raise SequencerError(f"lab inventory not found: '{inventory_file}'")
     inventory = load_inventory(inventory_file)
-    types = TypeLibrary.load(inventory.type_folders)
-    for component in inventory.components.values():
+    types = TypeLibrary.load(inventory.type_folders, strict)
+    for component in inventory.components.values() if strict else []:
         try:
             types.chain(component.type)
         except SequencerError as e:
             raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
     lab = Lab(folder=folder, inventory=inventory, types=types, git=git_state(folder), require_tag=require_tag)
-    for warning in lab.warnings:
+    for warning in lab.warnings if strict else []:
         log.warning(warning)
     return lab
 

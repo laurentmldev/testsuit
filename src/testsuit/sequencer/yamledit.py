@@ -109,6 +109,18 @@ class _Merger:
         return _build(new, siblings + ([old] if isinstance(old, (dict, list)) else []))
 
     def map(self, old: CommentedMap, new: dict) -> None:
+        # a key renamed (one gone, one new with the same contents): the node moves, with its comments and style
+        gone = [k for k in old if k not in new]
+        for key in [k for k in new if k not in old]:
+            match = next((g for g in gone if plain(old[g]) == new[key]), None)
+            if match is None:
+                continue
+            gone.remove(match)
+            position, node, comment = list(old).index(match), old[match], old.ca.items.pop(match, None)
+            del old[match]
+            old.insert(position, key, node)
+            if comment is not None:
+                old.ca.items[key] = comment
         for key in [k for k in old if k not in new]:
             del old[key]
         siblings = list(old.values())

@@ -190,7 +190,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
                 <span className="muted">branch <code>{info.branch || "detached"}</code> · {info.changed ? `${info.changed} changed file(s)` : "no change yet"}</span>
               )}
-              {session.ctx.lab_error && <span className="badge bad" title={session.ctx.lab_error}>the lab files do not load: helpers use the running lab</span>}
+              {session.ctx.lab_error && <span className="badge bad" title={session.ctx.lab_error}>the lab files do not load as they are (see the problems)</span>}
               <span className="spacer" />
               <button onClick={validateAll} disabled={checking} title="Check every file, as tsq lab reload and tsq validate would">{checking ? <><span className="spinner" aria-hidden="true" />Checking…</> : "Check everything"}</button>
               {info.kind === "workspace" && <button onClick={() => setDialog("generate")} title="Run the datapack tool on a test definition, as datapack <testdef> would">Generate a datapack</button>}

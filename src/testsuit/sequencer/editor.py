@@ -448,21 +448,79 @@ class Editor:
         return load_lab(session.folder, self._inventory(session), require_tag=False)
 
     def lab_for(self, session: EditSession) -> tuple[Lab, str | None]:
-        """The lab the session's helpers and checks use: its own files for a lab session (the running lab
-        when they are invalid), the running lab for a workspace."""
+        """The lab the session's helpers and checks use: its own files for a lab session, the running lab
+        for a workspace. A lab session whose files are inconsistent (a component of a type just renamed)
+        still gets its own files, read without that check; the running lab only when they do not load at all."""
         if session.kind == "lab":
             try:
                 return self.session_lab(session), None
             except SequencerError as e:
-                return self.seq.lab, str(e)
+                try:
+                    return load_lab(session.folder, self._inventory(session), require_tag=False, strict=False), str(e)
+                except Exception:
+                    return self.seq.lab, str(e)
         return self.seq.lab, None
+
+    def rename_type(self, session: EditSession, old: str, new: str, skip: str | None = None) -> list[str]:
+        """After a lab component type is renamed in its file: the references to it in the other files of the
+        session follow ('extends' in the type files, 'tsq_type' in the inventory). Returns the files changed.
+        (A datapack type of a setup is only referred to in its own file: its form renames them.)"""
+        def follow(node: Any, keys: tuple[str, ...]) -> bool:
+            changed = False
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k in keys and v == old:
+                        node[k] = new
+                        changed = True
+                    else:
+                        changed = follow(v, keys) or changed
+            elif isinstance(node, list):
+                for v in node:
+                    changed = follow(v, keys) or changed
+            return changed
+
+        # only where the renamed file's type library is used: the inventories reading it, and its other files
+        from testsuit.sequencer.inventory import load_inventory
+        files = self.tree(session)
+        renamed = self.path(session, skip).resolve() if skip else None
+        targets: set[str] = set()
+        for f in files:
+            if f["kind"] != "inventory":
+                continue
+            try:
+                folders = load_inventory(self.path(session, f["path"])).type_folders
+            except Exception:
+                continue
+            if renamed is None or any(renamed.is_relative_to(folder) for folder in folders):
+                targets.add(f["path"])
+                targets |= {t["path"] for t in files if t["kind"] == "types"
+                            and any(self.path(session, t["path"]).resolve().is_relative_to(folder) for folder in folders)}
+        changed = []
+        for f in files:
+            if f["path"] == skip or f["path"] not in targets:
+                continue
+            try:
+                data = yaml.safe_load(self.path(session, f["path"]).read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError):
+                continue
+            if f["kind"] == "inventory":
+                hit = follow(data, ("tsq_type",))
+            else:
+                hit = follow((data or {}).get("component_types"), ("extends",))
+            if hit:
+                self.write(session, f["path"], data=data)
+                changed.append(f["path"])
+        return changed
 
     @staticmethod
     def describe_types(lab: Lab) -> dict:
         """Every type with what it inherits: commands (with the type each comes from), status, self-test."""
         result = {}
         for name, t in lab.types.types.items():
-            chain = lab.types.chain(name)
+            try:
+                chain = lab.types.chain(name)
+            except SequencerError:                        # extends a type that is not there (renamed?): itself only
+                chain = [t]
             commands, status, selftest, transport = {}, None, {}, None
             for link in chain:
                 for cmd, spec in link.commands.items():

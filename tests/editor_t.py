@@ -77,6 +77,16 @@ def test_merge_empties_a_mapping_or_a_list():
     assert yaml.safe_load(merged) == {"steps": [], "other": 1} and "steps: []" in merged, merged
 
 
+def test_merge_keeps_a_renamed_key_as_written():
+    text = ("types:\n  sim:   # the simulator\n    # how it starts\n    start: {run: \"go\"}\n"
+            "    checks:\n      - {id: a, run: \"x\"}\n  other: {}\n")
+    data = yaml.safe_load(text)
+    data["types"] = {"simx": data["types"]["sim"], "other": {}}
+    merged = yamledit.merge(text, data)
+    assert yaml.safe_load(merged) == data
+    assert merged == text.replace("  sim:   #", "  simx:  #"), merged          # the comment stays in its column
+
+
 def test_merge_matches_list_items_by_id():
     data = yaml.safe_load(TEXT)
     steps = data["pipeline"]["phases"][0]["steps"]
@@ -433,6 +443,34 @@ def test_lab_session(repos):
     pushed = editor.push(session, "Label counter_1", "Ada", "ada@example.com", tag="lab-2")
     assert pushed["ok"]
     assert editor.published["lab"]["tag"] == "lab-2"
+
+
+def test_renaming_a_lab_type(repos):
+    """While the inventory still names a renamed type, the helpers list the session's types (not the running
+    lab's); rename_type then makes the inventory and the deriving types follow."""
+    editor = repos.editor
+    session = editor.open("lab")
+    types = editor.read(session, "types/bench.yml")["data"]
+    types["component_types"]["counter_box"] = types["component_types"].pop("counter_host")
+    types["component_types"]["fast_counter"] = {"extends": "counter_host", "description": "derived"}
+    editor.write(session, "types/bench.yml", data=types)
+    ctx = editor.context(session)
+    assert ctx["lab_error"] and "counter_host" in ctx["lab_error"]
+    assert "counter_box" in ctx["lab"]["types"] and "counter_host" not in ctx["lab"]["types"]
+    assert ctx["lab"]["types"]["fast_counter"]["chain"] == ["fast_counter"]      # its parent is gone: itself only
+
+    types["component_types"]["fast_counter"]["extends"] = "counter_box"        # the form renames those of its own file
+    editor.write(session, "types/bench.yml", data=types)
+    # another inventory with its own library, where counter_host is another type: left alone
+    other = "all:\n  vars: {tsq_types: [other_types/]}\n  hosts:\n    c9: {tsq_type: counter_host}\n"
+    editor.write(session, "other.yml", content=other)
+    editor.write(session, "other_types/t.yml", content="component_types:\n  counter_host: {extends: linux_system}\n")
+    assert editor.rename_type(session, "counter_host", "counter_box", skip="types/bench.yml") == ["inventory.yml"]
+    ctx = editor.context(session)
+    assert ctx["lab_error"] is None
+    assert sorted(ctx["lab"]["types"]["counter_box"]["used_by"]) == ["counter_1", "counter_2"]
+    assert "counter_host" not in editor.read(session, "inventory.yml")["content"]
+    assert editor.read(session, "other.yml")["content"] == other
 
 
 def test_sessions_survive_a_restart(repos):

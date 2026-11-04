@@ -89,13 +89,13 @@ class ResolvedType:
 
 class TypeLibrary:
 
-    def __init__(self, types: dict[str, TypeDef]):
+    def __init__(self, types: dict[str, TypeDef], strict: bool = True):
         self.types = types
-        for name in types:
+        for name in types if strict else []:
             self.chain(name)          # unknown parents and cycles
 
     @classmethod
-    def load(cls, folders: list[Path]) -> "TypeLibrary":
+    def load(cls, folders: list[Path], strict: bool = True) -> "TypeLibrary":
         types = {name: TypeDef.from_dict(name, data, "<builtin>") for name, data in BUILTIN_TYPES.items()}
         for name, data in registry.component_types.items():
             types[name] = TypeDef.from_dict(name, data, "<plugin>")
@@ -114,7 +114,7 @@ class TypeLibrary:
                         raise SequencerError(f"'{path}': '{name}' is a built-in type and cannot be redefined")
                     seen[name] = str(path)
                     types[name] = TypeDef.from_dict(name, definition, str(path))
-        return cls(types)
+        return cls(types, strict)
 
     def chain(self, name: str, extra: dict[str, TypeDef] | None = None) -> list[TypeDef]:
         """The type and its ancestors, base first."""
