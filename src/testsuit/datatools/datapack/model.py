@@ -29,8 +29,7 @@ Setup::
                 version: "{{ toytrain_sw_version }}"
                 postprocess: [finalize]
     component_types:
-      pilot_app:
-        extends: arduino_unoq             # for the test sequencer: the lab type it derives from
+      pilot_app:                          # what a component gets as inputs (its commands: its role's lab type)
         configurations:
           standard:
             inputs:
@@ -44,13 +43,13 @@ Setup::
                 method: generate
                 generator: toytrain-profile-compiler
                 options: {step_mps: 0.05}
-        commands: ...                     # for the test sequencer, not rendered
     configurations:
       sim_bench:
         stages:                           # for the test sequencer: logical stages needed
           train: {type: toytrain}
         components:
           pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
+                                          # role: for the test sequencer, a lab type (binding and commands)
           telemetry:
             type: telemetry_app
             configuration: standard
@@ -123,12 +122,20 @@ class ComponentConfiguration(_Model):
     inputs: list[InputFile] = Field(default_factory=list)
 
 
+GONE = "is gone: the component's role is a lab type, which gives its commands (test-specific commands: pipeline steps)"
+
+
 class ComponentType(_Model):
     configurations: dict[str, ComponentConfiguration]
     description: str = ""                    # what the type is (shown in the Editor)
-    # for the test sequencer
-    extends: str = ""
-    commands: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _gone(cls, data):
+        for key in ("extends", "commands"):
+            if isinstance(data, dict) and key in data:
+                raise ValueError(f"'{key}' {GONE}")
+        return data
 
 
 class Component(_Model):
@@ -137,10 +144,16 @@ class Component(_Model):
     configuration: str
     # other components whose generated inputs this one reads (generated first)
     needs: list[str] = Field(default_factory=list)
-    # for the test sequencer: logical stage and role it is bound by, command overrides (not rendered)
+    # for the test sequencer: logical stage and role it is bound by (the role is a lab type: its commands)
     stage: str = ""
     role: str = ""
-    commands: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _gone(cls, data):
+        if isinstance(data, dict) and "commands" in data:
+            raise ValueError(f"'commands' {GONE}")
+        return data
 
 
 class SetupConfiguration(_Model):

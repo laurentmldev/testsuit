@@ -80,12 +80,12 @@ def test_sample_datapack(sample_copy, test):
     assert criteria.is_file()
     assert (pack / "data" / "analysis" / "input" / "check_data.py").is_file()   # the python step's script
 
-    # the sequencer fields are kept as written: commands and pipeline are rendered at run time
+    # the sequencer fields are kept as written: the pipeline is rendered at run time
     definition = yaml.safe_load((pack / "definition" / "testdef.yml").read_text())
     assert definition["pipeline"]["phases"][0]["stages"] == ["train"]
     assert "{{ scenario.duration_s }}" in str(definition["pipeline"])
     setup = yaml.safe_load((pack / "definition" / "setup.yml").read_text())
-    assert setup["component_types"]["pilot_app"]["extends"] == "arduino_unoq"
+    assert "{{ component.input_dir }}" in str(definition["pipeline"])          # the exploitation step
     assert setup["configurations"]["sim_bench"]["components"]["pilot"]["role"] == "pilot"
 
     # second run: the datasets are already there, their version is checked instead

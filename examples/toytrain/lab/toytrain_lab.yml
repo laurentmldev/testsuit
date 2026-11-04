@@ -23,7 +23,6 @@ all:
   vars:
     ansible_user: tsq                              # account created on every calculator for the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based only: no password prompt
-    tsq_type: linux_system
     tsq_remote_root: /opt/testrun                  # <root>/<component>/{input,output}
     tsq_types: [types/]                            # lab component types (types/toytrain.yml)
 
@@ -37,7 +36,6 @@ all:
     sim_propulsion:                                # simulation processes on the same server
       ansible_host: localhost
       tsq_transport: local
-      tsq_type: toytrain_sim
       tsq_role: propulsion_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated propulsion controller
@@ -45,7 +43,6 @@ all:
     sim_piezo:
       ansible_host: localhost
       tsq_transport: local
-      tsq_type: toytrain_sim
       tsq_role: piezo_sim
       tsq_remote_root: /srv/toytrain-sim
       tsq_label: Simulated piezo sensors
@@ -58,21 +55,17 @@ all:
       hosts:
         calc_pilot:
           ansible_host: 10.42.0.10
-          tsq_type: arduino_unoq
           tsq_role: pilot
           tsq_label: CALC-Pilot
         calc_tm:
           ansible_host: 10.42.0.11
-          tsq_type: rpi5
           tsq_role: telemetry
           tsq_label: CALC-TM
         au:
           ansible_host: 10.42.0.12
-          tsq_type: rpi5
           tsq_role: acquisition
           tsq_label: AU
         switch:
           ansible_host: 10.42.0.2
-          tsq_type: auvidea_m82
           tsq_role: switch
           tsq_label: Switch Auvidea M82

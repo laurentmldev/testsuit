@@ -1,6 +1,6 @@
 """Component types (README section 7): the type library, ``extends`` chains and command resolution.
 
-A type gives a kind of component its commands, its ``status`` probe, its ``selftest`` checks and
+A component's role (``tsq_role``) is a type of the library. A type gives the components of that role their commands, its ``status`` probe, its ``selftest`` checks and
 its transport. The built-in base types are ``component`` (abstract root) and ``linux_system``.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-TYPE_KEYS = {"extends", "transport", "commands", "status", "selftest", "collect", "description", "configurations"}
+TYPE_KEYS = {"extends", "transport", "commands", "status", "selftest", "collect", "description"}
 
 BUILTIN_TYPES: dict[str, dict] = {
     "component": {
@@ -89,13 +89,13 @@ class ResolvedType:
 
 class TypeLibrary:
 
-    def __init__(self, types: dict[str, TypeDef]):
+    def __init__(self, types: dict[str, TypeDef], strict: bool = True):
         self.types = types
-        for name in types:
+        for name in types if strict else []:
             self.chain(name)          # unknown parents and cycles
 
     @classmethod
-    def load(cls, folders: list[Path]) -> "TypeLibrary":
+    def load(cls, folders: list[Path], strict: bool = True) -> "TypeLibrary":
         types = {name: TypeDef.from_dict(name, data, "<builtin>") for name, data in BUILTIN_TYPES.items()}
         for name, data in registry.component_types.items():
             types[name] = TypeDef.from_dict(name, data, "<plugin>")
@@ -114,7 +114,7 @@ class TypeLibrary:
                         raise SequencerError(f"'{path}': '{name}' is a built-in type and cannot be redefined")
                     seen[name] = str(path)
                     types[name] = TypeDef.from_dict(name, definition, str(path))
-        return cls(types)
+        return cls(types, strict)
 
     def chain(self, name: str, extra: dict[str, TypeDef] | None = None) -> list[TypeDef]:
         """The type and its ancestors, base first."""
@@ -133,15 +133,13 @@ class TypeLibrary:
     def is_a(self, name: str, ancestor: str) -> bool:
         return any(t.name == ancestor for t in self.chain(name))
 
-    def resolve(self, component: Component, stage: Stage | None = None,
-                datapack_types: dict[str, dict] | None = None, datapack_type: str | None = None,
-                instance_commands: dict | None = None) -> ResolvedType:
-        """Resolve a concrete component's type, with the datapack's type and instance overrides.
+    def resolve(self, component: Component, stage: Stage | None = None) -> ResolvedType:
+        """Resolve a concrete component's type: its role's chain, then the stage and host overrides.
 
-        Order, last wins: lab type chain (base first), datapack type chain, datapack instance,
-        stage ``tsq_commands``, host ``tsq_commands``. Inline ``run:`` in a step comes on top, in the engine.
+        Order, last wins: role type chain (base first), stage ``tsq_commands``, host ``tsq_commands``.
+        Inline ``run:`` in a step comes on top, in the engine.
         """
-        lab_chain = self.chain(component.type)
+        lab_chain = self.chain(component.role)
         commands: dict[str, dict] = {}
         sources: dict[str, str] = {}
         status = None
@@ -149,11 +147,10 @@ class TypeLibrary:
         collect: dict = {}
         transport = None
 
-        def apply(t: TypeDef, label: str):
-            nonlocal status, transport, collect
+        for t in lab_chain:
             for cmd, spec in t.commands.items():
                 commands[cmd] = dict(spec)
-                sources[cmd] = label
+                sources[cmd] = f"type {t.name}"
             if t.status is not None:
                 status = dict(t.status)
             if t.transport:
@@ -163,28 +160,6 @@ class TypeLibrary:
             for check in t.selftest:
                 selftest[:] = [c for c in selftest if c["id"] != check["id"]] + [dict(check)]
 
-        for t in lab_chain:
-            apply(t, f"type {t.name}")
-
-        if datapack_type:
-            pool = {name: TypeDef.from_dict(name, {k: v for k, v in d.items() if k in TYPE_KEYS}, "setup")
-                    for name, d in (datapack_types or {}).items()}
-            dp_chain = []
-            current = datapack_type
-            while current and current in pool:
-                if current in [t.name for t in dp_chain]:
-                    raise SequencerError(f"datapack component type '{datapack_type}': 'extends' cycle")
-                dp_chain.insert(0, pool[current])
-                current = pool[current].extends
-            if current and not self.is_a(component.type, current):
-                raise SequencerError(f"component '{component.id}' (type {component.type}) is not a '{current}', "
-                                     f"required by datapack type '{datapack_type}'")
-            for t in dp_chain:
-                apply(t, f"datapack type {t.name}")
-
-        for cmd, spec in (instance_commands or {}).items():
-            commands[cmd] = dict(spec)
-            sources[cmd] = "datapack component"
         if stage is not None:
             for cmd, spec in stage.commands.items():
                 commands[cmd] = dict(spec)
@@ -195,6 +170,6 @@ class TypeLibrary:
             sources[cmd] = f"host {component.id}"
 
         transport = str(component.vars.get("tsq_transport") or transport or "ssh")
-        return ResolvedType(lab_type=component.type, chain=[t.name for t in lab_chain], transport=transport,
+        return ResolvedType(lab_type=component.role, chain=[t.name for t in lab_chain], transport=transport,
                             commands=commands, command_sources=sources, status=status, selftest=selftest,
                             collect=collect)

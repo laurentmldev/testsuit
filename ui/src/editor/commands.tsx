@@ -1,4 +1,4 @@
-// Editors of command definitions (component types, stage and host overrides, datapack types), ready checks
+// Editors of command definitions (component types, stage and host overrides), ready checks
 // (wait_for) and expected results, used by every form that has commands.
 import { useState } from "react";
 import { Choices, Combo, Field, helpText, Section, Tags, Text, Toggle, type Choice } from "../fields";

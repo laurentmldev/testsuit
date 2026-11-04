@@ -144,8 +144,7 @@ class LogicalComponent:
     type: str                                    # datapack component type
     name: str = ""
     stage: str = ""                              # logical stage, '' for an ad hoc component
-    role: str = ""
-    commands: dict[str, Any] = field(default_factory=dict)
+    role: str = ""                               # a type of the lab: binds and gives the commands
 
 
 @dataclass
@@ -158,7 +157,22 @@ class Needs:
         return [c for c in self.components.values() if c.stage == stage]
 
 
+def check_sequencer_fields(setup: dict) -> None:
+    """The fields the role replaced (a clean break: the lab's role type gives the commands)."""
+    for name, t in (setup.get("component_types") or {}).items():
+        for key in ("extends", "commands"):
+            if isinstance(t, dict) and key in t:
+                raise SequencerError(f"setup component type '{name}': '{key}' is gone, the components' role gives "
+                                     "the lab type and its commands (move test-specific commands to pipeline steps)")
+    for config_name, config in (setup.get("configurations") or {}).items():
+        for comp_id, comp in ((config or {}).get("components") or {}).items():
+            if isinstance(comp, dict) and "commands" in comp:
+                raise SequencerError(f"setup configuration '{config_name}': component '{comp_id}': 'commands' is gone, "
+                                     "the role's lab type gives the commands (move test-specific ones to pipeline steps)")
+
+
 def needs_from_setup(setup: dict, configuration: str) -> Needs:
+    check_sequencer_fields(setup)
     configurations = setup.get("configurations") or {}
     if configuration not in configurations:
         raise SequencerError(f"setup has no configuration '{configuration}'")
@@ -178,7 +192,7 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
             raise SequencerError(f"setup configuration '{configuration}': component '{comp_id}' has no role "
                                  "(needed to bind it to a lab component)")
         components[comp_id] = LogicalComponent(id=comp_id, type=comp.get("type", ""), name=comp.get("name", ""),
-                                               stage=stage, role=comp["role"], commands=comp.get("commands") or {})
+                                               stage=stage, role=comp["role"])
     return Needs(stages=stages, components=components, component_types=setup.get("component_types") or {})
 
 

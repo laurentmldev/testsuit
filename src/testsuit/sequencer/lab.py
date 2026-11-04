@@ -65,26 +65,32 @@ class Lab:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
                 "stages": {s.id: {"type": s.type, "components": s.components} for s in self.inventory.stages.values()},
-                "components": {c.id: {"type": c.type, "role": c.role, "host": c.host, "lock": c.lock,
+                "components": {c.id: {"type": c.role, "role": c.role, "host": c.host, "lock": c.lock,
                                       "stages": c.stages, "label": c.label}
                                for c in self.inventory.components.values()},
                 "types": {t.name: {"extends": t.extends, "source": t.source, "commands": sorted(t.commands)}
                           for t in self.types.types.values()}}
 
 
-def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True) -> Lab:
-    """Read and check the inventory and its type library (every component's type must exist)."""
+def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, strict: bool = True) -> Lab:
+    """Read and check the inventory and its type library (every component's role must be a type).
+
+    :param strict: False to accept unknown types, for components and parents (the Editor, while a type is renamed)
+    """
     if not inventory_file.is_file():
         raise SequencerError(f"lab inventory not found: '{inventory_file}'")
     inventory = load_inventory(inventory_file)
-    types = TypeLibrary.load(inventory.type_folders)
-    for component in inventory.components.values():
+    types = TypeLibrary.load(inventory.type_folders, strict)
+    for component in inventory.components.values() if strict else []:
         try:
             types.chain(component.type)
         except SequencerError as e:
+            if component.role not in types.types:
+                e = SequencerError(f"role '{component.role}' is not a type of the lab (tsq_types: "
+                                   f"{', '.join(str(f) for f in inventory.type_folders) or 'none'})")
             raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
     lab = Lab(folder=folder, inventory=inventory, types=types, git=git_state(folder), require_tag=require_tag)
-    for warning in lab.warnings:
+    for warning in lab.warnings if strict else []:
         log.warning(warning)
     return lab
 

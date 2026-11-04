@@ -15,7 +15,7 @@ Status: implemented: `tsqd`, the REST API, the `tsq` command line, the datapack 
 
 A sample configuration, a toy train on a one-stage lab with a simulated environment, is in [examples/toytrain](../../../examples/toytrain/README.md).
 
-**Data model.** The lab side describes what the lab is made of; the tests side describes what a test needs and does; a run binds the second to the first when it activates a datapack. The essentials are in blue: a run activates a datapack built from a test definition, whose setup configuration lists logical components, each bound by role to a lab component whose type gives its commands. The technical details are in grey ([Vocabulary](#2-vocabulary) defines each term):
+**Data model.** The lab side describes what the lab is made of; the tests side describes what a test needs and does; a run binds the second to the first when it activates a datapack. The essentials are in blue: a run activates a datapack built from a test definition, whose setup configuration lists logical components, each bound by role to a lab component; the role is a lab type, which gives its commands. The technical details are in grey ([Vocabulary](#2-vocabulary) defines each term):
 
 ![Data model: lab side, tests side and runs](../../../docs/diagrams/data_model.svg)
 
@@ -200,7 +200,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | Term | Meaning |
 |---|---|
 | **lab** | everything one sequencer manages: all the components and the stages they belong to. One sequencer instance per lab. |
-| **component** | one managed element: a computer, a switch, a clock... Mainly Linux, never Windows. It has a host, a **type**, a transport (how to reach it), commands (how to deploy, start, stop, collect, kill...), and a monitored **state** (idle, configured, running, broken...). |
+| **component** | one managed element: a computer, a switch, a clock... Mainly Linux, never Windows. It has a host, a **role** (its type), a transport (how to reach it), commands (how to deploy, start, stop, collect, kill...), and a monitored **state** (idle, configured, running, broken...). |
 | **component type** | the commands and state monitoring of a kind of component. Types form a hierarchy: `linux_system` is the built-in base; a new type `extends` one and overrides some of its commands. |
 | **stage** | a named set of components; the unit of reservation for the components it holds. A component can be **specific** to one stage or **shared** by several. |
 | **ad hoc component** | a component that belongs to no stage, reserved on its own (for example a server running exploitation tools). |
@@ -215,12 +215,12 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 
 | Term | Meaning |
 |---|---|
-| **lab component type** | a component type of the lab's type library (`lab/types/*.yml`), assigned to a component with `tsq_type`. It gives the commands, status probe and self-test of every component of that kind. |
+| **lab component type** | a component type of the lab's type library (`lab/types/*.yml`). A component takes one as its role (`tsq_role`); it gives the commands, status probe and self-test of every component with that role. Hardware types (`rpi5`) are the bases roles extend. |
 | **built-in base type** | `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every lab type ends up extending (section 7.1). |
 | **`extends`** | the parent of a type: a type inherits its parent's commands, status and self-test, and overrides or adds some. The chain of parents is the type's **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a type adds (`install`, `feed`...). A command is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
-| **where a command comes from** | resolved in this order, last wins: the lab type and its parents, the datapack type, the setup component, the stage `tsq_commands`, the host `tsq_commands`, and an inline `run:` in a step (section 7.3). The Editor shows the source of each command. |
-| **role** | the job of a component in a stage (`pilot`, `telemetry`, `lab_network`...), set with `tsq_role`; logical components are bound to concrete ones by role. |
+| **where a command comes from** | resolved in this order, last wins: the role's lab type and its parents, the stage `tsq_commands`, the host `tsq_commands`, and an inline `run:` in a step (section 7.3). The Editor shows the source of each command. |
+| **role** | the job of a component (`pilot`, `telemetry`, `lab_network`...), set with `tsq_role`: a lab type, so a role always has the same commands. Logical components are bound to concrete ones by role. Unique within a stage. |
 | **stage type** | the kind of a stage (`toytrain`, `counter_bench`...): a datapack asks for a stage type, and any free stage of that type can be bound. |
 | **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
 | **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
@@ -236,7 +236,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 |---|---|
 | **test definition** (`testdef.yml`) | what one test is: its setup file and setup configuration, its dictionaries and its pipeline. `datapack testdef.yml` builds a datapack from it. |
 | **setup file** and **setup configuration** | the setup describes the components a test needs and their inputs; a setup has several named configurations (`sim_bench`, `emulated`...), each listing its logical stages and components. |
-| **datapack component type** | a type defined in a setup (`component_types`), extending a lab type: it adds the inputs of a component (by configuration) and can add or override commands. |
+| **datapack component type** | a type defined in a setup (`component_types`): the inputs of a component, by configuration. Its commands come from the component's role. |
 | **dictionary** | a YAML file of keys (`globals.yml`...) the templates and the pipeline can use. |
 | **template** | an input file rendered with Jinja2 and the datapack keys (`{{ key }}`), one per component. |
 | **input methods** | how an input file is made: `template`, `copy`, or `generate` (a registered **generator**), optionally followed by `postprocess` **processors** (section 5.1). An **importer** fetches the datasets of a datasource (`importer: git`, a release store...). |
@@ -432,41 +432,40 @@ all:
   vars:
     ansible_user: tsq                              # standard names, reused by the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based auth only, no password prompt
-    tsq_type: linux_system                         # default component type
     tsq_remote_root: /opt/testrun                  # default target: <root>/<component>/{input,output}
     tsq_types: [types/]                            # component type library, relative to this file (section 7.2)
 
   hosts:                                           # ad hoc components: in no stage
     lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
-    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: propulsion_sim}
-    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_type: toytrain_sim, tsq_role: piezo_sim}
+    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_role: propulsion_sim}
+    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_role: piezo_sim}
 
   children:
     train_1:                                       # a stage
       vars:
         tsq_stage_type: toytrain                   # what datapacks ask for
       hosts:
-        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_type: arduino_unoq, tsq_role: pilot}
-        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_type: rpi5, tsq_role: telemetry}
-        au_1:         {ansible_host: 10.42.1.12, tsq_type: rpi5, tsq_role: acquisition}
-        switch_1:     {ansible_host: 10.42.1.2, tsq_type: auvidea_m82, tsq_role: switch}
-        lab_switch:   {ansible_host: 10.42.0.2, tsq_type: auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
+        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_role: pilot}
+        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_role: telemetry}
+        au_1:         {ansible_host: 10.42.1.12, tsq_role: acquisition}
+        switch_1:     {ansible_host: 10.42.1.2, tsq_role: switch}
+        lab_switch:   {ansible_host: 10.42.0.2, tsq_role: lab_network, tsq_lock: shared}
     train_2:                                       # a second stage of the same type
       vars:
         tsq_stage_type: toytrain
         tsq_commands:                              # stage override: this train's pilot has no flashing helper
           install: {run: "arduino-cli upload --input-dir {{ component.input_dir }}/app"}
       hosts:
-        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_type: arduino_unoq, tsq_role: pilot}
-        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_type: rpi5, tsq_role: telemetry}
-        au_2:         {ansible_host: 10.42.2.12, tsq_type: rpi5, tsq_role: acquisition}
-        switch_2:     {ansible_host: 10.42.2.2, tsq_type: auvidea_m82, tsq_role: switch}
+        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_role: pilot}
+        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_role: telemetry}
+        au_2:         {ansible_host: 10.42.2.12, tsq_role: acquisition}
+        switch_2:     {ansible_host: 10.42.2.2, tsq_role: switch}
         lab_switch: {}                             # shared with train_1: joins both trains to lab_srv
 ```
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
 - Variables follow Ansible precedence: host over stage group over `all`.
-- `tsq_type` assigns a component type to each component (section 7).
+- `tsq_role` is the role of each component, a type of the type library (section 7): it gives the commands, the status probe and the self-test. It is required, and unique within a stage. (`tsq_type` is gone: the role is the type.)
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
   - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `train_1` and `train_2` can run two datapacks at the same time although they share `lab_switch`;
@@ -487,7 +486,7 @@ The inventory and its type library live in the folder `lab.folder` of the main c
 
 A lab can have an **emulated** twin that runs on one Linux computer, for writing and debugging tests and pipelines, and for demonstrations. It is the same mechanism as a real lab, with three files instead of hardware:
 - **an inventory** with the same stage types and roles, where every component uses the `local` transport, each with its own `remote_root`;
-- **a type library with the same type names** as the lab's, where each type runs its application as a local process (started by the sequencer, stopped by a signal) and replaces the hardware it touches by a stand-in, through host variables (`tsq_start_args`). The datapack component types `extends` these names, so they bind unchanged;
+- **a type library with the same roles** as the lab's, where each type runs its application as a local process (started by the sequencer, stopped by a signal) and replaces the hardware it touches by a stand-in, through host variables (`tsq_start_args`). The datapacks bind by role, so they bind unchanged;
 - **a main configuration** (`tsq.dev.yml`) pointing to that inventory, with local storage and the server listening on `127.0.0.1` only.
 
 On the datapack side, only what the platform changes (addresses, for example) goes in a dictionary of its own, chosen by the setup configuration: `datapack <testdef> --setup-config emulated` builds the datapack of the same test definition for the emulated platform. Then `tsq run <datapack.zip> --local --config tsq.dev.yml` runs it in the foreground, or `tsqd --config tsq.dev.yml` serves the queue and the UI locally.
@@ -503,6 +502,8 @@ A run on an emulated lab is flagged non-conform against the campaign's expected 
 ## 7. Component types and state monitoring
 
 A component type gives a kind of component its commands and the way to monitor its state. Types form a hierarchy: a type `extends` another one and overrides only what differs.
+
+A component's **role** (`tsq_role`) is a type: hardware types (`rpi5`, `arduino_unoq`) say how to drive a kind of hardware, and the roles extend them (`telemetry: {extends: rpi5}`), adding what the role needs. A datapack binds a logical component by role, so the commands it can use are known from the lab alone.
 
 ### 7.1 Built-in base types
 
@@ -555,19 +556,28 @@ component_types:
     status:
       probe: {run: "speed"}
       states: {running: {regex: "^[1-9]"}, idle: {regex: "^0"}}
+
+  # the roles components take (tsq_role), each extending its hardware type
+  pilot:     {extends: arduino_unoq}
+  telemetry: {extends: rpi5}
+  switch:    {extends: auvidea_m82}
+  lab_network: {extends: auvidea_m82}
+  propulsion_sim:                          # a simulation, from the inputs a datapack deploys
+    extends: toytrain_sim
+    commands:
+      start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
+  sequencer: {extends: linux_system}       # the sequencer host: where the exploitation runs
 ```
 
 ### 7.3 Where commands come from
 
-A datapack component type (setup file, section 8.2) can extend a lab type to add test-specific commands. The command used for a component is resolved in this order, last wins:
-1. the chain of its lab type, from the base type down (`component` → `linux_system` → `arduino_unoq`);
-2. the datapack component type (setup file `component_types.<type>.commands`);
-3. the datapack component instance (setup configuration);
-4. the stage `tsq_commands` (lab inventory);
-5. the host `tsq_commands` (lab inventory);
-6. an inline `run:` in a pipeline step.
+The commands of a component come from the lab only. The command used is resolved in this order, last wins:
+1. the chain of its role's type, from the base type down (`component` → `linux_system` → `arduino_unoq` → `pilot`);
+2. the stage `tsq_commands` (lab inventory);
+3. the host `tsq_commands` (lab inventory);
+4. an inline `run:` in a pipeline step.
 
-The lab has the last word over the datapack on purpose: a stage with a special way of deploying overrides the generic command for every datapack.
+A datapack does not redefine commands: what a test runs that the role does not offer is a `run:` step of its pipeline (the exploitation in section 8.3). A stage with a special way of deploying overrides the generic command for every datapack.
 
 ### 7.4 State monitoring
 
@@ -643,34 +653,27 @@ A datapack can therefore lock several stages and ad hoc components. Here the ana
 
 ### 8.2 Datapack component types
 
-Datapack component types (already in the setup file) declare the inputs. They can also `extends` a lab type, which makes binding check that the concrete host's type is that type or derives from it, and add or override commands for this test:
+Datapack component types (already in the setup file) declare the inputs of the components, by configuration. They say nothing about commands: a component gets those of its role, a lab type (section 7).
 
 ```yaml
 component_types:
   pilot_app:
-    extends: arduino_unoq               # lab type: binds only to an Arduino UNO Q
     configurations:
       standard:
         inputs:
           - {source: "{{ toytrain_sw.path }}/pilot/", target: app/, method: copy}
           - {source: templates/pilot.yml, target: pilot.yml}
   propulsion_sim:
-    extends: toytrain_sim
     configurations: {standard: {inputs: [{source: templates/propulsion_sim.yml, target: propulsion_sim.yml}]}}
-    commands:
-      start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
   exploit:
-    extends: linux_system
     configurations:
       standard:
         inputs:
           - {source: templates/exploit.yml, target: exploit.yml}
           - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
-    commands:
-      start: {run: "exploit_runner {{ component.input_dir }}/exploit.yml", timeout: 15m}
 ```
 
-Commands are kept as written in the datapack and rendered by the sequencer at run time.
+`extends` and `commands` in a datapack type, or `commands` in a setup component, are refused with what to write instead. A command only this test needs is a `run:` step of the pipeline, on the component (section 8.3).
 
 ### 8.3 Pipeline (test definition)
 
@@ -712,7 +715,12 @@ pipeline:
         - {from: "test_run:propulsion/output/propulsion.propj", to: "analysis/input/data/"}
       steps:
         - {id: deploy, component: analysis, do: deploy}
-        - {id: analyse, component: analysis, do: start, needs: [deploy]}   # exit 0: criteria ok, else failed
+        - id: analyse                      # a command of this test only: a run step on the component
+          component: analysis
+          needs: [deploy]
+          run: "exploit_runner {{ component.input_dir }}/exploit.yml"
+          timeout: 15m
+          expect: {exit: [0]}              # exit 0: criteria ok, else failed
       finally:
         - {id: collect, component: analysis, do: collect}
 ```
@@ -971,7 +979,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Datapacks tab) 
 
 **Lab inventory.**
 - Forms for stages, ad hoc components and their variables, with a YAML view next to them.
-- Helpers: when creating a component, the list of available component types (lab type library and plugins), each with its commands, status probe and self-test; the roles already used in the lab; the stage types; host reachability on demand.
+- Helpers: when creating a component, the roles it can take (the lab types, those of the stage first), each with its commands, status probe and self-test; the stage types; host reachability on demand.
 - Every change is validated like `tsq lab reload` and refused if invalid.
 
 **Datapack definitions.**
@@ -987,7 +995,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Datapacks tab) 
 
 **Help while filling the files.** Defining types, inventories, pipelines and templates takes knowing a lot of names, so every form helps with them:
 - each field shows its help in the panel on the right when pointed at or focused, written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
-- every name field proposes the values that make sense where it is, each with what it is: the component types with their commands and users, the roles of the stages of a type, the stage types with the stages that have them, the commands a step can run on the components it targets (with the type each command comes from), the keys a template can use with their values and the file each comes from;
+- every name field proposes the values that make sense where it is, each with what it is: the roles (lab types) with their commands and users, the roles of the stages of a type, the stage types with the stages that have them, the commands a step can run on the components it targets (with the type each command comes from), the keys a template can use with their values and the file each comes from;
 - what the tests ask of the lab and the lab does not have yet (a role, a stage type) is listed in the inventory form and offered when creating a component;
 - wizards start from what exists: a new stage copies another with its components renamed; **Add from the lab** creates a setup's logical components and datapack types for every role of a stage type; a new test definition comes with a pipeline that deploys, starts and waits for each component of its setup configuration in the order of their `needs`, and stops and collects them in `finally`;
 - in a form field whose value is rendered with keys (a command, a delay, a timeout, a file to wait for, a step's target...), typing `{{` opens the keys available there, with a quick search: the run-time keys (`component.*`, `run.*`, `params.*`...) and, in a test definition's pipeline, its datapack keys with their values and files. A key the list does not know can still be written as typed;

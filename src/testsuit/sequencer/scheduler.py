@@ -78,20 +78,6 @@ class Availability:
         return None
 
 
-def _type_ok(lab: Lab, needs: Needs, logical_type: str, concrete: Component) -> bool:
-    base = logical_type
-    seen = set()
-    while base in needs.component_types and base not in seen:
-        seen.add(base)
-        base = (needs.component_types[base] or {}).get("extends") or ""
-    if not base:
-        return True
-    try:
-        return lab.types.is_a(concrete.type, base)
-    except Exception:
-        return False
-
-
 def phase_needs(phases: list[Phase]) -> tuple[list[str], list[str]]:
     stages: list[str] = []
     adhoc: list[str] = []
@@ -113,8 +99,6 @@ def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Ava
         comp = inv.component_in(stage, lc.role)
         if comp is None:
             return f"{stage.id} has no '{lc.role}'"
-        if not _type_ok(lab, needs, lc.type, comp):
-            return f"{stage.id}: {comp.id} ({comp.type}) cannot run '{lc.type}'"
     for comp_id in stage.components:
         comp = inv.components[comp_id]
         why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
@@ -129,11 +113,9 @@ def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Ava
     return None
 
 
-def adhoc_problem(lab: Lab, needs: Needs, logical_type: str, comp: Component, avail: Availability, run_id: str,
+def adhoc_problem(comp: Component, avail: Availability, run_id: str,
                   avoid: set[tuple[str, str]] = frozenset(), check_free: bool = True) -> str | None:
-    """Why an ad hoc component cannot be bound to a logical component now (None when it can)."""
-    if not _type_ok(lab, needs, logical_type, comp):
-        return f"{comp.id} ({comp.type}) cannot run '{logical_type}'"
+    """Why an ad hoc component of the right role cannot be bound now (None when it can)."""
     why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
     if why is None and ("component", comp.id) in avoid and comp.lock == "exclusive":
         why = f"{comp.id} kept for a higher-priority run"
@@ -185,7 +167,7 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
         if not pool:
             reasons.append(f"no ad hoc component with role '{lc.role}'")
         for comp in pool:
-            why = adhoc_problem(lab, needs, lc.type, comp, avail, run_id, avoid, check_free)
+            why = adhoc_problem(comp, avail, run_id, avoid, check_free)
             if why:
                 reasons.append(why)
             else:
@@ -281,7 +263,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
                 continue
             bound = binding.components.get(lc.id) == comp.id
             candidates.append({**comp_facts(comp), "bound": bound,
-                               "why": None if bound else adhoc_problem(lab, needs, lc.type, comp, avail, run_id)})
+                               "why": None if bound else adhoc_problem(comp, avail, run_id)})
         components.append({
             "logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name,
             "phases": used_by("components", lc.id), "bound": binding.components.get(lc.id),

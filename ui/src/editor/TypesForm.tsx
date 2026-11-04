@@ -2,7 +2,8 @@
 // commands, status probe, self-test and transport.
 import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text } from "../fields";
-import { classes, freeName, labIdInput, labIdProblem, Markdown } from "../util";
+import { post } from "../api";
+import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, summary } from "./commands";
 import { clone, transportChoices, typeChoices, useSession, type Doc } from "./state";
 
@@ -41,8 +42,9 @@ const STARTERS: { id: string; label: string; description: string; body: (base: s
   { id: "derived", label: "Variant of an existing type", description: "Extends a type of the library and redefines only what differs.", body: (base) => ({ extends: base, description: "" }) },
 ];
 
-export function TypesForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void } }) {
-  const { ctx } = useSession();
+export function TypesForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void; flush?: () => Promise<void> } }) {
+  const session = useSession();
+  const { ctx } = session;
   const data = doc.data || {};
   const types: Record<string, any> = data.component_types || {};
   const [sel, setSel] = useState<string | null>(Object.keys(types)[0] || null);
@@ -54,13 +56,20 @@ export function TypesForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
     else draft.component_types[name] = value;
     api.setData(draft);
   };
-  const rename = (from: string, to: string) => {
+  // a rename follows everywhere in the session: the types of this file deriving from it, then the other
+  // type files and the inventory (on the server); the helpers' lists are reloaded after
+  const rename = async (from: string, to: string) => {
     if (!to || to === from || to in types) return;
     const draft = clone(data);
-    const entries = Object.entries(draft.component_types);
-    draft.component_types = Object.fromEntries(entries.map(([k, v]) => [k === from ? to : k, v]));
+    const entries = Object.entries<any>(draft.component_types);
+    draft.component_types = Object.fromEntries(entries.map(([k, v]) => [k === from ? to : k, v?.extends === from ? { ...v, extends: to } : v]));
     api.setData(draft);
     setSel(to);
+    await api.flush?.();
+    const result = await attempt(() => post(`edit/sessions/${session.sid}/rename_type`, { from, to, skip: doc.path }));
+    if (result?.changed?.length) notify(`'${from}' is now '${to}' in ${result.changed.join(", ")} too`, "info");
+    await session.refreshFiles();
+    await session.refreshContext();
   };
   return (
     <div className="form-split">
@@ -103,7 +112,7 @@ function NewType({ taken, onClose, onCreate }: { taken: string[]; onClose: () =>
     <Dialog title="New component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
       <Field label="Start from"><Choices value={starter} onChange={(v) => v && setStarter(v)} choices={STARTERS.map((x) => ({ value: x.id, label: x.label, description: x.description }))} /></Field>
       {starter === "derived" && <Field label="Type to extend"><Combo value={base} onChange={setBase} choices={typeChoices(ctx)} strict /></Field>}
-      <Field label="Name" help="The name components give in `tsq_type`: the kind of hardware or software (`rpi5`, `arduino_unoq`)." error={labIdProblem(name, taken)}>
+      <Field label="Name" help="A role components take (`tsq_role: pilot`), or a base other types extend: the kind of hardware or software (`rpi5`, `arduino_unoq`)." error={labIdProblem(name, taken)}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} />
       </Field>
     </Dialog>

@@ -251,11 +251,9 @@ VARS = {
     "ansible_port": h("SSH port (default 22).", type="integer"),
     "ansible_ssh_private_key_file": h("Private key used to log in (no password prompt).", type="string",
                                       examples=["~/.ssh/id_lab"]),
-    "tsq_type": h("Component type (lab type library, section 7): gives the commands, the status probe and the "
-                  "self-test. Default `linux_system`.", type="string"),
-    "tsq_role": h("Role of the component in its stage: datapacks bind their logical components by role "
-                  "(`role: pilot` binds the host with `tsq_role: pilot` in the stage). Unique within a stage.",
-                  type="string"),
+    "tsq_role": h("Role of the component, a type of the lab type library (section 7): it gives the commands, the "
+                  "status probe and the self-test. Datapacks bind their logical components by role (`role: pilot` "
+                  "binds the host with `tsq_role: pilot` in the stage). Unique within a stage.", type="string"),
     "tsq_lock": LOCK,
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
     "tsq_transport": h("How the sequencer talks to the component: `ssh` (default) or `local` (commands run on the "
@@ -270,10 +268,9 @@ VARS = {
 HOST_VARS = h("Variables of a host. `tsq_` variables are the sequencer's; any other variable is kept and reachable "
               "in templates as `{{ component.vars.<name> }}`.", type=["object", "null"], properties=VARS,
               defaultSnippets=[{"label": "SSH host", "body": {"ansible_host": "${1:10.0.0.10}",
-                                                              "tsq_type": "${2:linux_system}", "tsq_role": "${3:role}"}},
+                                                              "tsq_role": "${2:role}"}},
                                {"label": "local process", "body": {"ansible_host": "localhost", "tsq_transport": "local",
-                                                                   "tsq_type": "${1:linux_system}",
-                                                                   "tsq_role": "${2:role}"}}])
+                                                                   "tsq_role": "${1:role}"}}])
 
 GROUP_VARS = h("Variables of the group. A group with `tsq_stage_type` is a stage; its variables apply to its "
                "components (host variables win).", type=["object", "null"],
@@ -293,8 +290,7 @@ def _group(depth: int) -> dict:
                                             type=["object", "null"], additionalProperties=_group(depth + 1),
                                             defaultSnippets=[{"label": "stage", "body": {
                                                 "${1:stage_1}": {"vars": {"tsq_stage_type": "${2:type}"},
-                                                                 "hosts": {"${3:host}": {"tsq_type": "${4:linux_system}",
-                                                                                         "tsq_role": "${5:role}"}}}}}])
+                                                                 "hosts": {"${3:host}": {"tsq_role": "${4:role}"}}}}}])
     return group
 
 
@@ -344,12 +340,10 @@ INPUT = h(
                                                     "method": "generate", "generator": "${3:name}"}}])
 
 DATAPACK_TYPE = h(
-    "A datapack component type: the inputs each configuration of it gets, and commands added for this test. "
-    "`extends` a lab type, so that binding checks the lab component is of that type (or derives from it), "
-    "and its commands are inherited (section 8.2).",
+    "A datapack component type: the inputs each configuration of it gets (section 8.2). The commands come from "
+    "the lab type of the component's `role`.",
     type="object", required=["configurations"], additionalProperties=False,
     properties={
-        "extends": h("The lab component type this one runs on (lab type library).", type="string"),
         "description": h("What this component is in the test.", type="string"),
         "configurations": h("Configurations of the component, by name (`standard`...): the inputs of each.",
                             type="object", additionalProperties={
@@ -357,9 +351,6 @@ DATAPACK_TYPE = h(
                                 "properties": {"inputs": h("Input files of the component.", type="array", items=INPUT)}},
                             defaultSnippets=[{"label": "standard", "body": {"standard": {"inputs": [
                                 {"source": "templates/${1:config.yml}", "target": "${1:config.yml}"}]}}}]),
-        "commands": {**COMMANDS, **h("Commands added or redefined for this test (kept as written in the datapack, "
-                                     "rendered at run time). The lab's stage and host `tsq_commands` still win.",
-                                     type="object", additionalProperties=COMMAND)},
     })
 
 LOGICAL_COMPONENT = h(
@@ -371,11 +362,11 @@ LOGICAL_COMPONENT = h(
                 "configuration": h("Configuration of that type to use (its inputs).", type="string"),
                 "stage": h("Logical stage it belongs to (`stages` of this configuration). Leave out for an ad hoc "
                            "component.", type="string"),
-                "role": h("Role it binds to in the lab (`tsq_role`).", type="string"),
+                "role": h("Role it binds to in the lab (`tsq_role`): a lab type, which gives its commands.",
+                          type="string"),
                 "needs": h("Components whose inputs are generated first, readable with `read_input('<id>/<file>')` "
                            "and `components.<id>.input_dir` (section 5.2).", type="array", items={"type": "string"}),
-                "commands": h("Commands for this component only (between the datapack type and the lab overrides).",
-                              type="object", additionalProperties=COMMAND)})
+                })
 
 SETUP_CONFIGURATION = h(
     "A setup configuration: the logical stages and components a datapack built with it needs (section 8.1).",
@@ -570,7 +561,8 @@ def schemas(context: dict) -> dict:
              + (f": {t['description']}" if t.get("description") else "")
              + (f"\n\ncommands: {', '.join(sorted(t.get('commands') or {}))}" if t.get("commands") else "")
              for name, t in (lab.get("types") or {}).items()}
-    roles = {r: f"used by {', '.join(c)}" for r, c in (lab.get("roles") or {}).items()}
+    roles = {name: text + (f"\n\nused by {', '.join((lab.get('roles') or {})[name])}" if name in (lab.get("roles") or {}) else "")
+             for name, text in types.items()}
     stage_types = {t: f"stages: {', '.join(s)}" for t, s in (lab.get("stage_types") or {}).items()}
     transports = {t: t for t in context.get("transports") or ["local", "ssh"]}
     commands: dict[str, str] = {}
@@ -584,7 +576,7 @@ def schemas(context: dict) -> dict:
                for c, v in (cfg.get("components") or {}).items()}
     logical_stages = {st: f"stage type {ty}" for s in ws.get("setups") or []
                       for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("stages") or {}).items()}
-    dp_types = {t: f"datapack type, extends {v.get('extends', '')}" for s in ws.get("setups") or []
+    dp_types = {t: f"datapack type: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
                 for t, v in (s.get("component_types") or {}).items()}
     subs = {n: "sub-pipeline" for n in ws.get("subpipelines") or []}
     importers = {i: i for i in context.get("importers") or []}
@@ -596,10 +588,8 @@ def schemas(context: dict) -> dict:
 
     def lab_fields(node: dict) -> None:
         props = node.get("properties") or {}
-        if "tsq_type" in props and types:
-            props["tsq_type"].update(_choices(types, True))
         if "tsq_role" in props and roles:
-            props["tsq_role"].update(_choices(roles, False))
+            props["tsq_role"].update(_choices(roles, True))
         if "tsq_stage_type" in props and stage_types:
             props["tsq_stage_type"].update(_choices(stage_types, False))
         if "tsq_transport" in props:
@@ -614,8 +604,6 @@ def schemas(context: dict) -> dict:
 
     def setup_fields(node: dict) -> None:
         props = node.get("properties") or {}
-        if "configurations" in props and "extends" in props and types:
-            props["extends"].update(_choices(types, True))
         if "role" in props and "configuration" in props and roles:
             props["role"].update(_choices(roles, False))
         if "role" in props and "configuration" in props and dp_types:

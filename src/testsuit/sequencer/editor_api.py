@@ -80,6 +80,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         await run(editor.rename, session(sid), str(body["from"]), str(body["to"]))
         return {"renamed": body["from"], "to": body["to"]}
 
+    @app.post("/edit/sessions/{sid}/rename_type")
+    async def rename_type(sid: str, body: dict):
+        """The references to a renamed component type, in the session's other files."""
+        changed = await run(editor.rename_type, session(sid), str(body["from"]), str(body["to"]), body.get("skip"))
+        return {"changed": changed}
+
     @app.get("/edit/sessions/{sid}/context")
     async def context(sid: str):
         return await run(editor.context, session(sid))

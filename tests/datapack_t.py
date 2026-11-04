@@ -64,7 +64,7 @@ def test_datapack_nominal(tmp_path, no_git):
     assert context["my_dataset"]["param2"]["metadata"]["rawUnit"] == "m3/s"
     assert context["datapack"]["name"] == zip_path.stem
 
-    # definition kept as written, pipeline and commands included
+    # definition kept as written, pipeline included
     testdef = yaml.safe_load((work / "definition" / "testdef.yml").read_text())
     assert testdef["pipeline"]["phases"][0]["steps"][0]["run"] == "scp {{ component.id }}"
     assert (work / "definition" / "dictionaries" / "setup" / "globals.yml").is_file()
@@ -177,8 +177,7 @@ def test_generate_and_needs(tmp_path, no_git):
              "options": {"n": 5}}]}}},
         "tm_t": {"configurations": {"std": {"inputs": [{"source": "files/peer.yml", "target": "peer.yml"}]}}}},
         "configurations": {"c": {"components": {
-            "telemetry": {"type": "tm_t", "configuration": "std", "needs": ["pilot"],
-                          "commands": {"start": {"run": "{{ component.input_dir }}/go"}}},
+            "telemetry": {"type": "tm_t", "configuration": "std", "needs": ["pilot"]},
             "pilot": {"type": "pilot_t", "configuration": "std"}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
     (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",

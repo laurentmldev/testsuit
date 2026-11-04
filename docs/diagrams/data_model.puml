@@ -24,7 +24,7 @@ package "Lab side (lab repository, lab operators)" as labside {
   class "Stage type" as StageType
   class "Component" as Component #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
     host, transport, remote root
-    role, lock mode
+    lock mode
     monitored state
   }
   class "Lab component type" as LabType #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
@@ -81,7 +81,7 @@ Lab "1" *-- "*" Stage
 Lab "1" *-- "*" Component
 Stage "*" o-[#3A78C2]- "*" Component : specific or shared;\nad hoc: no stage
 Stage "*" --> "1" StageType
-Component "*" -[#3A78C2]-> "1" LabType : tsq_type
+Component "*" -[#3A78C2]-> "1" LabType : role (tsq_role)
 LabType --> LabType : extends
 LabType --|> BaseType
 LabType "1" *-- "*" Command
@@ -95,8 +95,7 @@ SetupConf "1" *-- "*" LStage
 SetupConf "1" *-[#3A78C2]- "*" LComp
 LComp "*" --> "0..1" LStage : in
 LComp "*" --> "1" DpType
-DpType --|> LabType : extends
-DpType "1" *-- "*" Command : adds or overrides
+LComp "*" -[#3A78C2]-> "1" LabType : role:\nits commands
 Pipeline "1" *-- "*" Phase
 Phase "1" *-- "*" Step
 Step --> SubPipe : uses

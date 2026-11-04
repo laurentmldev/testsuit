@@ -5,7 +5,7 @@ import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Text, useHelp, type Choice } from "../fields";
 import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
 import { CommandsEditor, summary } from "./commands";
-import { clone, roleChoices, stageTypeChoices, transportChoices, typeChoices, useSession, type Doc } from "./state";
+import { clone, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 
 type Inv = any;
 type Path = (string | number)[];
@@ -186,7 +186,7 @@ function useInvHelp() {
   return (path: Path) => helpText(schemas.inventory, path);
 }
 
-const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_type", "tsq_role", "tsq_lock",
+const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
   "tsq_label", "tsq_transport", "tsq_remote_root", "tsq_commands", "tsq_stage_type", "tsq_types"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
@@ -203,9 +203,6 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
     <div>
       <h3>Defaults of every component</h3>
       <p className="muted">Variables under <code>all.vars</code>: a stage or a host can redefine each of them.</p>
-      <Field label="Default type" help={help(["all", "vars", "tsq_type"])}>
-        <Combo value={vars.tsq_type} onChange={(v) => set("tsq_type", v)} choices={typeChoices(ctx)} strict placeholder="linux_system" />
-      </Field>
       <Field label="Transport" help={help(["all", "vars", "tsq_transport"])}>
         <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone="default (ssh)" />
       </Field>
@@ -218,7 +215,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
       </Field>
       <Field label="Other variables" help="Any other variable is kept, and reachable in templates as `{{ component.vars.<name> }}`." wide>
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"])}
-          exclude={["tsq_type", "tsq_transport", "tsq_remote_root", "ansible_user", "ansible_ssh_private_key_file", "tsq_types"]} />
+          exclude={["tsq_transport", "tsq_remote_root", "ansible_user", "ansible_ssh_private_key_file", "tsq_types"]} />
       </Field>
     </div>
   );
@@ -283,7 +280,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
       <Section title={`Components (${group.hosts.length})`} help={helpText(schemas.inventory, ["all", "children", "_", "hosts"])}
         actions={<button className="small" onClick={onAdd}>+ New component</button>}>
         <table className="grid compact">
-          <thead><tr><th>Component</th><th>Role</th><th>Type</th><th>Address</th><th>Lock</th><th /></tr></thead>
+          <thead><tr><th>Component</th><th>Role (lab type)</th><th>Address</th><th>Lock</th><th /></tr></thead>
           <tbody>
             {group.hosts.map((h) => {
               const v = hostVars(inv, h);
@@ -291,7 +288,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
               return (
                 <tr key={h} className="clickable" onClick={() => onSelect({ kind: "host", name: h })}>
                   <td><strong>{h}</strong>{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
-                  <td>{v.tsq_role || <span className="error-text">no role</span>}</td><td><code>{v.tsq_type || inv?.all?.vars?.tsq_type || "linux_system"}</code></td>
+                  <td>{v.tsq_role ? <code>{v.tsq_role}</code> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.types?.[v.tsq_role] && <span className="error-text small"> not a lab type</span>}</td>
                   <td>{v.ansible_host || h}</td><td>{v.tsq_lock || "exclusive"}</td>
                   <td><button className="small" onClick={(e) => {
                     e.stopPropagation();
@@ -305,7 +302,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
         {otherHosts.length > 0 && (
           <div className="add-row">
             <Combo value="" onChange={() => {}} placeholder="add an existing component (shared with its other groups)…"
-              choices={otherHosts.map((h) => ({ value: h, description: `${hostVars(inv, h).tsq_role || ""} ${hostVars(inv, h).tsq_type || ""}` }))}
+              choices={otherHosts.map((h) => ({ value: h, description: hostVars(inv, h).tsq_role || "" }))}
               onPick={(h) => update((d) => setAt(d, [...hostsPath, h], {}))} />
           </div>
         )}
@@ -337,7 +334,6 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
   const path = hostVarsPath(inv, name)!;
   const vars = getAt(inv, path) || {};
   const stagesOf = groups(inv).filter((g) => g.stage && g.hosts.includes(name));
-  const stageType = stagesOf[0]?.vars.tsq_stage_type;
   const effective = (k: string) => vars[k] ?? stagesOf[0]?.vars?.[k] ?? inv?.all?.vars?.[k];
   const [reach, setReach] = useState<any>(null);
   const set = (k: string, v: any) => update((d) => {
@@ -369,7 +365,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
     const r = await attempt(() => post("edit/reachability", { host: effective("ansible_host") || name, port: effective("ansible_port") || 22, transport }));
     setReach(r || null);
   };
-  const type = effective("tsq_type") || "linux_system";
+  const type = effective("tsq_role") || "";
   const lab = ctx.lab.types[type];
   return (
     <div>
@@ -385,12 +381,9 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           <button className="small" onClick={check} title="Whether the host answers on its SSH port (or is local)">Check reachability</button>
         </div>
       </Field>
-      <Field label="Type" help={help(["all", "hosts", "_", "tsq_type"])}>
-        <Combo value={vars.tsq_type} onChange={(v) => set("tsq_type", v)} choices={typeChoices(ctx)} strict placeholder={`${type} (inherited)`}
-          onPick={(v) => setHelp({ title: v, text: ctx.lab.types[v]?.description, extra: <TypeCard name={v} /> })} />
-      </Field>
       <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}>
-        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v ? labIdInput(v) : v)} choices={roleChoices(ctx, stageType ? { stageType } : { adhoc: true })} />
+        <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={roleChoices(ctx)} strict placeholder={type ? `${type} (inherited)` : undefined}
+          onPick={(v) => setHelp({ title: v, text: ctx.lab.types[v]?.description, extra: <TypeCard name={v} /> })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
         <Choices value={vars.tsq_lock} onChange={(v) => set("tsq_lock", v ?? undefined)} allowNone="exclusive (default)" choices={[
@@ -404,7 +397,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <Field label="Remote root" help={help(["all", "hosts", "_", "tsq_remote_root"])}>
         <Text mono value={vars.tsq_remote_root} onChange={(v) => set("tsq_remote_root", v)} placeholder={effective("tsq_remote_root") || "home folder"} />
       </Field>
-      <Section title="What its type gives it" collapsed={false}>
+      <Section title="What its role gives it" collapsed={false}>
         <TypeCard name={type} />
       </Section>
       <CommandsEditor title="Command overrides for this host (tsq_commands)" help={help(["all", "vars", "tsq_commands"])}
@@ -412,7 +405,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         inherited={Object.fromEntries(Object.entries<any>(lab?.commands || {}).map(([k, v]) => [k, { spec: v.spec, from: `type ${v.from}` }]))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
-          exclude={["tsq_label", "ansible_host", "tsq_type", "tsq_role", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_commands"]} />
+          exclude={["tsq_label", "ansible_host", "tsq_role", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_commands"]} />
       </Section>
     </div>
   );
@@ -485,11 +478,10 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
   const group = stage ? groups(inv).find((g) => g.name === stage) : null;
   const stageType = group?.vars.tsq_stage_type;
   const present = (group?.hosts || []).map((h) => hostVars(inv, h).tsq_role);
-  const roles = roleChoices(ctx, stageType ? { stageType } : { adhoc: true }).filter((r) => !present.includes(r.value));
-  const [role, setRole] = useState(roles[0]?.value || "");
-  // the type other components with this role have
-  const typeFor = (r: string) => (stageType ? ctx.lab.stage_type_roles?.[stageType]?.[r] : ctx.lab.adhoc_roles?.[r]) || "";
-  const [type, setType] = useState(typeFor(roles[0]?.value || ""));
+  // the roles the stages of this type (or the ad hoc components) already have first, then every other lab type
+  const usual = roleChoices(ctx, stageType ? { stageType } : { adhoc: true }).filter((r) => ctx.lab.types?.[r.value]);
+  const roles = [...usual, ...roleChoices(ctx).filter((r) => !usual.some((u) => u.value === r.value))].filter((r) => !present.includes(r.value));
+  const [role, setRole] = useState(usual.find((r) => !present.includes(r.value))?.value || "");
   const [name, setName] = useState("");               // the user names the component (its inventory host name)
   const [host, setHost] = useState("");
   const [transport, setTransport] = useState<string | null>(null);
@@ -498,7 +490,6 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
     const draft = clone(inv);
     const vars: any = {};
     if (host) vars.ansible_host = host;
-    if (type) vars.tsq_type = type;
     if (role) vars.tsq_role = role;
     if (transport) vars.tsq_transport = transport;
     if (group) setAt(draft, [...group.path, "hosts", name], vars);
@@ -508,13 +499,10 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
   return (
     <Dialog title={stage ? `New component in stage ${stage}` : "New ad hoc component"} onClose={onClose}
       footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={create}>Create the component</button>}>
-      <Field label="Role" help={stage ? `Roles the ${stageType} stages have, and those the tests ask for. Unique in the stage.` : "Ad hoc components are bound by role alone: `sequencer` for the analysis on the sequencer host, a simulation…"}>
-        <Combo value={role} onChange={(v) => setRole(labIdInput(v))} choices={roles} onPick={(r) => {
-          setRole(r);
-          if (typeFor(r)) setType(typeFor(r));
-        }} />
+      <Field label="Role" help={(stage ? `A lab type: the roles the ${stageType} stages already have come first. Unique in the stage.` : "A lab type. Ad hoc components are bound by role alone: `sequencer` for the analysis on the sequencer host, a simulation…") + " Commands, status probe and self-test come from it."}>
+        <Combo value={role} onChange={setRole} choices={roles} strict />
+        <TypeCard name={role} />
       </Field>
-      <Field label="Type" help="Commands, status probe and self-test come from it."><Combo value={type} onChange={setType} choices={typeChoices(ctx)} strict /></Field>
       <Field label="Id" help="The component's id in the lab (its inventory host name): what runs, logs and `tsq components` show. Letters, digits, `_`, `-` and `.`."
         error={name ? labIdProblem(name, taken) : null}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} placeholder={`for example ${freeName(labId(role || "component"), taken)}`} />

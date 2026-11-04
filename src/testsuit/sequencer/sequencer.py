@@ -436,8 +436,7 @@ class RunExecution:
             concrete = inv.components[concrete_id]
             stage_logical = logical_to_stage.get(logical) or ""
             stage = inv.stages[self.binding.stages[stage_logical]] if stage_logical else None
-            resolved = self.seq.lab.types.resolve(concrete, stage, self.datapack.needs.component_types, lc.type,
-                                                  lc.commands)
+            resolved = self.seq.lab.types.resolve(concrete, stage)
             transport = self.seq.transport_for(concrete_id)
             bound = BoundComponent(logical=lc, concrete=concrete, stage=stage, logical_stage=stage_logical,
                                    resolved=resolved, transport=transport)
