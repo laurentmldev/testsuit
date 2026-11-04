@@ -123,7 +123,7 @@ dfs = loadDataframeFromFile("tests/etc/data/csv/flags.csv", ".*")  # one DataFra
 rc = mexploit("tests/etc/mexploit/scenarii/mxp_OK_main_functions", "tests/etc/data", "out/", force=True)
 ```
 
-The scenarios under `tests/etc/mexploit/scenarii/` are working examples of every check type.
+The scenarios under `tests/etc/mexploit/scenarii/` are working examples of every check type. The [exploit README](src/testsuit/exploit/README.md) gives the usage of `mxp` and `exploit_runner`, the scenario and configuration formats, and the architecture.
 
 ## Running the tests
 
