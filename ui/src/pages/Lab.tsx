@@ -60,7 +60,7 @@ function SelftestDialog({ target, onClose }: { target: string | null; onClose: (
           <table className="grid compact">
             <tbody>
               {(r.checks || []).map((c: any) => (
-                <tr key={c.id}><td><code>{c.id}</code></td><td><Badge value={c.ok ? "passed" : "failed"} /></td><td className="reason">{c.detail}</td></tr>
+                <tr key={c.id}><td><code>{c.id}</code></td><td><Badge value={c.skipped ? "not run" : c.ok ? "OK" : "FAILED"} /></td><td className="reason">{c.detail}</td></tr>
               ))}
             </tbody>
           </table>
@@ -84,7 +84,7 @@ function ProbeStep({ step, index }: { step: any; index: number }) {
   const answer = [step.output, step.error].filter((x) => x && String(x).trim()).join("\n");
   return (
     <div className="probe-step">
-      <div><span className="muted">{index + 1}.</span> {step.action}</div>
+      <div><span className="muted">{index + 1}.</span> {step.action}{step.ok !== undefined && <> <Badge value={step.ok ? "OK" : "FAILED"} /></>}</div>
       {step.command && <pre className="probe-command">{step.command}</pre>}
       {(answer || step.exit !== undefined) && (
         <div className="probe-answer">
@@ -104,7 +104,7 @@ function Checks({ checks }: { checks: any[] }) {
         {checks.map((c) => (
           <tr key={c.id}>
             <td><code>{c.id}</code></td>
-            <td><Badge value={c.ok ? "passed" : "failed"} /></td>
+            <td><Badge value={c.skipped ? "not run" : c.ok ? "OK" : "FAILED"} /></td>
             <td className="mono small">{c.command || c.spec?.run || (c.spec?.builtin ? `built-in ${c.spec.builtin}` : c.spec ? JSON.stringify(c.spec) : "")}</td>
             <td className="reason">{c.exit !== undefined && c.exit !== null && <span className="muted small">exit status <code>{c.exit}</code></span>}<pre>{c.detail}</pre></td>
           </tr>

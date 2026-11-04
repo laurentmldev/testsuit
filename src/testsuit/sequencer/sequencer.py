@@ -354,7 +354,7 @@ class Sequencer:
             if check["id"] in specs:
                 check["spec"] = specs[check["id"]]
         self.monitor.selftests[comp_id] = result
-        failed = [c for c in result["checks"] if not c["ok"]]
+        failed = [c for c in result["checks"] if not c["ok"] and not c.get("skipped")]
         if not result["ok"]:
             # kept until a self-test passes: the probes that follow do not turn it back to idle (monitor.probe)
             detail = "; ".join(f"{c['id']}: {c['detail']}" if c["detail"] else c["id"] for c in failed) or "failed"

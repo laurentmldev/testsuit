@@ -299,6 +299,9 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
     if (v === undefined || v === "") delete next[k];
     onChange(next);
   };
+  // one command, or several checks (run: [...]) that all run
+  const runs: string[] = Array.isArray(s?.probe?.run) ? s.probe.run : [s?.probe?.run ?? ""];
+  const setRuns = (list: string[]) => set("probe", { ...s.probe, run: list.length > 1 ? list : list[0] ?? "" });
   return (
     <Section title="State monitoring (status)" help={help([])} collapsed={!s}>
       {!s && (
@@ -309,7 +312,16 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
       )}
       {s && (
         <>
-          <Field label="Probe command" help={help(["probe"])}><Text keys mono value={s.probe?.run} onChange={(v) => set("probe", { ...s.probe, run: v })} placeholder="systemctl is-active my-service" /></Field>
+          <Field label={runs.length > 1 ? "Probe commands" : "Probe command"} help={help(["probe"])}
+            hint={runs.length > 1 ? "each one runs and is OK when it exits with 0; the rules match their outputs, one after the other" : null}>
+            {runs.map((r, i) => (
+              <div key={i} className="inline-fields">
+                <Text keys mono value={r} onChange={(v) => setRuns(runs.map((x, j) => (j === i ? v : x)))} placeholder={i ? "ping -c 1 -W 1 {{ component.host }}" : "systemctl is-active my-service"} />
+                {runs.length > 1 && <button className="icon" title="Remove this check" onClick={() => setRuns(runs.filter((_, j) => j !== i))}>×</button>}
+              </div>
+            ))}
+            <button className="small" onClick={() => setRuns([...runs, ""])}>+ check</button>
+          </Field>
           <Field label="Run it through" help={help(["via"])}
             hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
             <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices(ctx)} placeholder="stage_server" mono />
