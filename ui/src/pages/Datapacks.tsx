@@ -57,7 +57,6 @@ export function DatapacksPage({ route }: { route: Route }) {
         )}
         <span className="spacer" />
         <button disabled={!sid} onClick={() => navigate(`edit/${sid}`)} title="Open the test definitions, setups, dictionaries and templates in the Editor">Edit datapack definitions</button>
-        <a className="small" href="#/edit" title="Every editing session, and the repositories they can open">Editing sessions</a>
       </div>
       <Markdown text={INTRO} className="intro" />
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}

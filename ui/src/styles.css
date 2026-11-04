@@ -215,6 +215,8 @@ tr.finally-row td { color: var(--muted); }
 .combo-value { font-family: var(--mono); font-size: 12.5px; display: flex; gap: 6px; }
 .combo-group { margin-left: auto; font-family: system-ui, sans-serif; font-size: 10.5px; color: var(--muted); }
 .combo-item-desc { font-size: 11.5px; color: var(--muted); }
+/* two lines per suggestion, so that a long description does not push the others out of sight; the whole one on the active item */
+.combo-item:not(.active) .combo-item-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .tag { display: inline-flex; align-items: center; gap: 2px; background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 1px 4px 1px 9px; font-size: 12.5px; font-family: var(--mono); }
 .tag button { border: none; background: none; padding: 0 3px; color: inherit; }
