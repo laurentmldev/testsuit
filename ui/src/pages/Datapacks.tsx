@@ -1,6 +1,6 @@
 // Datapacks (sequencer README, section 13.2): the test definitions of the tests repositories, what each one
 // is made of (logical configuration, input files, dictionaries), its baseline, and generating its datapack.
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { get, post, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { Section } from "../fields";
@@ -88,18 +88,46 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [generate, setGenerate] = useState(false);
+  // the versions of the baseline are listed after the rest, one source at a time (a remote can be slow)
+  const [listing, setListing] = useState<Record<string, { importer: string; source: string; started: number; seconds?: number; done?: boolean }>>({});
+  const [started, setStarted] = useState(Date.now());
+  const [, setTick] = useState(0);
+  const generation = useRef(0);
   const load = async () => {
+    const mine = ++generation.current;
+    setStarted(Date.now());
     try {
-      setData(await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config }));
+      const found: any = await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config, versions: false });
+      if (mine !== generation.current) return;
+      setData(found);
       setError(null);
+      const sources: Record<string, { importer: string; source: string; started: number }> = {};
+      for (const d of found.baseline || []) if (d.versions_pending) sources[`${d.importer}|${d.source}`] = { importer: d.importer, source: d.source, started: Date.now() };
+      setListing(sources);
+      await Promise.all(Object.entries(sources).map(async ([key, src]) => {
+        const r: any = await post(`edit/sessions/${sid}/versions`, { importer: src.importer, source: src.source }).catch((e: any) => ({ versions: null, error: e.message }));
+        if (mine !== generation.current) return;
+        setListing((all) => ({ ...all, [key]: { ...src, seconds: r.seconds, done: true } }));
+        setData((cur: any) => cur && { ...cur, baseline: cur.baseline.map((d: any) => `${d.importer}|${d.source}` === key
+          ? { ...d, versions: r.versions, versions_error: r.error, versions_pending: false } : d) });
+      }));
     } catch (e: any) {
-      setError(e.message);
+      if (mine === generation.current) setError(e.message);
     }
   };
   useEffect(() => {
     setData(null);
+    setListing({});
     load();
   }, [sid, testdef, config]);
+  const waiting = !data || Object.values(listing).some((l) => !l.done);
+  useEffect(() => {                                  // the seconds shown while something is read
+    if (!waiting) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [waiting]);
+  const secs = (from: number) => `${Math.round((Date.now() - from) / 1000)} s`;
+  const sources = Object.values(listing);
   const edit = (file: string) => navigate(`edit/${sid}`, { file });
   const td = data?.testdef;
   return (
@@ -128,7 +156,19 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
           <ul className="problems">{data.problems.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
         </div>
       )}
-      {!data && !error && <Spinner className="block" text="Reading the definition, its setup and dictionaries…" />}
+      {!data && !error && <Spinner className="block" text={`Reading the definition, its setup, its dictionaries and its inputs… ${secs(started)}`} />}
+      {data && sources.some((l) => !l.done) && (
+        <div className="hint-box small listing">
+          <Spinner text={`Listing the versions of the baseline: ${sources.filter((l) => l.done).length} of ${sources.length} sources done`} />
+          <ul>
+            {sources.map((l) => (
+              <li key={`${l.importer}|${l.source}`} className={l.done ? "muted" : ""}>
+                <span className="badge">{l.importer}</span> <code>{l.source}</code> {l.done ? `listed in ${l.seconds ?? "?"} s` : `listing… ${secs(l.started)}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {data && (
         <>
           <Baseline sid={sid} testdef={testdef} config={config} datasets={data.baseline} onChanged={load} edit={edit} />
@@ -270,6 +310,7 @@ function Baseline({ sid, testdef, config, datasets, onChanged, edit }: {
                 <tr key={d.id}>
                   <td><strong>{d.id}</strong><div className="muted small">{d.name}</div></td>
                   <td className="small"><span className="badge">{d.importer}</span> <code title={d.source}>{d.source}</code>
+                    {d.versions_pending && <div className="muted small"><Spinner text="listing its versions…" /></div>}
                     {d.versions_error && <div className="muted small" title={d.versions_error}>versions not listed: {d.versions_error}</div>}</td>
                   <td>
                     <div className="version-edit">

@@ -227,7 +227,12 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
         "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
 
+    quick = editor.synthesis(session, "testdef/count/testdef.yml", versions=False)   # the versions listed after
+    assert quick["baseline"][0]["versions_pending"] and quick["baseline"][0]["versions"] is None
+    listed = editor.versions(quick["baseline"][0]["importer"], quick["baseline"][0]["source"])
+    assert listed["versions"] == ["v1.10.0", "v1.9.0", "main"] and listed["error"] is None
     found = editor.synthesis(session, "testdef/count/testdef.yml")
+    assert not found["baseline"][0]["versions_pending"]                 # listed less than a minute ago: kept
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
     assert "dut" in {c["id"] for c in found["components"]}
     assert any(i["files"] for c in found["components"] for i in c["inputs"])
