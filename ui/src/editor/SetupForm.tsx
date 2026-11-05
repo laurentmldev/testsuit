@@ -1,5 +1,5 @@
-// Setup form (sequencer README, sections 5 and 8): where the inputs come from, the datapack component types
-// with their inputs, and the configurations: logical stages and components bound by role (a lab role: their commands).
+// Setup form (sequencer README, sections 5 and 8): where the inputs come from, the slot types with their
+// inputs, and the configurations: realms and slots, bound by role to lab components (a lab role: their commands).
 import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
@@ -17,7 +17,7 @@ function defaultInputs(ctx: any, role?: string): any[] {
   return expectedInputs(ctx, role).filter((x) => !x.optional).map((x) => ({ source: "", target: x.name, ...(x.type === "folder" ? { method: "copy" } : {}) }));
 }
 
-/** A new datapack component type for a role: bound to it, its standard configuration with the inputs it requires. */
+/** A new slot type for a role: bound to it, its standard configuration with the inputs it requires. */
 function newType(ctx: any, role?: string): any {
   return { ...(role ? { role } : {}), configurations: { standard: { inputs: defaultInputs(ctx, role) } } };
 }
@@ -33,7 +33,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
     fn(draft);
     api.setData(draft);
   };
-  const types: Record<string, any> = data.component_types || {};
+  const types: Record<string, any> = data.slot_types || {};
   const configs: Record<string, any> = data.configurations || {};
   // the keys a setup sees are those of a test definition using it (its dictionaries, the setup's own)
   const session = useSession();
@@ -49,16 +49,16 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
           const name = freeName("configuration", Object.keys(configs));
           update((d) => {
             d.configurations ||= {};
-            d.configurations[name] = { stages: {}, components: {} };
+            d.configurations[name] = { realms: {}, slots: {} };
           });
           setSel({ kind: "config", name });
         }}>+</button></div>
         {Object.keys(configs).map((c) => (
           <div key={c} className={classes("nav-item", sel.kind === "config" && sel.name === c && "selected")} onClick={() => setSel({ kind: "config", name: c })}>
-            <strong>{c}</strong> <span className="muted small">{Object.keys(configs[c]?.components || {}).length} components</span>
+            <strong>{c}</strong> <span className="muted small">{Object.keys(configs[c]?.slots || {}).length} slots</span>
           </div>
         ))}
-        <div className="nav-title">Component types <button className="small" onClick={() => setWizard("type")}>+</button></div>
+        <div className="nav-title">Slot types <button className="small" onClick={() => setWizard("type")}>+</button></div>
         {Object.keys(types).map((t) => (
           <div key={t} className={classes("nav-item", sel.kind === "type" && sel.name === t && "selected")} onClick={() => setSel({ kind: "type", name: t })}>
             <strong>{t}</strong> <span className="muted small">{Object.keys(types[t]?.configurations || {}).join(", ")}</span>
@@ -69,17 +69,17 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         {sel.kind === "general" && <General doc={doc} data={data} update={update} />}
         {sel.kind === "data" && <DataRepos doc={doc} data={data} update={update} />}
         {sel.kind === "type" && types[sel.name] !== undefined && (
-          <DatapackType doc={doc} name={sel.name} value={types[sel.name]} update={update} onRenamed={(n) => setSel({ kind: "type", name: n })} onDeleted={() => setSel({ kind: "general" })} />
+          <SlotTypeForm doc={doc} name={sel.name} value={types[sel.name]} update={update} onRenamed={(n) => setSel({ kind: "type", name: n })} onDeleted={() => setSel({ kind: "general" })} />
         )}
         {sel.kind === "config" && configs[sel.name] !== undefined && (
           <Configuration name={sel.name} data={data} update={update} onAddFromLab={(mode) => setWizard(`lab:${mode}:${sel.name}`)}
             onOpenType={(t) => setSel({ kind: "type", name: t })} onRenamed={(n) => setSel({ kind: "config", name: n })} onDeleted={() => setSel({ kind: "general" })} />
         )}
       </div>
-      {wizard === "type" && <NewDatapackType data={data} onClose={() => setWizard(null)} onCreate={(name, body) => {
+      {wizard === "type" && <NewSlotType data={data} onClose={() => setWizard(null)} onCreate={(name, body) => {
         update((d) => {
-          d.component_types ||= {};
-          d.component_types[name] = body;
+          d.slot_types ||= {};
+          d.slot_types[name] = body;
         });
         setSel({ kind: "type", name });
         setWizard(null);
@@ -249,17 +249,17 @@ function sourceChoices(session: ReturnType<typeof useSession>, doc: Doc, data: a
   return out;
 }
 
-function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
+function SlotTypeForm({ doc, name, value, update, onRenamed, onDeleted }: {
   doc: Doc; name: string; value: any; update: (fn: (d: any) => void) => void; onRenamed: (n: string) => void; onDeleted: () => void;
 }) {
   const session = useSession();
   const help = useSetupHelp();
   const t = value || {};
   const set = (k: string, v: any) => update((d) => {
-    if (v === undefined || v === "") delete d.component_types[name][k];
-    else d.component_types[name][k] = v;
+    if (v === undefined || v === "") delete d.slot_types[name][k];
+    else d.slot_types[name][k] = v;
   });
-  const usedBy = Object.entries<any>((doc.data?.configurations) || {}).flatMap(([c, cfg]) => Object.entries<any>(cfg?.components || {}).filter(([, comp]) => comp?.type === name).map(([id]) => `${id} (${c})`));
+  const usedBy = Object.entries<any>((doc.data?.configurations) || {}).flatMap(([c, cfg]) => Object.entries<any>(cfg?.slots || {}).filter(([, comp]) => comp?.type === name).map(([id]) => `${id} (${c})`));
   const [newName, setNewName] = useState(name);
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const configs: Record<string, any> = t.configurations || {};
@@ -268,33 +268,33 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
   return (
     <div>
       <div className="form-title">
-        <h3>Datapack type <input className={classes("inline-name", newName !== name && idProblem(newName, Object.keys(doc.data.component_types || {})) && "invalid")} key={name} value={newName} onChange={(e) => setNewName(idInput(e.target.value))} onBlur={() => {
-          if (newName === name || idProblem(newName, Object.keys(doc.data.component_types || {}))) return setNewName(name);
+        <h3>Slot type <input className={classes("inline-name", newName !== name && idProblem(newName, Object.keys(doc.data.slot_types || {})) && "invalid")} key={name} value={newName} onChange={(e) => setNewName(idInput(e.target.value))} onBlur={() => {
+          if (newName === name || idProblem(newName, Object.keys(doc.data.slot_types || {}))) return setNewName(name);
           update((d) => {
-            d.component_types = Object.fromEntries(Object.entries(d.component_types).map(([k, v]) => [k === name ? newName : k, v]));
-            for (const cfg of Object.values<any>(d.configurations || {})) for (const comp of Object.values<any>(cfg?.components || {})) if (comp?.type === name) comp.type = newName;
+            d.slot_types = Object.fromEntries(Object.entries(d.slot_types).map(([k, v]) => [k === name ? newName : k, v]));
+            for (const cfg of Object.values<any>(d.configurations || {})) for (const comp of Object.values<any>(cfg?.slots || {})) if (comp?.type === name) comp.type = newName;
           });
           onRenamed(newName);
         }} /></h3>
         <span className="muted small">{usedBy.length ? `used by ${usedBy.join(", ")}` : "not used yet"}</span>
         <button className="small danger" onClick={() => {
           if (!window.confirm(`Delete type ${name}?`)) return;
-          update((d) => delete d.component_types[name]);
+          update((d) => delete d.slot_types[name]);
           onDeleted();
         }}>Delete</button>
       </div>
-      <Field label="Description" help={help(["component_types", "_", "description"])}><Text value={t.description} onChange={(v) => set("description", v)} /></Field>
-      <Field label="Lab role" help={help(["component_types", "_", "role"])}
-        hint={t.role ? (expected.length ? `expects ${expected.map((x) => x.name + (x.optional ? " (optional)" : "")).join(", ")}` : "its role expects no input") : "the lab role of its components: the inputs it expects are proposed below"}>
+      <Field label="Description" help={help(["slot_types", "_", "description"])}><Text value={t.description} onChange={(v) => set("description", v)} /></Field>
+      <Field label="Lab role" help={help(["slot_types", "_", "role"])}
+        hint={t.role ? (expected.length ? `expects ${expected.map((x) => x.name + (x.optional ? " (optional)" : "")).join(", ")}` : "its role expects no input") : "the lab role of its slots: the inputs it expects are proposed below"}>
         <Combo value={t.role} strict choices={labRoleChoices(session.ctx)} placeholder="pilot, telemetry…" onChange={(v) => update((d) => {
-          const type = d.component_types[name];
+          const type = d.slot_types[name];
           if (!v) delete type.role;
           else type.role = v;
           // configurations without any input yet start with what the role requires
           for (const c of Object.values<any>(type.configurations || {})) if (c && !(c.inputs || []).length) c.inputs = defaultInputs(session.ctx, v);
         })} />
       </Field>
-      <Section title="Inputs, by configuration" help={help(["component_types", "_", "configurations"])}
+      <Section title="Inputs, by configuration" help={help(["slot_types", "_", "configurations"])}
         actions={<button className="small" onClick={() => set("configurations", { ...configs, [freeName("standard", Object.keys(configs))]: { inputs: defaultInputs(session.ctx, t.role) } })}>+ Configuration</button>}>
         {Object.entries(configs).map(([cfg, c]) => (
           <div key={cfg} className="sub-form">
@@ -310,7 +310,7 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
           </div>
         ))}
       </Section>
-      <p className="muted small">The commands of a component come from its lab role: see the configurations.</p>
+      <p className="muted small">The commands of a slot come from its lab role, implemented by the lab component it is bound to: see the configurations.</p>
     </div>
   );
 }
@@ -337,9 +337,9 @@ const METHOD_HELP = `How the input file (or folder) is produced from its source:
   options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
 \`\`\`
 
-It is run with 3 arguments: the source path, the target path and a JSON file of keys. \`.py\` runs with the sequencer's own Python, \`.sh\` with bash, anything else is executed directly. The JSON holds every resolved key, plus \`options\` (rendered) and \`component\` (its id, \`input_dir\`, and the components it needs). The script must write the target and exit with 0; its output, stderr included, is in the generation log.
+It is run with 3 arguments: the source path, the target path and a JSON file of keys. \`.py\` runs with the sequencer's own Python, \`.sh\` with bash, anything else is executed directly. The JSON holds every resolved key, plus \`options\` (rendered) and \`slot\` (its id, \`input_dir\`, and the slots it needs). The script must write the target and exit with 0; its output, stderr included, is in the generation log.
 
-**A generator can also be a registered function**, from a plugin: \`register_generator("name", fn)\` in its \`testsuit.plugins\` entry point, then \`generator: name\` (the registered ones are proposed in the list). The function gets \`(source, target, keys, options, component)\`; the keys it reads are recorded in \`datapack.yml\`, which a script's are not (it gets them all).
+**A generator can also be a registered function**, from a plugin: \`register_generator("name", fn)\` in its \`testsuit.plugins\` entry point, then \`generator: name\` (the registered ones are proposed in the list). The function gets \`(source, target, keys, options, slot)\`; the keys it reads are recorded in \`datapack.yml\`, which a script's are not (it gets them all).
 
 A script is the simplest; a registered function suits a generator shared by several setups, or keys that must be traced.`;
 
@@ -415,8 +415,8 @@ export function PreviewDialog({ setupPath, source, type, onClose }: { setupPath:
     setTestdef(td);
     const setup = (ctx.workspace?.setups || []).find((s: any) => s.path === setupPath);
     const cfg = setup?.configurations?.[testdefs.find((t: any) => t.path === td)?.setup_config];
-    const component = Object.entries<any>(cfg?.components || {}).find(([, c]) => c.type === type)?.[0];
-    setResult(await attempt(() => post(`edit/sessions/${sid}/preview`, { testdef: td, source: path, component })));
+    const slot = Object.entries<any>(cfg?.slots || {}).find(([, c]) => c.type === type)?.[0];
+    setResult(await attempt(() => post(`edit/sessions/${sid}/preview`, { testdef: td, source: path, slot })));
   };
   useEffect(() => {
     if (testdef) run(testdef);
@@ -428,32 +428,32 @@ export function PreviewDialog({ setupPath, source, type, onClose }: { setupPath:
       {testdefs.length > 1 && <Field label="With the keys of"><Choices value={testdef} onChange={(v) => v && run(v)} choices={testdefs.map((t: any) => ({ value: t.path, label: t.name || t.id }))} /></Field>}
       {result && !result.ok && <pre className="error-box">{result.error}</pre>}
       {result?.ok && <>
-        <p className="muted small">component {result.component || "?"} · keys used: {Object.keys(result.keys || {}).map((k) => <code key={k}>{k}</code>)}</p>
+        <p className="muted small">slot {result.slot || "?"} · keys used: {Object.keys(result.keys || {}).map((k) => <code key={k}>{k}</code>)}</p>
         <pre className="preview">{result.text}</pre>
       </>}
     </Dialog>
   );
 }
 
-function NewDatapackType({ data, onClose, onCreate }: { data: any; onClose: () => void; onCreate: (name: string, body: any) => void }) {
+function NewSlotType({ data, onClose, onCreate }: { data: any; onClose: () => void; onCreate: (name: string, body: any) => void }) {
   const { ctx } = useSession();
-  const [name, setName] = useState(freeName("my_app", Object.keys(data.component_types || {})));
+  const [name, setName] = useState(freeName("my_app", Object.keys(data.slot_types || {})));
   const [role, setRole] = useState("");
-  const taken = Object.keys(data.component_types || {});
+  const taken = Object.keys(data.slot_types || {});
   return (
-    <Dialog title="New datapack component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, newType(ctx, role || undefined))}>Create</button>}>
-      <Field label="Lab role" help="The lab role of its components: its standard configuration starts with the inputs that role requires." hint={role ? `starts with ${defaultInputs(ctx, role).map((x) => x.target).join(", ") || "no input"}` : null}>
+    <Dialog title="New slot type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, newType(ctx, role || undefined))}>Create</button>}>
+      <Field label="Lab role" help="The lab role of its slots: its standard configuration starts with the inputs that role requires." hint={role ? `starts with ${defaultInputs(ctx, role).map((x) => x.target).join(", ") || "no input"}` : null}>
         <Combo value={role} onChange={(v) => {
           setRole(v || "");
           if (v && (!name || name.startsWith("my_app"))) setName(freeName(`${slug(v)}_app`, taken));
         }} choices={labRoleChoices(ctx)} strict placeholder="pilot, telemetry…" />
       </Field>
-      <Field label="Name" help="What the component gets as inputs in the test (`pilot_app`, `exploit`). Its commands come from the role of the components using it." error={idProblem(name, taken)}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
+      <Field label="Name" help="What the slot gets as inputs in the test (`pilot_app`, `exploit`). Its commands come from the role of the slots using it." error={idProblem(name, taken)}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
     </Dialog>
   );
 }
 
-/** The commands a lab role offers a component, as a short line (each with what it does on hover). */
+/** The commands a lab role offers a slot, as a short line (each with what it does on hover). */
 function RoleCommands({ role }: { role?: string }) {
   const { ctx } = useSession();
   if (!role) return null;
@@ -463,11 +463,11 @@ function RoleCommands({ role }: { role?: string }) {
   return <div className="muted small" title={cmds.length ? `commands of the role ${role}:\n${cmds.map(([c, i]) => `${c}: ${i.description || ""}`).join("\n")}` : undefined}>{cmds.length ? `${cmds.length} commands` : "no command"}</div>;
 }
 
-/** The datapack type for a role: the one other components of that role use, or a new one named after it. */
+/** The slot type for a role: the one other slots of that role use, or a new one named after it. */
 function typeForRole(data: any, role: string): string {
   for (const cfg of Object.values<any>(data.configurations || {}))
-    for (const c of Object.values<any>(cfg?.components || {}))
-      if (c?.role === role && c?.type && data.component_types?.[c.type]) return c.type;
+    for (const c of Object.values<any>(cfg?.slots || {}))
+      if (c?.role === role && c?.type && data.slot_types?.[c.type]) return c.type;
   return `${slug(role)}_app`;
 }
 
@@ -478,12 +478,12 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   const { ctx } = useSession();
   const help = useSetupHelp();
   const cfg = data.configurations[name] || {};
-  const stages: Record<string, any> = cfg.stages || {};
-  const comps: Record<string, any> = cfg.components || {};
-  const types: Record<string, any> = data.component_types || {};
+  const stages: Record<string, any> = cfg.realms || {};
+  const comps: Record<string, any> = cfg.slots || {};
+  const types: Record<string, any> = data.slot_types || {};
   const stageType = (s: string) => (typeof stages[s] === "object" ? stages[s]?.type : stages[s]);
   const setComp = (id: string, k: string, v: any) => update((d) => {
-    const c = d.configurations[name].components[id];
+    const c = d.configurations[name].slots[id];
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete c[k];
     else c[k] = v;
   });
@@ -492,20 +492,20 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const aliased = Object.entries<any>(data.configurations).some(([other, c]) => other !== name && JSON.stringify(c) === JSON.stringify(cfg));
   const addComponent = (stage: string | null) => {
-    // the id is the user's: the name the test definition and its keys use for this component
-    const typed = window.prompt("Id of the new component (as the pipeline and the keys will name it):");
+    // the id is the user's: the name the test definition and its keys use for this slot
+    const typed = window.prompt("Id of the new slot (as the pipeline and the keys will name it):");
     const id = slug(typed || "");
     if (!id) return;
-    if (id in comps) return window.alert(`There is already a component '${id}' in this configuration.`);
+    if (id in comps) return window.alert(`There is already a slot '${id}' in this configuration.`);
     update((d) => {
-      d.configurations[name].components ||= {};
+      d.configurations[name].slots ||= {};
       const t = Object.keys(types)[0];
-      d.configurations[name].components[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", ...(stage ? { stage } : {}), role: "" };
+      d.configurations[name].slots[id] = { type: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", ...(stage ? { realm: stage } : {}), role: "" };
     });
   };
-  /** The logical components of one stage (or the ad hoc ones), with roles narrowed to that stage. */
+  /** The slots of one realm (or the ad hoc ones), with roles narrowed to its lab stage type. */
   const componentsTable = (ids: string[], stage: string | null) => {
-    if (!ids.length) return <p className="muted small">No component yet.</p>;
+    if (!ids.length) return <p className="muted small">No slot yet.</p>;
     const st = stage ? stageType(stage) : null;
     return (
       <table className="grid compact components">
@@ -521,7 +521,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                   <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
                   <RoleCommands role={c?.role} />
                 </td>
-                <td><code>{id}</code>{!stage && c?.stage && <div className="error-text small">stage '{c.stage}' is not declared</div>}</td>
+                <td><code>{id}</code>{!stage && c?.realm && <div className="error-text small">realm '{c.realm}' is not declared</div>}</td>
                 <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
                 <td>
                   <Combo value={c?.type} onChange={(v) => setComp(id, "type", v)} choices={typeOptions} strict />
@@ -529,7 +529,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
                 <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
-                <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
+                <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].slots[id])}>×</button></td>
               </tr>
             );
           })}
@@ -537,27 +537,27 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       </table>
     );
   };
-  /** A stage's components: one row per role its lab stages offer, ticked when the test uses it. Ticking
-   * adds a component for that role (with a datapack type for its inputs), unticking
-   * removes it. Components of the stage with another role follow. */
+  /** A realm's slots: one row per role its lab stages offer, ticked when the test uses it. Ticking
+   * adds a slot for that role (with a slot type for its inputs), unticking
+   * removes it. Slots of the realm with another role follow. */
   const stageTable = (stage: string) => {
     const st = stageType(stage);
     const labRoles: string[] = Object.keys(ctx.lab.stage_type_roles?.[st] || {});
-    const inStage = Object.keys(comps).filter((id) => comps[id]?.stage === stage);
+    const inStage = Object.keys(comps).filter((id) => comps[id]?.realm === stage);
     const byRole = (r: string) => inStage.find((id) => comps[id]?.role === r);
     const others = inStage.filter((id) => !labRoles.includes(comps[id]?.role));
     const tick = (role: string, on: boolean) => update((d) => {
       const c = d.configurations[name];
-      c.components ||= {};
+      c.slots ||= {};
       if (!on) {
-        for (const [id, x] of Object.entries<any>(c.components)) if (x?.stage === stage && x?.role === role) delete c.components[id];
+        for (const [id, x] of Object.entries<any>(c.slots)) if (x?.realm === stage && x?.role === role) delete c.slots[id];
         return;
       }
-      d.component_types ||= {};
+      d.slot_types ||= {};
       const t = typeForRole(d, role);
-      d.component_types[t] ||= newType(ctx, role);
-      const id = freeName(slug(role), Object.keys(c.components));
-      c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
+      d.slot_types[t] ||= newType(ctx, role);
+      const id = freeName(slug(role), Object.keys(c.slots));
+      c.slots[id] = { name: role, type: t, configuration: Object.keys(d.slot_types[t].configurations || { standard: 1 })[0], realm: stage, role };
     });
     const cells = (id: string) => {
       const c = comps[id];
@@ -574,7 +574,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
         </>
       );
     };
-    if (!labRoles.length && !others.length) return <p className="muted small">No lab stage of this type, so no component to pick.</p>;
+    if (!labRoles.length && !others.length) return <p className="muted small">No lab stage of this type, so no role to pick.</p>;
     return (
       <table className="grid compact components">
         <thead><tr><th className="tick" /><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th></tr></thead>
@@ -591,7 +591,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           })}
           {others.map((id) => (
             <tr key={id}>
-              <td className="tick"><button className="icon" title="remove" onClick={() => update((d) => delete d.configurations[name].components[id])}>×</button></td>
+              <td className="tick"><button className="icon" title="remove" onClick={() => update((d) => delete d.configurations[name].slots[id])}>×</button></td>
               <td>
                 <Combo value={comps[id]?.role} onChange={(v) => setComp(id, "role", v)} choices={roleChoices(ctx, { stageType: st })} />
                 <div className="error-text small">{comps[id]?.role ? "no lab stage of this type has this role" : "no role"}</div>
@@ -624,23 +624,23 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       </div>
       {aliased && <div className="hint-box small">Same contents as another configuration (likely a YAML alias): changing it here gives it a copy of its own.</div>}
       <Markdown text={help(["configurations", "_"])} className="muted" />
-      <Section title="Stages" help={help(["configurations", "_", "stages"])}
+      <Section title="Realms" help={help(["configurations", "_", "realms"])}
         actions={<button className="small primary" onClick={() => onAddFromLab("stage")}>Add from the lab…</button>}>
-        {!Object.keys(stages).length && <p className="muted small">No logical stage: the test only uses ad hoc components.</p>}
+        {!Object.keys(stages).length && <p className="muted small">No realm: the test only uses ad hoc slots.</p>}
         {Object.keys(stages).map((s) => {
-          const st = stageType(s);   // one fold per logical stage, with its components
-          const inStage = Object.keys(comps).filter((id) => comps[id]?.stage === s);
+          const st = stageType(s);   // one fold per realm, with its slots
+          const inStage = Object.keys(comps).filter((id) => comps[id]?.realm === s);
           return (
-            <Section key={s} title={<><code>{s}</code> <span className="muted small">{st || "no stage type"} · {inStage.length} component{inStage.length === 1 ? "" : "s"}</span></>}
+            <Section key={s} title={<><code>{s}</code> <span className="muted small">{st || "no lab stage type"} · {inStage.length} slot{inStage.length === 1 ? "" : "s"}</span></>}
               actions={<button className="small danger" onClick={() => {
-                if (inStage.length && !window.confirm(`Remove logical stage ${s} and its components ${inStage.join(", ")}?`)) return;
+                if (inStage.length && !window.confirm(`Remove realm ${s} and its slots ${inStage.join(", ")}?`)) return;
                 update((d) => {
-                  delete d.configurations[name].stages[s];
-                  for (const id of inStage) delete d.configurations[name].components[id];
+                  delete d.configurations[name].realms[s];
+                  for (const id of inStage) delete d.configurations[name].slots[id];
                 });
               }}>Remove</button>}>
-              <Field label="Stage type" help="Bound at run time to any free lab stage of this type.">
-                <Combo value={st} onChange={(v) => update((d) => (d.configurations[name].stages[s] = { type: v }))} choices={stageTypeChoices(ctx)} />
+              <Field label="Lab stage type" help="Bound at run time to any free lab stage of this type: its slots to the lab components of that stage.">
+                <Combo value={st} onChange={(v) => update((d) => (d.configurations[name].realms[s] = { type: v }))} choices={stageTypeChoices(ctx)} />
                 {!ctx.lab.stage_type_roles?.[st] && <div className="error-text small">no lab stage of this type</div>}
               </Field>
               {stageTable(s)}
@@ -648,85 +648,85 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           );
         })}
         <button className="small" onClick={() => update((d) => {
-          // a new logical stage uses every role of its lab stages: untick the ones the test does not need
+          // a new realm uses every role of its lab stages: untick the ones the test does not need
           const c = d.configurations[name];
-          c.stages ||= {};
-          c.components ||= {};
-          d.component_types ||= {};
+          c.realms ||= {};
+          c.slots ||= {};
+          d.slot_types ||= {};
           const type = stageTypeChoices(ctx)[0]?.value || "";
-          const stage = freeName(slug(type || "stage"), Object.keys(stages));
-          c.stages[stage] = { type };
+          const stage = freeName(slug(type || "realm"), Object.keys(stages));
+          c.realms[stage] = { type };
           for (const role of Object.keys(ctx.lab.stage_type_roles?.[type] || {})) {
             const t = typeForRole(d, role);
-            d.component_types[t] ||= newType(ctx, role);
-            const id = freeName(slug(role), Object.keys(c.components));
-            c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
+            d.slot_types[t] ||= newType(ctx, role);
+            const id = freeName(slug(role), Object.keys(c.slots));
+            c.slots[id] = { name: role, type: t, configuration: Object.keys(d.slot_types[t].configurations || { standard: 1 })[0], realm: stage, role };
           }
-        })}>+ Logical stage</button>
+        })}>+ Realm</button>
       </Section>
-      <Section title="Ad hoc components" help={help(["configurations", "_", "components"])}
+      <Section title="Ad hoc slots" help={help(["configurations", "_", "slots"])}
         actions={<button className="small" onClick={() => onAddFromLab("adhoc")}>Add from the lab…</button>}>
-        {componentsTable(Object.keys(comps).filter((id) => !comps[id]?.stage || !(comps[id].stage in stages)), null)}
-        <button className="small" onClick={() => addComponent(null)}>+ Component</button>
+        {componentsTable(Object.keys(comps).filter((id) => !comps[id]?.realm || !(comps[id].realm in stages)), null)}
+        <button className="small" onClick={() => addComponent(null)}>+ Slot</button>
       </Section>
       <Section title="Other keys" collapsed>
-        <KeyValues value={cfg} onChange={(v) => update((d) => (d.configurations[name] = v))} exclude={["stages", "components"]} />
+        <KeyValues value={cfg} onChange={(v) => update((d) => (d.configurations[name] = v))} exclude={["realms", "slots"]} />
       </Section>
     </div>
   );
 }
 
-/** Adds a logical stage of a lab stage type and a component per role, with a datapack type for each one's inputs. */
+/** Adds a realm of a lab stage type and a slot per role, with a slot type for each one's inputs. */
 function FromLab({ data, config, initial, onClose, onApply }: { data: any; config: string; initial?: string; onClose: () => void; onApply: (draft: any) => void }) {
   const { ctx } = useSession();
   const stageTypes = Object.keys(ctx.lab.stage_type_roles || {});
   const [mode, setMode] = useState<string>(initial === "stage" && stageTypes.length ? "stage" : "adhoc");
   const [stageType, setStageType] = useState(stageTypes[0] || "");
   const cfg = data.configurations?.[config] || {};
-  const [logical, setLogical] = useState(freeName(slug(stageTypes[0] || "stage"), Object.keys(cfg.stages || {})));
+  const [logical, setLogical] = useState(freeName(slug(stageTypes[0] || "realm"), Object.keys(cfg.realms || {})));
   const roles: string[] = Object.keys((mode === "stage" ? ctx.lab.stage_type_roles?.[stageType] : ctx.lab.adhoc_roles) || {});
-  const existing = new Set(Object.values<any>(cfg.components || {}).filter((c) => (mode === "stage" ? c?.stage === logical : !c?.stage)).map((c) => c?.role));
+  const existing = new Set(Object.values<any>(cfg.slots || {}).filter((c) => (mode === "stage" ? c?.realm === logical : !c?.realm)).map((c) => c?.role));
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const isPicked = (r: string) => picked[r] ?? (!existing.has(r) && (mode === "stage" || r !== "sequencer"));
-  const types: Record<string, any> = data.component_types || {};
+  const types: Record<string, any> = data.slot_types || {};
   const apply = () => {
     const draft = clone(data);
     draft.configurations ||= {};
     draft.configurations[config] ||= {};
     const c = draft.configurations[config];
-    c.components ||= {};
+    c.slots ||= {};
     if (mode === "stage") {
-      c.stages ||= {};
-      c.stages[logical] = { type: stageType };
+      c.realms ||= {};
+      c.realms[logical] = { type: stageType };
     }
-    draft.component_types ||= {};
+    draft.slot_types ||= {};
     for (const role of roles) {
       if (!isPicked(role)) continue;
       const t = typeForRole(draft, role);
-      draft.component_types[t] ||= { configurations: { standard: { inputs: [] } } };
-      const id = freeName(slug(role), Object.keys(c.components));
-      c.components[id] = { name: role, type: t, configuration: Object.keys(draft.component_types[t].configurations || { standard: 1 })[0], ...(mode === "stage" ? { stage: logical } : {}), role };
+      draft.slot_types[t] ||= { configurations: { standard: { inputs: [] } } };
+      const id = freeName(slug(role), Object.keys(c.slots));
+      c.slots[id] = { name: role, type: t, configuration: Object.keys(draft.slot_types[t].configurations || { standard: 1 })[0], ...(mode === "stage" ? { realm: logical } : {}), role };
     }
     onApply(draft);
   };
   return (
-    <Dialog title={`Add components from the lab to ${config}`} onClose={onClose} wide footer={<button className="primary" onClick={apply} disabled={!roles.some((r) => isPicked(r))}>Add them</button>}>
+    <Dialog title={`Add slots from the lab to ${config}`} onClose={onClose} wide footer={<button className="primary" onClick={apply} disabled={!roles.some((r) => isPicked(r))}>Add them</button>}>
       <Field label="From"><Choices value={mode} onChange={(v) => v && setMode(v)} choices={[
-        { value: "stage", label: "a stage type", description: "a logical stage, bound at run time to any free lab stage of that type, with a component per role" },
-        { value: "adhoc", label: "ad hoc components", description: "components in no stage, bound by role: simulations, the sequencer host for the analysis" },
+        { value: "stage", label: "a lab stage type", description: "a realm, bound at run time to any free lab stage of that type, with a slot per role" },
+        { value: "adhoc", label: "ad hoc slots", description: "slots in no realm, bound by role to ad hoc lab components: simulations, the sequencer host for the analysis" },
       ]} /></Field>
       {mode === "stage" && (
         <>
-          <Field label="Stage type"><Choices value={stageType} onChange={(v) => {
+          <Field label="Lab stage type"><Choices value={stageType} onChange={(v) => {
             if (!v) return;
             setStageType(v);
-            setLogical(freeName(slug(v), Object.keys(cfg.stages || {})));
+            setLogical(freeName(slug(v), Object.keys(cfg.realms || {})));
           }} choices={stageTypeChoices(ctx).filter((c) => stageTypes.includes(c.value))} /></Field>
-          <Field label="Logical stage id" help="The name the pipeline phases use (`stages: [train]`)."><Text value={logical} onChange={(v) => setLogical(idInput(v))} invalid={!!idProblem(logical)} /></Field>
+          <Field label="Realm id" help="The name the pipeline phases use (`realms: [train]`)."><Text value={logical} onChange={(v) => setLogical(idInput(v))} invalid={!!idProblem(logical)} /></Field>
         </>
       )}
       <table className="grid compact">
-        <thead><tr><th /><th>Role</th><th>Datapack type</th></tr></thead>
+        <thead><tr><th /><th>Role</th><th>Slot type</th></tr></thead>
         <tbody>
           {roles.map((role) => (
             <tr key={role}>
@@ -737,7 +737,7 @@ function FromLab({ data, config, initial, onClose, onApply }: { data: any; confi
           ))}
         </tbody>
       </table>
-      <p className="muted small">New datapack types get a <code>standard</code> configuration without inputs: add the files each component needs in its type afterwards.</p>
+      <p className="muted small">New slot types get a <code>standard</code> configuration without inputs: add the files each slot needs in its type afterwards.</p>
     </Dialog>
   );
 }

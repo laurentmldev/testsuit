@@ -51,29 +51,35 @@ esac
 
 # run-time keys of commands and steps (README section 8.3), for completion and help
 RUNTIME_KEYS = {
-    "component.id": "logical component id (setup configuration)",
-    "component.name": "its name",
-    "component.type": "its datapack component type",
-    "component.extends": "the lab component the bound host extends (its implementation)",
+    "slot.id": "the step's slot (setup configuration)",
+    "slot.name": "its name",
+    "slot.type": "its slot type",
+    "slot.role": "its role",
+    "slot.realm": "its realm (setup configuration), '' for an ad hoc slot",
+    "slot.component": "id of the lab component it is bound to",
+    "slot.input_dir": "<remote_root>/<slot>/input: where deploy puts its inputs",
+    "slot.output_dir": "<remote_root>/<slot>/output: what collect brings back",
+    "slot.remote_root": "the remote root of its lab component (tsq_remote_root)",
+    "slots.<id>": "the same keys for any slot of the run (slots.pilot.component)",
+    "component.id": "the lab component the step's slot is bound to (inventory name)",
+    "component.host": "its address (ansible_host)",
+    "component.label": "its label",
     "component.role": "its role",
-    "component.host": "address of the bound lab component (ansible_host)",
-    "component.concrete": "id of the bound lab component",
-    "component.label": "label of the bound lab component",
-    "component.stage": "its logical stage",
-    "component.concrete_stage": "the lab stage it is bound to",
-    "component.input_dir": "<remote_root>/<component>/input: where deploy puts its inputs",
-    "component.output_dir": "<remote_root>/<component>/output: what collect brings back",
-    "component.remote_root": "the component's remote root (tsq_remote_root)",
-    "component.vars": "every inventory variable of the bound lab component (component.vars.tsq_start_args...)",
+    "component.extends": "the library component it extends (its implementation)",
+    "component.slot": "the slot it is bound to",
+    "component.stage": "its lab stage",
+    "component.vars": "every inventory variable of it (component.vars.tsq_start_args...)",
+    "component.input_dir": "same as slot.input_dir",
+    "component.output_dir": "same as slot.output_dir",
+    "component.remote_root": "its remote root (tsq_remote_root)",
     "component.state": "its monitored state",
-    "remote_root": "the component's remote root",
+    "remote_root": "the remote root of the step's lab component",
     "run.id": "run id", "run.dir": "run folder on the sequencer host", "run.priority": "run priority",
     "phase.id": "current phase",
-    "components.<id>": "the same keys for any component of the run (components.pilot.host)",
-    "stages.<id>.id": "lab stage a logical stage is bound to",
-    "stage.roles.<role>": "the component of that role in the component's lab stage: id, host, role, label, vars "
-                          "(stage.roles.stage_server.host)",
-    "stage.components.<host>": "a component of the component's lab stage by inventory name (also stage.id, "
+    "realms.<id>.stage": "the lab stage a realm of the setup is bound to",
+    "stage.roles.<role>": "the lab component of that role in the lab stage of the step's component: id, host, role, "
+                          "label, vars (stage.roles.stage_server.host)",
+    "stage.components.<host>": "a lab component of that lab stage by inventory name (also stage.id, "
                                "stage.type, stage.vars)",
     "lab.components.<host>": "any host of the lab inventory: id, host, role, label, vars "
                              "(lab.components.psu_1.vars.ansible_host)",
@@ -391,7 +397,7 @@ class Editor:
             return "inventory"
         if "setup_file" in data or "pipeline" in data:
             return "testdef"
-        if "configurations" in data and ("component_types" in data or "datarepositories" in data):
+        if "configurations" in data and ({"slot_types", "component_types", "datarepositories"} & set(data)):
             return "setup"
         if ({"roles", "components"} & set(data)) and not set(data) - {"roles", "components"}:
             return "library"
@@ -662,7 +668,7 @@ class Editor:
                         "setup_config": data.get("setup_config"),
                         "phases": [p.get("id") for p in pipeline.get("phases") or [] if isinstance(p, dict)],
                         "include": pipeline.get("include") or []})
-                elif "configurations" in data and ("component_types" in data or "datarepositories" in data):
+                elif "configurations" in data and ({"slot_types", "component_types", "datarepositories"} & set(data)):
                     result["setups"].append(self._setup_summary(rel, data))
                 elif "subpipelines" in data and isinstance(data["subpipelines"], dict):
                     result["subpipeline_files"].append(rel)
@@ -684,12 +690,12 @@ class Editor:
         configurations = {}
         for name, cfg in (data.get("configurations") or {}).items():
             cfg = cfg if isinstance(cfg, dict) else {}
-            stages = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stages") or {}).items()}
-            comps = {c: {k: v.get(k) for k in ("name", "type", "configuration", "stage", "role", "needs")}
-                     for c, v in (cfg.get("components") or {}).items() if isinstance(v, dict)}
-            configurations[name] = {"stages": stages, "components": comps}
+            realms = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("realms") or {}).items()}
+            slots = {c: {k: v.get(k) for k in ("name", "type", "configuration", "realm", "role", "needs")}
+                     for c, v in (cfg.get("slots") or {}).items() if isinstance(v, dict)}
+            configurations[name] = {"realms": realms, "slots": slots}
         types = {}
-        for name, t in (data.get("component_types") or {}).items():
+        for name, t in (data.get("slot_types") or {}).items():
             t = t if isinstance(t, dict) else {}
             types[name] = {"configurations": sorted(t.get("configurations") or {}),
                            "description": t.get("description", ""), "role": t.get("role", "")}
@@ -697,7 +703,7 @@ class Editor:
                     for repo in data.get("datarepositories") or [] for src in repo.get("datasources") or []
                     for ds in src.get("datasets") or [] if isinstance(ds, dict)]
         return {"path": rel, "id": data.get("id"), "name": data.get("name"), "configurations": configurations,
-                "component_types": types, "datasets": datasets, "dictionaries": data.get("dictionaries") or []}
+                "slot_types": types, "datasets": datasets, "dictionaries": data.get("dictionaries") or []}
 
     def context(self, session: EditSession) -> dict:
         """What the helpers of the forms and the YAML view need (README section 13.2)."""
@@ -866,7 +872,7 @@ class Editor:
 
     def _mismatches(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                     setup_path: Path | None = None) -> list[str]:
-        """Every logical stage and component a test definition's pipeline names that its setup
+        """Every stage and slot a test definition's pipeline names that its setup
         configuration does not define (empty when either cannot be read: other checks say why).
         With setup_path, only for a test definition using that setup file."""
         from testsuit.sequencer.model import load_pipeline, needs_from_setup, pipeline_mismatches
@@ -897,7 +903,7 @@ class Editor:
 
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
-        setup configuration (phases, logical stages and components, step targets), and what the lab cannot provide."""
+        setup configuration (phases, realms and slots, step targets), and what the lab cannot provide."""
         from testsuit.sequencer.intake import check_against_lab
         mismatches = self._mismatches(session, testdef_rel, setup_config)
         if mismatches:
@@ -914,19 +920,30 @@ class Editor:
 
     def check_setup(self, session: EditSession, rel: str) -> list[dict]:
         from testsuit.datatools.datapack.datapack_tools import _find_sources
-        from testsuit.datatools.datapack.model import Setup
+        from testsuit.datatools.datapack.model import FORMER_CONFIG, FORMER_SETUP, FORMER_SLOT, Setup
         from testsuit.sequencer.intake import check_against_lab
         from testsuit.sequencer.model import needs_from_setup
         path = self.path(session, rel)
         text = path.read_text(encoding="utf-8")
         raw = yaml.safe_load(text) or {}
         problems = []
+        former = [([old], f"'{old}' is now '{new}'") for old, new in FORMER_SETUP.items() if old in raw]
+        former += [(["configurations", name, old], f"configuration '{name}': '{old}' is now '{new}'")
+                   for name, cfg in (raw.get("configurations") or {}).items() if isinstance(cfg, dict)
+                   for old, new in FORMER_CONFIG.items() if old in cfg]
+        former += [(["configurations", name, "slots", slot_id, old], f"slot '{slot_id}': '{old}' is now '{new}'")
+                   for name, cfg in (raw.get("configurations") or {}).items() if isinstance(cfg, dict)
+                   for slot_id, slot in (cfg.get("slots") or {}).items() if isinstance(slot, dict)
+                   for old, new in FORMER_SLOT.items() if old in slot]
+        if former:
+            return [{"file": rel, "line": w[0], "column": w[1], "severity": "error", "message": message}
+                    for keys, message in former for w in [yamledit.locate(text, keys) or (1, 1)]]
         try:
             Setup.model_validate(raw)
         except ValidationError as e:
             return _pydantic_problems(e, rel, text)
         lab, _ = self.lab_for(session)
-        types = raw.get("component_types") or {}
+        types = raw.get("slot_types") or {}
         for name, t in types.items():
             role = str(t.get("role") or "")
             expected = []
@@ -934,21 +951,21 @@ class Editor:
                 try:
                     expected = lab.library.role_inputs(role)
                 except SequencerError:
-                    where = yamledit.locate(text, ["component_types", name, "role"]) or (1, 1)
+                    where = yamledit.locate(text, ["slot_types", name, "role"]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                      "message": f"type '{name}': '{role}' is not a lab role"})
             for cfg_name, cfg in (t.get("configurations") or {}).items():
                 targets = {str(i.get("target", "")).rstrip("/") for i in (cfg or {}).get("inputs") or [] if isinstance(i, dict)}
                 for item in expected:                # what its role expects and this configuration does not give
                     if not item["optional"] and item["name"].rstrip("/") not in targets:
-                        where = yamledit.locate(text, ["component_types", name, "configurations", cfg_name]) or (1, 1)
+                        where = yamledit.locate(text, ["slot_types", name, "configurations", cfg_name]) or (1, 1)
                         problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                          "message": f"type '{name}', configuration '{cfg_name}': no input '{item['name']}', "
                                                     f"which its role {role} expects"})
                 for i, inp in enumerate((cfg or {}).get("inputs") or []):
                     source = str(inp.get("source", ""))
                     if source and "{{" not in source and not _find_sources(source, [path.parent]):
-                        where = yamledit.locate(text, ["component_types", name, "configurations", cfg_name,
+                        where = yamledit.locate(text, ["slot_types", name, "configurations", cfg_name,
                                                        "inputs", i, "source"]) or (1, 1)
                         problems.append({"file": rel, "line": where[0], "column": where[1],
                                          "severity": "warning" if inp.get("optional") else "error",
@@ -962,21 +979,21 @@ class Editor:
                 problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "error",
                                  "message": str(e)})
                 continue
-            for comp_id, comp in ((cfg or {}).get("components") or {}).items():
+            for comp_id, comp in ((cfg or {}).get("slots") or {}).items():
                 type_role = (types.get(comp.get("type")) or {}).get("role")
                 if type_role and comp.get("role") and comp["role"] != type_role:
-                    where = yamledit.locate(text, ["configurations", cfg_name, "components", comp_id, "role"]) or (1, 1)
+                    where = yamledit.locate(text, ["configurations", cfg_name, "slots", comp_id, "role"]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
-                                     "message": f"component '{comp_id}': role '{comp['role']}', but its type "
+                                     "message": f"slot '{comp_id}': role '{comp['role']}', but its type "
                                                 f"'{comp['type']}' is for role '{type_role}'"})
                 if comp.get("type") in types and comp.get("configuration") not in (types[comp["type"]].get("configurations") or {}):
-                    where = yamledit.locate(text, ["configurations", cfg_name, "components", comp_id]) or (1, 1)
+                    where = yamledit.locate(text, ["configurations", cfg_name, "slots", comp_id]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "error",
-                                     "message": f"component '{comp_id}': type '{comp['type']}' has no configuration "
+                                     "message": f"slot '{comp_id}': type '{comp['type']}' has no configuration "
                                                 f"'{comp.get('configuration')}'"})
             for problem in check_against_lab(SimpleNamespace(needs=needs), lab):
-                name = re.search(r"component '([^']+)'", problem)
-                where = (yamledit.locate(text, ["configurations", cfg_name, "components", name.group(1)])
+                name = re.search(r"slot '([^']+)'", problem)
+                where = (yamledit.locate(text, ["configurations", cfg_name, "slots", name.group(1)])
                          if name else yamledit.locate(text, ["configurations", cfg_name])) or (1, 1)
                 problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                  "message": f"{cfg_name}: {problem}"})
@@ -1019,7 +1036,7 @@ class Editor:
     # ── pipelines ────────────────────────────────────────────────────────
 
     def _flatten(self, lab: Lab, needs, pipeline, flats) -> dict:
-        from testsuit.sequencer.model import phase_components
+        from testsuit.sequencer.model import phase_slots
         from testsuit.sequencer.scheduler import Availability, find_binding
         problems: list[str] = []
         binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
@@ -1027,28 +1044,28 @@ class Editor:
             problems += [f"cannot bind: {r}" for r in reasons]
         phases = []
         for flat in flats:
-            held = phase_components(flat.phase, needs)
+            held = phase_slots(flat.phase, needs)
             rows = []
             for part, steps in (("steps", flat.steps), ("finally", flat.finally_)):
                 for fs in steps:
                     step = fs.step
-                    if step.component:
-                        targets = [step.component]
+                    if step.slot:
+                        targets = [step.slot]
                     elif isinstance(step.for_each, list):
                         targets = list(step.for_each)
-                    elif step.for_each == "components":
+                    elif step.for_each == "slots":
                         targets = list(held)
                     elif isinstance(step.for_each, str) and "{{" not in step.for_each:
-                        targets = [c for c in held if needs.components[c].role == step.for_each]
+                        targets = [c for c in held if c in needs.slots and needs.slots[c].role == step.for_each]
                     else:
                         targets = [str(step.for_each)] if step.for_each else []
                     expanded = []
                     for target in targets or [None]:
-                        entry: dict[str, Any] = {"component": target}
-                        if binding is not None and target in binding.components:
-                            concrete = lab.inventory.components[binding.components[target]]
-                            lc = needs.components[target]
-                            stage = lab.inventory.stages.get(binding.stages.get(lc.stage, ""))
+                        entry: dict[str, Any] = {"slot": target}
+                        if binding is not None and target in binding.slots:
+                            concrete = lab.inventory.components[binding.slots[target]]
+                            lc = needs.slots[target]
+                            stage = lab.inventory.stages.get(binding.realms.get(lc.realm, ""))
                             entry.update(concrete=concrete.id, role=concrete.role)
                             if step.action == "do":
                                 try:
@@ -1059,16 +1076,16 @@ class Editor:
                                 if resolved is not None:
                                     spec = resolved.commands.get(step.do)
                                     if spec is None:
-                                        problems.append(f"phase '{flat.phase.id}', step '{fs.id}': '{target}' "
-                                                        f"(role {concrete.role}) has no command '{step.do}' (it has: "
+                                        problems.append(f"phase '{flat.phase.id}', step '{fs.id}': slot '{target}' "
+                                                        f"({concrete.id}, role {concrete.role}) has no command '{step.do}' (it has: "
                                                         f"{', '.join(sorted(resolved.commands)) or 'none'})")
                                     entry.update(command=spec, source=resolved.command_sources.get(step.do))
                         expanded.append(entry)
                     rows.append({"id": fs.id, "part": part, "group": fs.group, "needs": fs.needs, "action": step.action,
                                  "do": step.do, "params": fs.params, "targets": expanded,
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
-            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stages": flat.phase.stages,
-                           "components": held, "groups": flat.groups, "steps": rows})
+            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "realms": flat.phase.realms,
+                           "slots": held, "groups": flat.groups, "steps": rows})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems}
 
     def flatten(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
@@ -1077,13 +1094,13 @@ class Editor:
         lab, _ = self.lab_for(session)
         result = self._flatten(lab, needs, pipeline, flats)
         result["setup"] = self.rel(session, setup_path)
-        result["logical"] = {"stages": needs.stages,
-                             "components": {c.id: {"type": c.type, "stage": c.stage, "role": c.role, "name": c.name}
-                                            for c in needs.components.values()}}
+        result["logical"] = {"realms": needs.realms,
+                             "slots": {c.id: {"type": c.type, "realm": c.realm, "role": c.role, "name": c.name}
+                                       for c in needs.slots.values()}}
         return result
 
     def palette(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
-        """What a step can do on each logical component of a test definition: the commands its role lists, with
+        """What a step can do on each slot of a test definition: the commands its role lists, with
         how each lab component that can be bound implements them (README section 13.2, pipelines)."""
         from testsuit.sequencer.model import needs_from_setup
         path = self.path(session, rel)
@@ -1095,12 +1112,12 @@ class Editor:
         config = setup_config or str(raw.get("setup_config") or "")
         needs = needs_from_setup(setup_raw, config)
         lab, _ = self.lab_for(session)
-        components = {}
-        for lc in needs.components.values():
+        slots = {}
+        for lc in needs.slots.values():
             offered = lab.library.role_commands(lc.role) if lc.role in lab.library.roles else {}
             # the lab components that can be bound, with how each implements the commands
-            stage_type = needs.stages.get(lc.stage)
-            if lc.stage:
+            stage_type = needs.realms.get(lc.realm)
+            if lc.realm:
                 hosts = [(lab.inventory.component_in(st, lc.role), st) for st in lab.inventory.stages_of_type(stage_type)]
             else:
                 hosts = [(c, None) for c in lab.inventory.adhoc if c.role == lc.role]
@@ -1120,7 +1137,7 @@ class Editor:
                               "help": info["description"] or _command_help(cmd),
                               "implementations": implementations.get(cmd, {})}
                         for cmd, info in sorted(offered.items())}
-            components[lc.id] = {"name": lc.name, "type": lc.type, "stage": lc.stage, "role": lc.role,
+            slots[lc.id] = {"name": lc.name, "type": lc.type, "realm": lc.realm, "role": lc.role,
                                  "role_known": lc.role in lab.library.roles, "commands": commands}
         workspace = self.scan_workspace(session.folder, session.folder) if session.kind == "workspace" else {}
         own = (raw.get("pipeline") or {}).get("subpipelines") or {}
@@ -1133,7 +1150,7 @@ class Editor:
                     subs.setdefault(n, self._sub_summary(s) | {"file": self.rel(session, inc)})
         return {"setup": self.rel(session, setup_path), "configuration": config,
                 "configurations": sorted((setup_raw.get("configurations") or {})),
-                "stages": needs.stages, "components": components, "subpipelines": subs,
+                "realms": needs.realms, "slots": slots, "subpipelines": subs,
                 "shared_subpipelines": (workspace.get("subpipelines") or {}),
                 "step_types": sorted(registry.step_types), "ready_checks": sorted(registry.ready_checks)}
 
@@ -1194,14 +1211,14 @@ class Editor:
             text = value if isinstance(value, str) else json.dumps(value, default=str)
             rows.append({"key": name, "value": text[:200], "origin": origin})
         return {"keys": rows, "error": error, "runtime": RUNTIME_KEYS,
-                "datapack": {"component.id": "id of the component being generated",
-                             "component.input_dir": "its input folder in the datapack",
-                             "components.<id>.input_dir": "input folder of a component it needs",
-                             "read_input('<id>/<file>')": "text of an input of a component it needs"}}
+                "datapack": {"slot.id": "id of the slot being generated (also slot.name, slot.type, slot.configuration)",
+                             "slot.input_dir": "its input folder in the datapack",
+                             "slots.<id>.input_dir": "input folder of a slot it needs",
+                             "read_input('<id>/<file>')": "text of an input of a slot it needs"}}
 
-    def preview(self, session: EditSession, testdef_rel: str, source: str, component: str | None = None,
+    def preview(self, session: EditSession, testdef_rel: str, source: str, slot: str | None = None,
                 setup_config: str | None = None) -> dict:
-        """A template rendered as the datapack tool would, for a component of the test definition's setup."""
+        """A template rendered as the datapack tool would, for a slot of the test definition's setup."""
         from testsuit.datatools.datapack.datapack_tools import _find_sources
         from testsuit.datatools.datapack.templating import TemplateError
         builder, testdef, raw = self._builder(session, testdef_rel, setup_config)
@@ -1212,18 +1229,18 @@ class Editor:
             if not found or not found[0].is_file():
                 raise SequencerError(f"template '{source}' not found")
             path = found[0]
-        comps = ((raw.get("configurations") or {}).get(testdef.setup_config) or {}).get("components") or {}
-        if component is None:                         # the first component with this template as an input
-            for comp_id, comp in comps.items():
-                cfg = ((raw.get("component_types") or {}).get(comp.get("type")) or {}).get("configurations") or {}
-                inputs = (cfg.get(comp.get("configuration")) or {}).get("inputs") or []
+        slots = ((raw.get("configurations") or {}).get(testdef.setup_config) or {}).get("slots") or {}
+        if slot is None:                              # the first slot with this template as an input
+            for slot_id, item in slots.items():
+                cfg = ((raw.get("slot_types") or {}).get(item.get("type")) or {}).get("configurations") or {}
+                inputs = (cfg.get(item.get("configuration")) or {}).get("inputs") or []
                 if any(path in _find_sources(str(i.get("source", "")), [builder.testdef_dir, setup_dir]) for i in inputs):
-                    component = comp_id
+                    slot = slot_id
                     break
-        comp = comps.get(component or "", {})
-        extra = {"component": {"id": component or "", "name": comp.get("name", ""), "type": comp.get("type", ""),
-                               "configuration": comp.get("configuration", ""), "input_dir": f"<{component} input folder>"},
-                 "components": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []},
+        comp = slots.get(slot or "", {})
+        extra = {"slot": {"id": slot or "", "name": comp.get("name", ""), "type": comp.get("type", ""),
+                          "configuration": comp.get("configuration", ""), "input_dir": f"<{slot} input folder>"},
+                 "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []},
                  "read_input": lambda p: f"<read_input('{p}'): available when the datapack is generated>"}
         keys = builder.keys()
         try:
@@ -1231,8 +1248,8 @@ class Editor:
         except TemplateError as e:
             _, message = self._message_file(session, str(e), source)
             line = re.search(r"line (\d+)", message)
-            return {"ok": False, "error": message, "line": int(line.group(1)) if line else None, "component": component}
-        return {"ok": True, "text": text, "component": component, "components": sorted(comps),
+            return {"ok": False, "error": message, "line": int(line.group(1)) if line else None, "slot": slot}
+        return {"ok": True, "text": text, "slot": slot, "slots": sorted(slots),
                 "keys": {k: (self.rel(session, Path(o)) if o.startswith("/") and Path(o).is_relative_to(session.root) else o)
                          for k, o in used.items()}}
 
@@ -1241,7 +1258,7 @@ class Editor:
     def synthesis(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                   versions: bool = True, run_checks: bool = True) -> dict:
         """A test definition at a glance: the logical configuration of its setup, the inputs of each
-        component, its dictionaries with their keys, and the datasets of its baseline with the versions
+        slot, its dictionaries with their keys, and the datasets of its baseline with the versions
         their importer offers. versions=False: only the versions already listed less than a minute ago,
         the others marked ``versions_pending`` (listed then one source at a time: ``versions()``).
         run_checks=False: without the pipeline and lab checks (asked then on their own: ``run_problems()``)."""
@@ -1270,9 +1287,9 @@ class Editor:
         setup_dir = builder.setup_file.parent
         config = testdef.setup_config
         cfg = (raw.get("configurations") or {}).get(config) or {}
-        types = raw.get("component_types") or {}
+        types = raw.get("slot_types") or {}
         components = []
-        for comp_id, comp in (cfg.get("components") or {}).items():
+        for comp_id, comp in (cfg.get("slots") or {}).items():
             comp = comp if isinstance(comp, dict) else {}
             configuration = ((types.get(comp.get("type")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
             inputs = []
@@ -1290,9 +1307,9 @@ class Editor:
                                "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
             components.append({"id": comp_id, "name": comp.get("name", ""), "type": comp.get("type", ""),
                                "configuration": comp.get("configuration", ""),
-                               "stage": comp.get("stage"), "role": comp.get("role"), "needs": comp.get("needs") or [],
+                               "realm": comp.get("realm"), "role": comp.get("role"), "needs": comp.get("needs") or [],
                                "inputs": inputs})
-        stages = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stages") or {}).items()}
+        realms = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("realms") or {}).items()}
 
         dictionaries = []
         for layer, path in builder.dictionaries:
@@ -1315,12 +1332,12 @@ class Editor:
             problems.append(f"no setup configuration '{config}' in {shown(builder.setup_file)}")
         for comp in components:
             if comp["type"] not in types:
-                problems.append(f"component '{comp['id']}': no component type '{comp['type']}'")
+                problems.append(f"slot '{comp['id']}': no slot type '{comp['type']}'")
             elif comp["configuration"] not in ((types[comp["type"]] or {}).get("configurations") or {}):
-                problems.append(f"component '{comp['id']}': no configuration '{comp['configuration']}' for type '{comp['type']}'")
+                problems.append(f"slot '{comp['id']}': no configuration '{comp['configuration']}' for type '{comp['type']}'")
             for number, item in enumerate(comp["inputs"], 1):
                 item["dataset"] = item["dataset"] if item["dataset"] in ids else None
-                where = f"component '{comp['id']}', input {number}"
+                where = f"slot '{comp['id']}', input {number}"
                 if item["resolved"] is None:
                     problems.append(f"{where}: source '{item['source']}' cannot be resolved (a key missing?)")
                 elif not item["resolved"].strip():
@@ -1339,7 +1356,7 @@ class Editor:
                             "own_config": config == (yaml.safe_load(self.path(session, testdef_rel).read_text(encoding="utf-8")) or {}).get("setup_config"),
                             "configurations": sorted(raw.get("configurations") or {})},
                 "setup": {"id": raw.get("id"), "name": raw.get("name")},
-                "stages": stages, "components": components, "dictionaries": dictionaries,
+                "realms": realms, "slots": components, "dictionaries": dictionaries,
                 "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}

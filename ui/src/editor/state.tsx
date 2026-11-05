@@ -253,7 +253,7 @@ export function stageTypeChoices(ctx: any): Choice[] {
   }
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
-      for (const [, type] of Object.entries<any>(c.stages || {}))
+      for (const [, type] of Object.entries<any>(c.realms || {}))
         if (type && !result[type]) result[type] = { value: type, description: `asked for by setup ${setup.id} (${cfg}), no such stage in the lab yet` };
   return Object.values(result);
 }
@@ -270,11 +270,11 @@ export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?:
     result[role] = { value: role, description: (opts.stageType ? `in the ${opts.stageType} stages · ` : opts.adhoc ? "ad hoc · " : "") + (types[role]?.description || "not a lab role") };
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
-      for (const [id, comp] of Object.entries<any>(c.components || {})) {
+      for (const [id, comp] of Object.entries<any>(c.slots || {})) {
         if (!comp.role || result[comp.role]) continue;
-        const stageType = comp.stage ? c.stages?.[comp.stage] : null;
-        if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.stage)) continue;
-        result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), component ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
+        const stageType = comp.realm ? c.realms?.[comp.realm] : null;
+        if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.realm)) continue;
+        result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), slot ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
       }
   return Object.values(result);
 }
@@ -305,7 +305,7 @@ export function clone<T>(x: T): T {
 
 // ── keys a field rendered with keys can use (the {{ picker) ──────────────
 
-/** Run-time keys of commands and steps (component.*, run.*, params.*...), with their help. */
+/** Run-time keys of commands and steps (slot.*, component.*, run.*, params.*...), with their help. */
 export function runtimeKeyItems(ctx: any): KeyItem[] {
   return Object.entries<string>(ctx?.runtime_keys || {}).map(([key, help]) => ({ key, help }));
 }

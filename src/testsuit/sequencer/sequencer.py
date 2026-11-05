@@ -21,7 +21,7 @@ from typing import Any
 
 from testsuit.datatools.datapack.baseline import check_baseline, tool_versions
 from testsuit.sequencer.config import Config
-from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPED, SUCCEEDED, BoundComponent, PhaseRunner, RunContext,
+from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPED, SUCCEEDED, BoundSlot, PhaseRunner, RunContext,
                                        StepRecord, StepRunner, worst)
 from testsuit.sequencer.intake import Datapack, check_against_lab, load_datapack, unpack
 from testsuit.sequencer.lab import Lab, checkout, load_lab, pull_lab
@@ -249,7 +249,7 @@ class Sequencer:
     def activate(self, run: dict, datapack: Datapack, binding: Binding) -> None:
         self.store.update_run(run["id"], state="reserved", activated_at=now(), waiting_for="",
                               binding=binding.as_dict(), warnings=self.lab.warnings)
-        for resource in set(binding.stages.values()) | set(binding.components.values()):
+        for resource in set(binding.realms.values()) | set(binding.slots.values()):
             self.store.add_usage(resource, datapack.testdef_id)
         self.notify("run", {"run": run["id"], "state": "reserved", "binding": binding.as_dict()})
         execution = RunExecution(self, run["id"], datapack, binding)
@@ -475,7 +475,7 @@ class Sequencer:
 
     async def manual_command(self, comp_id: str, name: str, timeout: float | None = None) -> dict:
         """Run one command of a component by hand (README section 7.6): only in maintenance, and not while a run
-        holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no logical component);
+        holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no slot);
         a detached one is started with its pid file under ``<root>/.tsq/manual/<component>/``, where ``signal``
         commands and the built-in ``kill`` find the processes started by hand."""
         info = await self.manual_commands(comp_id)
@@ -562,7 +562,7 @@ class Sequencer:
             log.warning(f"run {run['id']} was {run['state']} when the sequencer stopped: killing it")
             try:
                 datapack = load_datapack(Path(run["dir"]))
-                binding = Binding(**(run["binding"] or {}))
+                binding = Binding.from_dict(run["binding"])
                 execution = RunExecution(self, run["id"], datapack, binding)
                 await execution.recover(run.get("phase") or "")
             except Exception as e:
@@ -606,21 +606,21 @@ class RunExecution:
         self.store.update_run(self.run_id, state=state, **fields)
         self.seq.notify("run", {"run": self.run_id, "state": state, **{k: v for k, v in fields.items() if k != "steps"}})
 
-    async def bind_components(self, ids: list[str] | None = None) -> None:
+    async def bind_slots(self, ids: list[str] | None = None) -> None:
         inv = self.seq.lab.inventory
-        logical_to_stage = {c.id: c.stage for c in self.datapack.needs.components.values()}
-        for logical, concrete_id in self.binding.components.items():
+        realm_of = {c.id: c.realm for c in self.datapack.needs.slots.values()}
+        for logical, concrete_id in self.binding.slots.items():
             if ids is not None and logical not in ids:
                 continue
             if logical in self.ctx.bound and self.ctx.bound[logical].concrete.id == concrete_id:
                 continue
-            lc = self.datapack.needs.components[logical]
+            lc = self.datapack.needs.slots[logical]
             concrete = inv.components[concrete_id]
-            stage_logical = logical_to_stage.get(logical) or ""
-            stage = inv.stages[self.binding.stages[stage_logical]] if stage_logical else None
+            realm = realm_of.get(logical) or ""
+            stage = inv.stages[self.binding.realms[realm]] if realm else None
             resolved = self.seq.lab.resolve(concrete, stage)
             transport = self.seq.transport_for(concrete_id)
-            bound = BoundComponent(logical=lc, concrete=concrete, stage=stage, logical_stage=stage_logical,
+            bound = BoundSlot(logical=lc, concrete=concrete, stage=stage, realm=realm,
                                    resolved=resolved, transport=transport)
             for via in self.seq.lab.command_vias(concrete, stage, resolved).values():
                 if via.id not in bound.vias:           # commands run through it: where their pid files go
@@ -636,7 +636,7 @@ class RunExecution:
                 # Several runs may hold it at once: each gets its own input/output folders.
                 bound.work = f"{bound.root}/.tsq/{self.run_id}"
             self.ctx.bound[logical] = bound
-        self.ctx.stage_binding = dict(self.binding.stages)
+        self.ctx.realm_binding = dict(self.binding.realms)
         self.seq.monitor.active |= {b.concrete.id for b in self.ctx.bound.values()}
 
     def make_context(self) -> RunContext:
@@ -651,7 +651,7 @@ class RunExecution:
                 self.snapshot_steps()
 
         return RunContext(run_id=self.run_id, bag=self.datapack.dir, datapack=self.datapack, bound={},
-                          stage_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
+                          realm_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
                           expect_state=lambda concrete, state: self.store.set_expected(concrete, state),
                           on_state_mismatch=self.datapack.pipeline.on_state_mismatch,
                           max_output=self.seq.config.storage.max_run_output, lab=self.seq.lab)
@@ -681,7 +681,7 @@ class RunExecution:
     async def _run(self) -> str:
         cfg = self.seq.config
         self.ctx = self.make_context()
-        await self.bind_components()
+        await self.bind_slots()
 
         free = shutil.disk_usage(cfg.storage_path("runs")).free
         if free < cfg.storage.min_free_space:
@@ -711,7 +711,7 @@ class RunExecution:
     async def selftest(self, logical_ids: list[str]) -> bool:
         concrete = sorted({self.ctx.bound[l].concrete.id for l in logical_ids if l in self.ctx.bound})
         # every component of a locked stage is checked, used by the datapack or not
-        for stage_id in self.binding.stages.values():
+        for stage_id in self.binding.realms.values():
             concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components if c not in concrete]
         results = await asyncio.gather(*[self.seq._selftest_one(c) for c in concrete])
         self.selftests += results
@@ -734,7 +734,7 @@ class RunExecution:
                 text = result.output.strip() if result.completed and result.exit_status == 0 else None
             except Exception:
                 text = None
-            self.versions[bound.concrete.id] = {"version": text, "logical": logical, "role": bound.concrete.role}
+            self.versions[bound.concrete.id] = {"version": text, "slot": logical, "role": bound.concrete.role}
         await asyncio.gather(*[one(l) for l in logical_ids if l in self.ctx.bound])
 
     def run_baseline(self) -> dict:
@@ -788,12 +788,11 @@ class RunExecution:
 
     async def acquire(self, flat) -> bool:
         """Bind and lock what a later phase needs and the run does not hold yet."""
-        held = Binding(stages={s: c for s, c in self.binding.stages.items() if s in flat.phase.stages},
-                       components={l: c for l, c in self.binding.components.items()
-                                   if self.datapack.needs.components[l].stage in flat.phase.stages
-                                   or l in flat.phase.components})
-        missing_stages = [s for s in flat.phase.stages if s not in held.stages]
-        missing_comps = [c for c in flat.phase.components if c not in held.components]
+        held = Binding(realms={s: c for s, c in self.binding.realms.items() if s in flat.phase.realms},
+                       slots={l: c for l, c in self.binding.slots.items()
+                              if self.datapack.needs.slots[l].realm in flat.phase.realms or l in flat.phase.slots})
+        missing_stages = [s for s in flat.phase.realms if s not in held.realms]
+        missing_comps = [c for c in flat.phase.slots if c not in held.slots]
         if not missing_stages and not missing_comps:
             # still locked? (released after an earlier phase if no phase in between needed it)
             locks = {(l["kind"], l["resource"]) for l in self.store.locks(self.run_id)}
@@ -805,11 +804,11 @@ class RunExecution:
             if binding is not None:
                 conflicts = self.store.try_lock(self.run_id, binding.locks(self.seq.lab))
                 if not conflicts:
-                    self.binding.stages.update(binding.stages)
-                    self.binding.components.update(binding.components)
+                    self.binding.realms.update(binding.realms)
+                    self.binding.slots.update(binding.slots)
                     self.store.update_run(self.run_id, binding=self.binding.as_dict(), waiting_for="")
-                    new = [l for l in binding.components if l not in self.ctx.bound]
-                    await self.bind_components()
+                    new = [l for l in binding.slots if l not in self.ctx.bound]
+                    await self.bind_slots()
                     if new and self.seq.config.selftest.before_each_run and not await self.selftest(new):
                         self.reason = f"self-test failed before phase {flat.phase.id}"
                         return False
@@ -827,12 +826,12 @@ class RunExecution:
         keep_binding = Binding()
         for pid in later:
             phase = phases[pid]
-            for s in phase.stages:
-                if s in self.binding.stages:
-                    keep_binding.stages[s] = self.binding.stages[s]
-            for l, c in self.binding.components.items():
-                if l in phase.components or self.datapack.needs.components[l].stage in phase.stages:
-                    keep_binding.components[l] = c
+            for s in phase.realms:
+                if s in self.binding.realms:
+                    keep_binding.realms[s] = self.binding.realms[s]
+            for l, c in self.binding.slots.items():
+                if l in phase.slots or self.datapack.needs.slots[l].realm in phase.realms:
+                    keep_binding.slots[l] = c
         keep = {(k, r) for k, r, _ in keep_binding.locks(self.seq.lab)}
         released = self.store.release(self.run_id, keep=keep)
         if released:
@@ -868,7 +867,7 @@ class RunExecution:
         self.store.update_run(self.run_id, abort=mode)
         self.seq.notify("run", {"run": self.run_id, "abort": mode})
 
-        async def alive(bound: BoundComponent) -> bool:
+        async def alive(bound: BoundSlot) -> bool:
             for transport, folder in bound.pid_places(self.run_id):
                 try:
                     if await transport.alive_in(folder):
@@ -902,11 +901,11 @@ class RunExecution:
             if mode and mode != self.abort_mode:
                 await self.abort(mode)
 
-    async def _command(self, bound: BoundComponent, name: str) -> None:
+    async def _command(self, bound: BoundSlot, name: str) -> None:
         """A component command run by the sequencer itself (stop or kill on abort), recorded as a step."""
         flat = next((f for f in self.datapack.phases if f.phase.id == self.ctx.phase), self.datapack.phases[0])
-        fs = FlatStep(id=f"tsq_{name}", step=Step(id=f"tsq_{name}", component=bound.id, do=name), needs=[], params={})
-        record = StepRecord(phase=flat.phase.id, id=fs.id, component=bound.id, state="running", started=now())
+        fs = FlatStep(id=f"tsq_{name}", step=Step(id=f"tsq_{name}", slot=bound.id, do=name), needs=[], params={})
+        record = StepRecord(phase=flat.phase.id, id=fs.id, slot=bound.id, state="running", started=now())
         self.ctx.records[record.key] = record
         runner = StepRunner(self.ctx, flat, fs, bound, record)
         try:
@@ -920,7 +919,7 @@ class RunExecution:
         self.ctx = self.make_context()
         self.ctx.abort_mode = "kill"
         self.reason = "sequencer restarted during the run"
-        await self.bind_components()
+        await self.bind_slots()
         for bound in self.ctx.bound.values():
             for transport, folder in bound.pid_places(self.run_id):
                 try:

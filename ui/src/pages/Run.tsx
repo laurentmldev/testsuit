@@ -15,9 +15,12 @@ function worst(states: string[]): string {
   return states[0] || "pending";
 }
 
-export function stepKey(phase: string, id: string, component?: string) {
-  return `${phase}:${id}` + (component ? `[${component}]` : "");
+export function stepKey(phase: string, id: string, slot?: string) {
+  return `${phase}:${id}` + (slot ? `[${slot}]` : "");
 }
+
+/** The slot a step record ran for ('' for the whole step); runs recorded before slots were named say 'component'. */
+export const slotOf = (record: any): string => record?.slot ?? record?.component ?? "";
 
 function StepNode({ data }: NodeProps) {
   const d = data as any;
@@ -29,7 +32,7 @@ function StepNode({ data }: NodeProps) {
       <div className="step-action">{d.action}</div>
       {d.items?.length > 1 && (
         <div className="step-items">
-          {d.items.map((i: any) => <span key={i.component} className={classes("chip", STATE_COLORS[i.state] || "muted")} title={`${i.component}: ${i.state}`}>{i.component}</span>)}
+          {d.items.map((i: any) => <span key={slotOf(i)} className={classes("chip", STATE_COLORS[i.state] || "muted")} title={`${slotOf(i)}: ${i.state}`}>{slotOf(i)}</span>)}
         </div>
       )}
       <Handle type="source" position={Position.Right} />
@@ -129,12 +132,12 @@ export function RunGraph({ pipeline, records, selected, onSelect }: {
     const { step, phase } = n.data as any;
     const items = byStep[`${phase}:${step.id}`] || [];
     const state = items.length ? worst(items.map((i) => i.state)) : "pending";
-    const target = step.component || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
+    const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
     return {
       ...n, data: {
         ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}`,
         state, items, part: step.part, selected: selected?.startsWith(`${phase}:${step.id}`),
-        title: `${phase}:${step.id}\n${step.action}${step.do ? " " + step.do : ""}${step.if ? `\nif ${step.if}` : ""}\nneeds: ${step.needs.join(", ") || "-"}\n${items.map((i: any) => `${i.component || "-"}: ${i.state}${i.reason ? " (" + i.reason + ")" : ""}`).join("\n")}`,
+        title: `${phase}:${step.id}\n${step.action}${step.do ? " " + step.do : ""}${step.if ? `\nif ${step.if}` : ""}\nneeds: ${step.needs.join(", ") || "-"}\n${items.map((i: any) => `${slotOf(i) || "-"}: ${i.state}${i.reason ? " (" + i.reason + ")" : ""}`).join("\n")}`,
       },
     };
   });
@@ -146,7 +149,7 @@ export function RunGraph({ pipeline, records, selected, onSelect }: {
           if (n.type !== "step") return;
           const { step, phase } = n.data as any;
           const items = byStep[`${phase}:${step.id}`] || [];
-          onSelect(stepKey(phase, step.id, items.length === 1 ? items[0].component : items[0]?.component), step, phase);
+          onSelect(stepKey(phase, step.id, slotOf(items[0])), step, phase);
         }}>
         <Background gap={16} />
         <Controls showInteractive={false} />
@@ -208,10 +211,10 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   const r = run.data;
   const records: any[] = r?.steps || [];
   const live = r && (ACTIVE.includes(r.state) || ["queued", "waiting_resources"].includes(r.state));
-  const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, s.component) === key);
-  // the log to show: the selected record, or the first component of a step run on several; none before it starts
+  const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, slotOf(s)) === key);
+  // the log to show: the selected record, or the first slot of a step run on several; none before it starts
   const logRecord = selected ? recordFor(selected) || records.find((s) => selected === `${s.phase}:${s.id}`) : null;
-  const logKey = logRecord ? stepKey(logRecord.phase, logRecord.id, logRecord.component) : null;
+  const logKey = logRecord ? stepKey(logRecord.phase, logRecord.id, slotOf(logRecord)) : null;
   if (run.error) return <div className="page"><div className="error-box">{run.error}</div></div>;
   if (!r) return <div className="page muted">Loading…</div>;
   const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"], ["resources", "Resources"]];
@@ -235,7 +238,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         <span title={time(r.submitted_at)}>submitted {ago(r.submitted_at)}</span>
         {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} {duration(r.activated_at, r.ended_at)}</span>}
         {r.phase && <span>phase <strong>{r.phase}</strong></span>}
-        {r.binding && <span>on {Object.entries(r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
+        {r.binding && <span title="realm = lab stage, slot = lab component">on {Object.entries(r.binding.realms || r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
       {r.reason && <div className="banner warn">{r.reason}</div>}
@@ -268,7 +271,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
               <thead><tr><th>Step</th><th>State</th><th>Started</th><th>Duration</th><th>Exit</th><th>Tries</th><th>Reason</th></tr></thead>
               <tbody>
                 {records.map((s) => {
-                  const key = stepKey(s.phase, s.id, s.component);
+                  const key = stepKey(s.phase, s.id, slotOf(s));
                   return (
                     <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => setSelected(key)}>
                       <td><code>{key}</code></td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
@@ -300,8 +303,8 @@ function StepFacts({ record, records, onPick }: { record: any; records: any[]; o
       {records.length > 1 && (
         <div className="segmented">
           {records.map((s) => (
-            <button key={s.component} className={record?.component === s.component ? "selected" : ""} onClick={() => onPick(stepKey(s.phase, s.id, s.component))}>
-              {s.component} <Badge value={s.state} />
+            <button key={slotOf(s)} className={slotOf(record) === slotOf(s) ? "selected" : ""} onClick={() => onPick(stepKey(s.phase, s.id, slotOf(s)))}>
+              {slotOf(s)} <Badge value={s.state} />
             </button>
           ))}
         </div>
@@ -350,7 +353,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
   const d = res.data;
   if (res.error) return <div className="error-box">{res.error}</div>;
   if (!d) return <p className="muted">Loading…</p>;
-  const needs = [...d.stages, ...d.components];
+  const needs = [...d.realms, ...d.slots];
   const ok = needs.filter((n) => needStatus(n)[1] === "ok").length;
   return (
     <div className="scroll resources-tab">
@@ -367,19 +370,19 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
           <ul className="problems">{d.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>
         </div>
       )}
-      {d.stages.length > 0 && <h3>Stages</h3>}
-      {d.stages.map((s: any) => {
+      {d.realms.length > 0 && <h3>Realms</h3>}
+      {d.realms.map((s: any) => {
         const [label, color] = needStatus(s);
         return (
           <div key={s.logical} className="need">
             <div className="need-head">
-              <code>{s.logical}</code> <span className="muted">stage of type</span> <code>{s.type}</code>
+              <code>{s.logical}</code> <span className="muted">realm, on a lab stage of type</span> <code>{s.type}</code>
               <span className={classes("chip", color)}>{label}{s.bound && <> on {s.bound}</>}</span>
               <span className="spacer" />
               <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>
             </div>
-            {s.components.length > 0 && (
-              <div className="small muted">needs {s.components.map((c: any) => `${c.logical} (role ${c.role}, ${c.type || "any type"})`).join(", ")}</div>
+            {s.slots.length > 0 && (
+              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.type || "any type"})`).join(", ")}</div>
             )}
             {s.problem ? <div className="small bad-text">{s.problem}</div> : (
               <table className="grid compact">
@@ -402,8 +405,8 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
           </div>
         );
       })}
-      {d.components.length > 0 && <h3>Ad hoc components</h3>}
-      {d.components.map((n: any) => {
+      {d.slots.length > 0 && <h3>Ad hoc slots</h3>}
+      {d.slots.map((n: any) => {
         const [label, color] = needStatus(n);
         return (
           <div key={n.logical} className="need">

@@ -74,11 +74,11 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       const read = await step("Setup, dictionaries and inputs",
         () => post(`edit/sessions/${sid}/synthesis`, { ...body, versions: false, run_checks: false }),
         (r) => {
-          const inputs = (r.components || []).flatMap((c: any) => c.inputs || []);
-          return `${(r.components || []).length} components, ${inputs.length} inputs looked up, ${(r.dictionaries || []).length} dictionaries`;
+          const inputs = (r.slots || []).flatMap((c: any) => c.inputs || []);
+          return `${(r.slots || []).length} slots, ${inputs.length} inputs looked up, ${(r.dictionaries || []).length} dictionaries`;
         });
       if (read)
-        await step("Pipeline and lab: phases, stages, components, step targets",
+        await step("Pipeline and lab: phases, realms, slots, step targets",
           () => post(`edit/sessions/${sid}/run_problems`, body), () => "against the lab as it is now");
       if (!live.current) return;
       if (found.length) {
@@ -195,7 +195,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
               <Choices value={config} onChange={setConfig} allowNone={`its own (${td?.setup_config})`} choices={configs.filter((c) => c !== td?.setup_config).map((c) => ({ value: c }))} />
             </Field>
           )}
-          <Field label="Check against the lab" help="Also check that the lab has the stages and roles the setup asks for, and run the checks of each component type, as the queue does on posting.">
+          <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
         </>

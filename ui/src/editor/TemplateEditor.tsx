@@ -1,6 +1,6 @@
 // Template editor (sequencer README, sections 9 and 13.2): the template text with completion of the datapack
 // keys after `{{`, the keys it can use with their values and origins, and a preview rendered as the datapack
-// tool would for a component of a test definition.
+// tool would for a slot of a test definition.
 import { useEffect, useMemo, useState } from "react";
 import { post } from "../api";
 import { CodeEditor, languageOf } from "../monaco";
@@ -16,7 +16,7 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
     return (testdefs.find((t) => t.setup_file && t.setup_file.startsWith(dir)) || testdefs[0])?.path || "";
   }, [doc.path, testdefs]);
   const [testdef, setTestdef] = useState(guess);
-  const [component, setComponent] = useState<string | null>(null);
+  const [slot, setSlot] = useState<string | null>(null);
   const [keys, setKeys] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [filter, setFilter] = useState("");
@@ -33,11 +33,11 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
     if (!testdef) return;
     const t = window.setTimeout(async () => {
       await api.flush();
-      post(`edit/sessions/${sid}/preview`, { testdef, source: doc.path, component }).then(setPreview).catch((e) => setPreview({ ok: false, error: e.message }));
+      post(`edit/sessions/${sid}/preview`, { testdef, source: doc.path, slot }).then(setPreview).catch((e) => setPreview({ ok: false, error: e.message }));
     }, 900);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sid, testdef, component, doc.content, doc.path]);
+  }, [sid, testdef, slot, doc.content, doc.path]);
 
   const completions = useMemo(() => {
     if (!keys) return [];
@@ -63,10 +63,10 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
               {testdefs.map((t) => <option key={t.path} value={t.path}>{t.name || t.id} ({t.path})</option>)}
             </select>
           </label>
-          {preview?.components?.length > 0 && (
-            <label className="small">component{" "}
-              <select value={component || preview.component || ""} onChange={(e) => setComponent(e.target.value || null)}>
-                {preview.components.map((c: string) => <option key={c}>{c}</option>)}
+          {preview?.slots?.length > 0 && (
+            <label className="small">slot{" "}
+              <select value={slot || preview.slot || ""} onChange={(e) => setSlot(e.target.value || null)}>
+                {preview.slots.map((c: string) => <option key={c}>{c}</option>)}
               </select>
             </label>
           )}
@@ -79,7 +79,7 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
         {tab === "preview" && preview && (
           preview.ok ? (
             <>
-              <div className="muted small pad-x">as rendered for <code>{preview.component || "no component"}</code>; keys used: {Object.keys(preview.keys || {}).map((k) => <code key={k} title={preview.keys[k]}>{k} </code>)}</div>
+              <div className="muted small pad-x">as rendered for <code>{preview.slot || "no slot"}</code>; keys used: {Object.keys(preview.keys || {}).map((k) => <code key={k} title={preview.keys[k]}>{k} </code>)}</div>
               <pre className="preview">{preview.text}</pre>
             </>
           ) : <pre className="error-box">{preview.error}</pre>

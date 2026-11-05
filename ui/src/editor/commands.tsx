@@ -123,8 +123,8 @@ const WAIT_KINDS: Choice[] = [
   { value: "cmd", description: "a command exiting with 0" },
 ];
 
-export function WaitForEditor({ value, onChange, withComponent, components }: {
-  value: any; onChange: (v: any) => void; withComponent?: boolean; components?: Choice[];
+export function WaitForEditor({ value, onChange, withSlot, slots }: {
+  value: any; onChange: (v: any) => void; withSlot?: boolean; slots?: Choice[];
 }) {
   const { ctx, schemas } = useSession();
   const v = value || {};
@@ -179,9 +179,9 @@ export function WaitForEditor({ value, onChange, withComponent, components }: {
         <Field label="Timeout" help="Then the step is `error` (default 60 s)."><Text keys value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="60s" /></Field>
         <Field label="Interval" help="Time between checks (default 0.5 s)."><Text value={v.interval} onChange={(x) => set("interval", x)} placeholder="0.5s" /></Field>
       </div>
-      {withComponent && (
-        <Field label="Component checked" help="The logical component the check is about, when the step has no component.">
-          <Combo value={v.component} onChange={(x) => set("component", x)} choices={components || []} />
+      {withSlot && (
+        <Field label="Slot checked" help="The slot the check is about, when the step has no slot.">
+          <Combo value={v.slot} onChange={(x) => set("slot", x)} choices={slots || []} />
         </Field>
       )}
     </div>

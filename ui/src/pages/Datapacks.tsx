@@ -202,7 +202,7 @@ function PipelineGraph({ sid, testdef, config, edit }: { sid: string; testdef: s
   // the shape of a run's pipeline: each step's target and condition at its top level
   const pipeline = flat && {
     phases: flat.phases.map((ph: any) => ({
-      ...ph, steps: ph.steps.map((s: any) => ({ ...s, component: s.step.component, for_each: s.step.for_each, if: s.step.if })),
+      ...ph, steps: ph.steps.map((s: any) => ({ ...s, slot: s.step.slot, for_each: s.step.for_each, if: s.step.if })),
     })),
   };
   const steps = pipeline ? pipeline.phases.reduce((n: number, ph: any) => n + ph.steps.length, 0) : 0;
@@ -221,19 +221,19 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
   return (
     <Section title={<>Logical configuration <span className="muted small">{td.setup_config} of {data.setup?.name || data.setup?.id}</span></>}
       actions={<FileLink path={td.setup_file} edit={edit} />}>
-      {Object.keys(data.stages).length > 0 && (
-        <p className="small">Stages: {Object.entries(data.stages).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
+      {Object.keys(data.realms).length > 0 && (
+        <p className="small">Realms: {Object.entries(data.realms).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role</th><th>Component</th><th>Datapack type</th><th>Configuration</th><th>Stage</th><th>Needs</th></tr></thead>
+        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Realm</th><th>Needs</th></tr></thead>
         <tbody>
-          {data.components.map((c: any) => (
+          {data.slots.map((c: any) => (
             <tr key={c.id}>
               <td>{c.role || <span className="muted">none</span>}</td>
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
               <td><code>{c.type}</code></td>
               <td>{c.configuration}</td>
-              <td>{c.stage || <span className="muted small">ad hoc</span>}</td>
+              <td>{c.realm || <span className="muted small">ad hoc</span>}</td>
               <td>{c.needs.join(", ")}</td>
             </tr>
           ))}
@@ -244,13 +244,13 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
 }
 
 function Inputs({ data, edit }: { data: any; edit: (f: string) => void }) {
-  const count = data.components.reduce((n: number, c: any) => n + c.inputs.length, 0);
+  const count = data.slots.reduce((n: number, c: any) => n + c.inputs.length, 0);
   return (
     <Section title={<>Template and input files <span className="muted small">{count} inputs</span></>}>
       <table className="grid compact">
-        <thead><tr><th>Component</th><th>Target</th><th>Method</th><th>Source</th></tr></thead>
+        <thead><tr><th>Slot</th><th>Target</th><th>Method</th><th>Source</th></tr></thead>
         <tbody>
-          {data.components.map((c: any) => c.inputs.map((i: any, n: number) => (
+          {data.slots.map((c: any) => c.inputs.map((i: any, n: number) => (
             <tr key={`${c.id}:${n}`}>
               {n === 0 && <td rowSpan={c.inputs.length}><strong>{c.id}</strong></td>}
               <td className="mono small">{i.target}</td>

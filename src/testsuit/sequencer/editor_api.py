@@ -118,7 +118,7 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.post("/edit/sessions/{sid}/preview")
     async def preview(sid: str, body: dict):
-        return await run(editor.preview, session(sid), str(body["testdef"]), str(body["source"]), body.get("component"),
+        return await run(editor.preview, session(sid), str(body["testdef"]), str(body["source"]), body.get("slot"),
                          body.get("setup_config"))
 
     @app.post("/edit/sessions/{sid}/synthesis")

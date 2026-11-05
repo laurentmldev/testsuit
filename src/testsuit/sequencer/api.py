@@ -117,13 +117,13 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 for fs in items:
                     s = fs.step
                     steps.append({"id": fs.id, "part": part, "needs": fs.needs, "group": fs.group, "action": s.action,
-                                  "do": s.do, "component": s.component, "for_each": s.for_each,
+                                  "do": s.do, "slot": s.slot, "for_each": s.for_each,
                                   "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else s.action)})
-            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stages": flat.phase.stages,
-                           "components": flat.phase.components, "groups": flat.groups, "steps": steps})
-        return {"phases": phases, "stages": dp.needs.stages,
-                "components": {c.id: {"type": c.type, "role": c.role, "stage": c.stage, "name": c.name}
-                               for c in dp.needs.components.values()}}
+            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "realms": flat.phase.realms,
+                           "slots": flat.phase.slots, "groups": flat.groups, "steps": steps})
+        return {"phases": phases, "realms": dp.needs.realms,
+                "slots": {c.id: {"type": c.type, "role": c.role, "realm": c.realm, "name": c.name}
+                          for c in dp.needs.slots.values()}}
 
     @app.get("/runs/{run_id}/resources")
     async def run_resources(run_id: str):
@@ -135,8 +135,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         if not Path(run["dir"]).is_dir():
             raise HTTPException(404, f"run {run['id']}: the run folder is gone (retention), only its records remain")
         dp = await asyncio.to_thread(load_datapack, Path(run["dir"]))
-        bound = run.get("binding") or {}
-        binding = Binding(stages=dict(bound.get("stages") or {}), components=dict(bound.get("components") or {}))
+        binding = Binding.from_dict(run.get("binding"))
         overview = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"], binding)
         return {**overview, "problems": check_against_lab(dp, seq.lab), "state": run["state"],
                 "waiting_for": run.get("waiting_for") or "", "reserve": dp.pipeline.reserve}
@@ -162,12 +161,12 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     @app.get("/runs/{run_id}/logs")
     async def logs(run_id: str):
         run = await show(run_id)
-        return [{"step": f"{s['phase']}:{s['id']}" + (f"[{s['component']}]" if s["component"] else ""),
+        return [{"step": f"{s['phase']}:{s['id']}" + (f"[{slot}]" if (slot := s.get("slot") or s.get("component")) else ""),
                  "state": s["state"], "log": s["log"]} for s in run.get("steps") or []]
 
     @app.get("/runs/{run_id}/logs/{step:path}")
     async def log(run_id: str, step: str, offset: int = 0):
-        """A step's log ('<phase>:<step>[<component>]', or a unique prefix of it) from a byte offset."""
+        """A step's log ('<phase>:<step>[<slot>]', or a unique prefix of it) from a byte offset."""
         run = await show(run_id)
         matches = [s for s in await logs(run_id) if s["step"] == step] or \
                   [s for s in await logs(run_id) if s["step"].startswith(step)]

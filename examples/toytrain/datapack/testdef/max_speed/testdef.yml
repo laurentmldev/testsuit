@@ -16,62 +16,62 @@ pipeline:
   subpipelines:
     bring_up:                                    # deploy, then start everything, the pilot last
       steps:
-        # deploy every input in parallel (default linux_system deploy: scp to <remote_root>/<component>/input)
-        - {id: deploy, for_each: components, do: deploy}
-        - {id: flash_pilot, component: pilot, do: install, needs: [deploy]}
+        # deploy every input in parallel (default linux_system deploy: scp to <remote_root>/<slot>/input)
+        - {id: deploy, for_each: slots, do: deploy}
+        - {id: flash_pilot, slot: pilot, do: install, needs: [deploy]}
         # the simulation first: the calculators must find their peers when they start
         - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
         - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
-        - {id: start_tm, component: telemetry, do: start, needs: [deploy]}
-        - {id: tm_ready, component: telemetry, do: ready, needs: [start_tm]}
-        - {id: start_au, component: acquisition, do: start, needs: [deploy, sims_ready]}
-        - {id: au_ready, component: acquisition, do: ready, needs: [start_au]}
+        - {id: start_tm, slot: telemetry, do: start, needs: [deploy]}
+        - {id: tm_ready, slot: telemetry, do: ready, needs: [start_tm]}
+        - {id: start_au, slot: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: au_ready, slot: acquisition, do: ready, needs: [start_au]}
         # rendez-vous: the pilot starts the train only when everything listens
-        - {id: start_pilot, component: pilot, do: start, needs: [flash_pilot, sims_ready, tm_ready, au_ready]}
-        - {id: pilot_running, wait_for: {state: running, component: pilot, timeout: 20s}, needs: [start_pilot]}
+        - {id: start_pilot, slot: pilot, do: start, needs: [flash_pilot, sims_ready, tm_ready, au_ready]}
+        - {id: pilot_running, wait_for: {state: running, slot: pilot, timeout: 20s}, needs: [start_pilot]}
 
     shut_down:                                   # the pilot first (it stops the train), then the others
       params: {others: [acquisition, telemetry, propulsion, piezo]}
       steps:
-        - {id: stop_pilot, component: pilot, do: stop}
+        - {id: stop_pilot, slot: pilot, do: stop}
         - {id: stop_others, for_each: "{{ params.others }}", do: stop, needs: [stop_pilot]}
 
   phases:
 
     - id: test_run
-      stages: [train]                            # CALC-Pilot, CALC-TM, AU, switch: locked as one stage (the lab)
-      components: [propulsion, piezo]            # ad hoc components on the lab server
+      realms: [train]                            # CALC-Pilot, CALC-TM, AU, switch: their lab stage locked as one
+      slots: [propulsion, piezo]                 # ad hoc slots, on the lab server
       steps:
         - {id: up, uses: bring_up}
         # the scenario runs by itself (pilot profile, simulated contacts): just let it run
         - {id: run, delay: "{{ scenario.duration_s }}s", needs: [up]}
         - {id: down, uses: shut_down, needs: [run]}
       finally:                                   # always, even on cancel or kill
-        - {id: kill_leftovers, for_each: components, do: kill, if: "not succeeded('down')"}
-        - {id: collect, for_each: components, do: collect}   # outputs join the results datapack
+        - {id: kill_leftovers, for_each: slots, do: kill, if: "not succeeded('down')"}
+        - {id: collect, for_each: slots, do: collect}   # outputs join the results datapack
 
     - id: exploit
       needs: [test_run]
-      components: [analysis]                     # the lab server (role sequencer), never locked
+      slots: [analysis]                          # the lab server (role sequencer), never locked
       inputs:                                    # outputs of the test run become exploitation inputs
         - {from: "test_run:telemetry/output/telemetry.csv", to: "analysis/input/data/"}
         - {from: "test_run:propulsion/output/propulsion.propj", to: "analysis/input/data/"}
         - {from: "test_run:piezo/output/piezo.csv", to: "analysis/input/data/"}
       steps:
-        - {id: deploy, component: analysis, do: deploy}
+        - {id: deploy, slot: analysis, do: deploy}
         # a Python step (README section 8.3): the collected data is complete, or the test run lost some
         - id: check_data
-          component: analysis
+          slot: analysis
           needs: [deploy]
           python:
-            script: "{{ component.input_dir }}/check_data.py"
-            args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]
+            script: "{{ slot.input_dir }}/check_data.py"
+            args: ["{{ slot.input_dir }}/data", "{{ slot.output_dir }}"]
         # exploit_runner on the criteria: exit 0 when they are met, the test failed otherwise
         - id: analyse
-          component: analysis
+          slot: analysis
           needs: [check_data]
-          run: "exploit_runner {{ component.input_dir }}/exploit.yml"
+          run: "exploit_runner {{ slot.input_dir }}/exploit.yml"
           timeout: 15m
           expect: {exit: [0]}
       finally:
-        - {id: collect, component: analysis, do: collect}
+        - {id: collect, slot: analysis, do: collect}

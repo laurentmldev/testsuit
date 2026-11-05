@@ -61,7 +61,7 @@ SETUP = {
     "id": "bench_setup",
     "name": "Counter bench",
     "dictionaries": ["globals.yml"],
-    "component_types": {
+    "slot_types": {
         "dut_app": {"configurations": {"standard": {"inputs": [
             {"source": "files/app.sh", "target": "app.sh", "method": "copy"},
             {"source": "files/conf.txt", "target": "conf.txt"}]}}},
@@ -69,9 +69,9 @@ SETUP = {
             {"source": "files/check.sh", "target": "check.sh"}]}}},
     },
     "configurations": {"bench": {
-        "stages": {"bench": {"type": "counter_bench"}},
-        "components": {
-            "dut": {"name": "Device under test", "type": "dut_app", "configuration": "standard", "stage": "bench",
+        "realms": {"bench": {"type": "counter_bench"}},
+        "slots": {
+            "dut": {"name": "Device under test", "type": "dut_app", "configuration": "standard", "realm": "bench",
                     "role": "dut"},
             "analysis": {"name": "Analysis", "type": "analysis", "configuration": "standard", "role": "sequencer"},
         }}},
@@ -80,20 +80,20 @@ SETUP = {
 PIPELINE = {
     "timeout": "2m",
     "phases": [
-        {"id": "test_run", "stages": ["bench"],
+        {"id": "test_run", "realms": ["bench"],
          "steps": [
-             {"id": "deploy", "for_each": "components", "do": "deploy"},
-             {"id": "start", "component": "dut", "do": "start", "needs": ["deploy"]},
-             {"id": "ready", "component": "dut", "do": "ready", "needs": ["start"]},
+             {"id": "deploy", "for_each": "slots", "do": "deploy"},
+             {"id": "start", "slot": "dut", "do": "start", "needs": ["deploy"]},
+             {"id": "ready", "slot": "dut", "do": "ready", "needs": ["start"]},
              {"id": "run", "delay": "{{ duration }}", "needs": ["ready"]},
-             {"id": "stop", "component": "dut", "do": "stop", "needs": ["run"]}],
-         "finally": [{"id": "collect", "for_each": "components", "do": "collect"}]},
-        {"id": "exploit", "needs": ["test_run"], "components": ["analysis"],
+             {"id": "stop", "slot": "dut", "do": "stop", "needs": ["run"]}],
+         "finally": [{"id": "collect", "for_each": "slots", "do": "collect"}]},
+        {"id": "exploit", "needs": ["test_run"], "slots": ["analysis"],
          "inputs": [{"from": "test_run:dut/output/count.txt", "to": "analysis/input/data/"}],
-         "steps": [{"id": "deploy", "component": "analysis", "do": "deploy"},
-                   {"id": "analyse", "component": "analysis", "needs": ["deploy"],
-                    "run": "sh {{ component.input_dir }}/check.sh {{ component.input_dir }} {{ component.output_dir }}"}],
-         "finally": [{"id": "collect", "component": "analysis", "do": "collect"}]},
+         "steps": [{"id": "deploy", "slot": "analysis", "do": "deploy"},
+                   {"id": "analyse", "slot": "analysis", "needs": ["deploy"],
+                    "run": "sh {{ slot.input_dir }}/check.sh {{ slot.input_dir }} {{ slot.output_dir }}"}],
+         "finally": [{"id": "collect", "slot": "analysis", "do": "collect"}]},
     ],
 }
 
@@ -324,10 +324,10 @@ def test_roles_and_components(bench):
         load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
 
     setup = copy.deepcopy(SETUP)
-    setup["configurations"]["bench"]["components"]["dut"]["role"] = "counter"
+    setup["configurations"]["bench"]["slots"]["dut"]["role"] = "counter"
     needs = needs_from_setup(setup, "bench")
-    assert "component 'dut': role 'counter' is not a role of the lab" in check_against_lab(SimpleNamespace(needs=needs), lab)
-    setup["component_types"]["dut_app"]["extends"] = "counter_host"
+    assert "slot 'dut': role 'counter' is not a role of the lab" in check_against_lab(SimpleNamespace(needs=needs), lab)
+    setup["slot_types"]["dut_app"]["extends"] = "counter_host"
     with pytest.raises(SequencerError, match="'extends' is gone"):
         needs_from_setup(setup, "bench")
     write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
@@ -350,14 +350,14 @@ def test_run_succeeded(bench):
     assert verify_datapack(Path(run["results"])) == []
     record = yaml.safe_load(read_member(run, "run.yml"))
     assert record["phases"] == {"test_run": "succeeded", "exploit": "succeeded"}
-    assert record["binding"]["stages"]["bench"] in ("bench_1", "bench_2")
+    assert record["binding"]["realms"]["bench"] in ("bench_1", "bench_2")
     assert int(read_member(run, "data/dut/output/count.txt")) >= 3
     assert read_member(run, "data/dut/output/app.log").splitlines() == ["READY count", "stopped"]
     assert read_member(run, "data/analysis/output/verdict.txt").startswith("count ")
     assert "data/analysis/input/data/count.txt" in results_of(run)[0]
     assert "logs/test_run/start[dut].log" in results_of(run)[0]
     baseline = yaml.safe_load(read_member(run, "baseline.yml"))
-    concrete = record["binding"]["components"]["dut"]
+    concrete = record["binding"]["slots"]["dut"]
     assert baseline["run"]["components"][concrete]["version"] == "counter-1.2.0"
     selftest = yaml.safe_load(read_member(run, "selftest.yml"))
     assert all(r["ok"] for r in selftest["attempts"])
@@ -392,12 +392,12 @@ sys.exit(0 if count >= keys["min_count"] else 1)
 def python_bench(bench: Bench, exploit_steps: list) -> dict:
     """The bench pipeline whose exploit phase runs the given steps, check.py among the analysis inputs."""
     setup = copy.deepcopy(SETUP)
-    setup["component_types"]["analysis"]["configurations"]["standard"]["inputs"].append(
+    setup["slot_types"]["analysis"]["configurations"]["standard"]["inputs"].append(
         {"source": "files/check.py", "target": "check.py", "method": "copy"})
     write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
     write(bench.dp / "setup" / "files" / "check.py", CHECK_PY)
     pipeline = copy.deepcopy(PIPELINE)
-    pipeline["phases"][1]["steps"] = [{"id": "deploy", "component": "analysis", "do": "deploy"}, *exploit_steps]
+    pipeline["phases"][1]["steps"] = [{"id": "deploy", "slot": "analysis", "do": "deploy"}, *exploit_steps]
     return pipeline
 
 
@@ -414,9 +414,9 @@ def run_one(bench: Bench, zip_path: Path) -> dict:
 def test_python_steps(bench):
     """SQ-32: a script deployed on a component, and inline code on the sequencer host, with the run's keys."""
     pipeline = python_bench(bench, [
-        {"id": "check", "component": "analysis", "needs": ["deploy"], "python": {
-            "script": "{{ component.input_dir }}/check.py",
-            "args": ["{{ component.input_dir }}/data/count.txt", "{{ component.output_dir }}"]}},
+        {"id": "check", "slot": "analysis", "needs": ["deploy"], "python": {
+            "script": "{{ slot.input_dir }}/check.py",
+            "args": ["{{ slot.input_dir }}/data/count.txt", "{{ slot.output_dir }}"]}},
         {"id": "inline", "needs": ["check"], "python": {"code": (
             "import os, sys\n"
             "print('run', keys['run']['id'], 'in', os.getcwd())\n"
@@ -432,9 +432,9 @@ def test_python_steps(bench):
 def test_python_step_results(bench):
     """A script's exit status is judged like a shell command's; an uncaught exception is an error."""
     pipeline = python_bench(bench, [
-        {"id": "low", "component": "analysis", "needs": ["deploy"], "continue_on_error": True, "python": {
-            "script": "{{ component.input_dir }}/check.py",
-            "args": ["{{ component.input_dir }}/data/count.txt", "{{ component.output_dir }}"]}},
+        {"id": "low", "slot": "analysis", "needs": ["deploy"], "continue_on_error": True, "python": {
+            "script": "{{ slot.input_dir }}/check.py",
+            "args": ["{{ slot.input_dir }}/data/count.txt", "{{ slot.output_dir }}"]}},
         {"id": "expected", "needs": ["deploy"], "expect": {"exit": [3]}, "python": {"code": "raise SystemExit(3)"}},
         {"id": "crash", "needs": ["low"], "python": {"code": "1 / 0"}}])
     run = run_one(bench, bench.build("py_bad", pipeline=pipeline, min_count=100000))
@@ -485,7 +485,7 @@ def test_queue_and_parallel_stages(tmp_path, no_git):
     assert [r["verdict"] for r in done] == ["succeeded"] * 3
     # the lowest priority waited; the two others ran at the same time, on both stages
     assert seen_waiting and seen_waiting[0][done[0]["id"]] == "waiting_resources"
-    assert {r["binding"]["stages"]["bench"] for r in done[1:]} == {"bench_1", "bench_2"}
+    assert {r["binding"]["realms"]["bench"] for r in done[1:]} == {"bench_1", "bench_2"}
     # it started once a stage was released: after the test_run phase of another run (exploit needs no stage)
     assert done[0]["activated_at"] > max(r["activated_at"] for r in done[1:])
     # the analysis host is not locked: each run had its own folders there, never clobbered by another run
@@ -706,7 +706,7 @@ def test_probe_via(tmp_path, no_git):
     from testsuit.sequencer.engine import RunContext
     lab = bench.sequencer().lab
     keys = RunContext(run_id="r", bag=tmp_path, datapack=type("D", (), {"context": {}})(), bound={},
-                      stage_binding={}, lab=lab).keys("main")       # run steps get them too
+                      realm_binding={}, lab=lab).keys("main")       # run steps get them too
     assert keys["stage"]["id"] == "" and keys["lab"]["components"]["obc_1"]["host"] == "192.0.2.7"
     assert lab.lab_keys(lab.inventory.components["obc_1"], lab.inventory.stages["bench_1"])["stage"]["roles"]["dut"]["id"] \
         == "counter_1"
@@ -819,7 +819,7 @@ def test_maintenance_blocks(bench):
         return waiting, done
     waiting, done = asyncio.run(main())
     assert waiting["state"] == "waiting_resources" and "maintenance" in waiting["waiting_for"]
-    assert done["verdict"] == "succeeded" and done["binding"]["stages"]["bench"] == "bench_2"
+    assert done["verdict"] == "succeeded" and done["binding"]["realms"]["bench"] == "bench_2"
 
 
 def test_resource_overview(bench):
@@ -837,24 +837,24 @@ def test_resource_overview(bench):
         waiting = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"])
         seq.set_flag("bench_2", "maintenance", False)
         [done] = await run_until_done(seq, [run["id"]])
-        binding = Binding(**done["binding"])
+        binding = Binding.from_dict(done["binding"])
         bound = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"], binding)
         await seq.close()
         return waiting, bound
     waiting, bound = asyncio.run(main())
-    [stage] = waiting["stages"]
+    [stage] = waiting["realms"]
     assert stage["logical"] == "bench" and stage["bound"] is None and stage["phases"]
     assert {c["id"]: c["why"] for c in stage["candidates"]} == {
         "bench_1": "bench_1 in maintenance or held", "bench_2": "bench_2 in maintenance or held"}
     assert all(c["maintenance"] and c["roles"] for c in stage["candidates"])
-    [stage] = bound["stages"]
+    [stage] = bound["realms"]
     assert stage["bound"] == "bench_2"
     assert {c["id"]: (c["bound"], c["why"]) for c in stage["candidates"]} == {
         "bench_1": (False, "bench_1 in maintenance or held"), "bench_2": (True, None)}
 
 
 def test_rejected_datapack(bench):
-    pipeline = {"phases": [{"id": "p", "stages": ["bench"], "steps": [{"id": "x", "run": "true", "needs": ["nope"]}]}]}
+    pipeline = {"phases": [{"id": "p", "realms": ["bench"], "steps": [{"id": "x", "run": "true", "needs": ["nope"]}]}]}
     seq = bench.sequencer()
     with pytest.raises(Exception, match="nope"):
         seq.submit(bench.build("bad", pipeline=pipeline))
@@ -1007,7 +1007,7 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
 
     resources = requests.get(f"{url}/runs/{run['id']}/resources").json()
-    assert resources["stages"][0]["bound"] == "bench_1" and resources["problems"] == []
+    assert resources["realms"][0]["bound"] == "bench_1" and resources["problems"] == []
 
     assert tsq(["--server", url, "stages"]) == 0
     assert "bench_1" in capsys.readouterr().out

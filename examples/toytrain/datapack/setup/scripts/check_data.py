@@ -2,8 +2,8 @@
 collected is complete before exploit_runner judges it, so that a lost recording reads as a data problem,
 not as a speed criterion failure.
 
-    python: {script: "{{ component.input_dir }}/check_data.py",
-             args: ["{{ component.input_dir }}/data", "{{ component.output_dir }}"]}
+    python: {script: "{{ slot.input_dir }}/check_data.py",
+             args: ["{{ slot.input_dir }}/data", "{{ slot.output_dir }}"]}
 
 `keys` holds the datapack keys (the sequencer gives them to every python step). Standard library only, so
 it runs with any Python 3 on the target. Exit 0: the data is complete; 1: it is not (the step fails).

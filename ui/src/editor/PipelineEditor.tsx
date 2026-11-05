@@ -1,5 +1,5 @@
 // Pipeline editor (sequencer README, sections 8.3, 8.4 and 13.2): a graph of the steps of a phase or of a
-// sub-pipeline, where `needs` are the edges; a palette of what a step can do on each logical component
+// sub-pipeline, where `needs` are the edges; a palette of what a step can do on each slot
 // (the commands its lab role offers), a form per step, the phase resources, and the flattened pipeline.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -57,7 +57,7 @@ const nodeTypes = { step: EditStepNode, lane: LaneNode };
 
 function label(step: any, plugins: string[]): string {
   const a = stepAction(step, plugins);
-  const target = step.component || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
+  const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
   const what = a === "do" ? step.do : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "delay" ? `delay ${step.delay}`
     : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}` : a || "no action";
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
@@ -173,7 +173,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const data = doc.data || {};
   const pipeline = isTestdef ? data.pipeline || {} : null;
   const subsOwn: Record<string, any> = (isTestdef ? pipeline.subpipelines : data.subpipelines) || {};
-  // the test definition giving the components: this one, or one including this file
+  // the test definition giving the slots: this one, or one including this file
   const testdefFor = isTestdef ? doc.path : (ctx.workspace?.testdefs || []).find((t: any) => (t.include || []).some((i: string) => doc.path.endsWith(i.replace(/^\.\.\//g, ""))))?.path || (ctx.workspace?.testdefs || [])[0]?.path;
   const [config, setConfig] = useState<string | null>(null);
   const [palette, setPalette] = useState<any>(null);
@@ -238,8 +238,8 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const phase = scope.kind === "phase" ? phases[scope.index] : null;
   const held: string[] = useMemo(() => {
     if (!palette) return [];
-    if (!phase) return Object.keys(palette.components);
-    return Object.entries<any>(palette.components).filter(([id, c]) => (c.stage && (phase.stages || []).includes(c.stage)) || (phase.components || []).includes(id)).map(([id]) => id);
+    if (!phase) return Object.keys(palette.slots);
+    return Object.entries<any>(palette.slots).filter(([id, c]) => (c.realm && (phase.realms || []).includes(c.realm)) || (phase.slots || []).includes(id)).map(([id]) => id);
   }, [palette, phase]);
 
   const problems: Record<string, string> = {};
@@ -298,7 +298,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
       }}>+ sub-pipeline</button>
       <span className="spacer" />
       {palette?.configurations?.length > 1 && (
-        <label className="small">components of <select value={config || palette.configuration} onChange={(e) => setConfig(e.target.value)}>
+        <label className="small">slots of <select value={config || palette.configuration} onChange={(e) => setConfig(e.target.value)}>
           {palette.configurations.map((c: string) => <option key={c}>{c}</option>)}
         </select></label>
       )}
@@ -374,7 +374,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
               }} />
           ) : (
             <div className="muted pad">
-              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps.\n\nA phase locks its **stages** and ad hoc **components**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
+              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps.\n\nA phase locks its **realms** (each with the lab stage it is bound to) and ad hoc **slots**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
             </div>
           )}
         </div>
@@ -428,7 +428,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
 }) {
   const setHelp = useHelp();
   const { ctx } = useSession();
-  const comps: [string, any][] = palette ? Object.entries<any>(palette.components).filter(([id]) => held.includes(id)) : [];
+  const comps: [string, any][] = palette ? Object.entries<any>(palette.slots).filter(([id]) => held.includes(id)) : [];
   const common = (cmd: string) => comps.length > 1 && comps.every(([, c]) => cmd in c.commands);
   const allCommands = [...new Set(comps.flatMap(([, c]) => Object.keys(c.commands)))];
   return (
@@ -442,32 +442,32 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
       <div className="muted small">{selected ? `new steps come after the ${selected} selected` : "new steps start with the phase"}</div>
       {comps.length > 1 && (
         <div className="palette-group">
-          <div className="palette-title" onMouseEnter={() => setHelp({ title: "for_each: components", text: "One step that runs on every component of the phase, in parallel." })}>every component</div>
+          <div className="palette-title" onMouseEnter={() => setHelp({ title: "for_each: slots", text: "One step that runs on every slot of the phase, in parallel." })}>every slot</div>
           {allCommands.filter(common).map((cmd) => (
-            <button key={cmd} className="palette-item" onClick={() => onAdd({ id: cmd, for_each: "components", do: cmd })}>{cmd}</button>
+            <button key={cmd} className="palette-item" onClick={() => onAdd({ id: cmd, for_each: "slots", do: cmd })}>{cmd}</button>
           ))}
         </div>
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.stage ? `, stage ${c.stage}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
+          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.realm ? `, realm ${c.realm}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
-            <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, component: id, do: cmd })}
+            <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
               onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})`).join("")}` })}>
               {cmd}
             </button>
           ))}
         </details>
       ))}
-      {!palette && <p className="muted small">The components come from the setup configuration of the test definition.</p>}
+      {!palette && <p className="muted small">The slots come from the setup configuration of the test definition.</p>}
       <div className="palette-group">
         <div className="palette-title">anywhere</div>
         <button className="palette-item" onClick={() => onAdd({ id: "run", delay: "30s" })} onMouseEnter={() => setHelp({ title: "delay", text: "Wait for a duration: a test with no objective end, such as a scenario that runs by itself." })}>delay</button>
-        <button className="palette-item" onClick={() => onAdd({ id: "wait", wait_for: { state: "running", component: held[0] || "", timeout: "30s" } })}
+        <button className="palette-item" onClick={() => onAdd({ id: "wait", wait_for: { state: "running", slot: held[0] || "", timeout: "30s" } })}
           onMouseEnter={() => setHelp({ title: "wait_for", text: "Wait until a check passes: state, log line, port, URL, file, command." })}>wait for</button>
-        <button className="palette-item" onClick={() => onAdd({ id: "check", run: "echo ok" })} onMouseEnter={() => setHelp({ title: "run", text: "An inline shell command, on a component or in the run folder on the sequencer host." })}>shell command</button>
+        <button className="palette-item" onClick={() => onAdd({ id: "check", run: "echo ok" })} onMouseEnter={() => setHelp({ title: "run", text: "An inline shell command, on a slot's lab component or in the run folder on the sequencer host." })}>shell command</button>
         <button className="palette-item" onClick={() => onAdd({ id: "check", python: { code: "import sys\n\nprint(keys['run']['id'])\nsys.exit(0)\n" } })}
-          onMouseEnter={() => setHelp({ title: "python", text: "A Python script or inline code, on a component or on the sequencer host, with the run's keys as `keys`. Exit 0 succeeds; an exception makes the step an error." })}>Python script</button>
+          onMouseEnter={() => setHelp({ title: "python", text: "A Python script or inline code, on a slot's lab component or on the sequencer host, with the run's keys as `keys`. Exit 0 succeeds; an exception makes the step an error." })}>Python script</button>
         {Object.keys(subs).map((n) => (
           <button key={n} className="palette-item" onClick={() => onAdd({ id: n, uses: n, ...(Object.keys(subs[n].params || {}).length ? { with: clone(subs[n].params) } : {}) })}
             onMouseEnter={() => setHelp({ title: `uses ${n}`, text: `Runs the sub-pipeline as one step: ${(subs[n].steps || []).join(", ")}` })}>uses {n}</button>
@@ -497,26 +497,26 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     if (v === undefined || v === "" || v === false || (Array.isArray(v) && !v.length) || (k === "retries" && !v)) delete next[k];
     onChange(next);
   };
-  const comps: Choice[] = (palette ? Object.entries<any>(palette.components) : []).filter(([id]) => isSub || held.includes(id))
-    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.type}${c.stage ? ` · stage ${c.stage}` : " · ad hoc"}` }));
-  const roles = [...new Set(comps.map((c) => palette.components[c.value].role))];
-  const targetMode = step.component ? "component" : step.for_each === "components" ? "all" : Array.isArray(step.for_each) ? "list"
+  const comps: Choice[] = (palette ? Object.entries<any>(palette.slots) : []).filter(([id]) => isSub || held.includes(id))
+    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.type}${c.realm ? ` · realm ${c.realm}` : " · ad hoc"}` }));
+  const roles = [...new Set(comps.map((c) => palette.slots[c.value].role))];
+  const targetMode = step.slot ? "slot" : step.for_each === "slots" ? "all" : Array.isArray(step.for_each) ? "list"
     : typeof step.for_each === "string" && roles.includes(step.for_each) ? "role" : typeof step.for_each === "string" ? "expr" : "none";
-  const targets: string[] = step.component ? [step.component] : targetMode === "all" ? held : targetMode === "list" ? step.for_each
-    : targetMode === "role" ? comps.filter((c) => palette.components[c.value].role === step.for_each).map((c) => c.value) : [];
+  const targets: string[] = step.slot ? [step.slot] : targetMode === "all" ? held : targetMode === "list" ? step.for_each
+    : targetMode === "role" ? comps.filter((c) => palette.slots[c.value].role === step.for_each).map((c) => c.value) : [];
   const commandChoices: Choice[] = useMemo(() => {
     if (!palette || !targets.length) return [];
-    const sets = targets.map((t) => palette.components[t]?.commands || {});
+    const sets = targets.map((t) => palette.slots[t]?.commands || {});
     const names = Object.keys(sets[0]).filter((n) => sets.every((s) => n in s));
     return names.map((n) => ({ value: n, description: `${sets[0][n].description || sets[0][n].help || ""} (${sets[0][n].from})` }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette, JSON.stringify(targets)]);
   const setTarget = (mode: string | null) => {
     const next = { ...step };
-    delete next.component;
+    delete next.slot;
     delete next.for_each;
-    if (mode === "component") next.component = held[0] || "";
-    if (mode === "all") next.for_each = "components";
+    if (mode === "slot") next.slot = held[0] || "";
+    if (mode === "all") next.for_each = "slots";
     if (mode === "list") next.for_each = held.slice(0, 2);
     if (mode === "role") next.for_each = roles[0] || "";
     onChange(next);
@@ -544,13 +544,13 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     <div className="step-form">
       <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} /></Field>
       <Field label="On" help={help("for_each")}>
-        <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no component" choices={[
-          { value: "component", label: "a component" }, { value: "all", label: "every component", description: "of the phase, in parallel" },
-          { value: "list", label: "some components", description: "in parallel" }, { value: "role", label: "a role" },
+        <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no slot" choices={[
+          { value: "slot", label: "a slot" }, { value: "all", label: "every slot", description: "of the phase, in parallel" },
+          { value: "list", label: "some slots", description: "in parallel" }, { value: "role", label: "a role" },
         ]} />
       </Field>
-      {targetMode === "component" && <Field label="Component" help={help("component")}><Combo keys value={step.component} onChange={(v) => set("component", v)} choices={comps} strict={!isSub} /></Field>}
-      {targetMode === "list" && <Field label="Components" help={help("for_each")}><Tags value={step.for_each} onChange={(v) => set("for_each", v)} choices={comps} /></Field>}
+      {targetMode === "slot" && <Field label="Slot" help={help("slot")}><Combo keys value={step.slot} onChange={(v) => set("slot", v)} choices={comps} strict={!isSub} /></Field>}
+      {targetMode === "list" && <Field label="Slots" help={help("for_each")}><Tags value={step.for_each} onChange={(v) => set("for_each", v)} choices={comps} /></Field>}
       {targetMode === "role" && <Field label="Role"><Combo value={step.for_each} onChange={(v) => set("for_each", v)} choices={roles.map((r) => ({ value: r }))} /></Field>}
       {targetMode === "expr" && <Field label="for_each" help={help("for_each")}><Text keys mono value={step.for_each} onChange={(v) => set("for_each", v)} /></Field>}
       <Field label="Does" help={help(action || "do")}>
@@ -561,7 +561,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         ]} />
       </Field>
       {action === "do" && (
-        <Field label="Command" help={help("do")} hint={!targets.length ? "pick the component(s) first: their roles give the commands" : null}>
+        <Field label="Command" help={help("do")} hint={!targets.length ? "pick the slot(s) first: their roles give the commands" : null}>
           <Combo value={step.do} onChange={(v) => set("do", v)} choices={commandChoices} strict={commandChoices.length > 0} />
         </Field>
       )}
@@ -569,7 +569,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {action === "python" && <PythonEditor value={step.python} onChange={(v) => set("python", v)} uri={`inmemory:///step/${part}/${step.id}.py`}
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "python", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
-      {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withComponent={!step.component} components={comps} />}
+      {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
       {(action === "push" || action === "pull") && (
         <div className="inline-fields">
           <Field label="From" help={help(action)}><Text keys mono value={step[action]?.from} onChange={(v) => set(action, { ...step[action], from: v })} /></Field>
@@ -627,12 +627,12 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete ph[k];
     else ph[k] = v;
   });
-  const stageChoices: Choice[] = Object.entries<any>(palette?.stages || {}).map(([s, t]) => ({ value: s, description: `stage type ${t}: ${Object.entries<any>(palette.components).filter(([, c]) => c.stage === s).map(([id]) => id).join(", ")}` }));
-  const adhocChoices: Choice[] = Object.entries<any>(palette?.components || {}).filter(([, c]) => !c.stage).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
+  const realmChoices: Choice[] = Object.entries<any>(palette?.realms || {}).map(([s, t]) => ({ value: s, description: `lab stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.realm === s).map(([id]) => id).join(", ")}` }));
+  const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.realm).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
   const earlier = phases.slice(0, index);
   const fromChoices: Choice[] = earlier.flatMap((p: any) => {
-    const comps = palette ? Object.entries<any>(palette.components).filter(([id, c]) => (c.stage && (p.stages || []).includes(c.stage)) || (p.components || []).includes(id)).map(([id]) => id) : [];
-    return [...comps.map((c) => ({ value: `${p.id}:${c}/output/`, description: `outputs of ${c} in phase ${p.id}` })), { value: `${p.id}:*/output/`, description: `outputs of every component of ${p.id}` }];
+    const comps = palette ? Object.entries<any>(palette.slots).filter(([id, c]) => (c.realm && (p.realms || []).includes(c.realm)) || (p.slots || []).includes(id)).map(([id]) => id) : [];
+    return [...comps.map((c) => ({ value: `${p.id}:${c}/output/`, description: `outputs of ${c} in phase ${p.id}` })), { value: `${p.id}:*/output/`, description: `outputs of every slot of ${p.id}` }];
   });
   const [open, setOpen] = useState(true);
   return (
@@ -641,7 +641,7 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
         <button className="fold" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"}</button>
         <strong>Phase</strong>
         <input className="inline-name" key={phase.id} defaultValue={phase.id} onBlur={(e) => e.target.value && set("id", slug(e.target.value))} />
-        <span className="muted small">locks {[...(phase.stages || []), ...(phase.components || [])].join(", ") || "nothing"}</span>
+        <span className="muted small">locks {[...(phase.realms || []), ...(phase.slots || [])].join(", ") || "nothing"}</span>
         <span className="spacer" />
         <button className="small" disabled={index === 0} onClick={() => write((d) => {
           const [ph] = d.pipeline.phases.splice(index, 1);
@@ -659,17 +659,17 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
       {open && (
         <div className="phase-fields">
           <Field label="After phases" help={help("needs")}><Tags value={phase.needs} onChange={(v) => set("needs", v)} choices={phases.filter((p) => p.id !== phase.id).map((p) => ({ value: p.id }))} /></Field>
-          <Field label="Stages" help={help("stages")}><Tags value={phase.stages} onChange={(v) => set("stages", v)} choices={stageChoices} /></Field>
-          <Field label="Ad hoc components" help={help("components")}><Tags value={phase.components} onChange={(v) => set("components", v)} choices={adhocChoices} /></Field>
+          <Field label="Realms" help={help("realms")}><Tags value={phase.realms} onChange={(v) => set("realms", v)} choices={realmChoices} /></Field>
+          <Field label="Ad hoc slots" help={help("slots")}><Tags value={phase.slots} onChange={(v) => set("slots", v)} choices={adhocChoices} /></Field>
           <Field label="Timeout" help={help("timeout")}><Text value={phase.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
           {index > 0 && (
             <Field label="Inputs from earlier phases" help={help("inputs")} wide>
               {(phase.inputs || []).map((inp: any, i: number) => (
                 <div key={i} className="with-button">
-                  <Combo mono value={inp.from} onChange={(v) => set("inputs", phase.inputs.map((x: any, j: number) => (j === i ? { ...x, from: v } : x)))} choices={fromChoices} placeholder="phase:component/output/file" />
+                  <Combo mono value={inp.from} onChange={(v) => set("inputs", phase.inputs.map((x: any, j: number) => (j === i ? { ...x, from: v } : x)))} choices={fromChoices} placeholder="phase:slot/output/file" />
                   <span>→</span>
                   <Combo mono value={inp.to} onChange={(v) => set("inputs", phase.inputs.map((x: any, j: number) => (j === i ? { ...x, to: v } : x)))}
-                    choices={[...(phase.components || []), ...Object.entries<any>(palette?.components || {}).filter(([, c]) => (phase.stages || []).includes(c.stage)).map(([id]) => id)].map((c: string) => ({ value: `${c}/input/data/`, description: `into the inputs of ${c}` }))} placeholder="component/input/..." />
+                    choices={[...(phase.slots || []), ...Object.entries<any>(palette?.slots || {}).filter(([, c]) => (phase.realms || []).includes(c.realm)).map(([id]) => id)].map((c: string) => ({ value: `${c}/input/data/`, description: `into the inputs of ${c}` }))} placeholder="slot/input/..." />
                   <button className="icon" onClick={() => set("inputs", phase.inputs.filter((_: any, j: number) => j !== i))}>×</button>
                 </div>
               ))}
@@ -758,11 +758,11 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
     <div className="pad flattened">
       <p>
         Setup <code>{flat.setup}</code>. Binding against the lab (locks ignored):{" "}
-        {flat.binding ? Object.entries<any>({ ...flat.binding.stages, ...flat.binding.components }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
+        {flat.binding ? Object.entries<any>({ ...flat.binding.realms, ...flat.binding.slots }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
       </p>
       {flat.problems.length > 0 && <ul className="warn-list">{flat.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
       {flat.phases.map((ph: any) => (
-        <Section key={ph.id} title={`phase ${ph.id}${ph.needs.length ? ` (after ${ph.needs.join(", ")})` : ""}: ${ph.components.join(", ")}`}>
+        <Section key={ph.id} title={`phase ${ph.id}${ph.needs.length ? ` (after ${ph.needs.join(", ")})` : ""}: ${ph.slots.join(", ")}`}>
           <table className="grid compact">
             <thead><tr><th>Step</th><th>Needs</th><th>Action</th><th>On</th><th>Command, as it will run</th><th>From</th></tr></thead>
             <tbody>
@@ -771,7 +771,7 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
                   {i === 0 && <td rowSpan={s.targets.length}><code>{s.part === "finally" ? "finally " : ""}{s.id}</code></td>}
                   {i === 0 && <td rowSpan={s.targets.length} className="small">{s.needs.join(", ")}</td>}
                   {i === 0 && <td rowSpan={s.targets.length}>{s.action}{s.do ? ` ${s.do}` : ""}</td>}
-                  <td>{t.component ? <>{t.component}{t.concrete && <span className="muted small" title={t.concrete}> = {hostLabel(ctx, t.concrete)}</span>}</> : "-"}</td>
+                  <td>{t.slot ? <>{t.slot}{t.concrete && <span className="muted small" title={t.concrete}> = {hostLabel(ctx, t.concrete)}</span>}</> : "-"}</td>
                   <td className="mono small">{t.command ? summary(t.command) : s.action !== "do" ? summary(s.step) : ""}</td>
                   <td className="muted small">{t.source || ""}</td>
                 </tr>

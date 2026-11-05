@@ -118,7 +118,7 @@ def server_url(args) -> str:
 
 
 def print_step(event: dict) -> None:
-    key = f"{event['phase']}:{event['id']}" + (f"[{event['component']}]" if event.get("component") else "")
+    key = f"{event['phase']}:{event['id']}" + (f"[{event['slot']}]" if event.get("slot") else "")
     if event["state"] in ("running", "succeeded", "failed", "error", "skipped"):
         reason = f" ({event['reason']})" if event.get("reason") else ""
         print(f"{time.strftime('%H:%M:%S')} {event['state']:<9} {key}{reason}", flush=True)
@@ -198,7 +198,7 @@ def cmd_show(args, client: Client) -> int:
     dump({k: v for k, v in run.items() if v not in (None, "", [])})
     if steps:
         print()
-        table([{"step": f"{s['phase']}:{s['id']}" + (f"[{s['component']}]" if s["component"] else ""), **s}
+        table([{"step": f"{s['phase']}:{s['id']}" + (f"[{slot}]" if (slot := s.get("slot") or s.get("component")) else ""), **s}
                for s in steps], ["step", "state", "exit_status", "attempts", "started", "ended", "reason"])
     return 0
 
@@ -354,26 +354,26 @@ def cmd_validate(args, client: Client | None) -> int:
         if binding is None:
             problems += [f"cannot bind: {r}" for r in reasons]
         else:
-            print("binding (locks ignored): " + _cell(binding.as_dict()["stages"]) + " " +
-                  _cell(binding.as_dict()["components"]))
+            print("binding (locks ignored): " + _cell(binding.as_dict()["realms"]) + " " +
+                  _cell(binding.as_dict()["slots"]))
         for flat in dp.phases:
             print(f"\nphase {flat.phase.id}" + (f" (needs {', '.join(flat.phase.needs)})" if flat.phase.needs else "")
-                  + f": stages {_cell(flat.phase.stages)}, components {_cell(flat.phase.components)}")
+                  + f": realms {_cell(flat.phase.realms)}, slots {_cell(flat.phase.slots)}")
             for part, steps in (("steps", flat.steps), ("finally", flat.finally_)):
                 for fs in steps:
                     step = fs.step
                     what = step.action + (f" {step.do}" if step.action == "do" else "")
-                    target = step.component or (f"for_each {step.for_each}" if step.for_each else "-")
+                    target = step.slot or (f"for_each {step.for_each}" if step.for_each else "-")
                     command = ""
-                    if binding is not None and step.action == "do" and step.component in binding.components:
-                        concrete = lab.inventory.components[binding.components[step.component]]
-                        lc = dp.needs.components[step.component]
-                        stage = lab.inventory.stages.get(binding.stages.get(lc.stage, ""))
+                    if binding is not None and step.action == "do" and step.slot in binding.slots:
+                        concrete = lab.inventory.components[binding.slots[step.slot]]
+                        lc = dp.needs.slots[step.slot]
+                        stage = lab.inventory.stages.get(binding.realms.get(lc.realm, ""))
                         resolved = lab.resolve(concrete, stage)
                         spec = resolved.commands.get(step.do)
                         if spec is None:
-                            problems.append(f"phase {flat.phase.id}, step {fs.id}: {step.component} "
-                                            f"(role {concrete.role}) has no command '{step.do}'")
+                            problems.append(f"phase {flat.phase.id}, step {fs.id}: slot {step.slot} "
+                                            f"({concrete.id}, role {concrete.role}) has no command '{step.do}'")
                         command = f"  = {json.dumps(spec)} ({resolved.command_sources.get(step.do, '?')})"
                     if step.action == "python":
                         command = f"  = {json.dumps(step.python)}"

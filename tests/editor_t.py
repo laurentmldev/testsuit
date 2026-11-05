@@ -27,7 +27,7 @@ pipeline:
   phases:
     - id: run
       steps:
-        - {id: start, component: dut, do: start}
+        - {id: start, slot: dut, do: start}
         - id: wait     # a comment on a step
           delay: 1s
           needs: [start]
@@ -42,7 +42,7 @@ def test_merge_keeps_comments_and_style():
     data = yaml.safe_load(TEXT)
     data["name"] = "Counter"
     data["pipeline"]["phases"][0]["steps"][1]["delay"] = "2s"
-    data["pipeline"]["phases"][0]["steps"].append({"id": "stop", "component": "dut", "do": "stop", "needs": ["wait"]})
+    data["pipeline"]["phases"][0]["steps"].append({"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]})
     out = yamledit.merge(TEXT, data)
     assert yaml.safe_load(out) == data
     assert "# A test definition" in out and "id: count            # kept" in out
@@ -160,18 +160,18 @@ def test_workspace_session(repos):
 
     # a test definition, written as data: checked, then the helpers
     testdef = {"id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-               "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [
-                   {"id": "start", "component": "dut", "do": "start"},
+               "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [
+                   {"id": "start", "slot": "dut", "do": "start"},
                    {"id": "wait", "delay": "{{ duration }}", "needs": ["start"]},
-                   {"id": "stop", "component": "dut", "do": "stop", "needs": ["wait"]}]}]}}
+                   {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}]}]}}
     written = editor.write(session, "testdef/count/testdef.yml", data=testdef)
     assert written["kind"] == "testdef"
     assert not [p for p in written["problems"] if p["severity"] == "error"], written["problems"]
     assert not [p for p in editor.validate(session)["problems"] if p["severity"] == "error"]
 
     palette = editor.palette(session, "testdef/count/testdef.yml")
-    assert {"start", "stop", "ready", "deploy"} <= set(palette["components"]["dut"]["commands"])
-    start_cmd = palette["components"]["dut"]["commands"]["start"]
+    assert {"start", "stop", "ready", "deploy"} <= set(palette["slots"]["dut"]["commands"])
+    start_cmd = palette["slots"]["dut"]["commands"]["start"]
     assert start_cmd["from"] == "role dut" and start_cmd["description"] == "Starts the counter."
     assert start_cmd["implementations"]["counter_1"]["from"] == "component counter_host"
     flat = editor.flatten(session, "testdef/count/testdef.yml")
@@ -181,7 +181,7 @@ def test_workspace_session(repos):
     keys = {k["key"]: k for k in editor.keys(session, "testdef/count/testdef.yml")["keys"]}
     assert keys["min_count"]["value"] == "3" and keys["min_count"]["origin"].endswith("globals.yml")
     preview = editor.preview(session, "testdef/count/testdef.yml", "setup/files/check.sh")
-    assert preview["ok"] and "min 3" in preview["text"] and preview["component"] == "analysis"
+    assert preview["ok"] and "min 3" in preview["text"] and preview["slot"] == "analysis"
 
     # an unknown command is a problem of the step, located in the file
     testdef["pipeline"]["phases"][0]["steps"][0]["do"] = "launch"
@@ -225,7 +225,7 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
                  content="duration: 0.5s\nmin_count: 3\ndata_version: v1.9.0   # the data in use\n")
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
 
     quick = editor.synthesis(session, "testdef/count/testdef.yml", versions=False)   # the versions listed after
     assert quick["baseline"][0]["versions_pending"] and quick["baseline"][0]["versions"] is None
@@ -237,8 +237,8 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     split = editor.synthesis(session, "testdef/count/testdef.yml", versions=False, run_checks=False)["problems"]
     assert split + editor.run_problems(session, "testdef/count/testdef.yml") == found["problems"]
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
-    assert "dut" in {c["id"] for c in found["components"]}
-    assert any(i["files"] for c in found["components"] for i in c["inputs"])
+    assert "dut" in {c["id"] for c in found["slots"]}
+    assert any(i["files"] for c in found["slots"] for i in c["inputs"])
     dictionary = next(d for d in found["dictionaries"] if d["path"] == "setup/globals.yml")
     assert {"key": "min_count", "value": "3", "overridden_by": None} in dictionary["keys"]
     (ds,) = found["baseline"]
@@ -292,25 +292,25 @@ def test_generation_errors_and_stop(repos):
     session = editor.open("workspace0", local=True)
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
     assert editor.synthesis(session, "testdef/count/testdef.yml")["problems"] == []
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
-    inputs = setup["component_types"]["dut_app"]["configurations"]["standard"]["inputs"]
+    inputs = setup["slot_types"]["dut_app"]["configurations"]["standard"]["inputs"]
 
-    # what the sequencer would refuse at posting (a phase naming a component the setup does not have): listed before generating
+    # what the sequencer would refuse at posting (a phase naming a slot the setup does not have): listed before generating
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "stages": ["bench", "rig"], "components": ["test_sequencer"],
-                                 "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "realms": ["bench", "rig"], "slots": ["test_sequencer"],
+                                 "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
     problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
-    assert problems == ["pipeline: phase 'run': unknown logical stage 'rig' (setup stages: bench)",
-                        "pipeline: phase 'run': unknown logical component 'test_sequencer' (setup ad hoc components: analysis)"], problems
+    assert problems == ["pipeline: phase 'run': unknown realm 'rig' (setup realms: bench)",
+                        "pipeline: phase 'run': unknown slot 'test_sequencer' (setup ad hoc slots: analysis)"], problems
     # the same, on the setup file: a setup changed without the pipelines using it
     setup_warnings = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
-    assert "testdef/count/testdef.yml (bench): phase 'run': unknown logical stage 'rig' (setup stages: bench)" in setup_warnings, setup_warnings
+    assert "testdef/count/testdef.yml (bench): phase 'run': unknown realm 'rig' (setup realms: bench)" in setup_warnings, setup_warnings
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "stages": ["bench"], "steps": [{"id": "start", "component": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
 
     # a missing template: the error, in the result and as the last line of the log
     inputs[1]["source"] = "files/nope.txt"
@@ -571,7 +571,7 @@ def test_api(repos, tmp_path):
         assert [p["id"] for p in pipeline["phases"]] == ["test_run", "exploit"]
         start = next(s for s in pipeline["phases"][0]["steps"] if s["id"] == "start")
         assert start["needs"] == ["deploy"] and start["do"] == "start" and start["part"] == "steps"
-        assert pipeline["components"]["dut"]["role"] == "dut"
+        assert pipeline["slots"]["dut"]["role"] == "dut"
 
         # the UI, when it is built, or its placeholder
         assert requests.get(f"{url}/ui/").status_code == 200
@@ -584,16 +584,16 @@ def test_schemas_match_the_datapack_models():
     """Every key the Editor's forms offer in a setup or a test definition is one the datapack tool accepts."""
     from testsuit.datatools.datapack import model
     from testsuit.sequencer import editor_schemas as schemas
-    for schema, cls in ((schemas.DATAPACK_TYPE, model.ComponentType), (schemas.LOGICAL_COMPONENT, model.Component),
+    for schema, cls in ((schemas.SLOT_TYPE, model.SlotType), (schemas.SLOT, model.Slot),
                         (schemas.SETUP_CONFIGURATION, model.SetupConfiguration), (schemas.INPUT, model.InputFile),
                         (schemas.SETUP, model.Setup), (schemas.TESTDEF, model.Testdef)):
         assert set(schema.get("properties") or {}) <= set(cls.model_fields), cls.__name__
-    model.ComponentType(configurations={}, description="a counter")
+    model.SlotType(configurations={}, description="a counter")
 
 
 def test_setup_type_role_inputs(repos):
-    """A datapack component type bound to a lab role: the inputs the role requires and a configuration lacks are
-    warned about, and so is a logical component of another role using that type."""
+    """A slot type bound to a lab role: the inputs the role requires and a configuration lacks are
+    warned about, and so is a slot of another role using that type."""
     editor = repos.editor
     session = editor.open("workspace0", local=True)
     lab, _ = editor.lab_for(session)
@@ -602,12 +602,12 @@ def test_setup_type_role_inputs(repos):
         {"name": "extra/", "type": "folder", "optional": False, "description": "How to make it."},
         {"name": "notes.txt", "type": "file", "optional": True, "description": ""}]
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
-    setup["component_types"]["dut_app"]["role"] = "dut"
-    setup["configurations"]["bench"]["components"]["analysis"]["type"] = "dut_app"
+    setup["slot_types"]["dut_app"]["role"] = "dut"
+    setup["configurations"]["bench"]["slots"]["analysis"]["type"] = "dut_app"
     editor.write(session, "setup/bench_setup.yml", data=setup)
     messages = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
     assert "type 'dut_app', configuration 'standard': no input 'extra/', which its role dut expects" in messages, messages
     assert not any("'app.sh'" in m or "notes.txt" in m for m in messages), messages
-    assert any(m.startswith("component 'analysis': role 'sequencer', but its type 'dut_app' is for role 'dut'") for m in messages), messages
+    assert any(m.startswith("slot 'analysis': role 'sequencer', but its type 'dut_app' is for role 'dut'") for m in messages), messages
     described = editor.context(session)["lab"]["roles"]["dut"]["inputs"]
     assert [i["name"] for i in described] == ["app.sh", "extra/", "notes.txt"] and described[1]["from"] == "dut"

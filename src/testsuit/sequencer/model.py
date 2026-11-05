@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from testsuit.datatools.datapack.model import FORMER_PHASE, FORMER_STEP, former_names
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
@@ -37,12 +38,22 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+def _refuse_former(data: Any, former: dict[str, str], what: str) -> Any:
+    """A clean break: a former key name is refused, naming the new one."""
+    if isinstance(data, dict):
+        found = [k for k in former if k in data]
+        if found:
+            where = f"{what} '{data['id']}'" if data.get("id") else what
+            raise ValueError("; ".join(f"{where}: '{k}' is now '{former[k]}'" for k in found))
+    return data
+
+
 class Step(BaseModel):
-    """One step: a target (component or for_each), one action, and options."""
+    """One step: a target (slot or for_each), one action, and options."""
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     id: str
-    component: str | None = None
+    slot: str | None = None
     for_each: list[str] | str | None = None
     # actions (exactly one; a plugin step type is given by its name as key)
     do: str | None = None
@@ -63,6 +74,11 @@ class Step(BaseModel):
     detach: bool | None = None
     continue_on_error: bool = False
     env: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _former(cls, data):
+        return _refuse_former(data, FORMER_STEP, "step")
 
     @field_validator("id")
     @classmethod
@@ -90,12 +106,12 @@ class Step(BaseModel):
             raise SequencerError(f"step '{self.id}': unknown key or step type '{action}'")
         if action == "python":
             check_python(self.python, f"step '{self.id}'")
-        if action in ("do", "push", "pull") and not (self.component or self.for_each):
-            raise SequencerError(f"step '{self.id}': '{action}' needs a 'component' or 'for_each'")
-        if self.component and self.for_each is not None:
-            raise SequencerError(f"step '{self.id}': give 'component' or 'for_each', not both")
-        if action == "uses" and (self.component or self.for_each is not None):
-            raise SequencerError(f"step '{self.id}': a 'uses' step has no component")
+        if action in ("do", "push", "pull") and not (self.slot or self.for_each):
+            raise SequencerError(f"step '{self.id}': '{action}' needs a 'slot' or 'for_each'")
+        if self.slot and self.for_each is not None:
+            raise SequencerError(f"step '{self.id}': give 'slot' or 'for_each', not both")
+        if action == "uses" and (self.slot or self.for_each is not None):
+            raise SequencerError(f"step '{self.id}': a 'uses' step has no slot")
 
 
 class SubPipeline(_Model):
@@ -111,12 +127,17 @@ class PhaseInput(_Model):
 class Phase(_Model):
     id: str
     needs: list[str] = Field(default_factory=list)
-    stages: list[str] = Field(default_factory=list)
-    components: list[str] = Field(default_factory=list)
+    realms: list[str] = Field(default_factory=list)
+    slots: list[str] = Field(default_factory=list)
     inputs: list[PhaseInput] = Field(default_factory=list)
     steps: list[Step] = Field(default_factory=list)
     finally_: list[Step] = Field(default_factory=list, alias="finally")
     timeout: str | float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _former(cls, data):
+        return _refuse_former(data, FORMER_PHASE, "phase")
 
 
 class Pipeline(_Model):
@@ -139,35 +160,38 @@ class Pipeline(_Model):
 # ── resources needed (setup configuration) ─────────────────────────────────
 
 @dataclass
-class LogicalComponent:
+class LogicalSlot:
     id: str
-    type: str                                    # datapack component type
+    type: str                                    # slot type (setup 'slot_types')
     name: str = ""
-    stage: str = ""                              # logical stage, '' for an ad hoc component
-    role: str = ""                               # a type of the lab: binds and gives the commands
+    realm: str = ""                              # its realm, '' for an ad hoc slot
+    role: str = ""                               # a type of the lab: binds to a lab component, which gives the commands
 
 
 @dataclass
 class Needs:
-    stages: dict[str, str]                       # logical stage -> stage type
-    components: dict[str, LogicalComponent]
-    component_types: dict[str, dict]             # datapack component types (setup file)
+    realms: dict[str, str]                       # realm -> lab stage type
+    slots: dict[str, LogicalSlot]
+    slot_types: dict[str, dict]                  # slot types (setup file)
 
-    def in_stage(self, stage: str) -> list[LogicalComponent]:
-        return [c for c in self.components.values() if c.stage == stage]
+    def in_realm(self, realm: str) -> list[LogicalSlot]:
+        return [c for c in self.slots.values() if c.realm == realm]
 
 
 def check_sequencer_fields(setup: dict) -> None:
-    """The fields the role replaced (a clean break: the lab role gives the commands)."""
-    for name, t in (setup.get("component_types") or {}).items():
+    """Former names, and the fields the role replaced (the lab role gives the commands)."""
+    former = former_names(setup)
+    if former:
+        raise SequencerError("; ".join(former))
+    for name, t in (setup.get("slot_types") or {}).items():
         for key in ("extends", "commands"):
             if isinstance(t, dict) and key in t:
-                raise SequencerError(f"setup component type '{name}': '{key}' is gone, the components' role gives "
+                raise SequencerError(f"setup slot type '{name}': '{key}' is gone, the slots' role gives "
                                      "the commands, implemented by the lab components (move test-specific commands to pipeline steps)")
     for config_name, config in (setup.get("configurations") or {}).items():
-        for comp_id, comp in ((config or {}).get("components") or {}).items():
-            if isinstance(comp, dict) and "commands" in comp:
-                raise SequencerError(f"setup configuration '{config_name}': component '{comp_id}': 'commands' is gone, "
+        for slot_id, slot in ((config or {}).get("slots") or {}).items():
+            if isinstance(slot, dict) and "commands" in slot:
+                raise SequencerError(f"setup configuration '{config_name}': slot '{slot_id}': 'commands' is gone, "
                                      "the lab role gives the commands (move test-specific ones to pipeline steps)")
 
 
@@ -177,23 +201,23 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
     if configuration not in configurations:
         raise SequencerError(f"setup has no configuration '{configuration}'")
     config = configurations[configuration] or {}
-    stages = {}
-    for stage_id, stage in (config.get("stages") or {}).items():
-        stage_type = stage.get("type") if isinstance(stage, dict) else stage
+    realms = {}
+    for realm_id, realm in (config.get("realms") or {}).items():
+        stage_type = realm.get("type") if isinstance(realm, dict) else realm
         if not stage_type:
-            raise SequencerError(f"setup configuration '{configuration}': stage '{stage_id}' has no type")
-        stages[stage_id] = str(stage_type)
-    components = {}
-    for comp_id, comp in (config.get("components") or {}).items():
-        stage = comp.get("stage") or ""
-        if stage and stage not in stages:
-            raise SequencerError(f"setup configuration '{configuration}': component '{comp_id}' is in unknown stage '{stage}'")
-        if not comp.get("role"):
-            raise SequencerError(f"setup configuration '{configuration}': component '{comp_id}' has no role "
+            raise SequencerError(f"setup configuration '{configuration}': realm '{realm_id}' has no type")
+        realms[realm_id] = str(stage_type)
+    slots = {}
+    for slot_id, slot in (config.get("slots") or {}).items():
+        realm = slot.get("realm") or ""
+        if realm and realm not in realms:
+            raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' is in unknown realm '{realm}'")
+        if not slot.get("role"):
+            raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' has no role "
                                  "(needed to bind it to a lab component)")
-        components[comp_id] = LogicalComponent(id=comp_id, type=comp.get("type", ""), name=comp.get("name", ""),
-                                               stage=stage, role=comp["role"])
-    return Needs(stages=stages, components=components, component_types=setup.get("component_types") or {})
+        slots[slot_id] = LogicalSlot(id=slot_id, type=slot.get("type", ""), name=slot.get("name", ""),
+                                     realm=realm, role=slot["role"])
+    return Needs(realms=realms, slots=slots, slot_types=setup.get("slot_types") or {})
 
 
 # ── pipeline loading, sub-pipelines, validation ────────────────────────────
@@ -321,29 +345,29 @@ def flatten_phase(phase: Phase, pipeline: Pipeline) -> FlatPhase:
     return FlatPhase(phase=phase, steps=steps, finally_=finally_steps, groups={**groups, **finally_groups})
 
 
-def phase_components(phase: Phase, needs: Needs) -> list[str]:
-    """Logical components a phase holds: those of its logical stages, then its ad hoc ones."""
-    result = [c.id for s in phase.stages for c in needs.in_stage(s)]
-    return result + [c for c in phase.components if c not in result]
+def phase_slots(phase: Phase, needs: Needs) -> list[str]:
+    """Slots a phase holds: those of its realms, then its ad hoc ones."""
+    result = [c.id for r in phase.realms for c in needs.in_realm(r)]
+    return result + [c for c in phase.slots if c not in result]
 
 
 def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
-    """Every logical stage and component the phases name that the setup configuration does not define
+    """Every realm and slot the phases name that the setup configuration does not define
     as such (a setup changed without its pipeline, or the other way round)."""
     problems = []
-    adhoc = [c.id for c in needs.components.values() if not c.stage]
+    adhoc = [c.id for c in needs.slots.values() if not c.realm]
     for phase in pipeline.phases:
-        for stage in phase.stages:
-            if stage not in needs.stages:
-                problems.append(f"phase '{phase.id}': unknown logical stage '{stage}' "
-                                f"(setup stages: {', '.join(needs.stages) or 'none'})")
-        for comp in phase.components:
-            if comp not in needs.components:
-                problems.append(f"phase '{phase.id}': unknown logical component '{comp}' "
-                                f"(setup ad hoc components: {', '.join(adhoc) or 'none'})")
-            elif needs.components[comp].stage:
-                problems.append(f"phase '{phase.id}': component '{comp}' belongs to stage "
-                                f"'{needs.components[comp].stage}': list the stage instead")
+        for realm in phase.realms:
+            if realm not in needs.realms:
+                problems.append(f"phase '{phase.id}': unknown realm '{realm}' "
+                                f"(setup realms: {', '.join(needs.realms) or 'none'})")
+        for slot in phase.slots:
+            if slot not in needs.slots:
+                problems.append(f"phase '{phase.id}': unknown slot '{slot}' "
+                                f"(setup ad hoc slots: {', '.join(adhoc) or 'none'})")
+            elif needs.slots[slot].realm:
+                problems.append(f"phase '{phase.id}': slot '{slot}' belongs to realm "
+                                f"'{needs.slots[slot].realm}': list the realm instead")
     return problems
 
 
@@ -368,21 +392,22 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
     flats = []
     for phase in pipeline.phases:
         flat = flatten_phase(phase, pipeline)
-        held = phase_components(phase, needs)
-        roles = {needs.components[c].role for c in held}
+        held = phase_slots(phase, needs)
+        roles = {needs.slots[c].role for c in held}
         for fs in flat.steps + flat.finally_:
             targets = []
-            if fs.step.component and "{{" not in fs.step.component:
-                targets = [fs.step.component]
+            if fs.step.slot and "{{" not in fs.step.slot:
+                targets = [fs.step.slot]
             elif isinstance(fs.step.for_each, list):
                 targets = [t for t in fs.step.for_each if "{{" not in t]
             elif isinstance(fs.step.for_each, str) and "{{" not in fs.step.for_each \
-                    and fs.step.for_each != "components" and fs.step.for_each not in roles:
+                    and fs.step.for_each != "slots" and fs.step.for_each not in roles:
+                hint = " ('components' is now 'slots')" if fs.step.for_each == "components" else ""
                 raise SequencerError(f"phase '{phase.id}': step '{fs.id}': for_each '{fs.step.for_each}' is neither "
-                                     "'components', a role, nor a list of components of the phase")
+                                     f"'slots', a role, nor a list of slots of the phase{hint}")
             outside = [t for t in targets if t not in held]
             if outside:
-                raise SequencerError(f"phase '{phase.id}': step '{fs.id}' targets component(s) {outside} "
+                raise SequencerError(f"phase '{phase.id}': step '{fs.id}' targets slot(s) {outside} "
                                      f"outside the phase (it holds: {', '.join(held) or 'none'})")
         flats.append(flat)
     return flats

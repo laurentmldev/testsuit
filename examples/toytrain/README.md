@@ -4,7 +4,7 @@ The example project of testsuit: the test environment of a small system, a toy t
 
 It has two parts:
 - **the `toytrain` package**, a Python library extending testsuit without changing it: file formats for the train's recordings, mexploit criteria, a datapack importer for its software releases, a report logo and a command-line tool;
-- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, component types, datapack setup, test definitions with their pipeline, and exploitation criteria. The [sequencer cheat sheet](../../src/testsuit/sequencer/README.md#cheat-sheet) shows how to build, post and follow these datapacks.
+- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, roles and lab components, datapack setup (slots and slot types), test definitions with their pipeline, and exploitation criteria. The [sequencer cheat sheet](../../src/testsuit/sequencer/README.md#cheat-sheet) shows how to build, post and follow these datapacks.
 
 ## The system under test
 
@@ -56,10 +56,10 @@ lab/                                   owned by the lab operators
   toytrain_emulated.yml                inventory of the emulated mode: everything on the dev host
   components_emulated/toytrain.yml     the same roles, implemented by local processes
 datapack/                              owned by the test authors
-  setup/toytrain_setup.yml             test component types (their inputs), resources bound by role
+  setup/toytrain_setup.yml             slot types (their inputs), slots bound to lab components by role
   setup/globals.yml                    train characteristics, network plan, versions
   setup/platforms/<configuration>.yml  what the platform changes: sim_bench (the lab), emulated (dev host)
-  setup/templates/                     configuration of each component, rendered by the datapack tool
+  setup/templates/                     configuration of each slot, rendered by the datapack tool
   setup/scripts/check_data.py          a python step of the pipeline: the collected data is complete
   testdef/<test>/testdef.yml           test definition and pipeline
   testdef/<test>/scenario.yml          scenario keys
@@ -141,7 +141,7 @@ A single test run works with mxp too: `mxp datapack/testdef/max_speed/criteria/m
 datapack datapack/testdef/max_speed/testdef.yml --nocheck
 ```
 
-The datasets are imported into `.work/datarepo`, the templates of `datapack/setup/templates` are rendered for each component, and the zip lands in `.work/datapacks`, ready for `tsq submit`. Run it again and the datasets are checked (version and checksums) instead of being imported again.
+The datasets are imported into `.work/datarepo`, the templates of `datapack/setup/templates` are rendered for each slot, and the zip lands in `.work/datapacks`, ready for `tsq submit`. Run it again and the datasets are checked (version and checksums) instead of being imported again.
 
 **Use the `toytrain` command**, installed with the package (`[project.scripts]` in pyproject.toml):
 
@@ -167,7 +167,7 @@ Before anything else, the sequencer self-tests every component it locks: SSH, ta
 
 The pipeline then has two phases, the first one built from two sub-pipelines.
 
-**test_run** locks the stage `train_1` and the two simulations, then:
+**test_run** locks the realm `train` (bound to the lab stage `train_1`) and the two simulations, then:
 1. `bring_up`: deploys every input in parallel, and flashes the CALC-Pilot microcontroller; starts the simulations, then CALC-TM and AU, each waiting for its `READY` log line; starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
 2. lets the scenario run for its duration;
 3. `shut_down`: stops the pilot first, then the rest;
@@ -204,12 +204,12 @@ A run in emulated mode is flagged non-conform against `baseline_expected.yml`, s
 ## Assumptions
 
 Interfaces assumed for this example, all belonging to the toy-train software:
-- each calculator runs a systemd service `toytrain-<role>`, configured from `<remote_root>/<component>/input/`, that logs `READY` when listening;
+- each calculator runs a systemd service `toytrain-<role>`, configured from `<remote_root>/<slot>/input/`, that logs `READY` when listening;
 - CALC-Pilot has an `install` helper that flashes its microcontroller;
 - messages are UDP. Commands go to the propulsion controller on port 5000. Speed feedback (20 Hz), contact events and pilot state are multicast on 239.42.0.1, ports 5001 to 5003;
 - the telemetry file is a CSV with a `#TOYTRAIN-TM` first line and columns `Time, speed_mps, pilot_cmd, pilot_state, contact_front, contact_back` (`pilot_cmd`: 0 keep, 1 up, 2 down, 3 stop; `pilot_state`: 0 idle, 1 running, 2 stopped);
 - the propulsion controller and its simulation record what they receive and send as `*.propj` JSON files;
-- the switch is unmanaged: it is only monitored (ping), and locked with its stage. The datapack does not drive it, so it has no component in the setup;
+- the switch is unmanaged: it is only monitored (ping), and locked with its stage. The datapack does not drive it, so it has no slot in the setup;
 - each application sends and joins its multicast traffic on the interface of its `local_address`;
 - the applications are Python, so the same release runs on the calculators and on a dev host; each one is started as `app/bin/toytrain-<role> --config <role>.yml`;
 - in emulated mode, the pilot accepts `--mcu host` (microcontroller host stub), the AU accepts `--gpio-backend udp://<address>:<port>` (one datagram per GPIO edge), and the piezo simulation's `--gpio` accepts the same URL in place of the adapter device.
@@ -218,9 +218,9 @@ This sample also uses a few details that the sequencer README leaves open:
 - a probe state can be matched on an exit code (`exit: 0`);
 - host variables are reachable as `component.vars.*`, with `component.output_dir` next to `component.input_dir`;
 - `install` and `version` are ordinary named commands;
-- `wait_for: {state: ...}` names its component.
+- `wait_for: {state: ...}` names its slot.
 
-The datapack tool keeps the sequencer fields (`stages`, `stage`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A component's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the lab components (`lab/components/toytrain.yml`) implement them.
+The datapack tool keeps the sequencer fields (`realms`, `realm`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A slot's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the lab components (`lab/components/toytrain.yml`) implement them.
 
 ## Writing your own
 
