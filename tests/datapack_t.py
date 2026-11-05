@@ -1,4 +1,4 @@
-"""datapack: Jinja2 rendering of the component inputs from YAML dictionaries, BagIt zip."""
+"""datapack: Jinja2 rendering of the slot inputs from YAML dictionaries, BagIt zip."""
 import shutil
 import zipfile
 from pathlib import Path
@@ -36,7 +36,7 @@ def test_datapack_nominal(tmp_path, no_git):
         "This is a sample ref File: 3.1415 m3/s\n"
         "for Comp One (mycmp1) on test platform by TOYTRAIN\n"
         "sensors: s1 s2 s3\n")
-    # the second component gets its own values
+    # the second slot gets its own values
     assert "for Comp Two (mycmp2)" in (work / "data" / "mycmp2" / "input" / "MyRef1.txt").read_text()
     # copy: not rendered
     assert (inputs / "MyRef2.txt").read_text() == "copied as is: {{ not_a_key }}\n"
@@ -54,10 +54,10 @@ def test_datapack_nominal(tmp_path, no_git):
     manifest = yaml.safe_load((work / "datapack.yml").read_text())
     assert manifest["testdef"]["id"] == "my_test_def" and manifest["setup"]["name"] == "Setup for My Test Def"
     assert manifest["nocheck"] is True
-    keys = manifest["components"]["mycmp1"]["inputs"][0]["keys"]["MyRef1.txt"]
+    keys = manifest["slots"]["mycmp1"]["inputs"][0]["keys"]["MyRef1.txt"]
     assert keys["platform.name"].endswith("testdef/overrides.yml")
     assert keys["platform.vendor"].endswith("setup/globals.yml")
-    assert manifest["components"]["mycmp1"]["inputs"][2]["keys"]["conf/limits.yml"]["my_dataset.param2.value"].endswith("values.yml")
+    assert manifest["slots"]["mycmp1"]["inputs"][2]["keys"]["conf/limits.yml"]["my_dataset.param2.value"].endswith("values.yml")
 
     context = yaml.safe_load((work / "context.yml").read_text())
     assert context["value"]["sensors"] == ["s1", "s2", "s3"]
@@ -66,7 +66,7 @@ def test_datapack_nominal(tmp_path, no_git):
 
     # definition kept as written, pipeline included
     testdef = yaml.safe_load((work / "definition" / "testdef.yml").read_text())
-    assert testdef["pipeline"]["phases"][0]["steps"][0]["run"] == "scp {{ component.id }}"
+    assert testdef["pipeline"]["phases"][0]["steps"][0]["run"] == "scp {{ slot.id }}"
     assert (work / "definition" / "dictionaries" / "setup" / "globals.yml").is_file()
     assert (work / "definition" / "dictionaries" / "testdef" / "values.yml").is_file()
 
@@ -114,7 +114,7 @@ def test_setup_config_override(tmp_path, no_git):
     """the setup configuration given to the tool replaces the test definition's one"""
     datapack(TESTDEF, nocheck=True, output_dir=tmp_path, setup_config="other")
     manifest = yaml.safe_load((TESTDEF.parent / ".current_datapack" / "datapack.yml").read_text())
-    assert manifest["setup"]["configuration"] == "other" and not manifest["components"]
+    assert manifest["setup"]["configuration"] == "other" and not manifest["slots"]
     with pytest.raises(DatapackError, match="no configuration 'unknown'"):
         datapack(TESTDEF, nocheck=True, output_dir=tmp_path, setup_config="unknown")
 
@@ -151,32 +151,32 @@ def test_cli_verify(tmp_path, no_git, monkeypatch, capsys):
 
 
 def test_generate_and_needs(tmp_path, no_git):
-    """method: generate (registered function or script) and components reading the inputs they need."""
+    """method: generate (registered function or script) and slots reading the inputs they need."""
     from testsuit.datatools.datapack.generators import register_generator, unregister_generator
 
-    def compile_profile(source, target, keys, options, component):
+    def compile_profile(source, target, keys, options, slot):
         steps = yaml.safe_load(source.read_text())["steps"]
         target.write_text(yaml.safe_dump({"table": [s * options["scale"] for s in steps],
-                                          "speed": keys["train"]["speed"], "for": component["id"]}))
+                                          "speed": keys["train"]["speed"], "for": slot["id"]}))
     register_generator("profile-compiler", compile_profile)
     root = tmp_path / "dp"
     (root / "setup" / "files").mkdir(parents=True)
     (root / "testdef").mkdir()
     (root / "setup" / "files" / "profile.yml").write_text("steps: [1, 2, 3]\n")
     (root / "setup" / "files" / "peer.yml").write_text(
-        "table: {{ (read_input('pilot/profile.yml') | from_yaml).table }}\npilot: {{ components.pilot.input_dir }}\n")
+        "table: {{ (read_input('pilot/profile.yml') | from_yaml).table }}\npilot: {{ slots.pilot.input_dir }}\n")
     (root / "setup" / "gen.sh").write_text(
         'python3 -c "import json,sys; k=json.load(open(sys.argv[3])); '
         'open(sys.argv[2],\'w\').write(str(k[\'train\'][\'speed\'] * k[\'options\'][\'n\']))" "$@"\n')
     (root / "setup" / "globals.yml").write_text("train: {speed: 2}\n")
-    setup = {"id": "s", "dictionaries": ["globals.yml"], "component_types": {
+    setup = {"id": "s", "dictionaries": ["globals.yml"], "slot_types": {
         "pilot_t": {"configurations": {"std": {"inputs": [
             {"source": "files/profile.yml", "target": "profile.yml", "method": "generate",
              "generator": "profile-compiler", "options": {"scale": "{{ train.speed }}"}},
             {"source": "files/profile.yml", "target": "scaled.txt", "method": "generate", "generator": "gen.sh",
              "options": {"n": 5}}]}}},
         "tm_t": {"configurations": {"std": {"inputs": [{"source": "files/peer.yml", "target": "peer.yml"}]}}}},
-        "configurations": {"c": {"components": {
+        "configurations": {"c": {"slots": {
             "telemetry": {"type": "tm_t", "configuration": "std", "needs": ["pilot"]},
             "pilot": {"type": "pilot_t", "configuration": "std"}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
@@ -193,22 +193,22 @@ def test_generate_and_needs(tmp_path, no_git):
     peer = yaml.safe_load((work / "telemetry" / "input" / "peer.yml").read_text())
     assert peer["table"] == [2, 4, 6] and peer["pilot"].endswith("data/pilot/input")
     manifest = yaml.safe_load((root / "testdef" / ".current_datapack" / "datapack.yml").read_text())
-    assert list(manifest["components"]) == ["telemetry", "pilot"]               # as written, generated in needs order
-    assert manifest["components"]["pilot"]["inputs"][0]["keys"]["profile.yml"] == \
+    assert list(manifest["slots"]) == ["telemetry", "pilot"]               # as written, generated in needs order
+    assert manifest["slots"]["pilot"]["inputs"][0]["keys"]["profile.yml"] == \
         {"train.speed": str(root / "setup" / "globals.yml")}
-    assert manifest["components"]["telemetry"]["needs"] == ["pilot"]
+    assert manifest["slots"]["telemetry"]["needs"] == ["pilot"]
 
 
 def test_needs_cycle(tmp_path, no_git):
     root = tmp_path / "dp"
     (root / "setup").mkdir(parents=True)
     (root / "testdef").mkdir()
-    setup = {"id": "s", "component_types": {"t": {"configurations": {"std": {"inputs": []}}}},
-             "configurations": {"c": {"components": {
+    setup = {"id": "s", "slot_types": {"t": {"configurations": {"std": {"inputs": []}}}},
+             "configurations": {"c": {"slots": {
                  "a": {"type": "t", "configuration": "std", "needs": ["b"]},
                  "b": {"type": "t", "configuration": "std", "needs": ["a"]}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
     (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
                                                             "setup_config": "c"}))
-    with pytest.raises(DatapackError, match="components needing each other"):
+    with pytest.raises(DatapackError, match="slots needing each other"):
         datapack(root / "testdef" / "t.yml", nocheck=True, output_dir=tmp_path / "out")

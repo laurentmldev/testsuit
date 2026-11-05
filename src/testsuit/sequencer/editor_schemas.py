@@ -4,8 +4,8 @@ The descriptions are the contextual help of the Editor: the YAML view shows them
 completion, and the forms show them next to each field. ``defaultSnippets`` are the blocks the
 YAML view proposes when a new item is started.
 
-``schemas(context)`` fills in what depends on the lab and the workspace: component types, roles,
-stage types, transports, commands, importers, generators, logical components.
+``schemas(context)`` fills in what depends on the lab and the workspace: slot types, roles,
+stage types, transports, commands, importers, generators, slots.
 """
 from __future__ import annotations
 
@@ -58,11 +58,10 @@ WAIT_KINDS = {
 WAIT_FOR = h("Wait until a check passes, polling every `interval` (default 0.5 s) until `timeout` "
              "(default 60 s, then the step is `error`). Exactly one check kind: " +
              ", ".join(f"`{k}`" for k in WAIT_KINDS) + ", or a plugin ready check. "
-             "`component` names the component checked when the step has none.",
+             "`slot` names the slot checked when the step has none.",
              type="object",
              properties={**WAIT_KINDS, "timeout": DURATION, "interval": DURATION,
-                         "component": h("The logical component checked (in a step without `component`).",
-                                        type="string")},
+                         "slot": h("The slot checked (in a step without `slot`).", type="string")},
              defaultSnippets=[
                  {"label": "state running", "body": {"state": "running", "timeout": "20s"}},
                  {"label": "log line", "body": {"log": {"file": "{{ component.output_dir }}/${1:app.log}",
@@ -259,14 +258,14 @@ COMPONENT = h(
 
 ROLE = h(
     "A lab role: an abstract definition of a component, the commands it offers, by name, with what each does. "
-    "Lab components implement them; datapacks bind their logical components by role and run its commands. "
+    "Lab components implement them; datapacks bind their slots by role and run its commands. "
     "A role `extends` another one and adds commands (section 7.1).",
     type="object", additionalProperties=False,
     properties={
         "extends": h("The parent role: its commands are offered too. `linux_system` (deploy, collect, kill) for "
                      "anything reachable over SSH, `component` (no command) otherwise.", type="string"),
         "description": h("What this role is: shown in the Editor when a role is chosen.", type="string"),
-        "inputs": h("The inputs a component of this role expects, in its input folder: datapack component types "
+        "inputs": h("The inputs a component of this role expects, in its input folder: slot types "
                     "bound to the role get them by default (section 7.1). A role extending another one adds to its "
                     "inputs, or redefines one by name.", type="array", items=h(
                         "An input the role expects.", type="object", required=["name"], additionalProperties=False,
@@ -314,7 +313,7 @@ VARS = {
                                       examples=["~/.ssh/id_lab"]),
     "tsq_role": h("Role of the component, a role of the lab library (section 7.1): the commands it must implement. "
                   "Not needed when the component it extends supports one role (it has that one); one of them when "
-                  "it supports several; any role when it lists none. Datapacks bind their logical components by "
+                  "it supports several; any role when it lists none. Datapacks bind their slots by "
                   "role (`role: pilot` binds the host with role pilot in the stage). Unique within a stage.",
                   type="string"),
     "tsq_extends": h("The lab component this host is (section 7.2): a component of the library, or another host. "
@@ -330,8 +329,8 @@ VARS = {
     "tsq_shell": h("The shell commands run under on the component, for example `bash` or `bash -l` (login profile "
                    "read). Default: `/bin/sh` for steps and commands, the login shell for probes and self-tests.",
                    type="string", examples=["bash", "bash -l"]),
-    "tsq_remote_root": h("Folder on the component under which each logical component gets "
-                         "`<root>/<component>/input` and `output`.", type="string", examples=["/opt/testrun"]),
+    "tsq_remote_root": h("Folder on the component under which each slot bound to it gets "
+                         "`<root>/<slot>/input` and `output`.", type="string", examples=["/opt/testrun"]),
     "tsq_commands": h("Command overrides, by name. On a stage group they apply to every component of the stage; on a "
                       "host, to that host only. They win over the component it extends (section 7.4).",
                       type="object", additionalProperties=COMMAND),
@@ -391,13 +390,13 @@ INVENTORY = {
 # ── datapack side: setup ───────────────────────────────────────────────────
 
 INPUT = h(
-    "An input of the component: `source` (file, folder or glob pattern, relative to the test definition or setup "
-    "folder) put at `target` in the component's input folder, by `method`.",
+    "An input of the slot: `source` (file, folder or glob pattern, relative to the test definition or setup "
+    "folder) put at `target` in the slot's input folder, by `method`.",
     type="object", required=["source", "target"], additionalProperties=False,
     properties={
         "source": h("File, folder or glob pattern, absolute or relative to the test definition then the setup folder. "
                     "Templates allowed (`{{ toytrain_sw.path }}/pilot/`).", type="string"),
-        "target": h("Where it goes in the component's input folder (`app/`, `config.yml`). A folder ends with `/`.",
+        "target": h("Where it goes in the slot's input folder (`app/`, `config.yml`). A folder ends with `/`.",
                     type="string"),
         "method": h("`template` (default): rendered with the datapack keys (Jinja2); `copy`: copied as is; "
                     "`generate`: produced by a `generator` (a plugin or a script) from the source and the keys.",
@@ -415,53 +414,53 @@ INPUT = h(
                      {"label": "generate", "body": {"source": "${1:source}", "target": "${2:target}",
                                                     "method": "generate", "generator": "${3:name}"}}])
 
-DATAPACK_TYPE = h(
-    "A datapack component type: the inputs each configuration of it gets (section 8.2). The commands come from "
-    "the lab role of the component's `role`.",
+SLOT_TYPE = h(
+    "A slot type: the inputs each configuration of it gets (section 8.2). The commands come from "
+    "the lab role of the slot's `role`.",
     type="object", required=["configurations"], additionalProperties=False,
     properties={
-        "description": h("What this component is in the test.", type="string"),
-        "role": h("The lab role its components have: the inputs that role expects are proposed for each "
+        "description": h("What this slot is in the test.", type="string"),
+        "role": h("The lab role its slots have: the inputs that role expects are proposed for each "
                   "configuration, and missing ones reported.", type="string"),
-        "configurations": h("Configurations of the component, by name (`standard`...): the inputs of each.",
+        "configurations": h("Configurations of the slot type, by name (`standard`...): the inputs of each.",
                             type="object", additionalProperties={
                                 "type": "object", "additionalProperties": False,
-                                "properties": {"inputs": h("Input files of the component.", type="array", items=INPUT)}},
+                                "properties": {"inputs": h("Input files of the slot.", type="array", items=INPUT)}},
                             defaultSnippets=[{"label": "standard", "body": {"standard": {"inputs": [
                                 {"source": "templates/${1:config.yml}", "target": "${1:config.yml}"}]}}}]),
     })
 
-LOGICAL_COMPONENT = h(
-    "A logical component: what the test needs, bound at activation to a lab component with the same `role` "
-    "(in the bound stage when `stage` is given, among the ad hoc components otherwise).",
+SLOT = h(
+    "A slot: what the test needs, bound at activation to a lab component with the same `role` "
+    "(in the lab stage bound to its `realm` when given, among the ad hoc lab components otherwise).",
     type="object", required=["type", "configuration"], additionalProperties=False,
     properties={"name": h("Name shown in logs and the UI.", type="string"),
-                "type": h("Its datapack component type (`component_types` of this setup).", type="string"),
+                "type": h("Its slot type (`slot_types` of this setup).", type="string"),
                 "configuration": h("Configuration of that type to use (its inputs).", type="string"),
-                "stage": h("Logical stage it belongs to (`stages` of this configuration). Leave out for an ad hoc "
-                           "component.", type="string"),
+                "realm": h("Realm it belongs to (`realms` of this configuration): the slots of a realm are bound in "
+                           "one lab stage. Leave out for an ad hoc "
+                           "slot.", type="string"),
                 "role": h("Role it binds to in the lab (`tsq_role`): a lab role, which gives its commands.",
                           type="string"),
-                "needs": h("Components whose inputs are generated first, readable with `read_input('<id>/<file>')` "
-                           "and `components.<id>.input_dir` (section 5.2).", type="array", items={"type": "string"}),
+                "needs": h("Slots whose inputs are generated first, readable with `read_input('<id>/<file>')` "
+                           "and `slots.<id>.input_dir` (section 5.2).", type="array", items={"type": "string"}),
                 })
 
 SETUP_CONFIGURATION = h(
-    "A setup configuration: the logical stages and components a datapack built with it needs (section 8.1).",
-    type="object", required=["components"], additionalProperties=False,
+    "A setup configuration: the realms and slots a datapack built with it needs (section 8.1).",
+    type="object", required=["slots"], additionalProperties=False,
     properties={
-        "stages": h("Logical stages, by id, with the stage type they ask for: each is bound to any free stage of that "
-                    "type.", type="object",
+        "realms": h("Realms, by id, with the lab stage type they ask for: each is bound to any free lab stage of that "
+                    "type, and its slots to the lab components of that lab stage.", type="object",
                     additionalProperties=h("`{type: <stage type>}`.", type=["object", "string"],
                                            properties={"type": h("Stage type (`tsq_stage_type` in the lab).",
                                                                  type="string")})),
-        "components": h("Logical components, by id (the id used by the pipeline steps).", type="object",
-                        additionalProperties=LOGICAL_COMPONENT),
+        "slots": h("Slots, by id (the id used by the pipeline steps).", type="object", additionalProperties=SLOT),
     })
 
 SETUP = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Datapack setup",
-    **h("A setup file (datapack side): where the inputs come from, the datapack component types and the "
+    **h("A setup file (datapack side): where the inputs come from, the slot types and the "
         "configurations the test definitions choose from."),
     "type": "object", "required": ["id", "configurations"], "additionalProperties": False,
     "properties": {
@@ -488,7 +487,7 @@ SETUP = {
                                                                  "version": h("Version (git tag...).", type="string"),
                                                                  "postprocess": {"type": "array",
                                                                                  "items": {"type": "string"}}}}}}}}}}),
-        "component_types": h("Datapack component types, by name.", type="object", additionalProperties=DATAPACK_TYPE),
+        "slot_types": h("Slot types, by name.", type="object", additionalProperties=SLOT_TYPE),
         "configurations": h("Setup configurations, by name: a test definition picks one with `setup_config`.",
                             type="object", additionalProperties=SETUP_CONFIGURATION),
     },
@@ -499,11 +498,11 @@ SETUP = {
 STEP_FIELDS = {
     "id": h("Step id, unique in its phase or sub-pipeline (no `.`, `[` or `/`). Steps of a sub-pipeline appear as "
             "`<uses step>.<id>`.", type="string"),
-    "component": h("The logical component the step acts on.", type="string"),
-    "for_each": h("Run the step on several components in parallel: a list of logical components, `components` for "
-                  "every component of the phase, or a role.", type=["array", "string"], items={"type": "string"},
-                  examples=["components"]),
-    "do": h("A command of the component's type (`deploy`, `start`, `ready`, `stop`, `collect`...).", type="string"),
+    "slot": h("The slot the step acts on (it runs on the lab component bound to it).", type="string"),
+    "for_each": h("Run the step on several slots in parallel: a list of slots, `slots` for "
+                  "every slot of the phase, or a role.", type=["array", "string"], items={"type": "string"},
+                  examples=["slots"]),
+    "do": h("A command of the slot's role, as its lab component implements it (`deploy`, `start`, `ready`, `stop`, `collect`...).", type="string"),
     "run": h("An inline shell command, on the component (or in the run folder on the sequencer host without one). "
              + TEMPLATE_NOTE, type="string"),
     "python": PYTHON,
@@ -530,32 +529,32 @@ STEP_FIELDS = {
     "env": h("Environment variables of the step's command.", type="object"),
 }
 
-STEP = h("A step: a target (`component` or `for_each`), one action (`do`, `run`, `python`, `push`, `pull`, `delay`, "
+STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `push`, `pull`, `delay`, "
          "`wait_for`, `uses`, or a plugin step type), and options.", type="object", required=["id"],
          properties=STEP_FIELDS, additionalProperties=True,
          defaultSnippets=[
-             {"label": "do a command", "body": {"id": "${1:start_app}", "component": "${2:component}",
+             {"label": "do a command", "body": {"id": "${1:start_app}", "slot": "${2:slot}",
                                                 "do": "${3:start}", "needs": []}},
-             {"label": "for each component", "body": {"id": "${1:deploy}", "for_each": "components", "do": "${2:deploy}"}},
-             {"label": "run a shell command", "body": {"id": "${1:check}", "component": "${2:component}",
+             {"label": "for each slot", "body": {"id": "${1:deploy}", "for_each": "slots", "do": "${2:deploy}"}},
+             {"label": "run a shell command", "body": {"id": "${1:check}", "slot": "${2:slot}",
                                                        "run": "${3:command}"}},
              {"label": "run Python code", "body": {"id": "${1:check}", "python": {"code": "import sys\n${2:sys.exit(0)}\n"}}},
              {"label": "delay", "body": {"id": "${1:run}", "delay": "${2:30s}", "needs": []}},
              {"label": "wait for a state", "body": {"id": "${1:running}", "wait_for": {
-                 "state": "running", "component": "${2:component}", "timeout": "20s"}}},
+                 "state": "running", "slot": "${2:slot}", "timeout": "20s"}}},
              {"label": "sub-pipeline", "body": {"id": "${1:up}", "uses": "${2:bring_up}"}}])
 
-PHASE = h("A phase: the resources it locks (`stages`, `components`), its inputs from earlier phases, and its steps. "
+PHASE = h("A phase: the resources it locks (`realms`, `slots`), its inputs from earlier phases, and its steps. "
           "Phases run in `needs` order.", type="object", required=["id"], additionalProperties=False,
           properties={
               "id": h("Phase id.", type="string"),
               "needs": h("Phases that must end before this one starts.", type="array", items={"type": "string"}),
-              "stages": h("Logical stages locked for the phase (setup configuration `stages`): their components "
-                          "come with them.", type="array", items={"type": "string"}),
-              "components": h("Ad hoc logical components locked for the phase (those with no stage).", type="array",
-                              items={"type": "string"}),
+              "realms": h("Realms locked for the phase (setup configuration `realms`): their slots, and the whole "
+                          "lab stage each is bound to, come with them.", type="array", items={"type": "string"}),
+              "slots": h("Ad hoc slots locked for the phase (those with no realm).", type="array",
+                         items={"type": "string"}),
               "inputs": h("Outputs of earlier phases copied in the run folder before the phase starts: "
-                          "`{from: '<phase>:<component>/output/<path>', to: '<component>/input/<path>'}`.",
+                          "`{from: '<phase>:<slot>/output/<path>', to: '<slot>/input/<path>'}`.",
                           type="array", items={"type": "object", "required": ["from", "to"],
                                                "properties": {"from": {"type": "string"}, "to": {"type": "string"}}}),
               "steps": h("Steps of the phase.", type="array", items=STEP),
@@ -656,11 +655,11 @@ def schemas(context: dict) -> dict:
     ws = context.get("workspace") or {}
     logical = {c: f"{c} ({v.get('type', '')}, role {v.get('role', '')})"
                for s in ws.get("setups") or [] for cfg in (s.get("configurations") or {}).values()
-               for c, v in (cfg.get("components") or {}).items()}
-    logical_stages = {st: f"stage type {ty}" for s in ws.get("setups") or []
-                      for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("stages") or {}).items()}
-    dp_types = {t: f"datapack type: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
-                for t, v in (s.get("component_types") or {}).items()}
+               for c, v in (cfg.get("slots") or {}).items()}
+    realms = {st: f"lab stage type {ty}" for s in ws.get("setups") or []
+              for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("realms") or {}).items()}
+    dp_types = {t: f"slot type: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
+                for t, v in (s.get("slot_types") or {}).items()}
     subs = {n: "sub-pipeline" for n in ws.get("subpipelines") or []}
     importers = {i: i for i in context.get("importers") or []}
     generators = {g: g for g in context.get("generators") or []}
@@ -697,7 +696,7 @@ def schemas(context: dict) -> dict:
             props["role"].update(_choices(roles, False))
         if "role" in props and "configuration" in props and dp_types:
             props["type"].update(_choices(dp_types, False))
-        if "role" in props and "configurations" in props and roles:          # a datapack component type
+        if "role" in props and "configurations" in props and roles:          # a slot type
             props["role"].update(_choices(roles, False))
         if "importer" in props and importers:
             props["importer"].update(_choices(importers, False))
@@ -714,17 +713,17 @@ def schemas(context: dict) -> dict:
             if commands:
                 props["do"].update(_choices(commands, False))
             if logical:
-                props["component"].update(_choices(logical, False))
-                props["for_each"]["examples"] = ["components"] + sorted(logical)
+                props["slot"].update(_choices(logical, False))
+                props["for_each"]["examples"] = ["slots"] + sorted(logical)
             if subs:
                 props["uses"].update(_choices(subs, False))
             for name in step_types:
                 props.setdefault(name, h(f"Plugin step type `{name}`."))
-        if "stages" in props and "finally" in props:
-            if logical_stages:
-                props["stages"]["items"] = {"type": "string", **_choices(logical_stages, False)}
+        if "realms" in props and "finally" in props:
+            if realms:
+                props["realms"]["items"] = {"type": "string", **_choices(realms, False)}
             if logical:
-                props["components"]["items"] = {"type": "string", **_choices(logical, False)}
+                props["slots"]["items"] = {"type": "string", **_choices(logical, False)}
         if "cmd" in props and "log" in props:
             for name in ready_checks:
                 props.setdefault(name, h(f"Plugin ready check `{name}`."))

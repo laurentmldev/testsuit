@@ -1,6 +1,6 @@
 # datapack: test inputs, generated and packaged
 
-The `datapack` command turns a **test definition** into a **datapack**. A datapack is a zip that holds the input files of every component the test needs, generated from templates, imported datasets and YAML keys, plus a record of where each one comes from. It is self-sufficient: running it, by hand or with the [test sequencer](../../sequencer/README.md), needs nothing but the zip.
+The `datapack` command turns a **test definition** into a **datapack**. A datapack is a zip that holds the input files of every slot the test needs, generated from templates, imported datasets and YAML keys, plus a record of where each one comes from. It is self-sufficient: running it, by hand or with the [test sequencer](../../sequencer/README.md), needs nothing but the zip.
 
 [examples/toytrain/datapack](../../../../examples/toytrain/datapack) is a complete example: a setup with three calculators and two simulations, and two test definitions.
 
@@ -76,7 +76,7 @@ datarepositories:                      # datasets imported before generating, by
             version: "{{ toytrain_sw_version }}"
             postprocess: [finalize]     # processors run on the imported folder
 
-component_types:                       # the inputs of each kind of component, by configuration
+slot_types:                            # the inputs of each kind of slot, by configuration
   pilot_app:
     configurations:
       standard:
@@ -92,16 +92,18 @@ component_types:                       # the inputs of each kind of component, b
             generator: profile-compiler   # a registered generator (illustrative)
             options: {step_mps: 0.05}
 
-configurations:                        # what a test uses: its components, of these types
+configurations:                        # what a test uses: its slots, of these types
   sim_bench:
-    stages: {train: {type: toytrain}}  # for the test sequencer
-    components:
-      pilot:     {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
-      telemetry: {type: telemetry_app, configuration: standard, stage: train, role: telemetry,
+    realms: {train: {type: toytrain}}  # for the test sequencer: slots bound in one lab stage
+    slots:
+      pilot:     {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
+      telemetry: {type: telemetry_app, configuration: standard, realm: train, role: telemetry,
                   needs: [pilot]}      # generated after pilot, can read its inputs
 ```
 
-`stages`, `stage`, `role` and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a logical component to a lab component, and the lab role gives its commands ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's component types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
+`realms`, `realm`, `role` and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a realm groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
+
+The former names are refused, with the current one: `component_types` (now `slot_types`), a configuration's `components` and `stages` (now `slots` and `realms`), a slot's `stage` (now `realm`).
 
 [model.py](model.py) holds the schemas of both files. Unknown fields are errors, to catch typos.
 
@@ -116,13 +118,13 @@ Every string of these files, and every template, can use keys with Jinja2: `{{ t
    - `testdef.{id, name, file, path, setup_file, setup_config}`;
    - `setup.{id, name, file, path, configuration}`;
    - `datapack.{name, user, host, timestamp, nocheck}`;
-   - while the files of a component are rendered, `component.{id, name, type, configuration, input_dir}` and, for the components it `needs`, `components.<id>.input_dir`.
+   - while the files of a slot are rendered, `slot.{id, name, type, configuration, input_dir}` and, for the slots it `needs`, `slots.<id>.input_dir`.
 
 A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), resolved on first use, so a dictionary may reference one loaded after it. A value made of a single expression keeps its type, so lists and numbers can be shared too. An undefined key is an error, and so is a circular reference. A dotted name (`bench.version: v1.2`) is read as nested keys.
 
 ### Inputs
 
-Each input of a component type puts `source` at `target` in the component's input folder:
+Each input of a slot type puts `source` at `target` in the slot's input folder:
 
 | `method` | What it does |
 |---|---|
@@ -133,7 +135,7 @@ Each input of a component type puts `source` at `target` in the component's inpu
 - `source` is a file, a folder or a glob pattern, absolute or relative to the test definition folder, then to the setup folder. A glob always gives a folder.
 - `optional: true` skips an input whose source does not exist.
 - `postprocess` runs processors on the target. Built in: `replace s/<regex>/<replacement>/<flags>`.
-- A component whose inputs depend on another's lists it in `needs`. It is generated after it, and reads its files with `read_input('<id>/<file>')` in a template.
+- A slot whose inputs depend on another's lists it in `needs`. It is generated after it, and reads its files with `read_input('<id>/<file>')` in a template.
 
 ## The datapack
 
@@ -144,12 +146,12 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
   bagit.txt, bag-info.txt
   manifest-sha256.txt, tagmanifest-sha256.txt   checksums of everything
   datapack.yml        what it was built from: test definition, setup and configuration, git state,
-                      datasets, each component's inputs, and the keys each generated file used
+                      datasets, each slot's inputs, and the keys each generated file used
   context.yml         every key, resolved: using the datapack needs no dictionary
   baseline.yml        where the contents come from, and whether the datapack is conform
   definition/         the test definition, setup and dictionaries, as written
-  data/<component>/input/    the generated files
-  data/<component>/output/   empty, for the results
+  data/<slot>/input/         the generated files
+  data/<slot>/output/        empty, for the results
 ```
 
 ### Baseline
@@ -174,7 +176,7 @@ flowchart LR
     L2 --> I[import datasets]
     I -- importers, processors --> R[(data repository)]
     R -- path, version, dataset.yml --> K
-    K --> G[generate components]
+    K --> G[generate slots]
     G -- template / copy / generate,<br/>processors --> W[.current_datapack/data]
     W --> P[package: datapack.yml, context.yml,<br/>baseline.yml, BagIt, zip]
 ```
@@ -183,7 +185,7 @@ A build runs in four steps, in `_Builder.build`:
 
 1. **Test definition.** The test definition's dictionaries are loaded, then the file is rendered with them and validated. Its `pipeline` is kept as written.
 2. **Setup.** The setup's dictionaries are loaded. Each dataset of its data repositories is imported into `<repository path>/<dataset id>/<version>/`. When that folder already exists, its version is checked instead, and a version that cannot be confirmed is an error unless `--nocheck` is given. The setup is then rendered and validated.
-3. **Components.** The components of the configuration are generated in the order of their `needs` (a cycle is an error). For each component, its inputs are rendered, copied or generated into `data/<component>/input/`, and the keys each file read are recorded.
+3. **Slots.** The slots of the configuration are generated in the order of their `needs` (a cycle is an error). For each slot, its inputs are rendered, copied or generated into `data/<slot>/input/`, and the keys each file read are recorded.
 4. **Packaging.** `datapack.yml`, `context.yml` and `baseline.yml` are written, the BagIt manifests are computed, and the folder is zipped into `datapack.output_dir`.
 
 | Module | Role |
@@ -216,6 +218,6 @@ def register():
 
 - **Importer.** A factory `(target_dir, source, version) -> ADataImporter`.
 - **Processor.** A function `(target: Path, *args: str)`.
-- **Generator.** A function `(source, target, keys, options, component)`. The keys it reads are recorded in `datapack.yml`, like those of templates.
+- **Generator.** A function `(source, target, keys, options, slot)`. The keys it reads are recorded in `datapack.yml`, like those of templates.
 
 [examples/toytrain/src/toytrain/plugin.py](../../../../examples/toytrain/src/toytrain/plugin.py) registers the `toytrain-release` importer this way.

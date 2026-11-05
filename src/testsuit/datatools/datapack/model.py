@@ -28,8 +28,8 @@ Setup::
               - id: toytrain_sw
                 version: "{{ toytrain_sw_version }}"
                 postprocess: [finalize]
-    component_types:
-      pilot_app:                          # what a component gets as inputs (its commands: its lab role)
+    slot_types:
+      pilot_app:                          # what a slot gets as inputs (its commands: its lab role)
         configurations:
           standard:
             inputs:
@@ -45,21 +45,47 @@ Setup::
                 options: {step_mps: 0.05}
     configurations:
       sim_bench:
-        stages:                           # for the test sequencer: logical stages needed
-          train: {type: toytrain}
-        components:
-          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
+        realms:                           # for the test sequencer: slots bound together in one lab stage
+          train: {type: toytrain}         # of that stage type (tsq_stage_type)
+        slots:                            # each bound to a lab component at run time
+          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
                                           # role: for the test sequencer, a lab role (binding and commands)
           telemetry:
             type: telemetry_app
             configuration: standard
-            needs: [pilot]                # generated after pilot: read_input('pilot/pilot.yml'), components.pilot.input_dir
+            needs: [pilot]                # generated after pilot: read_input('pilot/pilot.yml'), slots.pilot.input_dir
+
+Names: a datapack has *slots* (of *slot types*), grouped in *realms*; at run time each slot is bound to a
+lab *component*, and each realm to a lab *stage*. The former names (``component_types``, a configuration's
+``components`` and ``stages``, a slot's ``stage``) are refused, naming the current one.
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# former names, refused with the current one (no aliases: README section 8)
+FORMER_SETUP = {"component_types": "slot_types"}           # setup, top level
+FORMER_CONFIG = {"components": "slots", "stages": "realms"}  # a setup configuration
+FORMER_SLOT = {"stage": "realm"}                             # a slot of a setup configuration
+FORMER_STEP = {"component": "slot"}                          # a pipeline step
+FORMER_PHASE = {"components": "slots", "stages": "realms"}   # a pipeline phase
+
+
+def former_names(setup: Any) -> list[str]:
+    """The former names a setup still uses, each with its current name."""
+    if not isinstance(setup, dict):
+        return []
+    found = [f"setup: '{old}' is now '{new}'" for old, new in FORMER_SETUP.items() if old in setup]
+    for name, config in (setup.get("configurations") or {}).items():
+        if isinstance(config, dict):
+            found += [f"configuration '{name}': '{old}' is now '{new}'" for old, new in FORMER_CONFIG.items() if old in config]
+            for slot_id, slot in (config.get("slots") or {}).items():
+                if isinstance(slot, dict):
+                    found += [f"configuration '{name}', slot '{slot_id}': '{old}' is now '{new}'"
+                              for old, new in FORMER_SLOT.items() if old in slot]
+    return found
 
 
 class _Model(BaseModel):
@@ -118,17 +144,17 @@ class InputFile(_Model):
         return self
 
 
-class ComponentConfiguration(_Model):
+class SlotConfiguration(_Model):
     inputs: list[InputFile] = Field(default_factory=list)
 
 
-GONE = "is gone: the component's lab role gives its commands, implemented by the lab components (test-specific commands: pipeline steps)"
+GONE = "is gone: the slot's lab role gives its commands, implemented by the lab components (test-specific commands: pipeline steps)"
 
 
-class ComponentType(_Model):
-    configurations: dict[str, ComponentConfiguration]
+class SlotType(_Model):
+    configurations: dict[str, SlotConfiguration]
     description: str = ""                    # what the type is (shown in the Editor)
-    role: str = ""                           # the lab role of its components: the inputs it expects (Editor)
+    role: str = ""                           # the lab role of its slots: the inputs it expects (Editor)
 
     @model_validator(mode="before")
     @classmethod
@@ -139,14 +165,15 @@ class ComponentType(_Model):
         return data
 
 
-class Component(_Model):
+class Slot(_Model):
+    """A slot of a setup configuration: bound at run time to a lab component of its role."""
     name: str = ""
     type: str
     configuration: str
-    # other components whose generated inputs this one reads (generated first)
+    # other slots whose generated inputs this one reads (generated first)
     needs: list[str] = Field(default_factory=list)
-    # for the test sequencer: logical stage and role it is bound by (the lab role gives its commands)
-    stage: str = ""
+    # for the test sequencer: realm and role it is bound by (the lab role gives its commands)
+    realm: str = ""
     role: str = ""
 
     @model_validator(mode="before")
@@ -158,9 +185,9 @@ class Component(_Model):
 
 
 class SetupConfiguration(_Model):
-    components: dict[str, Component]
-    # for the test sequencer: logical stages needed, by id
-    stages: dict[str, Any] = Field(default_factory=dict)
+    slots: dict[str, Slot]
+    # for the test sequencer: realms (slots bound in one lab stage of a type), by id
+    realms: dict[str, Any] = Field(default_factory=dict)
 
 
 class Setup(_Model):
@@ -168,5 +195,5 @@ class Setup(_Model):
     name: str = ""
     dictionaries: list[str] = Field(default_factory=list)
     datarepositories: list[DataRepository] = Field(default_factory=list)
-    component_types: dict[str, ComponentType] = Field(default_factory=dict)
+    slot_types: dict[str, SlotType] = Field(default_factory=dict)
     configurations: dict[str, SetupConfiguration]

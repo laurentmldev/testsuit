@@ -13,4 +13,4 @@ pipeline:
   phases:
     - id: test_run
       steps:
-        - {id: deploy, run: "scp {{ component.id }}"}
+        - {id: deploy, run: "scp {{ slot.id }}"}

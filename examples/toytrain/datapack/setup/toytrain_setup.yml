@@ -1,9 +1,10 @@
 # Setup of the toy-train tests on the lab (datapack side, sequencer README section 8).
-# It says what each component gets as inputs and how this test drives it; the lab inventory says
-# where the components are.
+# It says what each slot gets as inputs and how this test drives it; the lab inventory says
+# where the lab components bound to the slots are.
 #
-# The sequencer fields (stages, stage, role) are kept in the datapack as written, for the sequencer
-# to use at run time. A component's role is a type of the lab: it gives the component its commands.
+# The sequencer fields (realms, realm, role) are kept in the datapack as written, for the sequencer
+# to use at run time. A slot's role is a type of the lab: the slot binds to a lab component with that
+# role, which gives the commands.
 
 id: toytrain_setup
 name: Toy train (simulated propulsion and sensors)
@@ -31,7 +32,7 @@ datarepositories:
           - id: toytrain_sim
             version: "{{ toytrain_sim_version }}"
 
-component_types:
+slot_types:
 
   pilot_app:                                  # CALC-Pilot application
     role: pilot                                 # the inputs the lab role expects: app/ and pilot.yml
@@ -77,16 +78,16 @@ component_types:
           - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
           - {source: scripts/check_data.py, target: check_data.py, method: copy}   # a python step (testdef pipeline)
 
-# The datapack does not drive the train's switch: on the lab it is locked with its stage all the same.
+# The datapack does not drive the train's switch: on the lab it is locked with its lab stage all the same.
 configurations:
-  sim_bench: &toytrain_components             # the lab: real calculators, simulated propulsion and sensors
-    stages:
-      train: {type: toytrain}                 # bound to train_1 (the only stage of this type)
-    components:
-      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage: train, role: pilot}
-      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage: train, role: telemetry}
-      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage: train, role: acquisition}
+  sim_bench: &toytrain_slots                  # the lab: real calculators, simulated propulsion and sensors
+    realms:
+      train: {type: toytrain}                 # bound to train_1 (the only lab stage of this type)
+    slots:
+      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
+      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, realm: train, role: telemetry}
+      acquisition: {name: AU, type: acquisition_app, configuration: standard, realm: train, role: acquisition}
       propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
       piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
       analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}
-  emulated: *toytrain_components              # a dev host: everything emulated by local processes (README, emulated mode)
+  emulated: *toytrain_slots                   # a dev host: everything emulated by local processes (README, emulated mode)

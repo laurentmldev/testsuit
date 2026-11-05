@@ -107,7 +107,7 @@ register_data_importer("myserver", MyServerImporter)   # an ADataImporter subcla
 ```python
 from testsuit.datatools.datapack.processors import register_processor
 
-# 'postprocess: ["mystep arg1 arg2"]' on a dataset or a component input of a setup file
+# 'postprocess: ["mystep arg1 arg2"]' on a dataset or a slot input of a setup file
 register_processor("mystep", lambda target, *args: ...)   # target: the dataset folder or the generated input
 ```
 

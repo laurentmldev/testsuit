@@ -1,4 +1,4 @@
-"""Generators: component-specific processing that produces an input file (``method: generate``,
+"""Generators: slot-specific processing that produces an input file (``method: generate``,
 sequencer README section 5.1)::
 
     inputs:
@@ -9,11 +9,11 @@ sequencer README section 5.1)::
         options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
 
 A generator is either registered with ``register_generator(name, function)``, the function being
-called as ``function(source: Path, target: Path, keys: Mapping, options: dict, component: dict)``,
+called as ``function(source: Path, target: Path, keys: Mapping, options: dict, slot: dict)``,
 or the path (relative to the setup folder) of a script, run as ``<script> <source> <target> <keys.json>``
 (``.py`` with the current Python, ``.sh`` with bash, anything else executed directly). The JSON file
-holds every resolved key, plus ``options`` and ``component`` (with ``input_dir`` and the inputs of
-the components it needs, ``components.<id>.input_dir``).
+holds every resolved key, plus ``options`` and ``slot`` (with ``input_dir`` and the inputs of
+the slots it needs, ``slots.<id>.input_dir``).
 
 ``keys`` is a lazy view of the keys: the ones a registered generator reads are recorded in
 ``datapack.yml`` like those of templates. A script gets them all, so none is recorded for it.
@@ -50,13 +50,13 @@ def get_generators() -> list[str]:
     return list(_generators)
 
 
-def run_generator(name: str, source: Path, target: Path, keys: Mapping, options: dict, component: dict,
+def run_generator(name: str, source: Path, target: Path, keys: Mapping, options: dict, slot: dict,
                   scripts_folder: Path, all_keys: Callable[[], dict]) -> bool:
     """Run a generator; return True if it was a registered one (whose key reads are tracked)."""
     target.parent.mkdir(parents=True, exist_ok=True)
     if name in _generators:
         try:
-            _generators[name](Path(source), Path(target), keys, dict(options), dict(component))
+            _generators[name](Path(source), Path(target), keys, dict(options), dict(slot))
         except GeneratorError:
             raise
         except Exception as e:
@@ -66,7 +66,7 @@ def run_generator(name: str, source: Path, target: Path, keys: Mapping, options:
     if not script.is_file():
         raise GeneratorError(f"unknown generator '{name}': not registered (registered: "
                              f"{', '.join(sorted(_generators)) or 'none'}) and no script '{script}'")
-    data = {**all_keys(), "options": options, "component": component}
+    data = {**all_keys(), "options": options, "slot": slot}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(data, f, default=str)
         keys_file = f.name

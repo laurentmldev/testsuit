@@ -20,7 +20,7 @@ const KIND_LABELS: [string, string, string][] = [
   ["inventory", "Lab inventory", "Stages, ad hoc components and their variables (Ansible YAML inventory)."],
   ["library", "Lab roles and components", "Roles: the commands a component offers. Components: how they implement them, status probe and self-test."],
   ["testdef", "Test definitions", "A test: its setup configuration, key files and pipeline."],
-  ["setup", "Setups", "Inputs of each component, datapack component types and the configurations tests choose from."],
+  ["setup", "Setups", "Slots and their inputs, slot types, and the configurations tests choose from."],
   ["subpipelines", "Shared sub-pipelines", "Groups of steps used by several test definitions (pipeline.include)."],
   ["dictionary", "Key files", "Keys used by the templates (dictionaries)."],
   ["template", "Templates", "Input files rendered with the keys (Jinja2)."],
@@ -253,8 +253,8 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
 const KIND_HELP: Record<string, string> = {
   inventory: "**Lab inventory.** Stages are groups with `tsq_stage_type`: datapacks ask for a stage by type and get any free one. Each component extends a lab component (`tsq_extends`), which implements the commands of a lab role; it has the role of that component, or picks one of its roles with `tsq_role`. Datapacks bind by role. Hosts directly under `all` are **ad hoc** components (simulations, the sequencer host). Pick an item on the left of the form to edit it.",
   library: "**Lab roles and components.** A **role** is abstract: the commands a component offers (`do: <command>` in pipelines), each with what it does; datapacks bind to it. A **component** is concrete: the roles it supports, how it implements their commands, its status probe and its self-test; hosts extend one (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`). Both `extend` another and redefine only what differs: start from `linux_system` for anything reachable over SSH.",
-  setup: "**Setup.** A configuration lists the logical stages (by stage type) and components (by role) a test needs; each component has a role, a lab role that gives its commands, and a datapack type that says which input files it gets. Use **Add from the lab** to create components for every role of a stage type.",
-  testdef: "**Test definition.** It picks a setup configuration and gives the pipeline: phases that lock stages and components, and steps linked by `needs`. Open the **Pipeline** view to edit it as a graph.",
+  setup: "**Setup.** A configuration lists the slots a test needs, each bound at run time to a lab component of its role (a lab role, which gives its commands), and the realms that group slots in one lab stage (by stage type). A slot's type says which input files it gets. Use **Add from the lab** to create slots for every role of a lab stage type.",
+  testdef: "**Test definition.** It picks a setup configuration and gives the pipeline: phases that lock realms and slots, and steps linked by `needs`. Open the **Pipeline** view to edit it as a graph.",
   subpipelines: "**Shared sub-pipelines.** Steps grouped under a name, used with `uses: <name>` by several test definitions that list this file in `pipeline.include`.",
   template: "**Template.** Rendered with the datapack keys when the datapack is generated. Type `{{` to get the keys, and look at the preview.",
   dictionary: "**Key file.** Its keys are available to every template and command: `{{ section.key }}`.",
@@ -285,7 +285,7 @@ function SessionWelcome({ session }: { session: Session }) {
           <ul>
             {(ctx.workspace?.testdefs || []).map((t: any) => <li key={t.path}><button className="link" onClick={() => open(t.path)}>{t.name || t.id}</button> <span className="muted">{t.path}</span></li>)}
           </ul>
-          <p>Use <strong>+ New…</strong> to create a test definition from a setup configuration, with a starting pipeline built from the components it uses.</p>
+          <p>Use <strong>+ New…</strong> to create a test definition from a setup configuration, with a starting pipeline built from the slots it uses.</p>
         </>
       )}
     </div>

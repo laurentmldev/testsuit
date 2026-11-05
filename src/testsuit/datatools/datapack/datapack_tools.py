@@ -1,4 +1,4 @@
-"""Generation of a datapack: the input files of every component of a test setup, packaged in a zip.
+"""Generation of a datapack: the input files of every slot of a test setup, packaged in a zip.
 
 Steps, from a test definition file (see model for the file formats, templating for the keys):
 
@@ -6,8 +6,8 @@ Steps, from a test definition file (see model for the file formats, templating f
 2. the setup file it points to is loaded, with its own dictionaries;
 3. the datasets of the setup data repositories are imported (or their version is checked when
    already there) and their keys added;
-4. every key is resolved; the input files of each component of the chosen setup configuration are
-   rendered (or copied) into ``data/<component>/input/``;
+4. every key is resolved; the input files of each slot of the chosen setup configuration are
+   rendered (or copied) into ``data/<slot>/input/``;
 5. everything is written as a BagIt bag (RFC 8493) and zipped::
 
        <name>/
@@ -15,13 +15,13 @@ Steps, from a test definition file (see model for the file formats, templating f
          manifest-sha256.txt         checksums of data/
          tagmanifest-sha256.txt      checksums of the other files
          datapack.yml                what the datapack was built from: ids, git state, datasets,
-                                     components and the keys used by each generated file
+                                     slots and the keys used by each generated file
          context.yml                 every key, resolved: the datapack needs no dictionary to be used
          baseline.yml                where the contents come from: sources (git), datasets, tools,
                                      and each generated file with its checksum (conform or not)
          definition/                 test definition, setup and dictionaries, as written
-         data/<component>/input/     generated files
-         data/<component>/output/    empty, for the test results
+         data/<slot>/input/          generated files
+         data/<slot>/output/         empty, for the test results
 
 Keys always available (they override dictionary keys of the same name):
 
@@ -29,7 +29,8 @@ Keys always available (they override dictionary keys of the same name):
 - ``setup.{id, name, file, path, configuration}``
 - ``datapack.{name, user, host, timestamp, nocheck}``
 - ``<dataset id>.{path, version}`` for every imported dataset
-- ``component.{id, name, type, configuration}`` while rendering the files of a component
+- ``slot.{id, name, type, configuration, input_dir}`` while rendering the files of a slot, and
+  ``slots.<id>.{id, name, type, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
 
 ``datapack.output_dir`` (from a dictionary, or the ``output_dir`` argument) is where the zip is written.
 """
@@ -57,7 +58,7 @@ from pydantic import ValidationError
 from testsuit.datatools.datapack.baseline import check_baseline, tool_versions
 from testsuit.datatools.datapack.generators import GeneratorError, run_generator
 from testsuit.datatools.datapack.importers import create_data_importer
-from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef
+from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef, former_names
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
 from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping
 from testsuit.plugins import load_plugins
@@ -321,7 +322,7 @@ def verify_datapack(zip_path: str | os.PathLike) -> list[str]:
 
 
 def _depth(comp_id: str, components: dict) -> int:
-    """Length of the longest needs chain below a component (0: needs nothing)."""
+    """Length of the longest needs chain below a slot (0: needs nothing)."""
     needs = components[comp_id].needs
     return 1 + max(_depth(n, components) for n in needs) if needs else 0
 
@@ -438,47 +439,50 @@ class _Builder:
                     self.dataset_keys.append(({dataset.id: {"path": record["path"], "version": dataset.version}}, "<datapack>"))
 
         keys = self.keys()
-        for type_id, type_def in (raw.get("component_types") or {}).items():       # before rendering: a clear error
+        former = former_names(raw)                                                    # before rendering: a clear error
+        if former:
+            raise DatapackError(f"setup '{self.setup_file}': former names: " + "; ".join(former))
+        for type_id, type_def in (raw.get("slot_types") or {}).items():
             for key in ("extends", "commands"):
                 if isinstance(type_def, dict) and key in type_def:
-                    raise DatapackError(f"setup '{self.setup_file}': component type '{type_id}': '{key}' {GONE}")
+                    raise DatapackError(f"setup '{self.setup_file}': slot type '{type_id}': '{key}' {GONE}")
         for config_id, config in (raw.get("configurations") or {}).items():
-            for comp_id, comp in ((config or {}).get("components") or {}).items():
-                if isinstance(comp, dict) and "commands" in comp:
-                    raise DatapackError(f"setup '{self.setup_file}': configuration '{config_id}', component "
-                                        f"'{comp_id}': 'commands' {GONE}")
-        rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "component_types"}),
-                    "component_types": {
-                        type_id: keys.render_data(type_def, where=f"component_types.{type_id}") if isinstance(type_def, dict)
+            for slot_id, slot in ((config or {}).get("slots") or {}).items():
+                if isinstance(slot, dict) and "commands" in slot:
+                    raise DatapackError(f"setup '{self.setup_file}': configuration '{config_id}', slot "
+                                        f"'{slot_id}': 'commands' {GONE}")
+        rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "slot_types"}),
+                    "slot_types": {
+                        type_id: keys.render_data(type_def, where=f"slot_types.{type_id}") if isinstance(type_def, dict)
                         else type_def
-                        for type_id, type_def in (raw.get("component_types") or {}).items()}}
+                        for type_id, type_def in (raw.get("slot_types") or {}).items()}}
         setup = _validate(Setup, rendered, f"setup '{self.setup_file}'")
         if testdef.setup_config not in setup.configurations:
             raise DatapackError(f"no configuration '{testdef.setup_config}' in setup '{self.setup_file}' "
                                 f"(available: {', '.join(setup.configurations)})")
         return setup
 
-    def generate_components(self, setup: Setup, testdef: Testdef, keys: Keys) -> dict:
+    def generate_slots(self, setup: Setup, testdef: Testdef, keys: Keys) -> dict:
         _info(Fore.GREEN + f"\n *** [2] Generating files for setup '{setup.id}' in configuration '{testdef.setup_config}' ***")
         setup_dir = self.setup_file.parent
         components = {}
-        configured = setup.configurations[testdef.setup_config].components
+        configured = setup.configurations[testdef.setup_config].slots
         for comp_id, component in configured.items():
             unknown = [n for n in component.needs if n not in configured]
             if unknown:
-                raise DatapackError(f"component '{comp_id}' needs unknown component(s) {', '.join(unknown)}")
+                raise DatapackError(f"slot '{comp_id}' needs unknown slot(s) {', '.join(unknown)}")
         try:
             order = list(graphlib.TopologicalSorter({c: comp.needs for c, comp in configured.items()}).static_order())
         except graphlib.CycleError as e:
-            raise DatapackError(f"components needing each other: {' -> '.join(e.args[1])}") from e
+            raise DatapackError(f"slots needing each other: {' -> '.join(e.args[1])}") from e
         order.sort(key=lambda c: (_depth(c, configured), list(configured).index(c)))
         for comp_id in order:
             component = configured[comp_id]
-            if component.type not in setup.component_types:
-                raise DatapackError(f"component '{comp_id}': no component type '{component.type}' in setup '{self.setup_file}'")
-            comp_type = setup.component_types[component.type]
+            if component.type not in setup.slot_types:
+                raise DatapackError(f"slot '{comp_id}': no slot type '{component.type}' in setup '{self.setup_file}'")
+            comp_type = setup.slot_types[component.type]
             if component.configuration not in comp_type.configurations:
-                raise DatapackError(f"component '{comp_id}': no configuration '{component.configuration}' for type "
+                raise DatapackError(f"slot '{comp_id}': no configuration '{component.configuration}' for type "
                                     f"'{component.type}' (available: {', '.join(comp_type.configurations)})")
             _info("\n" + Fore.LIGHTBLUE_EX + f"[{comp_id}] " + Fore.LIGHTBLACK_EX + f"{component.type} / {component.configuration}")
 
@@ -491,14 +495,14 @@ class _Builder:
             def read_input(path: str, comp_id=comp_id, component=component, data_dir=self.work / "data") -> str:
                 other = path.split("/", 1)[0]
                 if other not in component.needs:
-                    raise DatapackError(f"component '{comp_id}': read_input('{path}'): '{other}' is not in its needs")
+                    raise DatapackError(f"slot '{comp_id}': read_input('{path}'): '{other}' is not in its needs")
                 file = (data_dir / other / "input" / path.split("/", 1)[-1]).resolve()
                 if not file.is_relative_to((data_dir / other / "input").resolve()) or not file.is_file():
-                    raise DatapackError(f"component '{comp_id}': read_input('{path}'): no such generated input")
+                    raise DatapackError(f"slot '{comp_id}': read_input('{path}'): no such generated input")
                 return file.read_text(encoding="utf-8")
             comp_keys = {"id": comp_id, "name": component.name, "type": component.type,
                          "configuration": component.configuration, "input_dir": input_dir.as_posix()}
-            extra = {"component": comp_keys, "components": needed, "read_input": read_input}
+            extra = {"slot": comp_keys, "slots": needed, "read_input": read_input}
             inputs = []
             for number, input_file in enumerate(comp_type.configurations[component.configuration].inputs, 1):
                 problem = _input_problem(input_file.source, input_file.target, input_dir)
@@ -510,7 +514,7 @@ class _Builder:
                     problem = next((f"input '{input_file.source}': '{s}' holds the datapack being generated"
                                     for s in sources if self.work.resolve().is_relative_to(s.resolve())), None)
                 if problem:
-                    problem = f"component '{comp_id}', input {number}: {problem}"
+                    problem = f"slot '{comp_id}', input {number}: {problem}"
                     if not self.lenient:
                         raise DatapackError(problem)
                     _warn(problem + ": skipped")
@@ -531,22 +535,22 @@ class _Builder:
                         try:
                             with keys.tracking() as read:
                                 tracked = run_generator(input_file.generator, source, destination, keys.root,
-                                                        input_file.options, {**comp_keys, "components": needed},
+                                                        input_file.options, {**comp_keys, "slots": needed},
                                                         setup_dir, keys.resolve_all)
                         except GeneratorError as e:
-                            raise DatapackError(f"component '{comp_id}': {e}") from e
+                            raise DatapackError(f"slot '{comp_id}': {e}") from e
                         if tracked:
                             used[destination.relative_to(input_dir).as_posix()] = read
                     elif input_file.method == "copy":
                         try:
                             _copy(source, destination)
                         except OSError as e:
-                            raise DatapackError(f"component '{comp_id}': copy of '{source}' failed: {e}") from e
+                            raise DatapackError(f"slot '{comp_id}': copy of '{source}' failed: {e}") from e
                     else:
                         try:
                             rendered = keys.render_tree(source, destination, [self.testdef_dir, setup_dir], extra)
                         except TemplateError as e:
-                            raise DatapackError(f"component '{comp_id}': {e}") from e
+                            raise DatapackError(f"slot '{comp_id}': {e}") from e
                         prefix = destination.relative_to(input_dir)
                         used.update({(prefix / name if source.is_dir() else prefix.parent / name).as_posix(): k
                                      for name, k in rendered.items()})
@@ -555,7 +559,7 @@ class _Builder:
                     try:
                         run_processor(spec, target, setup_dir)
                     except ProcessorError as e:
-                        raise DatapackError(f"component '{comp_id}': {e}") from e
+                        raise DatapackError(f"slot '{comp_id}': {e}") from e
                 inputs.append({"source": input_file.source, "target": input_file.target, "method": input_file.method,
                                **({"generator": input_file.generator} if input_file.generator else {}),
                                "files": [s.as_posix() for s in sources],
@@ -657,7 +661,7 @@ class _Builder:
         except TemplateError as e:
             raise DatapackError(str(e)) from e
 
-        components = self.generate_components(setup, testdef, keys)
+        components = self.generate_slots(setup, testdef, keys)
 
         _info(Fore.GREEN + "\n *** [3] Packaging ***\n")
         if output_dir is None:
@@ -681,7 +685,7 @@ class _Builder:
             "setup": {"id": setup.id, "name": setup.name, "configuration": testdef.setup_config,
                       "file": self.setup_file.as_posix(), "git": self.setup_git},
             "datasets": self.datasets,
-            "components": components,
+            "slots": components,
             **({"skipped": self.skipped} if self.skipped else {}),
         })
         baseline = self.baseline(name, components, testdef_git)

@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
-from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalComponent, phase_components
+from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
 from testsuit.sequencer.transports import Result, Transport
 from testsuit.sequencer.library import Resolved
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
@@ -74,12 +74,12 @@ def worst(verdicts) -> str:
 
 
 @dataclass
-class BoundComponent:
-    """A logical component of the datapack bound to a concrete lab component."""
-    logical: LogicalComponent
+class BoundSlot:
+    """A slot of the datapack bound to a lab component."""
+    logical: LogicalSlot
     concrete: Component
     stage: Stage | None
-    logical_stage: str
+    realm: str                                    # its realm, '' for an ad hoc slot
     resolved: Resolved
     transport: Transport
     root: str = ""                                # remote root, '~' resolved
@@ -113,20 +113,25 @@ class BoundComponent:
         return [(self.transport, self.pid_dir(run_id))] + [
             (transport, f"{root}/.tsq/{run_id}/{self.concrete.id}") for _, transport, root in self.vias.values()]
 
-    def keys(self, state: str = "unknown") -> dict:
+    def keys(self) -> dict:
+        """The ``slot`` key: the datapack's slot, and the lab component it is bound to."""
         return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "type": self.logical.type,
-                "extends": self.concrete.extends, "host": self.concrete.host, "concrete": self.concrete.id,
-                "label": self.concrete.label, "stage": self.logical_stage,
-                "concrete_stage": self.stage.id if self.stage else "", "role": self.logical.role,
-                "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root,
-                "vars": self.concrete.vars_in(self.stage), "state": state}
+                "role": self.logical.role, "realm": self.realm, "component": self.concrete.id,
+                "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root}
+
+    def component_keys(self, state: str = "unknown") -> dict:
+        """The ``component`` key: the lab component the slot is bound to (its id is the lab id)."""
+        return {"id": self.concrete.id, "host": self.concrete.host, "label": self.concrete.label,
+                "role": self.concrete.role, "extends": self.concrete.extends, "slot": self.logical.id,
+                "stage": self.stage.id if self.stage else "", "vars": self.concrete.vars_in(self.stage),
+                "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root, "state": state}
 
 
 @dataclass
 class StepRecord:
     phase: str
     id: str                                       # namespaced id
-    component: str = ""                           # one for_each item, '' for the whole step
+    slot: str = ""                                # one for_each item, '' for the whole step
     state: str = "pending"                        # pending ready running succeeded failed error skipped
     reason: str = ""
     started: str = ""
@@ -137,7 +142,7 @@ class StepRecord:
 
     @property
     def key(self) -> str:
-        return f"{self.phase}:{self.id}" + (f"[{self.component}]" if self.component else "")
+        return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
@@ -153,8 +158,8 @@ class RunContext:
     run_id: str
     bag: Path                                     # run folder: the unpacked datapack
     datapack: Any                                 # intake.Datapack
-    bound: dict[str, BoundComponent]              # logical component id -> bound component
-    stage_binding: dict[str, str]                 # logical stage -> concrete stage id
+    bound: dict[str, BoundSlot]                   # slot id -> bound slot
+    realm_binding: dict[str, str]                 # realm -> lab stage id
     priority: int = 50
     notify: Callable[[str, dict], None] = lambda kind, data: None
     state_of: Callable[[str], Any] | None = None  # async (concrete id) -> probed state, from the monitor
@@ -174,13 +179,13 @@ class RunContext:
     def lock_for(self, concrete: str) -> asyncio.Lock:
         return self._locks.setdefault(concrete, asyncio.Lock())
 
-    def keys(self, phase: str, params: dict | None = None, component: BoundComponent | None = None) -> dict:
+    def keys(self, phase: str, params: dict | None = None, slot: BoundSlot | None = None) -> dict:
         keys = dict(self.datapack.context)
         keys.update({
             "run": {"id": self.run_id, "dir": str(self.bag), "priority": self.priority},
             "phase": {"id": phase},
-            "components": {c.id: c.keys() for c in self.bound.values()},
-            "stages": {s: {"id": c, "logical": s} for s, c in self.stage_binding.items()},
+            "slots": {c.id: c.keys() for c in self.bound.values()},
+            "realms": {r: {"id": r, "stage": s} for r, s in self.realm_binding.items()},
             "params": params or {},
             "succeeded": lambda step: self.verdict_of(phase, step) == SUCCEEDED,
             "failed": lambda step: self.verdict_of(phase, step) == FAILED,
@@ -189,11 +194,11 @@ class RunContext:
             "verdict": lambda step: self.verdict_of(phase, step),
         })
         if self.lab is not None:
-            keys.update(self.lab.lab_keys(component.concrete if component else None,
-                                          component.stage if component else None))
-        if component is not None:
-            keys["component"] = component.keys()
-            keys["remote_root"] = component.root
+            keys.update(self.lab.lab_keys(slot.concrete if slot else None, slot.stage if slot else None))
+        if slot is not None:
+            keys["slot"] = slot.keys()
+            keys["component"] = slot.component_keys()
+            keys["remote_root"] = slot.root
         return keys
 
     def verdict_of(self, phase: str, step: str) -> str:
@@ -215,15 +220,15 @@ class RunContext:
 # ── step execution ─────────────────────────────────────────────────────────
 
 class StepRunner:
-    """Executes one flat step of a phase, for one component or none."""
+    """Executes one flat step of a phase, for one slot or none."""
 
-    def __init__(self, ctx: RunContext, phase: FlatPhase, fs: FlatStep, component: BoundComponent | None,
+    def __init__(self, ctx: RunContext, phase: FlatPhase, fs: FlatStep, slot: BoundSlot | None,
                  record: StepRecord):
-        self.ctx, self.phase, self.fs, self.step, self.component, self.record = ctx, phase, fs, fs.step, component, record
+        self.ctx, self.phase, self.fs, self.step, self.slot, self.record = ctx, phase, fs, fs.step, slot, record
         self.phase_id = phase.phase.id
         log_dir = ctx.bag / "logs" / self.phase_id
         log_dir.mkdir(parents=True, exist_ok=True)
-        self.log_path = log_dir / (fs.id + (f"[{component.id}]" if component else "") + ".log")
+        self.log_path = log_dir / (fs.id + (f"[{slot.id}]" if slot else "") + ".log")
         record.log = self.log_path.relative_to(ctx.bag).as_posix()
         self._log = open(self.log_path, "ab")
 
@@ -242,12 +247,12 @@ class StepRunner:
 
     @property
     def pidfile(self) -> str | None:
-        if self.component is None:
+        if self.slot is None:
             return None
-        return f"{self.component.pid_dir(self.ctx.run_id)}/{self.fs.id}.pid"
+        return f"{self.slot.pid_dir(self.ctx.run_id)}/{self.fs.id}.pid"
 
     def keys(self) -> dict:
-        return self.ctx.keys(self.phase_id, self.fs.params, self.component)
+        return self.ctx.keys(self.phase_id, self.fs.params, self.slot)
 
     async def execute(self) -> tuple[str, str]:
         """(verdict, reason) of the step, retries included."""
@@ -292,12 +297,12 @@ class StepRunner:
             return ERROR, str(e)
 
     def command(self, name: str) -> dict:
-        if self.component is None:
-            raise SequencerError(f"step '{self.fs.id}': 'do: {name}' needs a component")
-        spec = self.component.resolved.commands.get(name)
+        if self.slot is None:
+            raise SequencerError(f"step '{self.fs.id}': 'do: {name}' needs a slot")
+        spec = self.slot.resolved.commands.get(name)
         if spec is None:
-            raise SequencerError(f"component '{self.component.id}' (role {self.component.concrete.role}) has no "
-                                 f"command '{name}' (has: {', '.join(sorted(self.component.resolved.commands)) or 'none'})")
+            raise SequencerError(f"slot '{self.slot.id}' (lab component {self.slot.concrete.id}, role {self.slot.concrete.role}) has no "
+                                 f"command '{name}' (has: {', '.join(sorted(self.slot.resolved.commands)) or 'none'})")
         return dict(spec)
 
     async def command_spec(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
@@ -330,8 +335,8 @@ class StepRunner:
             expect = step.expect if step.expect is not None else spec.get("expect")
             if on is not None:
                 via, transport, root = on
-                pidfile = f"{root}/.tsq/{self.ctx.run_id}/{self.component.concrete.id}/{self.fs.id}.pid"
-                self.note(f"through {via.id} ({via.host}), for {self.component.concrete.id}")
+                pidfile = f"{root}/.tsq/{self.ctx.run_id}/{self.slot.concrete.id}/{self.fs.id}.pid"
+                self.note(f"through {via.id} ({via.host}), for {self.slot.concrete.id}")
                 return await self.shell(str(command), env, timeout, detach, expect, (transport, pidfile))
             return await self.shell(str(command), env, timeout, detach, expect)
         for name, value in spec.items():
@@ -349,22 +354,22 @@ class StepRunner:
         py = dict(spec["python"])
         code = py.pop("code", None)                # inline code is Python, not a template
         py = render(py, keys, self.fs.id)
-        local = self.ctx.bag / ".tsq" / self.ctx.run_id / "python" / (self.fs.id + (f"[{self.component.id}]" if self.component else ""))
+        local = self.ctx.bag / ".tsq" / self.ctx.run_id / "python" / (self.fs.id + (f"[{self.slot.id}]" if self.slot else ""))
         local.mkdir(parents=True, exist_ok=True)
         (local / "keys.json").write_text(json.dumps(_plain(keys), indent=1, default=str), encoding="utf-8")
         (local / "tsq_python.py").write_text(PYTHON_WRAPPER, encoding="utf-8")
         if code is not None:
             (local / "step.py").write_text(str(code), encoding="utf-8")
-        if self.component is None:                 # on the sequencer host: the daemon's interpreter by default
+        if self.slot is None:                 # on the sequencer host: the daemon's interpreter by default
             folder = str(local)
             interpreter = str(py.get("interpreter") or sys.executable)
         else:                                      # on the component: next to the step's pid file
-            folder = f"{self.component.pid_dir(self.ctx.run_id)}/python/{local.name}"
+            folder = f"{self.slot.pid_dir(self.ctx.run_id)}/python/{local.name}"
             try:
-                await self.component.transport.put(local, folder)
+                await self.slot.transport.put(local, folder)
             except Exception as e:
                 return ERROR, f"transport: {e}"
-            interpreter = str(py.get("interpreter") or self.component.concrete.vars.get("tsq_python") or "python3")
+            interpreter = str(py.get("interpreter") or self.slot.concrete.vars.get("tsq_python") or "python3")
         script = f"{folder}/step.py" if code is not None else str(py["script"])
         command = " ".join(shlex.quote(a) for a in [interpreter, f"{folder}/tsq_python.py", script,
                                                     *[str(a) for a in py.get("args") or []]])
@@ -380,9 +385,9 @@ class StepRunner:
 
     def via_place(self, name: str) -> tuple:
         """The component a command's via names, its transport and remote root (bound with the component)."""
-        comp = self.component
+        comp = self.slot
         if comp is None:
-            raise SequencerError(f"step '{self.fs.id}': 'via' needs a component")
+            raise SequencerError(f"step '{self.fs.id}': 'via' needs a slot")
         lab = self.ctx.lab
         if lab is None:
             raise SequencerError(f"step '{self.fs.id}': 'via' needs the lab")
@@ -393,23 +398,23 @@ class StepRunner:
         return comp.vias[via.id]
 
     def transport(self) -> Transport:
-        if self.component is None:
-            raise SequencerError(f"step '{self.fs.id}' needs a component")
-        return self.component.transport
+        if self.slot is None:
+            raise SequencerError(f"step '{self.fs.id}' needs a slot")
+        return self.slot.transport
 
     async def shell(self, command: str, env: dict, timeout: float | None, detach: bool, expect: dict | None,
                     on: tuple[Transport, str] | None = None):
         """on: the transport and pid file to run it with, for a command run through another component."""
         if on is not None:
             transport, pidfile = on
-        elif self.component is None:                 # no component: on the sequencer host, in the run folder
+        elif self.slot is None:                 # no component: on the sequencer host, in the run folder
             from testsuit.sequencer.inventory import Component as _Component
             from testsuit.sequencer.transports.local import LocalTransport
             transport = LocalTransport(_Component("sequencer", {}), str(self.ctx.bag))
             pidfile = str(self.ctx.bag / ".tsq" / self.ctx.run_id / f"{self.fs.id}.pid")
             command = f"cd {shlex.quote(str(self.ctx.bag))} && {command}"
         else:
-            transport, pidfile = self.component.transport, self.pidfile
+            transport, pidfile = self.slot.transport, self.pidfile
         self.note(f"{'start (detached)' if detach else 'run'} on {transport.host}: {command}")
         if detach:
             try:
@@ -444,9 +449,9 @@ class StepRunner:
         return SUCCEEDED, ""
 
     async def builtin(self, name: str, timeout: float | None) -> tuple[str, str]:
-        comp = self.component
+        comp = self.slot
         if comp is None:
-            raise SequencerError(f"built-in command '{name}' needs a component")
+            raise SequencerError(f"built-in command '{name}' needs a slot")
         local_data = self.ctx.bag / "data" / comp.id
         if name == "deploy":
             self.note(f"deploy {local_data / 'input'} -> {comp.transport.host}:{comp.input_dir}")
@@ -497,7 +502,7 @@ class StepRunner:
 
     def apply_collect_filters(self, target: Path) -> None:
         import fnmatch
-        rules = self.component.resolved.collect or {}
+        rules = self.slot.resolved.collect or {}
         include, exclude = rules.get("include"), rules.get("exclude") or []
         for path in [p for p in target.rglob("*") if p.is_file()]:
             rel = path.relative_to(target).as_posix()
@@ -506,9 +511,9 @@ class StepRunner:
                 path.unlink()
 
     async def signal(self, sig: str, grace: float) -> tuple[str, str]:
-        comp = self.component
+        comp = self.slot
         if comp is None:
-            raise SequencerError("'signal' needs a component")
+            raise SequencerError("'signal' needs a slot")
         places = comp.pid_places(self.ctx.run_id)
         sig = sig.upper().removeprefix("SIG")
         self.note(f"signal {sig} to the processes of {comp.id} on " + " and ".join(t.host for t, _ in places))
@@ -540,9 +545,9 @@ class StepRunner:
         return SUCCEEDED, ""
 
     async def transfer(self, action: str, spec: dict) -> tuple[str, str]:
-        comp = self.component
+        comp = self.slot
         if comp is None or not isinstance(spec, dict) or "from" not in spec or "to" not in spec:
-            raise SequencerError(f"step '{self.fs.id}': '{action}' needs a component, and 'from' and 'to'")
+            raise SequencerError(f"step '{self.fs.id}': '{action}' needs a slot, and 'from' and 'to'")
         try:
             if action == "push":
                 local = (self.ctx.bag / spec["from"]).resolve()
@@ -569,11 +574,13 @@ class StepRunner:
         spec = dict(spec)
         timeout = parse_duration(spec.pop("timeout", None)) or timeout or 60.0
         interval = parse_duration(spec.pop("interval", None)) or 0.5
-        target = self.component
+        target = self.slot
         if "component" in spec:
-            name = spec.pop("component")
+            raise SequencerError("wait_for: 'component' is now 'slot'")
+        if "slot" in spec:
+            name = spec.pop("slot")
             if name not in self.ctx.bound:
-                raise SequencerError(f"wait_for: unknown component '{name}'")
+                raise SequencerError(f"wait_for: unknown slot '{name}'")
             target = self.ctx.bound[name]
         if len(spec) != 1:
             raise SequencerError(f"wait_for: expected one check kind, got {sorted(spec)}")
@@ -595,10 +602,10 @@ class StepRunner:
                 return ERROR, "timeout"
             await asyncio.sleep(min(interval, max(0.05, deadline - time.monotonic())))
 
-    def ready_check(self, kind: str, value: Any, target: BoundComponent | None):
+    def ready_check(self, kind: str, value: Any, target: BoundSlot | None):
         def need_target():
             if target is None:
-                raise SequencerError(f"wait_for {kind} needs a component")
+                raise SequencerError(f"wait_for {kind} needs a slot")
             return target
 
         if kind == "state":
@@ -672,25 +679,25 @@ class StepRunner:
 
 def _targets(ctx: RunContext, flat: FlatPhase, fs: FlatStep, keys: dict) -> list[str | None]:
     step = fs.step
-    held = phase_components(flat.phase, ctx.datapack.needs)
-    if step.component:
-        name = render(step.component, keys, fs.id)
+    held = phase_slots(flat.phase, ctx.datapack.needs)
+    if step.slot:
+        name = render(step.slot, keys, fs.id)
         return [name]
     if step.for_each is None:
         return [None]
     value = render(step.for_each, keys, fs.id)
-    if value == "components":
+    if value == "slots":
         return list(held)
     if isinstance(value, str):
-        by_role = [c for c in held if ctx.datapack.needs.components[c].role == value]
+        by_role = [c for c in held if ctx.datapack.needs.slots[c].role == value]
         if not by_role:
-            raise SequencerError(f"step '{fs.id}': for_each '{value}' matches no component of the phase")
+            raise SequencerError(f"step '{fs.id}': for_each '{value}' matches no slot of the phase")
         return by_role
     if not isinstance(value, list):
-        raise SequencerError(f"step '{fs.id}': for_each must be a list, 'components' or a role")
+        raise SequencerError(f"step '{fs.id}': for_each must be a list, 'slots' or a role")
     outside = [c for c in value if c not in held]
     if outside:
-        raise SequencerError(f"step '{fs.id}': component(s) {outside} outside the phase")
+        raise SequencerError(f"step '{fs.id}': slot(s) {outside} outside the phase")
     return list(value)
 
 
@@ -700,8 +707,8 @@ class PhaseRunner:
         self.ctx, self.flat = ctx, flat
         self.id = flat.phase.id
 
-    def record(self, fs: FlatStep, component: str | None) -> StepRecord:
-        rec = StepRecord(phase=self.id, id=fs.id, component=component or "")
+    def record(self, fs: FlatStep, slot: str | None) -> StepRecord:
+        rec = StepRecord(phase=self.id, id=fs.id, slot=slot or "")
         self.ctx.records[rec.key] = rec
         return rec
 
@@ -760,7 +767,7 @@ class PhaseRunner:
         if target is not None:
             if target not in self.ctx.bound:
                 rec = self.record(fs, target)
-                self.set_state(rec, ERROR, f"component '{target}' is not bound")
+                self.set_state(rec, ERROR, f"slot '{target}' is not bound")
                 return ERROR
             component = self.ctx.bound[target]
         rec = self.record(fs, target)

@@ -57,7 +57,7 @@ The exploit_runner HTML report stays a single file that works offline with plotl
 
 ## Datapacks
 
-The `datapack` command builds the input files of every component of a test setup and packs them in a zip. A test definition names a setup and its configuration; the setup declares data repositories (datasets imported by importers such as `git`), component types with their input files, and configurations listing the components:
+The `datapack` command builds the input files of every slot of a test setup and packs them in a zip. A test definition names a setup and its configuration; the setup declares data repositories (datasets imported by importers such as `git`), slot types with their input files, and configurations listing the slots (each bound at run time to a lab component by the test sequencer):
 
 ```yaml
 # testdef.yml
@@ -68,7 +68,7 @@ setup_config: sim_bench
 dictionaries: [scenario.yml]
 ```
 
-Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<component>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. `examples/toytrain/datapack` is a complete example. The [datapack README](src/testsuit/datatools/datapack/README.md) gives the usage, the file formats and the architecture.
+Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<slot>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. `examples/toytrain/datapack` is a complete example. The [datapack README](src/testsuit/datatools/datapack/README.md) gives the usage, the file formats and the architecture.
 
 ## Repository layout
 

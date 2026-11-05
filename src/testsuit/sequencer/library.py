@@ -1,7 +1,7 @@
 """The lab library (README section 7): lab roles, lab components, and how a component's commands resolve.
 
 - A **lab role** is abstract: the commands a component with that role offers (names and what they do),
-  inheriting those of the role it ``extends``. Datapacks bind their logical components by role, and use
+  inheriting those of the role it ``extends``. Datapacks bind their slots by role, and use
   only the commands of the role.
 - A **lab component** is concrete: it implements commands (``run``, ``signal``, ``wait_for``...), its
   ``status`` probe, its ``selftest`` checks and its transport, inheriting those of the component it

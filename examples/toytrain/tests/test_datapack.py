@@ -82,11 +82,11 @@ def test_sample_datapack(sample_copy, test):
 
     # the sequencer fields are kept as written: the pipeline is rendered at run time
     definition = yaml.safe_load((pack / "definition" / "testdef.yml").read_text())
-    assert definition["pipeline"]["phases"][0]["stages"] == ["train"]
+    assert definition["pipeline"]["phases"][0]["realms"] == ["train"]
     assert "{{ scenario.duration_s }}" in str(definition["pipeline"])
     setup = yaml.safe_load((pack / "definition" / "setup.yml").read_text())
-    assert "{{ component.input_dir }}" in str(definition["pipeline"])          # the exploitation step
-    assert setup["configurations"]["sim_bench"]["components"]["pilot"]["role"] == "pilot"
+    assert "{{ slot.input_dir }}" in str(definition["pipeline"])          # the exploitation step
+    assert setup["configurations"]["sim_bench"]["slots"]["pilot"]["role"] == "pilot"
 
     # second run: the datasets are already there, their version is checked instead
     assert datapack(str(testdef), nocheck=True)
@@ -118,14 +118,14 @@ def test_check_data_step(tmp_path, cut):
 
 
 def test_emulated_datapack(sample_copy):
-    """setup configuration 'emulated': the same components, on loopback addresses of the dev host"""
+    """setup configuration 'emulated': the same slots, on loopback addresses of the dev host"""
     testdef = sample_copy / "datapack" / "testdef" / "front_contact" / "testdef.yml"
     assert verify_datapack(datapack(str(testdef), nocheck=True, setup_config="emulated")) == []
 
     inputs = testdef.parent / ".current_datapack" / "data"
     manifest = yaml.safe_load((testdef.parent / ".current_datapack" / "datapack.yml").read_text())
     assert manifest["setup"]["configuration"] == "emulated"
-    assert sorted(manifest["components"]) == ["acquisition", "analysis", "piezo", "pilot", "propulsion", "telemetry"]
+    assert sorted(manifest["slots"]) == ["acquisition", "analysis", "piezo", "pilot", "propulsion", "telemetry"]
     pilot = yaml.safe_load((inputs / "pilot" / "input" / "pilot.yml").read_text())
     assert pilot["network"]["local_address"] == "127.0.0.10"
     assert pilot["network"]["propulsion"] == {"address": "127.0.0.20", "port": 5000}

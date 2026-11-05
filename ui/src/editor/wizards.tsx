@@ -1,5 +1,5 @@
 // "+ New…" (sequencer README, section 13.2): new files that start from what the lab and the workspace already
-// have, so that a test definition comes with a pipeline that drives the components of its setup.
+// have, so that a test definition comes with a pipeline that drives the slots of its setup.
 import { useMemo, useState } from "react";
 import { Choices, Combo, Dialog, Field, Text, type Choice } from "../fields";
 import { attempt, Markdown, relPath, slug } from "../util";
@@ -10,7 +10,7 @@ type Kind = "testdef" | "setup" | "library" | "subpipelines" | "dictionary" | "t
 
 const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; workspace?: boolean }> = {
   testdef: { label: "Test definition", description: "a test, from a setup configuration, with a starting pipeline", workspace: true },
-  setup: { label: "Setup", description: "the components a family of tests needs and their inputs", workspace: true },
+  setup: { label: "Setup", description: "the slots a family of tests needs and their inputs", workspace: true },
   subpipelines: { label: "Shared sub-pipelines", description: "steps used by several test definitions", workspace: true },
   dictionary: { label: "Key file", description: "keys for the templates and commands", workspace: true },
   template: { label: "Template", description: "an input file rendered with the keys", workspace: true },
@@ -20,33 +20,33 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their
  * needs, wait until they are ready, run, then stop them and collect their outputs in finally. */
 export function starterPipeline(setup: any, configName: string, ctx: any): any {
-  const cfg = setup.configurations[configName] || { stages: {}, components: {} };
+  const cfg = { realms: {}, slots: {}, ...(setup.configurations[configName] || {}) };
   const labRoles = ctx.lab.roles || {};
-  const comps = Object.entries<any>(cfg.components);
-  // the commands of a component: those its lab role offers
-  const has = (id: string, cmd: string) => Object.keys(labRoles[cfg.components[id]?.role || ""]?.commands || {}).includes(cmd);
+  const comps = Object.entries<any>(cfg.slots);
+  // the commands of a slot: those its lab role offers
+  const has = (id: string, cmd: string) => Object.keys(labRoles[cfg.slots[id]?.role || ""]?.commands || {}).includes(cmd);
   const steps: any[] = [];
   const started: Record<string, string> = {};
   const order: string[] = [];
   const visit = (id: string, seen: Set<string>) => {
-    if (order.includes(id) || seen.has(id) || !cfg.components[id]) return;
+    if (order.includes(id) || seen.has(id) || !cfg.slots[id]) return;
     seen.add(id);
-    for (const n of cfg.components[id].needs || []) visit(n, seen);
+    for (const n of cfg.slots[id].needs || []) visit(n, seen);
     order.push(id);
   };
   for (const [id] of comps) visit(id, new Set());
   for (const id of order) {
-    const needs = (cfg.components[id].needs || []).map((n: string) => started[n]).filter(Boolean);
+    const needs = (cfg.slots[id].needs || []).map((n: string) => started[n]).filter(Boolean);
     let last: string | null = null;
     if (has(id, "deploy")) {
-      steps.push({ id: `deploy_${id}`, component: id, do: "deploy" });
+      steps.push({ id: `deploy_${id}`, slot: id, do: "deploy" });
       last = `deploy_${id}`;
     }
     if (has(id, "start")) {
-      steps.push({ id: `start_${id}`, component: id, do: "start", ...((last || needs.length) ? { needs: [...(last ? [last] : []), ...needs] } : {}) });
+      steps.push({ id: `start_${id}`, slot: id, do: "start", ...((last || needs.length) ? { needs: [...(last ? [last] : []), ...needs] } : {}) });
       last = `start_${id}`;
       if (has(id, "ready")) {
-        steps.push({ id: `ready_${id}`, component: id, do: "ready", needs: [last] });
+        steps.push({ id: `ready_${id}`, slot: id, do: "ready", needs: [last] });
         last = `ready_${id}`;
       }
     }
@@ -55,14 +55,14 @@ export function starterPipeline(setup: any, configName: string, ctx: any): any {
   const ends = Object.values(started).filter((s) => !steps.some((x) => (x.needs || []).includes(s)));
   steps.push({ id: "scenario", delay: "60s", ...(ends.length ? { needs: ends } : {}) });
   const fin: any[] = [];
-  for (const id of [...order].reverse()) if (has(id, "stop")) fin.push({ id: `stop_${id}`, component: id, do: "stop" });
+  for (const id of [...order].reverse()) if (has(id, "stop")) fin.push({ id: `stop_${id}`, slot: id, do: "stop" });
   const stops = fin.map((s) => s.id);
-  for (const id of order) if (has(id, "collect")) fin.push({ id: `collect_${id}`, component: id, do: "collect", ...(stops.length ? { needs: stops } : {}) });
+  for (const id of order) if (has(id, "collect")) fin.push({ id: `collect_${id}`, slot: id, do: "collect", ...(stops.length ? { needs: stops } : {}) });
   return {
     phases: [{
       id: "main",
-      ...(Object.keys(cfg.stages).length ? { stages: Object.keys(cfg.stages) } : {}),
-      ...(comps.some(([, c]) => !c.stage) ? { components: comps.filter(([, c]) => !c.stage).map(([id]) => id) } : {}),
+      ...(Object.keys(cfg.realms).length ? { realms: Object.keys(cfg.realms) } : {}),
+      ...(comps.some(([, c]) => !c.realm) ? { slots: comps.filter(([, c]) => !c.realm).map(([id]) => id) } : {}),
       steps, ...(fin.length ? { finally: fin } : {}),
     }],
   };
@@ -109,7 +109,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
         pipeline: starterPipeline(setup, config, ctx),
       };
     } else if (kind === "setup") {
-      data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { stages: {}, components: {} } }, component_types: {} };
+      data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { realms: {}, slots: {} } }, slot_types: {} };
     } else if (kind === "library") data = { roles: {}, components: {} };
     else if (kind === "subpipelines") data = { subpipelines: {} };
     else if (kind === "dictionary") content = `# Keys for the templates and commands: {{ ${slug(id || name || "section")}.example }}\n${slug(id || name || "section")}:\n  example: value\n`;
@@ -119,7 +119,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
   };
 
   const configChoices: Choice[] = Object.entries<any>(setup?.configurations || {}).map(([c, v]) => ({
-    value: c, description: `components ${Object.keys(v.components).join(", ") || "none"}`,
+    value: c, description: `slots ${Object.keys(v.slots || {}).join(", ") || "none"}`,
   }));
   const canCreate = !exists && (kind !== "testdef" || (setup && config && (id || name)));
   return (
@@ -128,14 +128,14 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
       {kind === "testdef" && (
         <>
           {!setups.length && <div className="banner warn">No setup in this session yet: create one first.</div>}
-          <Field label="Setup" help="The test uses one configuration of a setup: its stages and components.">
+          <Field label="Setup" help="The test uses one configuration of a setup: its realms and slots.">
             <Choices value={setupPath} onChange={(v) => {
               setSetupPath(v || "");
               setConfig(Object.keys(setups.find((s) => s.path === v)?.configurations || {})[0] || "");
             }} choices={setups.map((s) => ({ value: s.path, label: s.name || s.id, description: s.path }))} />
           </Field>
           <Field label="Configuration"><Choices value={config} onChange={(v) => setConfig(v || "")} choices={configChoices} /></Field>
-          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stages and components of the configuration: each component is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the components and collects their outputs. Only the commands their lab roles offer are used." />
+          <Markdown className="small muted" text="The pipeline starts with one phase that locks the realms and slots of the configuration: each slot is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the slots and collects their outputs. Only the commands their lab roles offer are used." />
         </>
       )}
       {["testdef", "setup", "dictionary"].includes(kind) && (

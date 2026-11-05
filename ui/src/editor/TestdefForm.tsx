@@ -26,7 +26,7 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   }));
   const configChoices: Choice[] = Object.entries<any>(setup?.configurations || {}).map(([name, c]) => ({
     value: name,
-    description: `stages ${Object.entries<any>(c.stages).map(([s, t]) => `${s} (${t})`).join(", ") || "none"} · components ${Object.keys(c.components).join(", ") || "none"}`,
+    description: `realms ${Object.entries<any>(c.realms || {}).map(([s, t]) => `${s} (${t})`).join(", ") || "none"} · slots ${Object.keys(c.slots || {}).join(", ") || "none"}`,
   }));
   const config = setup?.configurations?.[data.setup_config];
   const dictChoices: Choice[] = files.filter((f) => f.kind === "dictionary").map((f) => ({ value: relPath(doc.path, f.path), description: f.path }));
@@ -42,7 +42,7 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         <Field label="Name" help={help("name")}><Text value={data.name} onChange={(v) => set("name", v)} /></Field>
         <Field label="Description" help={help("description")} wide><Text multiline value={data.description} onChange={(v) => set("description", v)} /></Field>
       </Section>
-      <Section title="Setup" help="The setup says which stages and components the test needs; the configuration picks one of its sets.">
+      <Section title="Setup" help="The setup says which realms and slots the test needs; the configuration picks one of its sets.">
         <Field label="Setup file" help={help("setup_file")} error={data.setup_file && !setup ? "no setup at this path in the session" : null}>
           <Combo mono value={data.setup_file} onChange={(v) => set("setup_file", v)} choices={setupChoices} strict
             onPick={(v) => {
@@ -61,13 +61,13 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         </Field>
         {config && (
           <table className="grid compact">
-            <thead><tr><th>Component</th><th>Datapack type</th><th>Configuration</th><th>Stage</th><th>Role</th><th>Needs</th></tr></thead>
+            <thead><tr><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Realm</th><th>Role</th><th>Needs</th></tr></thead>
             <tbody>
-              {Object.entries<any>(config.components).map(([id, c]) => (
+              {Object.entries<any>(config.slots || {}).map(([id, c]) => (
                 <tr key={id}>
                   <td><code>{id}</code> <span className="muted small">{c.name}</span></td>
                   <td>{c.type}</td><td>{c.configuration}</td>
-                  <td>{c.stage ? `${c.stage} (${config.stages[c.stage] || "?"})` : <span className="muted">ad hoc</span>}</td>
+                  <td>{c.realm ? `${c.realm} (${config.realms?.[c.realm] || "?"})` : <span className="muted">ad hoc</span>}</td>
                   <td>{c.role}</td><td className="small">{(c.needs || []).join(", ")}</td>
                 </tr>
               ))}

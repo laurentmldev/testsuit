@@ -151,13 +151,13 @@ function ActiveCard({ run }: { run: any }) {
         <Badge value={run.state} />
       </div>
       <div className="muted small">{run.id} · priority {run.priority} · started {ago(run.activated_at)} · {duration(run.activated_at)}</div>
-      {run.binding && <div className="small">on {Object.values(run.binding.stages || {}).join(", ")} {Object.values(run.binding.components || {}).length} components</div>}
+      {run.binding && <div className="small">on {Object.values(run.binding.realms || run.binding.stages || {}).join(", ")} {Object.values(run.binding.slots || run.binding.components || {}).length} slots</div>}
       {steps.length > 0 && (
         <div className="progress" title={`${done} of ${steps.length} steps ended`}>
           <div style={{ width: `${(100 * done) / steps.length}%` }} />
         </div>
       )}
-      {runningSteps.length > 0 && <div className="small">now: {runningSteps.map((s) => `${s.phase}:${s.id}${s.component ? `[${s.component}]` : ""}`).join(", ")}</div>}
+      {runningSteps.length > 0 && <div className="small">now: {runningSteps.map((s) => `${s.phase}:${s.id}${(s.slot ?? s.component) ? `[${s.slot ?? s.component}]` : ""}`).join(", ")}</div>}
       <div className="card-actions">
         <button className="small" onClick={() => abort(run, "cancel")}>Cancel</button>
         <button className="small danger" onClick={() => abort(run, "kill")}>Kill</button>

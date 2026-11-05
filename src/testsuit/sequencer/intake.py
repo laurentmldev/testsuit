@@ -98,20 +98,20 @@ def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
     """What the lab cannot provide: stage types, roles, component types, commands used by the pipeline."""
     problems = []
     inv = lab.inventory
-    for logical_stage, stage_type in datapack.needs.stages.items():
+    for realm, stage_type in datapack.needs.realms.items():
         stages = inv.stages_of_type(stage_type)
         if not stages:
-            problems.append(f"no stage of type '{stage_type}' in the lab (logical stage '{logical_stage}')")
+            problems.append(f"no stage of type '{stage_type}' in the lab (realm '{realm}')")
             continue
-        for comp in datapack.needs.in_stage(logical_stage):
-            if not any(inv.component_in(s, comp.role) for s in stages):
-                problems.append(f"component '{comp.id}': no component with role '{comp.role}' in the "
+        for slot in datapack.needs.in_realm(realm):
+            if not any(inv.component_in(s, slot.role) for s in stages):
+                problems.append(f"slot '{slot.id}': no component with role '{slot.role}' in the "
                                 f"'{stage_type}' stages ({', '.join(s.id for s in stages)})")
-    for comp in datapack.needs.components.values():
-        if comp.role not in lab.library.roles:
-            problems.append(f"component '{comp.id}': role '{comp.role}' is not a role of the lab")
-        if not comp.stage and not [c for c in inv.adhoc if c.role == comp.role]:
-            problems.append(f"component '{comp.id}': no ad hoc component with role '{comp.role}' in the lab")
-        if comp.type and comp.type not in datapack.needs.component_types:
-            problems.append(f"component '{comp.id}': type '{comp.type}' not in the setup's component types")
+    for slot in datapack.needs.slots.values():
+        if slot.role not in lab.library.roles:
+            problems.append(f"slot '{slot.id}': role '{slot.role}' is not a role of the lab")
+        if not slot.realm and not [c for c in inv.adhoc if c.role == slot.role]:
+            problems.append(f"slot '{slot.id}': no ad hoc component with role '{slot.role}' in the lab")
+        if slot.type and slot.type not in datapack.needs.slot_types:
+            problems.append(f"slot '{slot.id}': type '{slot.type}' not in the setup's slot types")
     return problems
