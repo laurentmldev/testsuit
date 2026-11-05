@@ -79,21 +79,21 @@ export function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 12) : id;
 }
 
-// ── light Markdown: `code`, **bold**, lists, code blocks, paragraphs ────────────────
+// ── light Markdown: `code`, **bold**, [links](https://…), lists, code blocks, paragraphs ──
 
 function inline(text: string, key: number): ReactNode {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"])/g);
   return (
     <Fragment key={key}>
-      {parts.map((p, i) =>
-        p.startsWith("`") && p.endsWith("`") && p.length > 1 ? (
-          <code key={i}>{p.slice(1, -1)}</code>
-        ) : p.startsWith("**") && p.endsWith("**") ? (
-          <strong key={i}>{p.slice(2, -2)}</strong>
-        ) : (
-          p
-        ),
-      )}
+      {parts.map((p, i) => {
+        if (p.startsWith("`") && p.endsWith("`") && p.length > 1) return <code key={i}>{p.slice(1, -1)}</code>;
+        if (p.startsWith("**") && p.endsWith("**") && p.length > 4) return <strong key={i}>{p.slice(2, -2)}</strong>;
+        const md = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(p);
+        const href = md ? md[2] : /^https?:\/\//.test(p) ? p : null;
+        if (href && /^(https?:|mailto:)/i.test(href))   // only web and mail links: never javascript: or the like
+          return <a key={i} href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{md ? md[1] : p}</a>;
+        return p;
+      })}
     </Fragment>
   );
 }
