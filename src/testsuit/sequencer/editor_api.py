@@ -124,7 +124,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.post("/edit/sessions/{sid}/synthesis")
     async def synthesis(sid: str, body: dict):
         return await run(editor.synthesis, session(sid), str(body["testdef"]), body.get("setup_config"),
-                         bool(body.get("versions", True)))
+                         bool(body.get("versions", True)), bool(body.get("run_checks", True)))
+
+    @app.post("/edit/sessions/{sid}/run_problems")
+    async def run_problems(sid: str, body: dict):
+        """The pipeline and lab checks of a test definition (the last of the checks before generating)."""
+        return {"problems": await run(editor.run_problems, session(sid), str(body["testdef"]), body.get("setup_config"))}
 
     @app.post("/edit/sessions/{sid}/versions")
     async def versions(sid: str, body: dict):

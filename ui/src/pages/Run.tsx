@@ -6,7 +6,7 @@ import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
 import { ago, Badge, classes, duration, setQuery, STATE_COLORS, time } from "../util";
-import { abort, ACTIVE, PriorityInput } from "./Queue";
+import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
 
@@ -226,6 +226,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
         {live && <button onClick={() => abort(r, "cancel")}>Cancel</button>}
         {live && <button className="danger" onClick={() => abort(r, "kill")}>Kill</button>}
+        {["done", "cancelled"].includes(r.state) && <button title="Clean its outputs and put the datapack back in the queue" onClick={() => repost(r).then(() => { run.refresh(); pipeline.refresh(); })}>Re-post</button>}
         {r.results && <a className="button" href={url(`runs/${r.id}/files/results.zip?results=true`)}>Results zip</a>}
       </div>
       <div className="run-facts">

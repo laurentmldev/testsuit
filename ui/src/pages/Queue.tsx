@@ -29,6 +29,11 @@ export async function abort(run: any, mode: "cancel" | "kill") {
   await attempt(() => post(`runs/${run.id}/${mode}`), `${mode} requested for ${run.id}`);
 }
 
+export async function repost(run: any) {
+  if (!window.confirm(`Post run ${run.id} again? Its outputs (run folder, results zip) are removed and the datapack goes back to the queue.`)) return;
+  await attempt(() => post(`runs/${run.id}/repost`), `run ${run.id} back in the queue`);
+}
+
 function PostDialog({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [baseline, setBaseline] = useState<File | null>(null);

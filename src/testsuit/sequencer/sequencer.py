@@ -283,6 +283,39 @@ class Sequencer:
         self.wake()
         return self.store.get_run(run["id"])
 
+    def repost(self, run_id: str) -> dict:
+        """Queue an ended run again, same run id: its outputs (run folder, results) are removed and its
+        datapack unpacked afresh from the posted zip."""
+        run = self.require_run(run_id)
+        if run["state"] not in DONE_STATES or run["id"] in self.executions:
+            raise SequencerError(f"run {run['id']} is {run['state']}: only an ended run can be posted again")
+        incoming = Path(run["zip"] or "")
+        if not incoming.is_file():
+            raise SequencerError(f"run {run['id']}: its datapack zip is gone, post the datapack again")
+        runs = self.config.storage_path("runs")
+        run_dir, fresh = runs / run["id"], runs / f".{run['id']}.repost"
+        shutil.rmtree(fresh, ignore_errors=True)
+        try:                                                  # unpacked and checked aside: a refusal keeps the old run
+            bag = unpack(incoming, fresh)
+            problems = check_against_lab(load_datapack(bag), self.lab)
+            if problems:
+                raise SequencerError("the lab cannot run this datapack:\n  " + "\n  ".join(problems))
+        except Exception:
+            shutil.rmtree(fresh, ignore_errors=True)
+            raise
+        shutil.rmtree(run_dir, ignore_errors=True)
+        shutil.rmtree(self.config.storage_path("results") / run["id"], ignore_errors=True)
+        fresh.rename(run_dir)
+        self.store.release(run["id"])
+        self.store.update_run(run["id"], state="queued", verdict=None, reason=None, submitted_at=now(),
+                              activated_at=None, ended_at=None, waiting_for=None, attempts=0, binding=None,
+                              phase=None, results=None, warnings=None, steps=None, abort=None,
+                              dir=str(run_dir / bag.name), local=int(self.local), owner=OWNER)
+        self.notify("run", {"run": run["id"], "state": "queued", "name": run["name"], "priority": run["priority"],
+                            "conform": bool(run["conform"]), "reposted": True})
+        self.wake()
+        return self.store.get_run(run["id"])
+
     def require_run(self, run_id: str) -> dict:
         run = self.store.get_run(run_id)
         if run is None:

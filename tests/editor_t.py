@@ -233,6 +233,9 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert listed["versions"] == ["v1.10.0", "v1.9.0", "main"] and listed["error"] is None
     found = editor.synthesis(session, "testdef/count/testdef.yml")
     assert not found["baseline"][0]["versions_pending"]                 # listed less than a minute ago: kept
+    # the checks before generating, one at a time: the same problems as the synthesis in one go
+    split = editor.synthesis(session, "testdef/count/testdef.yml", versions=False, run_checks=False)["problems"]
+    assert split + editor.run_problems(session, "testdef/count/testdef.yml") == found["problems"]
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
     assert "dut" in {c["id"] for c in found["components"]}
     assert any(i["files"] for c in found["components"] for i in c["inputs"])

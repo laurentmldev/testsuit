@@ -68,6 +68,7 @@ tsq show <run>                                # state, binding, verdict, every s
 tsq logs <run>                                # steps and their logs; one log: tsq logs <run> --step test_run:up.start_tm -f
 tsq cancel <run>                              # stop commands, then kill, then finally (collect)
 tsq kill <run>                                # kill at once, then finally
+tsq repost <run>                              # an ended run back in the queue, its outputs cleaned
 ```
 
 **Without a daemon** (one datapack in the foreground, same storage and locks):
@@ -986,6 +987,7 @@ During the run, the outputs are already in the run folder as they are collected,
   - `kill -KILL -<pgid>` for each pid file kills whole process trees, even when the ssh session is gone, and a group is alive while `ps` lists a member that is not a zombie;
   - it needs nothing on the target but a POSIX shell, `setsid` and `ps`; a component that prefers systemd units overrides `start` and `kill`.
 - **Other lab components** override `kill`: stop the propulsion controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
+- **`tsq repost <run>`** (or Re-post in the run view of the UI): an ended run (done or cancelled) goes back to the queue under the same run id, with the same priority. Its outputs are removed (the run folder and the results zip) and the datapack is unpacked again from the zip that was posted, after the same check against the lab as a new post.
 - **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <stage | component>` is the audited manual escape hatch.
 
 ## 12. Extension points
@@ -1014,7 +1016,7 @@ tsq validate <datapack.zip | testdef.yml> [--lab lab.yml]   # resources, pipelin
 tsq run <datapack.zip> --local                              # no daemon: dev mode, foreground
 tsq queue                                                   # waiting runs, priorities, what they wait for
 tsq runs [--state running] | tsq show <run> | tsq logs <run> [--step S] [-f]
-tsq cancel <run> | tsq kill <run>
+tsq cancel <run> | tsq kill <run> | tsq repost <run>
 tsq stages | tsq components                                 # monitored state, lock state, holder
 tsq hold | release | maintenance | resume <stage | component>
 tsq selftest [<stage | component>]                          # platform self-test on demand (section 7.6)
@@ -1026,7 +1028,7 @@ tsq config                                                  # settings in use, a
 `--wait` returns the run verdict as exit code (0 succeeded, 1 failed, 2 error), and `--follow` streams the logs: what scripts and CI need.
 
 **REST API** (FastAPI, OpenAPI generated):
-- `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill`, `GET /runs/{id}/logs/{step}`;
+- `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill|repost`, `GET /runs/{id}/logs/{step}`;
 - `GET /stages`, `GET /components`, `POST /stages/{id}|/components/{id}/hold|release|maintenance|resume`;
 - `GET /components/{id}/probe` (the last probe's report: what was tested, on which host and transport, each command and its answer, the rule that matched and why, plus the last self-test), `POST /components/{id}/probe` (probe now, and return the new report);
 - `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
@@ -1050,7 +1052,7 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 | Post a datapack | upload a zip, set its priority and an optional expected baseline; see at once whether it is valid, conform, and which stage types it waits for |
 | Manage and monitor components | stages and components with their monitored state, lock state and holder, self-test results, history of state changes; hold, release, maintenance, resume and self-test buttons. Clicking a component's state opens its probe report: what was tested (probe kind, host, transport, each command), the system's answer and exit status, the state rules with the one that matched, why the state is what it is (a failed self-test keeping it broken, with the failed checks, their command and answer), and a *Probe again* button |
 | Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
-| Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs; cancel and kill |
+| Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs; cancel and kill, re-post an ended run |
 | Access a datapack's contents | before the run (queued: inputs, definition, keys, baseline), during the run (inputs, outputs collected so far, logs) and after it (the results datapack): a file tree with viewers for text, YAML, CSV and logs, and downloads for the rest, large files included |
 
 ### 13.2 Editor mode
