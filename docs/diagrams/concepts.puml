@@ -1,0 +1,53 @@
+@startuml concepts
+!pragma layout smetana
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #9A9A9A
+  FontColor #333333
+}
+skinparam card {
+  BorderColor #3A78C2
+  BackgroundColor #DCE9FA
+  FontColor #1F4E8C
+}
+skinparam frame {
+  BorderColor #9A9A9A
+  FontColor #555555
+}
+
+rectangle "**Datapack** (tests side): what a test needs" as dp #FFFFFF {
+  frame "**realm** train\nasks for stage type //toytrain//" as realm {
+    card "**slot** pilot\nrole //pilot//\nslot type pilot_app" as s_pilot
+    card "**slot** telemetry\nrole //telemetry//\nslot type telemetry_app" as s_tm
+  }
+  card "**ad hoc slot** propulsion\nrole //propulsion_sim//" as s_prop
+}
+
+rectangle "**Lab roles**: what a component is for" as roles #FFFFFF {
+  rectangle "//pilot//\ndeploy, start, ready,\nstop, collect, install..." as r_pilot #F2F2F2
+  rectangle "//telemetry//\ndeploy, start, ready..." as r_tm #F2F2F2
+  rectangle "//propulsion_sim//\ndeploy, start, stop..." as r_prop #F2F2F2
+}
+
+rectangle "**Lab** (lab side): what exists" as lab #FFFFFF {
+  frame "**stage** train_1\nstage type //toytrain//" as stage {
+    card "**component** CALC-Pilot\nrole //pilot//\nextends //arduino_unoq//" as c_pilot
+    card "**component** CALC-TM\nrole //telemetry//\nextends //rpi5//" as c_tm
+  }
+  card "**ad hoc component** sim_propulsion\nrole //propulsion_sim//, on lab-srv" as c_prop
+}
+
+s_pilot -[#3A78C2,bold]-> c_pilot : bound at run start\n(same role)
+s_tm -[#3A78C2,bold]-> c_tm
+s_prop -[#3A78C2,bold]-> c_prop
+realm .[#3A78C2,bold].> stage : bound and locked\n(same stage type)
+
+s_pilot -[#999999,dashed]-> r_pilot : role
+r_pilot <-[#999999,dashed]- c_pilot : implements\nits commands
+s_tm -[#999999,dashed]-> r_tm
+r_tm <-[#999999,dashed]- c_tm
+s_prop -[#999999,dashed]-> r_prop
+r_prop <-[#999999,dashed]- c_prop
+@enduml

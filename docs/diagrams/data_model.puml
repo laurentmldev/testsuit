@@ -46,13 +46,13 @@ package "Tests side (tests repositories, test authors)" as testside {
   class "Test definition\n(testdef.yml)" as TestDef #DCE9FA;line:3A78C2;line.bold;text:1F4E8C
   class "Setup file" as Setup
   class "Setup configuration" as SetupConf #DCE9FA;line:3A78C2;line.bold;text:1F4E8C
-  class "Logical stage" as LStage {
+  class "Realm" as LStage {
     stage type
   }
-  class "Logical component" as LComp #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
+  class "Slot" as LComp #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
     role
   }
-  class "Datapack component type" as DpType {
+  class "Slot type" as DpType {
     inputs (template, copy, generate)
   }
   class "Dictionary" as Dict {

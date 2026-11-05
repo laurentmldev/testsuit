@@ -11,7 +11,7 @@ component "web UI\n(Queue, Runs, Lab, Editor)" as ui
 package "sequencer daemon (tsqd)" {
   component "Intake\n(zip, verify, validate)" as intake
   component "Queue\n(priority, FIFO)" as queue
-  component "Scheduler\n(bind logical stages and\nad hoc components, lock)" as sched
+  component "Scheduler\n(bind realms and\nad hoc slots, lock)" as sched
   component "Run engine\n(pipeline DAG, phases,\nsteps, finally, kill)" as engine
   component "Executors\n(run, push, pull,\nwait, delay...)" as exec
   component "Transports\n(ssh, local, plugins)" as transports
