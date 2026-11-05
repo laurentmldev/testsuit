@@ -123,7 +123,14 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.post("/edit/sessions/{sid}/synthesis")
     async def synthesis(sid: str, body: dict):
-        return await run(editor.synthesis, session(sid), str(body["testdef"]), body.get("setup_config"))
+        return await run(editor.synthesis, session(sid), str(body["testdef"]), body.get("setup_config"),
+                         bool(body.get("versions", True)))
+
+    @app.post("/edit/sessions/{sid}/versions")
+    async def versions(sid: str, body: dict):
+        """The versions an importer lists at a source (the baseline of the Datapacks page, one source at a time)."""
+        session(sid)
+        return await run(editor.versions, str(body.get("importer", "")), str(body.get("source", "")))
 
     @app.post("/edit/sessions/{sid}/datasets")
     async def datasets(sid: str, body: dict):

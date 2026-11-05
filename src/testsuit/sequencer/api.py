@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 
 from testsuit.sequencer.logbuffer import install as install_log_buffer
 from testsuit.sequencer.sequencer import Sequencer
-from testsuit.sequencer.util import SequencerError
+from testsuit.sequencer.util import SequencerError, parse_duration
 
 STEP_FILES = ("datapack.yml", "context.yml", "baseline.yml", "run.yml", "selftest.yml")
 
@@ -253,6 +253,24 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         if name not in seq.lab.inventory.components:
             raise HTTPException(404, f"no component '{name}'")
         return probe_report(name)
+
+    @app.get("/components/{name}/commands")
+    async def component_commands(name: str):
+        """The commands of a component, which of them can be run by hand, and whether it is in maintenance."""
+        if name not in seq.lab.inventory.components:
+            raise HTTPException(404, f"no component '{name}'")
+        return await seq.manual_commands(name)
+
+    @app.post("/components/{name}/commands/{command}")
+    async def run_component_command(name: str, command: str, body: dict | None = None):
+        """Run one command of a component in maintenance, by hand (README section 7.6)."""
+        if name not in seq.lab.inventory.components:
+            raise HTTPException(404, f"no component '{name}'")
+        timeout = (body or {}).get("timeout")
+        try:
+            return await seq.manual_command(name, command, parse_duration(timeout) if timeout else None)
+        except SequencerError as e:
+            raise HTTPException(409, str(e)) from e
 
     def resource_action(kind: str):
         async def endpoint(name: str, action: str, body: dict | None = None):

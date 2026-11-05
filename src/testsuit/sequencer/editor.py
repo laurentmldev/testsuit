@@ -1204,10 +1204,12 @@ class Editor:
 
     # ── Datapacks page: what a test definition is made of, its baseline ──
 
-    def synthesis(self, session: EditSession, testdef_rel: str, setup_config: str | None = None) -> dict:
+    def synthesis(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
+                  versions: bool = True) -> dict:
         """A test definition at a glance: the logical configuration of its setup, the inputs of each
         component, its dictionaries with their keys, and the datasets of its baseline with the versions
-        their importer offers."""
+        their importer offers. versions=False: only the versions already listed less than a minute ago,
+        the others marked ``versions_pending`` (listed then one source at a time: ``versions()``)."""
         from testsuit.datatools.datapack.datapack_tools import _find_sources
         from testsuit.datatools.datapack.templating import TemplateError
         try:
@@ -1271,7 +1273,7 @@ class Editor:
                              "overridden_by": shown(origin) if origin and origin != path.as_posix() else None})
             dictionaries.append({"layer": layer, "path": shown(path), "keys": rows})
 
-        baseline = self._datasets(session, builder, raw, keys, shown, render)
+        baseline = self._datasets(session, builder, raw, keys, shown, render, versions)
         ids = {d["id"] for d in baseline}
         problems = []
         if config not in (raw.get("configurations") or {}):
@@ -1305,6 +1307,19 @@ class Editor:
                 "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
+
+    def _versions_cached(self, importer_name: str, source: str) -> bool:
+        import time
+        cached = self._version_cache.get((importer_name, source))
+        return bool(cached) and time.monotonic() - cached[0] < 60
+
+    def versions(self, importer_name: str, source: str) -> dict:
+        """The versions an importer lists at a source, and how long that took (the Datapacks page, one
+        source at a time, after the rest of the synthesis)."""
+        import time
+        started = time.monotonic()
+        versions, error = self._versions(importer_name, source)
+        return {"versions": versions, "error": error, "seconds": round(time.monotonic() - started, 2)}
 
     def _versions(self, importer_name: str, source: str) -> tuple[list[str] | None, str | None]:
         """Versions an importer lists at a source (kept a minute: the forms ask again at each change)."""
@@ -1340,7 +1355,8 @@ class Editor:
         return {"testdef": testdef_rel, "testdefs": testdefs, "setup_config": found["testdef"]["setup_config"],
                 "datasets": found["baseline"], "error": None}
 
-    def _datasets(self, session: EditSession, builder, raw: dict, keys, shown, render) -> list[dict]:
+    def _datasets(self, session: EditSession, builder, raw: dict, keys, shown, render,
+                  list_versions: bool = True) -> list[dict]:
         from testsuit.datatools.datapack.datapack_tools import _expand, normalize_dataset_path
         datasets = []
         for r, repo in enumerate(raw.get("datarepositories") or []):
@@ -1353,7 +1369,8 @@ class Editor:
                     source = local.as_posix() if local.exists() else source
                 if source.startswith("/"):
                     source = os.path.normpath(source)
-                versions, error = self._versions(str(src.get("importer", "")), source)
+                pending = not list_versions and not self._versions_cached(str(src.get("importer", "")), source)
+                versions, error = (None, None) if pending else self._versions(str(src.get("importer", "")), source)
                 for d, ds in enumerate(src.get("datasets") or []):
                     if not isinstance(ds, dict):
                         continue
@@ -1375,7 +1392,7 @@ class Editor:
                                      "written": written, "version": version, "key": key,
                                      "defined_in": shown(origin) if origin.startswith("/") else origin or None,
                                      "editable": editable, "at": [r, s, d],
-                                     "versions": versions, "versions_error": error})
+                                     "versions": versions, "versions_error": error, "versions_pending": pending})
         return datasets
 
     def set_version(self, session: EditSession, testdef_rel: str, dataset: str, version: str,
