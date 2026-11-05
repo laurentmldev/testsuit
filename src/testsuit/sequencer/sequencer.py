@@ -25,7 +25,7 @@ from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPE
 from testsuit.sequencer.intake import Datapack, check_against_lab, load_datapack, unpack
 from testsuit.sequencer.lab import Lab, checkout, load_lab, pull_lab
 from testsuit.sequencer.model import FlatStep, Step
-from testsuit.sequencer.monitor import Monitor, selftest_component
+from testsuit.sequencer.monitor import Monitor, component_keys, selftest_component
 from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resources, find_binding, order_queue)
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport
@@ -367,6 +367,103 @@ class Sequencer:
             self.store.set_selftest_failed(comp_id, None)
             self.notify("selftest", {"target": comp_id, "ok": True})
             await self.monitor.probe(comp_id)               # back to its probed state now
+        return result
+
+    # ── commands run by hand, on a component in maintenance ─────────────
+    MANUAL_KINDS = ("run", "signal", "builtin kill")
+
+    def _in_maintenance(self, comp_id: str) -> bool:
+        resources = self.store.resources()
+        comp = self.lab.inventory.components[comp_id]
+        return any((resources.get(key) or {}).get("maintenance")
+                   for key in [("component", comp_id), *[("stage", s) for s in comp.stages]])
+
+    def manual_commands(self, comp_id: str) -> dict:
+        """The commands of a component (as the lab resolves them) and whether each can be run by hand."""
+        comp = self.lab.inventory.components[comp_id]
+        stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
+        resolved = self.lab.resolve(comp, stage)
+        commands = []
+        for name, spec in sorted(resolved.commands.items()):
+            spec = dict(spec or {})
+            kind = ("run" if "run" in spec else "signal" if "signal" in spec
+                    else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(spec), "?"))
+            commands.append({"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS})
+        return {"component": comp_id, "maintenance": self._in_maintenance(comp_id),
+                "held_by": [r for r, _ in self.store.holders().get(("component", comp_id), [])],
+                "commands": commands}
+
+    async def manual_command(self, comp_id: str, name: str, timeout: float | None = None) -> dict:
+        """Run one command of a component by hand (README section 7.6): only in maintenance, and not while a run
+        holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no logical component);
+        a detached one is started with its pid file under ``<root>/.tsq/manual/<component>/``, where ``signal``
+        commands and the built-in ``kill`` find the processes started by hand."""
+        info = self.manual_commands(comp_id)
+        if not info["maintenance"]:
+            raise SequencerError(f"component '{comp_id}' is not in maintenance: put it (or its stage) in maintenance "
+                                 "to run its commands by hand")
+        if info["held_by"]:
+            raise SequencerError(f"component '{comp_id}' is held by run(s) {', '.join(info['held_by'])}")
+        command = next((c for c in info["commands"] if c["name"] == name), None)
+        if command is None:
+            raise SequencerError(f"component '{comp_id}' has no command '{name}' "
+                                 f"(has: {', '.join(c['name'] for c in info['commands']) or 'none'})")
+        if not command["manual"]:
+            raise SequencerError(f"'{name}' is a {command['kind']} command: only run and signal commands, and the "
+                                 "built-in kill, can be run by hand (deploy and collect need a datapack)")
+        comp = self.lab.inventory.components[comp_id]
+        stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
+        spec = command["spec"]
+        transport = self.transport_for(comp_id)
+        result: dict = {"component": comp_id, "command": name, "kind": command["kind"], "at": now()}
+        try:
+            root = await transport.resolve_root()
+        except Exception as e:
+            return {**result, "ok": False, "error": f"cannot reach {comp.host}: {e}"}
+        manual_dir = f"{root}/.tsq/manual/{comp_id}"
+        started = time.monotonic()
+        if command["kind"] != "run":                   # signal, kill: the processes started by hand
+            sig = "KILL" if command["kind"] == "builtin kill" else str(spec["signal"])
+            places = [(transport, manual_dir)]         # on the component, and on what its commands run through
+            for via in {v.id: v for v in self.lab.command_vias(comp, stage).values()}.values():
+                other = self.transport_for(via.id)
+                places.append((other, f"{await other.resolve_root()}/.tsq/manual/{comp_id}"))
+            alive = []
+            for place, folder in places:
+                alive += await place.alive_in(folder)
+                await place.signal_dir(folder, sig)
+            result.update(ok=True, run=f"kill -{sig} on the processes started by hand",
+                          output="\n".join(alive) or "no process started by hand is running")
+        else:
+            via = None
+            if spec.get("via"):
+                via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
+                transport = self.transport_for(via.id)
+                manual_dir = f"{await transport.resolve_root()}/.tsq/manual/{comp_id}"
+            keys = component_keys(comp, root, via, self.lab)
+            keys["component"].update(name=comp.id, type=comp.role)
+            text = str(render(spec["run"], keys, f"{comp_id}.{name}"))
+            env = {str(k): str(v) for k, v in (render(spec.get("env") or {}, keys, f"{comp_id}.{name}") or {}).items()}
+            if timeout is None and spec.get("timeout") is not None:
+                timeout = parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
+            await transport.shell(f"mkdir -p {shlex.quote(manual_dir)}", timeout=15)
+            pidfile = f"{manual_dir}/{name}.pid"
+            result.update(run=text, via=via.id if via else None, on=via.host if via else comp.host)
+            if spec.get("detach"):
+                process = await transport.start(text, env=env, pidfile=pidfile)
+                try:
+                    done = await process.wait(2.0)
+                    result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
+                except asyncio.TimeoutError:
+                    result.update(ok=True, detached=True, output=process.text(),
+                                  detail="started, still running (stop it with a signal command or kill)")
+            else:
+                done = await transport.run(text, env=env, timeout=timeout or 300, pidfile=pidfile)
+                result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
+        result["duration"] = round(time.monotonic() - started, 3)
+        self.notify("manual_command", {"component": comp_id, "command": name, "ok": result["ok"],
+                                       "audit": "run by hand, in maintenance"})
+        log.info("manual command %s of %s: %s", name, comp_id, "ok" if result["ok"] else "failed")
         return result
 
     # ── restart recovery and housekeeping ───────────────────────────────

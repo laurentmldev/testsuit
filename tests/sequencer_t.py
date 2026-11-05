@@ -714,6 +714,46 @@ def test_commands_via(tmp_path, no_git):
         bench.sequencer()
 
 
+def test_manual_command(tmp_path, no_git):
+    """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
+    from testsuit.sequencer.util import SequencerError
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["commands"]["start"] = {"run": "sleep 30", "detach": True}
+    types["components"]["counter_host"]["commands"]["check"] = {"run": "echo host={{ component.host }}; exit 3"}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        out = {}
+        try:
+            await seq.manual_command("counter_1", "version")
+        except SequencerError as e:
+            out["refused"] = str(e)
+        seq.set_flag("counter_1", "maintenance", True)
+        listed = seq.manual_commands("counter_1")
+        out["manual"] = {c["name"]: c["manual"] for c in listed["commands"]}
+        out["version"] = await seq.manual_command("counter_1", "version")
+        out["check"] = await seq.manual_command("counter_1", "check")
+        out["start"] = await seq.manual_command("counter_1", "start")
+        out["stop"] = await seq.manual_command("counter_1", "stop")
+        try:
+            await seq.manual_command("counter_1", "ready")
+        except SequencerError as e:
+            out["ready"] = str(e)
+        await seq.close()
+        return out
+    out = asyncio.run(main())
+    assert "not in maintenance" in out["refused"]
+    assert out["manual"]["version"] and out["manual"]["stop"] and not out["manual"]["ready"]
+    assert out["version"]["ok"] and "counter-1.2.0" in out["version"]["output"]
+    assert out["check"]["ok"] is False and out["check"]["exit"] == 3 and "host=" in out["check"]["output"]
+    assert out["start"]["ok"] and out["start"]["detached"]
+    assert out["stop"]["ok"] and "start.pid" in out["stop"]["output"]
+    assert "can be run by hand" in out["ready"]
+
+
 def test_maintenance_blocks(bench):
     async def main():
         seq = bench.sequencer()

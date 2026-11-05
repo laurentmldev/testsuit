@@ -12,9 +12,10 @@ const ACTION_HELP: Record<string, string> = {
   resume: "Back in scheduling (clears hold and maintenance).",
   release: "Free its locks now, held by a run that is gone (after a crash). A live run keeps running.",
   selftest: "Run the platform self-test now: reachability, remote root, disk, clock and the type's own checks.",
+  commands: "Run one of its commands by hand (start, stop, a check…): only in maintenance, while no run holds it.",
 };
 
-function Actions({ kind, item, onDone, onSelftest }: { kind: "stages" | "components"; item: any; onDone: () => void; onSelftest: (name: string) => void }) {
+function Actions({ kind, item, onDone, onSelftest, onCommands }: { kind: "stages" | "components"; item: any; onDone: () => void; onSelftest: (name: string) => void; onCommands?: () => void }) {
   const act = async (action: string) => {
     let note = "";
     if (action === "hold" || action === "maintenance") {
@@ -34,7 +35,54 @@ function Actions({ kind, item, onDone, onSelftest }: { kind: "stages" | "compone
       {off && <button className="small primary" title={ACTION_HELP.resume} onClick={() => act("resume")}>Resume</button>}
       {item.holders?.length > 0 && <button className="small" title={ACTION_HELP.release} onClick={() => act("release")}>Release</button>}
       <button className="small" title={ACTION_HELP.selftest} onClick={() => onSelftest(item.id)}>Self-test</button>
+      {onCommands && <button className="small" title={ACTION_HELP.commands} onClick={onCommands}>Commands…</button>}
     </div>
+  );
+}
+
+/** The commands of a component in maintenance, each run by hand, with what it did (README section 7.6). */
+function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const labelOf = useLabels();
+  const [info, setInfo] = useState<any>(null);
+  const [running, setRunning] = useState<string | null>(null);
+  const [results, setResults] = useState<any[]>([]);
+  useEffect(() => { attempt(() => get(`components/${id}/commands`)).then(setInfo); }, [id]);
+  const run = async (name: string) => {
+    setRunning(name);
+    const r = await attempt(() => post(`components/${id}/commands/${name}`, {}), `${id}: ${name}`);
+    setRunning(null);
+    if (r) setResults((all) => [r, ...all]);
+  };
+  const blocked = info && (!info.maintenance ? "not in maintenance" : info.held_by?.length ? `held by ${info.held_by.join(", ")}` : null);
+  return (
+    <Dialog title={`Commands of ${labelOf(id)}`} onClose={onClose} wide>
+      <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params). A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
+      {!info ? <p className="muted">Reading its commands…</p> : (
+        <>
+          {blocked && <div className="error-box">Cannot run its commands: {blocked}.</div>}
+          <table className="grid compact">
+            <tbody>
+              {info.commands.map((c: any) => (
+                <tr key={c.name}>
+                  <td><code>{c.name}</code></td>
+                  <td className="small mono">{c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
+                  <td>{c.manual
+                    ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
+                    : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {results.map((r, i) => (
+            <div key={i} className="manual-result">
+              <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> on {r.on || labelOf(id)}{r.via && <> (through {r.via})</>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
+              {r.run && <pre className="small">$ {r.run}</pre>}
+              {(r.output || r.error || r.detail) && <pre className="small">{[r.output, r.error && `error: ${r.error}`, r.detail].filter(Boolean).join("\n")}</pre>}
+            </div>
+          ))}
+        </>
+      )}
+    </Dialog>
   );
 }
 
@@ -206,6 +254,8 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const [logs, setLogs] = useState(false);
   const [probing, setProbing] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
+  const [commands, setCommands] = useState<string | null>(null);
+  const stageById: Record<string, any> = Object.fromEntries((stages.data || []).map((s) => [s.id, s]));
   // "probed 3s ago" kept true: redrawn every second, the components read again after each probe (events),
   // and every component probed when the page opens
   const [, setTick] = useState(0);
@@ -250,7 +300,8 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <div className="muted small" title={time(c.probed_at)}>{c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>
       <td><Holders item={c} /></td>
-      <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest} /></td>
+      <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest}
+        onCommands={c.maintenance || (c.stages || []).some((st: string) => stageById[st]?.maintenance) ? () => setCommands(c.id) : undefined} /></td>
     </tr>
   );
   const head = <thead><tr><th>Component</th><th>Role</th><th>Extends</th><th>Host</th><th>State</th><th>Lock</th><th>Held by</th><th /></tr></thead>;
@@ -293,6 +344,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         setDetails(null);
         refresh();
       }} />}
+      {commands && <CommandsDialog id={commands} onClose={() => setCommands(null)} />}
       {selftest !== undefined && <SelftestDialog target={selftest} onClose={() => {
         setSelftest(undefined);
         refresh();

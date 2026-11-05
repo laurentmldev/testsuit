@@ -689,6 +689,16 @@ components:
 - A component whose self-test failed **stays** `broken` (or `offline`) even when its probe says it is healthy, until a self-test passes. Its detail tells which check failed.
 - With `selftest.when_idle` (default `true`), a self-test also runs when a component becomes `idle` (it was offline, broken, running...), except for a component an active run holds. A component kept broken by its self-test is tested again when its probe says it is idle, at most once a minute, and comes back once a test passes.
 
+### 7.7 Commands run by hand, in maintenance
+
+A component in maintenance (or in a stage in maintenance) can have its commands run by hand, to check or fix it. Use the **Commands…** button on the Lab page, or `GET /components/<id>/commands` and `POST /components/<id>/commands/<command>`. It is refused while a run holds the component.
+
+- **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, logical components), so a command that needs one does not render. A command with `via` runs through that component.
+- **A detached command** (`detach: true`, such as `start`) keeps running. Its pid file goes under `<root>/.tsq/manual/<component>/`.
+- **`signal` commands and the built-in `kill`** stop the processes started by hand there.
+- **Other commands** (`deploy`, `collect`, `wait_for`, `python`) need a run, and are not offered.
+- **Each command run by hand** is recorded as a `manual_command` event, which is kept for audit.
+
 ## 8. Datapack side: resources needed and pipeline
 
 ### 8.1 Resources a datapack needs
