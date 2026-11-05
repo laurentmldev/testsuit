@@ -17,7 +17,7 @@ dp --> user : <testdef>_<date>.zip (BagIt)
 user -> cli : tsq submit pack.zip --priority 70 --follow
 cli -> intake : POST /runs (zip, priority)
 intake -> intake : verify checksums, unzip to runs/<id>/
-intake -> intake : validate against the lab inventory\n(stage types, roles, types, commands)
+intake -> intake : validate against the lab inventory\n(stage types, roles, slot types, commands)
 alt invalid
   intake --> cli : 400 + problems
 else valid

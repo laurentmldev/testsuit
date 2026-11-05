@@ -1,6 +1,6 @@
 # sequencer: architecture overview
 
-The sequencer runs real tests on a lab made of components (computers, switches, clocks...), grouped in **stages**. It takes a **datapack**, the zip built by the `datapack` tool, and queues it by priority. When the stages and components the datapack needs are free, it locks them and runs the datapack's **pipeline**:
+The sequencer runs real tests on a lab made of components (computers, switches, clocks...), grouped in **stages**. It takes a **datapack**, the zip built by the `datapack` tool, and queues it by priority. The datapack asks for **slots** (by role) grouped in **realms** (by stage type): when a stage and components matching them are free, the sequencer binds and locks them, then runs the datapack's **pipeline**:
 1. deploy the slot inputs on the lab components bound to the slots;
 2. start the components, in parallel or waiting for each other;
 3. feed the system;
@@ -17,9 +17,7 @@ A sample configuration, a toy train on a one-stage lab with a simulated environm
 
 **Keys.** [Section 8.5](#85-keys-overview) lists the template keys available at generation, in pipeline steps and in lab commands.
 
-**Data model.** The lab side describes what the lab is made of; the tests side describes what a test needs and does; a run binds the second to the first when it activates a datapack. The essentials are in blue: a run activates a datapack built from a test definition, whose setup configuration lists slots, each bound by role to a lab component (a realm groups slots bound in one lab stage); the lab role lists the commands, the lab component implements them. The technical details are in grey ([Vocabulary](#2-vocabulary) defines each term):
-
-![Data model: lab side, tests side and runs](../../../docs/diagrams/data_model.svg)
+**Where to start.** [Section 2](#2-user-manual) is the user manual: the key concepts, then what to do for each use case. The data model is in [section 4.3](#43-data-model).
 
 ## Cheat sheet
 
@@ -117,7 +115,7 @@ The example's release store only holds placeholders of the toy-train application
 
 Contents:
 1. [Functional requirements](#1-functional-requirements)
-2. [Vocabulary](#2-vocabulary)
+2. [User manual](#2-user-manual)
 3. [Principles](#3-principles)
 4. [Overview](#4-overview)
 5. [Datapack generation refinements](#5-datapack-generation-refinements)
@@ -139,23 +137,40 @@ Contents:
 
 What the product shall do, gathered from the specifications discussed so far. The last column points to the section of this document that answers each requirement.
 
-### 1.1 Datapack generation
+### 1.1 Main use cases
+
+Who does what with the sequencer. [Section 2.2](#22-use-cases-step-by-step) says how to do each one.
+
+| Id | Use case | Who | Requirements |
+|---|---|---|---|
+| UC-1 | **Describe the lab**: its stages, components, roles and lab components, in a git repository | lab operator | SQ-5, SQ-6, SQ-9, SQ-15, SQ-25 |
+| UC-2 | **Monitor and maintain the lab**: states, self-test, maintenance and hold, commands by hand, reload | lab operator | SQ-10, SQ-11, SQ-23, SQ-26 |
+| UC-3 | **Define a test**: the slots and realms it needs, their inputs, and the pipeline that runs it | test author | DG-1, DG-2, DG-3, SQ-12 to SQ-16, SQ-28, SQ-32 |
+| UC-4 | **Build and check a datapack**: generate it, verify it, check its baseline and validate it against the lab | test author | DG-4, DG-5 |
+| UC-5 | **Run a test and follow it**: post a datapack with a priority, see it queued, bound and running, live | test author, CI job | SQ-1 to SQ-4, SQ-7, SQ-8, SQ-11, SQ-24 |
+| UC-6 | **Stop a run**: cancel or kill it, keeping cleanup and collection, then post it again | test author, lab operator | SQ-17 |
+| UC-7 | **Get the results**: the collected outputs, logs, verdict and conformity, as a results datapack | test author, CI job | SQ-27, DG-5 |
+| UC-8 | **Change the lab or the tests in the Editor**: edit in forms, try, push in one's name | lab operator, test author | SQ-29 |
+| UC-9 | **Run tests from CI**, as a GitLab runner | CI job | SQ-20 |
+| UC-10 | **Try the platform on a dev host**, every component emulated | anyone | SQ-31 |
+
+### 1.2 Datapack generation
 
 The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 templates, self-sufficient BagIt zip), with these refinements:
 
 | Id | Requirement | Section |
 |---|---|---|
-| DG-1 | The definition of each component (its input files) comes from the YAML setup files the datapack tool already reads. These files can be extended to describe the test run (commands, pipeline, stages needed) and still be usable for a plain datapack. | 5, 8 |
-| DG-2 | Generating a component's inputs can involve processing specific to that component, beyond rendering templates and copying files. | 5.1 |
-| DG-3 | A component can need other components' inputs to generate its own. | 5.2 |
+| DG-1 | The definition of each slot (its input files) comes from the YAML setup files the datapack tool already reads. These files can be extended to describe the test run (pipeline, realms and slots needed) and still be usable for a plain datapack. | 5, 8 |
+| DG-2 | Generating a slot's inputs can involve processing specific to that slot, beyond rendering templates and copying files. | 5.1 |
+| DG-3 | A slot can need other slots' inputs to generate its own. | 5.2 |
 | DG-4 | A datapack is self-sufficient: it can be run from its zip contents only (inputs, resolved keys, test definition with its pipeline). | 10 |
 | DG-5 | A datapack carries a **baseline**: where each of its contents comes from (git path, commit and tag of the original inputs, the processing tools and their versions, and, for results, the sequencer and the lab), so that the identity of the produced data can be controlled and checked against an expected baseline. A non-conform datapack is accepted but flagged as such, up to its results. | 5.3, 10 |
 
-### 1.2 Queue and resources
+### 1.3 Queue and resources
 
 | Id | Requirement | Section |
 |---|---|---|
-| SQ-1 | Accept and queue a datapack containing everything about the test to execute: component inputs and the commands pipeline. | 10 |
+| SQ-1 | Accept and queue a datapack containing everything about the test to execute: slot inputs and the commands pipeline. | 10 |
 | SQ-2 | Each datapack in the queue has a priority. Higher priorities are activated first, FIFO within a priority, and the priority of a queued datapack can be changed. | 9 |
 | SQ-3 | When the resources a datapack needs are available, dequeue it and activate it on them. | 9 |
 | SQ-4 | Several datapacks can run at the same time on different stages, for example two datapacks on two stages of the same type. | 9 |
@@ -170,7 +185,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-25 | The folder holding the lab inventory is configurable. The sequencer expects it to be a git clone, and warns when it is not under git or not on a clean tag. | 4.1, 6.1 |
 | SQ-26 | Before each datapack, a platform self-test checks that every component involved can be reached and used properly. | 7.6, 10 |
 
-### 1.3 Pipeline execution
+### 1.4 Pipeline execution
 
 | Id | Requirement | Section |
 |---|---|---|
@@ -185,7 +200,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-32 | A pipeline step, or a command of a lab component, can be a Python script, run on a component or on the sequencer host, with the run's keys available to it. Its result is judged like a shell command's, and an uncaught exception is an `error`. | 8.3 |
 | SQ-24 | Each run ends with a verdict: `succeeded`; `failed` when a command did not give its expected result, typically an unexpected return status; or `error` when a command crashed or could not complete (signal, timeout, unreachable component). | 8.3, 10 |
 
-### 1.4 Interfaces and integration
+### 1.5 Interfaces and integration
 
 | Id | Requirement | Section |
 |---|---|---|
@@ -198,7 +213,58 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-21 | Simple and modular, built on well-known open-source languages and libraries. | 3, 14 |
 | SQ-22 | A single-team lab is enough for a first version: no access control in the kernel. | 13 |
 
-## 2. Vocabulary
+## 2. User manual
+
+What to do with the sequencer, in short; the sections after give the details. The commands are those of the [cheat sheet](#cheat-sheet), and the web UI (section 13.1) does the same from its pages.
+
+### 2.1 Key concepts
+
+![Slots and realms of a datapack, bound to the components and stages of the lab, through roles](../../../docs/diagrams/concepts.svg)
+
+Two sides meet when a run starts:
+- **The lab** (lab repository, lab operators) is what exists. A **component** is one element of it: a computer, a switch, a simulator on a server. Components are grouped in **stages**, each of a **stage type** (`toytrain`): a stage is locked as a whole. A component in no stage is **ad hoc**, locked on its own.
+- **Lab roles** say what a component is for, as the **commands** it offers (`deploy`, `start`, `ready`, `stop`, `collect`, `install`...). Every component has one role, and implements its commands through the **lab component** it extends: the kind of hardware or software it is (`arduino_unoq`, `rpi5`, `linux_system`).
+- **The datapack** (tests repositories, test authors) is what a test needs. A **slot** is one thing it needs, by role ("the pilot"); its **slot type** says which input files the slot gets. Slots that must be in one stage are grouped in a **realm**, which asks for a stage type. A slot in no realm is an **ad hoc slot**.
+- **A run** binds each realm to a free stage of its type and each slot to the component of its role there (an ad hoc slot to an ad hoc component of its role), locks them, then runs the **pipeline**: phases of steps, each step running a command of its slot's role on the component bound to it.
+
+A test never names a host: the same datapack runs on any stage of the right type, real or emulated. [Vocabulary](#23-vocabulary) defines every term; [section 4.3](#43-data-model) shows how they relate.
+
+### 2.2 Use cases, step by step
+
+**UC-1 Describe the lab** (lab operator; sections 6 and 7):
+1. In the lab repository, write the inventory: each stage with its stage type and its hosts, and the ad hoc hosts. Give each host its role and the lab component it extends.
+2. Reuse or write the lab roles (`lab/roles/`) and lab components (`lab/components/`): a lab component implements every command of the roles it supports.
+3. Check with `tsq lab status`, or in the Editor's lab session, whose problems list shows what is missing. Push, then `tsq lab reload --pull`.
+
+**UC-2 Monitor and maintain the lab** (lab operator; sections 7.5 to 7.7):
+- Follow the states with `tsq components` or the **Lab** page, and self-test with `tsq selftest [<stage>]`.
+- Take a stage or component out of scheduling with `tsq maintenance <id> --note "..."` (back with `tsq resume <id>`), or keep it for yourself with `tsq hold <id>` (back with `tsq release <id>`).
+- In maintenance, run its commands by hand with **Commands…** on the Lab page.
+
+**UC-3 Define a test** (test author; sections 5 and 8):
+1. In a setup file, write the slot types with their input files (templates, copies, generators), and a setup configuration with its realms and slots, each slot with its role and slot type.
+2. In a test definition, give the setup file and configuration, the dictionaries, and the pipeline: phases that lock realms and ad hoc slots, steps that run a command on a slot, linked by `needs`, with `finally` steps that always run.
+3. In the Editor (workspace session), **Add from the lab** creates the slots for every role of a stage type, the pipeline graph proposes each slot's commands, and the template preview shows a rendered input.
+
+**UC-4 Build and check a datapack** (test author; sections 5 and 8):
+- Build it with `datapack testdef.yml`, or **Generate…** on the **Datapacks** page.
+- Check it with `datapack --verify <zip>` (checksums), `datapack --check-baseline baseline_expected.yml <zip>` (conformity) and `tsq validate <zip>` (binding and every command, against the lab).
+
+**UC-5 Run a test and follow it** (test author; sections 9 and 10):
+- Post it with `tsq submit <zip> --priority 70 --follow`, or from the **Queue** page.
+- See it waiting with `tsq queue` (change its priority with `tsq priority <run> 90`), then running with `tsq show <run>` and `tsq logs <run>`, or on the **Runs** page with its pipeline graph and live logs.
+
+**UC-6 Stop a run** (section 11): `tsq cancel <run>` stops the commands, then kills them; `tsq kill <run>` kills at once. Either way the `finally` steps still run and collect the outputs. `tsq repost <run>` puts an ended run back in the queue.
+
+**UC-7 Get the results** (section 10.1): `tsq files <run>` browses the run folder (`data/<slot>/output/`, logs), and `tsq files <run> --results --get` downloads the results datapack. The verdict is `succeeded`, `failed` or `error`, and a results zip ending in `_NONCONFORM` did not match its expected baseline.
+
+**UC-8 Change the lab or the tests in the Editor** (section 13.2): open a session on the lab or a tests repository, edit in the forms (each with its help and problems), **Generate a datapack** to try the change, then **Review and push…** to commit it in your name.
+
+**UC-9 Run tests from CI** (section 13): a GitLab job builds the datapack and calls `tsq submit --wait --follow`, so the run log becomes the job trace and the verdict the job status.
+
+**UC-10 Try the platform on a dev host** (section 6.2): the toy-train example's emulated lab runs every component as a local process. Follow the [cheat sheet](#cheat-sheet) with `TSQ_CONFIG=tsq.dev.yml`.
+
+### 2.3 Vocabulary
 
 | Term | Meaning |
 |---|---|
@@ -314,25 +380,33 @@ plugins: [toytrain]                    # in addition to the installed entry poin
 
 `tsq config` prints the settings in use, with where each one comes from (file or default).
 
-### 4.2 Main use cases
+### 4.2 Main interactions
 
-**Build a datapack, post it and follow it** (sections 9 and 10, cheat sheet):
+How the parts of section 4 work together in the main use cases of section 1.1.
+
+**Build a datapack, post it and follow it** (UC-4, UC-5; sections 9 and 10):
 
 ![Build a datapack, post it and follow it](../../../docs/diagrams/seq_submit.svg)
 
-**Activate a run and execute its pipeline** (sections 9, 10 and 7.6):
+**Activate a run and execute its pipeline** (UC-5; sections 9, 10 and 7.6):
 
 ![Activate a run and execute its pipeline](../../../docs/diagrams/seq_run.svg)
 
-**Edit the lab or a test definition in the Editor, try it and push it** (section 13.2):
+**Edit the lab or a test definition in the Editor, try it and push it** (UC-8; section 13.2):
 
 ![Edit, try and push in the Editor](../../../docs/diagrams/seq_editor.svg)
 
-**Cancel or kill a run** (section 11):
+**Cancel or kill a run** (UC-6; section 11):
 
 ![Cancel or kill a run](../../../docs/diagrams/seq_cancel.svg)
 
 The figures of this document are PlantUML sources in [docs/diagrams](../../../docs/diagrams/), rendered to SVG with `sh docs/diagrams/render.sh path/to/plantuml.jar`.
+
+### 4.3 Data model
+
+The lab side describes what the lab is made of; the tests side describes what a test needs and does; a run binds the second to the first when it activates a datapack. The essentials are in blue: a run activates a datapack built from a test definition, whose setup configuration lists slots, each bound by role to a lab component (a realm groups slots bound in one lab stage); the lab role lists the commands, the lab component implements them. The technical details are in grey ([Vocabulary](#23-vocabulary) defines each term):
+
+![Data model: lab side, tests side and runs](../../../docs/diagrams/data_model.svg)
 
 ## 5. Datapack generation refinements
 
