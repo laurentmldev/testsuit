@@ -311,6 +311,9 @@ VARS = {
                      "(default `linux_system`).", type="string"),
     "tsq_lock": LOCK,
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
+    "tsq_description": h("What it is, shown in the editor and on the Lab page: in `all.vars`, the lab; on a stage "
+                         "group, the stage; on a host, the component. Not inherited: each level has its own.",
+                         type="string"),
     "tsq_transport": h("How the sequencer talks to the component: `ssh` (default) or `local` (commands run on the "
                        "sequencer host, as the user running it), or a plugin transport.", type="string"),
     "tsq_remote_root": h("Folder on the component under which each logical component gets "

@@ -119,6 +119,9 @@ input.priority { width: 80px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.description { white-space: pre-wrap; color: var(--muted, #666); margin: 2px 0 8px; }
+.lab-description { margin: 0 0 12px; }
+td .description { margin: 2px 0 0; max-width: 40ch; }
 .card-actions, .row-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .row-actions { margin: 0; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin: 6px 0; }
@@ -198,6 +201,10 @@ tr.finally-row td { color: var(--muted); }
 .inline-fields { display: flex; gap: 12px; flex-wrap: wrap; }
 .inline-fields > .field { flex: 1 1 220px; grid-template-columns: 1fr; }
 .inline-fields > .field > label { padding-top: 0; }
+.probe-check { flex-wrap: nowrap; align-items: flex-start; gap: 6px; margin-bottom: 6px; }
+.probe-check > .text-field { flex: 1; }
+.probe-check > span { padding-top: 6px; }
+.probe-check textarea { width: 100%; min-height: 3.4em; resize: vertical; }
 .with-button { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .with-button > .combo, .with-button > input { flex: 1; }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }

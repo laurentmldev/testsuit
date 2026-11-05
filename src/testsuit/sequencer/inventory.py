@@ -49,6 +49,11 @@ class Component:
         return str(self.vars.get("tsq_label", self.id))
 
     @property
+    def description(self) -> str:
+        """Its own ``tsq_description`` (the lab's and its stages' are not inherited)."""
+        return str(self.vars.get("tsq_description") or "")
+
+    @property
     def adhoc(self) -> bool:
         return not self.stages
 
@@ -56,7 +61,7 @@ class Component:
         """Variables of the component as seen in a stage: all < stage group < host."""
         if stage is None:
             return dict(self.vars)
-        return {**self.vars, **{k: v for k, v in stage.vars.items() if k not in self._host_vars}}
+        return {**self.vars, **{k: v for k, v in _own(stage.vars).items() if k not in self._host_vars}}
 
     _host_vars: set = field(default_factory=set, repr=False)
     _role: str = field(default="", repr=False)
@@ -68,6 +73,7 @@ class Stage:
     type: str
     components: list[str]
     vars: dict[str, Any]                         # group variables (tsq_commands included)
+    description: str = ""                        # its own tsq_description (not inherited by its components)
 
     @property
     def commands(self) -> dict[str, Any]:
@@ -80,6 +86,11 @@ class Inventory:
     vars: dict[str, Any]                         # all.vars
     components: dict[str, Component]
     stages: dict[str, Stage]
+
+    @property
+    def description(self) -> str:
+        """``all.vars.tsq_description``: what this lab is."""
+        return str(self.vars.get("tsq_description") or "")
 
     @property
     def library_folders(self) -> list[Path]:
@@ -113,6 +124,12 @@ def _mapping(value: Any, where: str) -> dict:
     return value
 
 
+def _own(variables: dict) -> dict:
+    """Variables as inherited by a sub-group or a host: without the ``tsq_description`` of the level above,
+    each level (the lab, a stage, a component) having its own."""
+    return {k: v for k, v in variables.items() if k != "tsq_description"}
+
+
 def load_inventory(path: Path) -> Inventory:
     """Read an Ansible YAML inventory file."""
     data = load_yaml(path)
@@ -129,13 +146,14 @@ def load_inventory(path: Path) -> Inventory:
         unknown = set(group) - {"vars", "hosts", "children"}
         if unknown:
             raise SequencerError(f"inventory '{path}': unknown keys {sorted(unknown)} in group '{name}'")
-        group_vars = deep_merge(inherited, _mapping(group.get("vars"), f"vars of group '{name}'")) if depth else {}
+        group_vars = deep_merge(_own(inherited), _mapping(group.get("vars"), f"vars of group '{name}'")) if depth else {}
         hosts = _mapping(group.get("hosts"), f"hosts of group '{name}'")
         is_stage = depth > 0 and "tsq_stage_type" in _mapping(group.get("vars"), name)
         if is_stage:
             if name in stage_defs:
                 raise SequencerError(f"inventory '{path}': stage '{name}' defined twice")
-            stage_defs[name] = {"vars": group_vars, "hosts": []}
+            own = _mapping(group.get("vars"), name).get("tsq_description")
+            stage_defs[name] = {"vars": group_vars, "hosts": [], "description": str(own or "")}
         for host, hvars in hosts.items():
             host = str(host)
             host_vars[host] = deep_merge(host_vars.get(host, {}), _mapping(hvars, f"host '{host}'"))
@@ -152,10 +170,10 @@ def load_inventory(path: Path) -> Inventory:
 
     components: dict[str, Component] = {}
     for host, hvars in host_vars.items():
-        merged = dict(root_vars)
+        merged = _own(root_vars)
         for group, gvars in host_groups[host]:
             if group not in stage_defs:                       # plain groups: their variables apply
-                merged = deep_merge(merged, gvars)
+                merged = deep_merge(merged, _own(gvars))
         merged = deep_merge(merged, hvars)
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
@@ -169,6 +187,7 @@ def load_inventory(path: Path) -> Inventory:
                                  f"is not one of {', '.join(LOCK_MODES)}")
         components[host] = component
 
-    stages = {name: Stage(id=name, type=str(d["vars"]["tsq_stage_type"]), components=d["hosts"], vars=d["vars"])
+    stages = {name: Stage(id=name, type=str(d["vars"]["tsq_stage_type"]), components=d["hosts"], vars=d["vars"],
+                          description=d["description"])
               for name, d in stage_defs.items()}
     return Inventory(file=path.resolve(), vars=root_vars, components=components, stages=stages)

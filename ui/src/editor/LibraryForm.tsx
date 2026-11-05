@@ -326,15 +326,16 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
       )}
       {s && (
         <>
-          <Field label={runs.length > 1 ? "Probe commands" : "Probe command"} help={help(["probe"])}
-            hint={runs.length > 1 ? "each one runs and is OK when it exits with 0; the rules match their outputs, one after the other" : null}>
+          <Field label={runs.length > 1 ? "Probe commands" : "Probe command"} help={help(["probe"])} wide
+            hint={runs.length > 1 ? "each check runs and is OK when it exits with 0; the rules match their outputs, one after the other" : "shell command, over several lines if long; + Add a check probes several items, each with its own result"}>
             {runs.map((r, i) => (
-              <div key={i} className="inline-fields">
-                <Text keys mono value={r} onChange={(v) => setRuns(runs.map((x, j) => (j === i ? v : x)))} placeholder={i ? "ping -c 1 -W 1 {{ component.host }}" : "systemctl is-active my-service"} />
+              <div key={i} className="inline-fields probe-check">
+                {runs.length > 1 && <span className="muted small">{i + 1}.</span>}
+                <Text keys mono multiline value={r} onChange={(v) => setRuns(runs.map((x, j) => (j === i ? v : x)))} placeholder={i ? "ping -c 1 -W 1 {{ component.host }}" : "systemctl is-active my-service"} />
                 {runs.length > 1 && <button className="icon" title="Remove this check" onClick={() => setRuns(runs.filter((_, j) => j !== i))}>×</button>}
               </div>
             ))}
-            <button className="small" onClick={() => setRuns([...runs, ""])}>+ check</button>
+            <button className="small" onClick={() => setRuns([...runs, ""])}>+ Add a check</button>
           </Field>
           <Field label="Run it through" help={help(["via"])}
             hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>

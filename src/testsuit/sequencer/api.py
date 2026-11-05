@@ -222,10 +222,10 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             row = {"id": item.id, "maintenance": bool(res.get("maintenance")), "hold": bool(res.get("hold")),
                    "note": res.get("note"), "holders": [{"run": r, "mode": m} for r, m in holders.get((kind, item.id), [])]}
             if kind == "stage":
-                row.update(type=item.type, components=item.components)
+                row.update(type=item.type, components=item.components, description=item.description)
             else:
                 row.update(role=item.role, extends=item.extends, host=item.host, lock=item.lock, stages=item.stages,
-                           label=item.label, adhoc=item.adhoc, state=res.get("state") or "unknown",
+                           label=item.label, description=item.description, adhoc=item.adhoc, state=res.get("state") or "unknown",
                            expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"),
                            selftest_failed=res.get("selftest_failed"))
             rows.append(row)

@@ -466,6 +466,7 @@ all:
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
 - Variables follow Ansible precedence: host over stage group over `all`.
+- `tsq_description` says what an item is, shown in the editor and on the Lab page. It is set at three levels, each separate and not inherited: in `all.vars` it describes the lab, on a stage group the stage, on a host the component. `tsq_label` is the component's short name.
 - `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
 - Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`calc_pilot_1` is a pilot, as `arduino_unoq` supports only that role); when it supports several, `tsq_role` picks one (`rpi5`: telemetry or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Roles are unique within a stage.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.

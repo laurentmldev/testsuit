@@ -242,7 +242,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const git = lab.data?.git;
   const row = (c: any) => (
     <tr key={c.id} className={c.hold || c.maintenance ? "off" : ""}>
-      <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div></td>
+      <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div>{c.description && <div className="small description">{c.description}</div>}</td>
       <td>{c.role}</td>
       <td><code>{c.extends}</code></td>
       <td>{c.host}</td>
@@ -269,6 +269,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}
+      {lab.data?.description && <p className="description lab-description">{lab.data.description}</p>}
       {(stages.data || []).map((s) => (
         <div key={s.id} className="card stage">
           <div className="card-head">
@@ -280,6 +281,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
             <span className="spacer" />
             <Actions kind="stages" item={s} onDone={refresh} onSelftest={setSelftest} />
           </div>
+          {s.description && <p className="description">{s.description}</p>}
           <table className="grid">{head}<tbody>{s.components.map((id: string) => byId[id] && row(byId[id]))}</tbody></table>
         </div>
       ))}
