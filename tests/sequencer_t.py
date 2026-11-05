@@ -732,8 +732,9 @@ def test_manual_command(tmp_path, no_git):
         except SequencerError as e:
             out["refused"] = str(e)
         seq.set_flag("counter_1", "maintenance", True)
-        listed = seq.manual_commands("counter_1")
+        listed = await seq.manual_commands("counter_1")
         out["manual"] = {c["name"]: c["manual"] for c in listed["commands"]}
+        out["segments"] = next(c["segments"] for c in listed["commands"] if c["name"] == "check")
         out["version"] = await seq.manual_command("counter_1", "version")
         out["check"] = await seq.manual_command("counter_1", "check")
         out["start"] = await seq.manual_command("counter_1", "start")
@@ -752,6 +753,8 @@ def test_manual_command(tmp_path, no_git):
     assert out["start"]["ok"] and out["start"]["detached"]
     assert out["stop"]["ok"] and "start.pid" in out["stop"]["output"]
     assert "can be run by hand" in out["ready"]
+    assert [seg["key"] for seg in out["segments"]] == [None, "component.host", None]
+    assert out["segments"][0]["text"] == "echo host=" and out["segments"][1]["text"] == "counter_1"
 
 
 def test_maintenance_blocks(bench):

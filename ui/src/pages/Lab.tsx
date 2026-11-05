@@ -40,6 +40,16 @@ function Actions({ kind, item, onDone, onSelftest, onCommands }: { kind: "stages
   );
 }
 
+/** A command as it will run: each value from a key shows that key (and its template) when pointed at. */
+function Rendered({ segments }: { segments: any[] }) {
+  return (
+    <span className="rendered">
+      {segments.map((seg, i) => seg.key === null && !seg.error ? <span key={i}>{seg.text}</span>
+        : <span key={i} className={seg.error ? "key-value error-text" : "key-value"} title={seg.error ? `{{ ${seg.key ?? ""} }}: ${seg.error}` : `{{ ${seg.key} }}`}>{seg.text}</span>)}
+    </span>
+  );
+}
+
 /** The commands of a component in maintenance, each run by hand, with what it did (README section 7.6). */
 function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const labelOf = useLabels();
@@ -65,7 +75,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               {info.commands.map((c: any) => (
                 <tr key={c.name}>
                   <td><code>{c.name}</code></td>
-                  <td className="small mono">{c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
+                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
                   <td>{c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
                     : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>

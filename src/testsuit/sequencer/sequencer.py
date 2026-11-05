@@ -9,6 +9,7 @@ import asyncio
 import graphlib
 import logging
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -378,17 +379,63 @@ class Sequencer:
         return any((resources.get(key) or {}).get("maintenance")
                    for key in [("component", comp_id), *[("stage", s) for s in comp.stages]])
 
-    def manual_commands(self, comp_id: str) -> dict:
-        """The commands of a component (as the lab resolves them) and whether each can be run by hand."""
+    def _manual_keys(self, comp, stage, root: str, via=None) -> dict:
+        keys = component_keys(comp, root, via, self.lab)
+        keys["component"].update(name=comp.id, type=comp.role)
+        return keys
+
+    @staticmethod
+    def _segments(template: str, keys: dict, where: str) -> list[dict]:
+        """A command as it will run, in pieces: the literal text, and each ``{{ expression }}`` with its value
+        (or why it cannot be rendered), for the Lab page to show the key behind each value."""
+        if "{%" in template:                            # control blocks: the whole, rendered at once
+            try:
+                return [{"text": str(render(template, keys, where)), "key": None}]
+            except SequencerError as e:
+                return [{"text": template, "key": None, "error": str(e)}]
+        segments = []
+        for part in re.split(r"(\{\{.*?\}\})", template, flags=re.DOTALL):
+            if not part:
+                continue
+            if part.startswith("{{"):
+                try:
+                    segments.append({"text": str(render(part, keys, where)), "key": part[2:-2].strip()})
+                except SequencerError as e:
+                    segments.append({"text": part, "key": part[2:-2].strip(), "error": str(e).split(": ", 1)[-1]})
+            else:
+                segments.append({"text": part, "key": None})
+        return segments
+
+    async def manual_commands(self, comp_id: str) -> dict:
+        """The commands of a component (as the lab resolves them), whether each can be run by hand, and each
+        run command as it would run (``segments``: its text, with the key behind each value)."""
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
+
+        async def root_of(cid: str) -> str:
+            transport = self.transport_for(cid)
+            try:
+                return await asyncio.wait_for(transport.resolve_root(), 10)
+            except Exception:
+                return transport._root                  # unreachable now: its root as configured
+        root = await root_of(comp_id)
         commands = []
         for name, spec in sorted(resolved.commands.items()):
             spec = dict(spec or {})
             kind = ("run" if "run" in spec else "signal" if "signal" in spec
                     else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(spec), "?"))
-            commands.append({"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS})
+            entry = {"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS}
+            if kind == "run":
+                via = None
+                if spec.get("via"):
+                    try:
+                        via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
+                    except SequencerError:
+                        pass
+                entry["segments"] = self._segments(str(spec["run"]), self._manual_keys(comp, stage, root, via),
+                                                   f"{comp_id}.{name}")
+            commands.append(entry)
         return {"component": comp_id, "maintenance": self._in_maintenance(comp_id),
                 "held_by": [r for r, _ in self.store.holders().get(("component", comp_id), [])],
                 "commands": commands}
@@ -398,7 +445,7 @@ class Sequencer:
         holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no logical component);
         a detached one is started with its pid file under ``<root>/.tsq/manual/<component>/``, where ``signal``
         commands and the built-in ``kill`` find the processes started by hand."""
-        info = self.manual_commands(comp_id)
+        info = await self.manual_commands(comp_id)
         if not info["maintenance"]:
             raise SequencerError(f"component '{comp_id}' is not in maintenance: put it (or its stage) in maintenance "
                                  "to run its commands by hand")
@@ -440,8 +487,7 @@ class Sequencer:
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
                 transport = self.transport_for(via.id)
                 manual_dir = f"{await transport.resolve_root()}/.tsq/manual/{comp_id}"
-            keys = component_keys(comp, root, via, self.lab)
-            keys["component"].update(name=comp.id, type=comp.role)
+            keys = self._manual_keys(comp, stage, root, via)
             text = str(render(spec["run"], keys, f"{comp_id}.{name}"))
             env = {str(k): str(v) for k, v in (render(spec.get("env") or {}, keys, f"{comp_id}.{name}") or {}).items()}
             if timeout is None and spec.get("timeout") is not None:

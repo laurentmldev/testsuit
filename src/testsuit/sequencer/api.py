@@ -259,7 +259,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         """The commands of a component, which of them can be run by hand, and whether it is in maintenance."""
         if name not in seq.lab.inventory.components:
             raise HTTPException(404, f"no component '{name}'")
-        return seq.manual_commands(name)
+        return await seq.manual_commands(name)
 
     @app.post("/components/{name}/commands/{command}")
     async def run_component_command(name: str, command: str, body: dict | None = None):
