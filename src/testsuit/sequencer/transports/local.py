@@ -21,7 +21,7 @@ class LocalTransport(Transport):
                     pidfile: str | None = None) -> Process:
         full_env = {**os.environ, **{k: str(v) for k, v in (env or {}).items()}}
         proc = await asyncio.create_subprocess_shell(
-            command, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            self.in_shell(command), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT, env=full_env, start_new_session=True, executable="/bin/sh")
         if pidfile:
             Path(pidfile).parent.mkdir(parents=True, exist_ok=True)

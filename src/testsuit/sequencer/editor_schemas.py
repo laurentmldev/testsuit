@@ -327,6 +327,9 @@ VARS = {
                          type="string"),
     "tsq_transport": h("How the sequencer talks to the component: `ssh` (default) or `local` (commands run on the "
                        "sequencer host, as the user running it), or a plugin transport.", type="string"),
+    "tsq_shell": h("The shell commands run under on the component, for example `bash` or `bash -l` (login profile "
+                   "read). Default: `/bin/sh` for steps and commands, the login shell for probes and self-tests.",
+                   type="string", examples=["bash", "bash -l"]),
     "tsq_remote_root": h("Folder on the component under which each logical component gets "
                          "`<root>/<component>/input` and `output`.", type="string", examples=["/opt/testrun"]),
     "tsq_commands": h("Command overrides, by name. On a stage group they apply to every component of the stage; on a "

@@ -1205,6 +1205,39 @@ def test_ssh_transport(tmp_path, ssh_server):
     asyncio.run(main())
 
 
+def test_tsq_shell(tmp_path, ssh_server):
+    """tsq_shell: steps (pid file) and short checks run under the shell named, not /bin/sh."""
+    from testsuit.sequencer.inventory import Component
+    from testsuit.sequencer.transports import create_transport
+    from testsuit.sequencer.util import SequencerError
+    start, key_file = ssh_server
+    probe = 'echo "[${BASH_VERSION:+bash}]"'
+
+    async def main():
+        server = await start()
+        port = server.sockets[0].getsockname()[1]
+        ssh = {"ansible_host": "127.0.0.1", "ansible_port": port, "ansible_user": "tsq",
+               "ansible_ssh_private_key_file": str(key_file), "tsq_ssh_options": {"known_hosts": None}}
+        seen = {}
+        try:
+            for kind, base in (("local", {"ansible_host": "localhost"}), ("ssh", ssh)):
+                for shell in ("", "bash", "/bin/bash -l"):
+                    transport = create_transport(kind, Component("box", {**base, "tsq_shell": shell}), str(tmp_path / "r"))
+                    step = await transport.run(probe, pidfile=f"{tmp_path}/r/.tsq/r1/box/{kind}{len(shell)}.pid")
+                    check = await transport.shell(probe)
+                    seen[(kind, shell)] = (step.output.strip(), check.output.strip())
+                    await transport.close()
+        finally:
+            server.close()
+        return seen
+    seen = asyncio.run(main())
+    for kind in ("local", "ssh"):
+        assert seen[(kind, "")][0] == "[]"                                  # /bin/sh by default for steps
+        assert seen[(kind, "bash")] == seen[(kind, "/bin/bash -l")] == ("[bash]", "[bash]")
+    with pytest.raises(SequencerError, match="is not a shell"):
+        create_transport("local", Component("box", {"ansible_host": "localhost", "tsq_shell": "bash; rm -rf /"}))
+
+
 def test_dead_local_run_recovered(tmp_path, no_git):
     """A tsq run --local that died: the daemon cancels its queued run and releases its locks."""
     from testsuit.sequencer import sequencer as sequencer_module

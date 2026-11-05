@@ -1,8 +1,9 @@
 """The ``ssh`` transport (AsyncSSH): key-based login, SFTP transfers, commands in their own process group.
 
 Host variables used: ``ansible_host``, ``ansible_user``, ``ansible_port``, ``ansible_ssh_private_key_file``,
-and ``tsq_ssh_options`` (extra ``asyncssh.connect`` keyword arguments, for example ``known_hosts: null``).
-Commands run through ``setsid -w`` so that the whole process tree can be killed; the group id is
+and ``tsq_ssh_options`` (extra ``asyncssh.connect`` keyword arguments, for example ``known_hosts: null``),
+``tsq_shell`` (the shell commands run under: ``sh``, the default, for steps and commands; the login shell for
+short checks; with ``tsq_shell``, that shell for both). Commands run through ``setsid -w`` so that the whole process tree can be killed; the group id is
 written to the step's pid file on the component.
 """
 from __future__ import annotations
@@ -84,12 +85,13 @@ class SshTransport(Transport):
                     pidfile: str | None = None) -> Process:
         conn = await self.connection()
         script = env_prefix(env) + command
+        shell = self.shell_command or "sh"                  # the command's shell (tsq_shell); sh by default
         if pidfile:
             folder = posixpath.dirname(pidfile)
-            wrapped = (f"mkdir -p {shlex.quote(folder)} && exec setsid -w sh -c 'echo $$ > \"$0\"; exec sh -c \"$1\"' "
+            wrapped = (f"mkdir -p {shlex.quote(folder)} && exec setsid -w sh -c 'echo $$ > \"$0\"; exec {shell} -c \"$1\"' "
                        f"{shlex.quote(pidfile)} {shlex.quote(script)}")
         else:
-            wrapped = script
+            wrapped = self.in_shell(script)                 # else the login shell runs it
         try:
             proc = await conn.create_process(wrapped, stderr=asyncio.subprocess.STDOUT, encoding=None)
         except Exception as e:
