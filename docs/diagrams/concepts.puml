@@ -18,25 +18,25 @@ skinparam frame {
 }
 
 rectangle "**Datapack** (tests side): what a test needs" as dp #FFFFFF {
-  frame "**realm** train\nasks for stage type //toytrain//" as realm {
-    card "**slot** pilot\nrole //pilot//\nslot type pilot_app" as s_pilot
-    card "**slot** telemetry\nrole //telemetry//\nslot type telemetry_app" as s_tm
+  frame "**realm** bench\nasks for stage type //bench//" as realm {
+    card "**slot** controller\nrole //controller//\nslot type controller_app" as s_pilot
+    card "**slot** logger\nrole //logger//\nslot type logger_app" as s_tm
   }
-  card "**ad hoc slot** propulsion\nrole //propulsion_sim//" as s_prop
+  card "**ad hoc slot** actuator\nrole //actuator_sim//" as s_prop
 }
 
 rectangle "**Lab roles**: what a component is for" as roles #FFFFFF {
-  rectangle "//pilot//\ndeploy, start, ready,\nstop, collect, install..." as r_pilot #F2F2F2
-  rectangle "//telemetry//\ndeploy, start, ready..." as r_tm #F2F2F2
-  rectangle "//propulsion_sim//\ndeploy, start, stop..." as r_prop #F2F2F2
+  rectangle "//controller//\ndeploy, start, ready,\nstop, collect, install..." as r_pilot #F2F2F2
+  rectangle "//logger//\ndeploy, start, ready..." as r_tm #F2F2F2
+  rectangle "//actuator_sim//\ndeploy, start, stop..." as r_prop #F2F2F2
 }
 
 rectangle "**Lab** (lab side): what exists" as lab #FFFFFF {
-  frame "**stage** train_1\nstage type //toytrain//" as stage {
-    card "**component** CALC-Pilot\nrole //pilot//\nextends //arduino_unoq//" as c_pilot
-    card "**component** CALC-TM\nrole //telemetry//\nextends //rpi5//" as c_tm
+  frame "**stage** bench_1\nstage type //bench//" as stage {
+    card "**component** controller_1\nrole //controller//\nextends //mcu_board//" as c_pilot
+    card "**component** logger_1\nrole //logger//\nextends //sbc//" as c_tm
   }
-  card "**ad hoc component** sim_propulsion\nrole //propulsion_sim//, on lab-srv" as c_prop
+  card "**ad hoc component** sim_actuator\nrole //actuator_sim//, on lab_srv" as c_prop
 }
 
 s_pilot -[#3A78C2,bold]-> c_pilot : bound at run start\n(same role)
