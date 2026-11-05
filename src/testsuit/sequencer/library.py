@@ -21,7 +21,9 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Inventory, Stage
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-ROLE_KEYS = {"extends", "description", "commands"}
+ROLE_KEYS = {"extends", "description", "commands", "inputs"}
+INPUT_KEYS = {"name", "type", "optional", "description"}
+INPUT_TYPES = ("file", "folder")
 COMPONENT_KEYS = {"extends", "roles", "description", "transport", "commands", "status", "selftest", "collect"}
 HOST_KEYS = {"tsq_commands": "commands", "tsq_status": "status", "tsq_selftest": "selftest", "tsq_collect": "collect"}
 
@@ -63,12 +65,40 @@ BUILTIN_COMPONENTS: dict[str, dict] = {
 DEFAULT_EXTENDS = "linux_system"           # what a host extends when it gives no tsq_extends
 
 
+def _role_inputs(value: Any, where: str) -> list[dict]:
+    """The inputs a role expects (section 7.1): each a file or a folder of the component's input folder, by name
+    (its path there, a folder ending with /), optional or not, with how to make it (Markdown)."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SequencerError(f"{where}: 'inputs' is a list of {{name, type, optional, description}}")
+    inputs, names = [], set()
+    for i, item in enumerate(value, 1):
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+            raise SequencerError(f"{where}: input {i} needs a 'name' (its path in the input folder)")
+        unknown = set(item) - INPUT_KEYS
+        if unknown:
+            raise SequencerError(f"{where}: input '{item['name']}': unknown keys {sorted(unknown)}")
+        kind = str(item.get("type") or ("folder" if str(item["name"]).endswith("/") else "file"))
+        if kind not in INPUT_TYPES:
+            raise SequencerError(f"{where}: input '{item['name']}': type '{kind}' is not file or folder")
+        name = str(item["name"]).strip()
+        name = name.rstrip("/") + "/" if kind == "folder" else name
+        if name in names:
+            raise SequencerError(f"{where}: input '{name}' listed twice")
+        names.add(name)
+        inputs.append({"name": name, "type": kind, "optional": bool(item.get("optional")),
+                       "description": str(item.get("description") or "")})
+    return inputs
+
+
 @dataclass
 class RoleDef:
     name: str
     extends: str = ""
     description: str = ""
     commands: dict[str, str] = field(default_factory=dict)     # name -> what it does
+    inputs: list[dict] = field(default_factory=list)           # what a component of the role expects as inputs
     source: str = "<builtin>"
 
     @classmethod
@@ -79,8 +109,8 @@ class RoleDef:
             raise SequencerError(f"{source}: role '{name}' must be a mapping")
         unknown = set(data) - ROLE_KEYS
         if unknown:
-            raise SequencerError(f"{source}: role '{name}': unknown keys {sorted(unknown)} (a role only lists "
-                                 "commands: their implementation goes in the components)")
+            raise SequencerError(f"{source}: role '{name}': unknown keys {sorted(unknown)} (a role lists commands "
+                                 "and the inputs it expects: their implementation goes in the components)")
         commands = data.get("commands") or {}
         if isinstance(commands, list):
             commands = {str(c): "" for c in commands}
@@ -88,7 +118,8 @@ class RoleDef:
             raise SequencerError(f"{source}: role '{name}': 'commands' lists names, each with what it does "
                                  "(`start: start the application`), not how it is done: implementations go in the lab components")
         return cls(name=name, extends=str(data.get("extends") or ""), description=str(data.get("description") or ""),
-                   commands={str(k): str(v or "") for k, v in commands.items()}, source=source)
+                   commands={str(k): str(v or "") for k, v in commands.items()},
+                   inputs=_role_inputs(data.get("inputs"), f"{source}: role '{name}'"), source=source)
 
 
 @dataclass
@@ -224,6 +255,14 @@ class Library:
             for cmd, text in role.commands.items():
                 commands[cmd] = {"description": text or commands.get(cmd, {}).get("description", ""), "from": role.name}
         return commands
+
+    def role_inputs(self, name: str) -> list[dict]:
+        """The inputs a role expects, its parents' first (a role redefines one by name), with the role listing it."""
+        inputs: dict[str, dict] = {}
+        for role in self.role_chain(name):
+            for item in role.inputs:
+                inputs[item["name"]] = {**item, "from": role.name}
+        return list(inputs.values())
 
     # ── components ──
 

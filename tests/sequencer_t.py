@@ -215,6 +215,26 @@ def test_inventory_descriptions(tmp_path):
     assert inv.components["b"].vars_in(inv.stages["st"])["x"] == 1
 
 
+def test_role_inputs(tmp_path):
+    """A role lists the inputs it expects; a role extending it adds to them or redefines one by name."""
+    from testsuit.sequencer.library import Library
+    from testsuit.sequencer.util import SequencerError
+    folder = tmp_path / "lib"
+    write(folder / "roles.yml", yaml.safe_dump({"roles": {
+        "app": {"extends": "linux_system", "inputs": [
+            {"name": "app", "type": "folder", "description": "The build: `make dist`."},
+            {"name": "config.yml", "optional": True}]},
+        "pilot": {"extends": "app", "inputs": [{"name": "config.yml", "description": "Required here."},
+                                               {"name": "profile.bin"}]}}}))
+    lib = Library.load([folder])
+    assert [(i["name"], i["type"], i["optional"], i["from"]) for i in lib.role_inputs("pilot")] == [
+        ("app/", "folder", False, "app"), ("config.yml", "file", False, "pilot"), ("profile.bin", "file", False, "pilot")]
+    assert lib.role_inputs("app")[0]["description"] == "The build: `make dist`."
+    write(folder / "roles.yml", yaml.safe_dump({"roles": {"bad": {"inputs": [{"name": "x", "type": "socket"}]}}}))
+    with pytest.raises(SequencerError, match="type 'socket' is not file or folder"):
+        Library.load([folder])
+
+
 def test_roles_and_components(bench):
     """A role lists commands, the components implement them: a component, or a host, missing one of its role's
     commands does not load; a host has the role of its component, or picks one of its roles; tsq_type and

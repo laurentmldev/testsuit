@@ -266,6 +266,17 @@ ROLE = h(
         "extends": h("The parent role: its commands are offered too. `linux_system` (deploy, collect, kill) for "
                      "anything reachable over SSH, `component` (no command) otherwise.", type="string"),
         "description": h("What this role is: shown in the Editor when a role is chosen.", type="string"),
+        "inputs": h("The inputs a component of this role expects, in its input folder: datapack component types "
+                    "bound to the role get them by default (section 7.1). A role extending another one adds to its "
+                    "inputs, or redefines one by name.", type="array", items=h(
+                        "An input the role expects.", type="object", required=["name"], additionalProperties=False,
+                        properties={
+                            "name": h("Its path in the component's input folder (`config.yml`, `app/`): the `target` "
+                                      "of the datapack input. A folder ends with `/`.", type="string"),
+                            "type": h("`file` (default) or `folder`.", type="string", enum=["file", "folder"]),
+                            "optional": h("The component works without it.", type="boolean"),
+                            "description": h("What it is and how to make it (Markdown, as long as needed): shown in "
+                                             "the Editor next to the datapack input.", type="string")})),
         "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
                       "components.", type="object",
                       properties={name: h(f"**{name}**: {text}", type=["string", "null"])
@@ -407,6 +418,8 @@ DATAPACK_TYPE = h(
     type="object", required=["configurations"], additionalProperties=False,
     properties={
         "description": h("What this component is in the test.", type="string"),
+        "role": h("The lab role its components have: the inputs that role expects are proposed for each "
+                  "configuration, and missing ones reported.", type="string"),
         "configurations": h("Configurations of the component, by name (`standard`...): the inputs of each.",
                             type="object", additionalProperties={
                                 "type": "object", "additionalProperties": False,
@@ -681,6 +694,8 @@ def schemas(context: dict) -> dict:
             props["role"].update(_choices(roles, False))
         if "role" in props and "configuration" in props and dp_types:
             props["type"].update(_choices(dp_types, False))
+        if "role" in props and "configurations" in props and roles:          # a datapack component type
+            props["role"].update(_choices(roles, False))
         if "importer" in props and importers:
             props["importer"].update(_choices(importers, False))
         if "generator" in props and generators:

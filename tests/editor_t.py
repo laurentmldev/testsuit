@@ -586,3 +586,25 @@ def test_schemas_match_the_datapack_models():
                         (schemas.SETUP, model.Setup), (schemas.TESTDEF, model.Testdef)):
         assert set(schema.get("properties") or {}) <= set(cls.model_fields), cls.__name__
     model.ComponentType(configurations={}, description="a counter")
+
+
+def test_setup_type_role_inputs(repos):
+    """A datapack component type bound to a lab role: the inputs the role requires and a configuration lacks are
+    warned about, and so is a logical component of another role using that type."""
+    editor = repos.editor
+    session = editor.open("workspace0", local=True)
+    lab, _ = editor.lab_for(session)
+    lab.library.roles["dut"].inputs = [
+        {"name": "app.sh", "type": "file", "optional": False, "description": ""},
+        {"name": "extra/", "type": "folder", "optional": False, "description": "How to make it."},
+        {"name": "notes.txt", "type": "file", "optional": True, "description": ""}]
+    setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
+    setup["component_types"]["dut_app"]["role"] = "dut"
+    setup["configurations"]["bench"]["components"]["analysis"]["type"] = "dut_app"
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    messages = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
+    assert "type 'dut_app', configuration 'standard': no input 'extra/', which its role dut expects" in messages, messages
+    assert not any("'app.sh'" in m or "notes.txt" in m for m in messages), messages
+    assert any(m.startswith("component 'analysis': role 'sequencer', but its type 'dut_app' is for role 'dut'") for m in messages), messages
+    described = editor.context(session)["lab"]["roles"]["dut"]["inputs"]
+    assert [i["name"] for i in described] == ["app.sh", "extra/", "notes.txt"] and described[1]["from"] == "dut"

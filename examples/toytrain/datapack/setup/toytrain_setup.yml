@@ -34,6 +34,7 @@ datarepositories:
 component_types:
 
   pilot_app:                                  # CALC-Pilot application
+    role: pilot                                 # the inputs the lab role expects: app/ and pilot.yml
     configurations:
       standard:
         inputs:
