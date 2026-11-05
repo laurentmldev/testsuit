@@ -100,7 +100,7 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
                 ))}
               </tbody>
             </table>
-            <Markdown className="small muted" text="An input template is rendered when the datapack is generated, before a run binds its slots to the lab: the run-time keys (`component.*`, `realms.*`, `stage.*`, `lab.*`, a slot's `role` or `output_dir`...) are not defined here. They are for pipeline steps and lab commands (README section 8.5)." />
+            <Markdown className="small muted" text="An input template is rendered when the datapack is generated, before a run binds its slots to the lab: the run-time keys (`component.*`, `stage_slots.*`, `stage.*`, `lab.*`, a slot's `role` or `output_dir`...) are not defined here. They are for pipeline steps and lab commands (README section 8.5)." />
           </div>
         )}
       </div>

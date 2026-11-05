@@ -45,19 +45,20 @@ Setup::
                 options: {step_mps: 0.05}
     configurations:
       sim_bench:
-        realms:                           # for the test sequencer: slots bound together in one lab stage
+        stage_slots:                           # for the test sequencer: slots bound together in one lab stage
           train: {type: toytrain}         # of that stage type (tsq_stage_type)
         slots:                            # each bound to a lab component at run time
-          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
+          pilot: {name: CALC-Pilot, type: pilot_app, configuration: standard, stage_slot: train, role: pilot}
                                           # role: for the test sequencer, a lab role (binding and commands)
           telemetry:
             type: telemetry_app
             configuration: standard
             needs: [pilot]                # generated after pilot: read_input('pilot/pilot.yml'), slots.pilot.input_dir
 
-Names: a datapack has *slots* (of *slot types*), grouped in *realms*; at run time each slot is bound to a
-lab *component*, and each realm to a lab *stage*. The former names (``component_types``, a configuration's
-``components`` and ``stages``, a slot's ``stage``) are refused, naming the current one.
+Names: a datapack has *slots* (of *slot types*), some grouped in *stage slots*; at run time each slot is bound
+to a lab *component*, and each stage slot to a lab *stage*. The former names (``component_types``, a
+configuration's ``components``, ``stages`` and ``realms``, a slot's ``stage`` and ``realm``) are refused, naming
+the current one.
 """
 from __future__ import annotations
 
@@ -66,11 +67,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # former names, refused with the current one (no aliases: README section 8)
-FORMER_SETUP = {"component_types": "slot_types"}           # setup, top level
-FORMER_CONFIG = {"components": "slots", "stages": "realms"}  # a setup configuration
-FORMER_SLOT = {"stage": "realm"}                             # a slot of a setup configuration
+FORMER_SETUP = {"component_types": "slot_types"}                                          # setup, top level
+FORMER_CONFIG = {"components": "slots", "stages": "stage_slots", "realms": "stage_slots"}  # a setup configuration
+FORMER_SLOT = {"stage": "stage_slot", "realm": "stage_slot"}                             # a slot of a setup configuration
 FORMER_STEP = {"component": "slot"}                          # a pipeline step
-FORMER_PHASE = {"components": "slots", "stages": "realms"}   # a pipeline phase
+FORMER_PHASE = {"components": "slots", "stages": "stage_slots", "realms": "stage_slots"}   # a pipeline phase
 
 
 def former_names(setup: Any) -> list[str]:
@@ -172,8 +173,8 @@ class Slot(_Model):
     configuration: str
     # other slots whose generated inputs this one reads (generated first)
     needs: list[str] = Field(default_factory=list)
-    # for the test sequencer: realm and role it is bound by (the lab role gives its commands)
-    realm: str = ""
+    # for the test sequencer: stage_slot and role it is bound by (the lab role gives its commands)
+    stage_slot: str = ""
     role: str = ""
 
     @model_validator(mode="before")
@@ -186,8 +187,8 @@ class Slot(_Model):
 
 class SetupConfiguration(_Model):
     slots: dict[str, Slot]
-    # for the test sequencer: realms (slots bound in one lab stage of a type), by id
-    realms: dict[str, Any] = Field(default_factory=dict)
+    # for the test sequencer: stage_slots (slots bound in one lab stage of a type), by id
+    stage_slots: dict[str, Any] = Field(default_factory=dict)
 
 
 class Setup(_Model):

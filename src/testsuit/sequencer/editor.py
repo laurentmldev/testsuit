@@ -55,7 +55,7 @@ RUNTIME_KEYS = {
     "slot.name": "its name",
     "slot.type": "its slot type",
     "slot.role": "its role",
-    "slot.realm": "its realm (setup configuration), '' for an ad hoc slot",
+    "slot.stage_slot": "its stage slot (setup configuration), '' for an ad hoc slot",
     "slot.component": "id of the lab component it is bound to",
     "slot.input_dir": "<remote_root>/<slot>/input: where deploy puts its inputs",
     "slot.output_dir": "<remote_root>/<slot>/output: what collect brings back",
@@ -76,7 +76,7 @@ RUNTIME_KEYS = {
     "remote_root": "the remote root of the step's lab component",
     "run.id": "run id", "run.dir": "run folder on the sequencer host", "run.priority": "run priority",
     "phase.id": "current phase",
-    "realms.<id>.stage": "the lab stage a realm of the setup is bound to",
+    "stage_slots.<id>.stage": "the lab stage a stage slot of the setup is bound to",
     "stage.roles.<role>": "the lab component of that role in the lab stage of the step's component: id, host, role, "
                           "label, vars (stage.roles.stage_server.host)",
     "stage.components.<host>": "a lab component of that lab stage by inventory name (also stage.id, "
@@ -690,10 +690,10 @@ class Editor:
         configurations = {}
         for name, cfg in (data.get("configurations") or {}).items():
             cfg = cfg if isinstance(cfg, dict) else {}
-            realms = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("realms") or {}).items()}
-            slots = {c: {k: v.get(k) for k in ("name", "type", "configuration", "realm", "role", "needs")}
+            stage_slots = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stage_slots") or {}).items()}
+            slots = {c: {k: v.get(k) for k in ("name", "type", "configuration", "stage_slot", "role", "needs")}
                      for c, v in (cfg.get("slots") or {}).items() if isinstance(v, dict)}
-            configurations[name] = {"realms": realms, "slots": slots}
+            configurations[name] = {"stage_slots": stage_slots, "slots": slots}
         types = {}
         for name, t in (data.get("slot_types") or {}).items():
             t = t if isinstance(t, dict) else {}
@@ -903,7 +903,7 @@ class Editor:
 
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
-        setup configuration (phases, realms and slots, step targets), and what the lab cannot provide."""
+        setup configuration (phases, stage slots and slots, step targets), and what the lab cannot provide."""
         from testsuit.sequencer.intake import check_against_lab
         mismatches = self._mismatches(session, testdef_rel, setup_config)
         if mismatches:
@@ -1065,7 +1065,7 @@ class Editor:
                         if binding is not None and target in binding.slots:
                             concrete = lab.inventory.components[binding.slots[target]]
                             lc = needs.slots[target]
-                            stage = lab.inventory.stages.get(binding.realms.get(lc.realm, ""))
+                            stage = lab.inventory.stages.get(binding.stage_slots.get(lc.stage_slot, ""))
                             entry.update(concrete=concrete.id, role=concrete.role)
                             if step.action == "do":
                                 try:
@@ -1084,7 +1084,7 @@ class Editor:
                     rows.append({"id": fs.id, "part": part, "group": fs.group, "needs": fs.needs, "action": step.action,
                                  "do": step.do, "params": fs.params, "targets": expanded,
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
-            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "realms": flat.phase.realms,
+            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems}
 
@@ -1094,8 +1094,8 @@ class Editor:
         lab, _ = self.lab_for(session)
         result = self._flatten(lab, needs, pipeline, flats)
         result["setup"] = self.rel(session, setup_path)
-        result["logical"] = {"realms": needs.realms,
-                             "slots": {c.id: {"type": c.type, "realm": c.realm, "role": c.role, "name": c.name}
+        result["logical"] = {"stage_slots": needs.stage_slots,
+                             "slots": {c.id: {"type": c.type, "stage_slot": c.stage_slot, "role": c.role, "name": c.name}
                                        for c in needs.slots.values()}}
         return result
 
@@ -1116,8 +1116,8 @@ class Editor:
         for lc in needs.slots.values():
             offered = lab.library.role_commands(lc.role) if lc.role in lab.library.roles else {}
             # the lab components that can be bound, with how each implements the commands
-            stage_type = needs.realms.get(lc.realm)
-            if lc.realm:
+            stage_type = needs.stage_slots.get(lc.stage_slot)
+            if lc.stage_slot:
                 hosts = [(lab.inventory.component_in(st, lc.role), st) for st in lab.inventory.stages_of_type(stage_type)]
             else:
                 hosts = [(c, None) for c in lab.inventory.adhoc if c.role == lc.role]
@@ -1137,7 +1137,7 @@ class Editor:
                               "help": info["description"] or _command_help(cmd),
                               "implementations": implementations.get(cmd, {})}
                         for cmd, info in sorted(offered.items())}
-            slots[lc.id] = {"name": lc.name, "type": lc.type, "realm": lc.realm, "role": lc.role,
+            slots[lc.id] = {"name": lc.name, "type": lc.type, "stage_slot": lc.stage_slot, "role": lc.role,
                                  "role_known": lc.role in lab.library.roles, "commands": commands}
         workspace = self.scan_workspace(session.folder, session.folder) if session.kind == "workspace" else {}
         own = (raw.get("pipeline") or {}).get("subpipelines") or {}
@@ -1150,7 +1150,7 @@ class Editor:
                     subs.setdefault(n, self._sub_summary(s) | {"file": self.rel(session, inc)})
         return {"setup": self.rel(session, setup_path), "configuration": config,
                 "configurations": sorted((setup_raw.get("configurations") or {})),
-                "realms": needs.realms, "slots": slots, "subpipelines": subs,
+                "stage_slots": needs.stage_slots, "slots": slots, "subpipelines": subs,
                 "shared_subpipelines": (workspace.get("subpipelines") or {}),
                 "step_types": sorted(registry.step_types), "ready_checks": sorted(registry.ready_checks)}
 
@@ -1308,9 +1308,9 @@ class Editor:
                                "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
             components.append({"id": comp_id, "name": comp.get("name", ""), "type": comp.get("type", ""),
                                "configuration": comp.get("configuration", ""),
-                               "realm": comp.get("realm"), "role": comp.get("role"), "needs": comp.get("needs") or [],
+                               "stage_slot": comp.get("stage_slot"), "role": comp.get("role"), "needs": comp.get("needs") or [],
                                "inputs": inputs})
-        realms = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("realms") or {}).items()}
+        stage_slots = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stage_slots") or {}).items()}
 
         dictionaries = []
         for layer, path in builder.dictionaries:
@@ -1357,7 +1357,7 @@ class Editor:
                             "own_config": config == (yaml.safe_load(self.path(session, testdef_rel).read_text(encoding="utf-8")) or {}).get("setup_config"),
                             "configurations": sorted(raw.get("configurations") or {})},
                 "setup": {"id": raw.get("id"), "name": raw.get("name")},
-                "realms": realms, "slots": components, "dictionaries": dictionaries,
+                "stage_slots": stage_slots, "slots": components, "dictionaries": dictionaries,
                 "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}

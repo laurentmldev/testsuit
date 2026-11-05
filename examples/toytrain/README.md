@@ -167,7 +167,7 @@ Before anything else, the sequencer self-tests every component it locks: SSH, ta
 
 The pipeline then has two phases, the first one built from two sub-pipelines.
 
-**test_run** locks the realm `train` (bound to the lab stage `train_1`) and the two simulations, then:
+**test_run** locks the stage slot `train` (bound to the lab stage `train_1`) and the two simulations, then:
 1. `bring_up`: deploys every input in parallel, and flashes the CALC-Pilot microcontroller; starts the simulations, then CALC-TM and AU, each waiting for its `READY` log line; starts the pilot once everything listens (rendez-vous), and waits for its monitored state to be `running`;
 2. lets the scenario run for its duration;
 3. `shut_down`: stops the pilot first, then the rest;
@@ -220,7 +220,7 @@ This sample also uses a few details that the sequencer README leaves open:
 - `install` and `version` are ordinary named commands;
 - `wait_for: {state: ...}` names its slot.
 
-The datapack tool keeps the sequencer fields (`realms`, `realm`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A slot's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the lab components (`lab/components/toytrain.yml`) implement them.
+The datapack tool keeps the sequencer fields (`stage_slots`, `stage_slot`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A slot's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the lab components (`lab/components/toytrain.yml`) implement them.
 
 ## Writing your own
 

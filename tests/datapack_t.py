@@ -213,3 +213,16 @@ def test_needs_cycle(tmp_path, no_git):
                                                             "setup_config": "c"}))
     with pytest.raises(DatapackError, match="slots needing each other"):
         datapack(root / "testdef" / "t.yml", nocheck=True, output_dir=tmp_path / "out")
+
+
+def test_former_names_refused():
+    from testsuit.datatools.datapack.model import former_names
+    from testsuit.sequencer.model import Phase
+    setup = {"component_types": {}, "configurations": {"c": {"realms": {"r": {"type": "t"}},
+                                                              "slots": {"s": {"type": "x", "realm": "r"}}}}}
+    found = former_names(setup)
+    assert "setup: 'component_types' is now 'slot_types'" in found
+    assert "configuration 'c': 'realms' is now 'stage_slots'" in found
+    assert "configuration 'c', slot 's': 'realm' is now 'stage_slot'" in found
+    with pytest.raises(ValueError, match="'realms' is now 'stage_slots'"):
+        Phase(id="p", realms=["r"], steps=[])

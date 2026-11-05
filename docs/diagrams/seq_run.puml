@@ -10,7 +10,7 @@ participant "Run engine" as engine
 participant "Transport\n(ssh / local)" as tr
 participant "Bound components\n(stage, ad hoc,\nsequencer)" as comp
 
-sched -> sched : walk the queue by priority;\nbind realms and ad hoc slots\nto free lab stages and components
+sched -> sched : walk the queue by priority;\nbind stage slots and ad hoc slots\nto free lab stages and components
 sched -> store : lock everything the phase needs\n(one transaction, all or nothing)
 alt nothing free
   sched -> store : run "waiting_resources"\n(and what it waits for)

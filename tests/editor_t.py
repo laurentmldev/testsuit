@@ -160,7 +160,7 @@ def test_workspace_session(repos):
 
     # a test definition, written as data: checked, then the helpers
     testdef = {"id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-               "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [
+               "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
                    {"id": "start", "slot": "dut", "do": "start"},
                    {"id": "wait", "delay": "{{ duration }}", "needs": ["start"]},
                    {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}]}]}}
@@ -233,7 +233,7 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
                  content="duration: 0.5s\nmin_count: 3\ndata_version: v1.9.0   # the data in use\n")
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
 
     quick = editor.synthesis(session, "testdef/count/testdef.yml", versions=False)   # the versions listed after
     assert quick["baseline"][0]["versions_pending"] and quick["baseline"][0]["versions"] is None
@@ -300,7 +300,7 @@ def test_generation_errors_and_stop(repos):
     session = editor.open("workspace0", local=True)
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
     assert editor.synthesis(session, "testdef/count/testdef.yml")["problems"] == []
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
     inputs = setup["slot_types"]["dut_app"]["configurations"]["standard"]["inputs"]
@@ -308,17 +308,17 @@ def test_generation_errors_and_stop(repos):
     # what the sequencer would refuse at posting (a phase naming a slot the setup does not have): listed before generating
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "realms": ["bench", "rig"], "slots": ["test_sequencer"],
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench", "rig"], "slots": ["test_sequencer"],
                                  "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
     problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
-    assert problems == ["pipeline: phase 'run': unknown realm 'rig' (setup realms: bench)",
+    assert problems == ["pipeline: phase 'run': unknown stage slot 'rig' (setup stage_slots: bench)",
                         "pipeline: phase 'run': unknown slot 'test_sequencer' (setup ad hoc slots: analysis)"], problems
     # the same, on the setup file: a setup changed without the pipelines using it
     setup_warnings = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
-    assert "testdef/count/testdef.yml (bench): phase 'run': unknown realm 'rig' (setup realms: bench)" in setup_warnings, setup_warnings
+    assert "testdef/count/testdef.yml (bench): phase 'run': unknown stage slot 'rig' (setup stage_slots: bench)" in setup_warnings, setup_warnings
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "realms": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
 
     # a missing template: the error, in the result and as the last line of the log
     inputs[1]["source"] = "files/nope.txt"

@@ -432,12 +432,12 @@ SLOT_TYPE = h(
 
 SLOT = h(
     "A slot: what the test needs, bound at activation to a lab component with the same `role` "
-    "(in the lab stage bound to its `realm` when given, among the ad hoc lab components otherwise).",
+    "(in the lab stage bound to its `stage_slot` when given, among the ad hoc lab components otherwise).",
     type="object", required=["type", "configuration"], additionalProperties=False,
     properties={"name": h("Name shown in logs and the UI.", type="string"),
                 "type": h("Its slot type (`slot_types` of this setup).", type="string"),
                 "configuration": h("Configuration of that type to use (its inputs).", type="string"),
-                "realm": h("Realm it belongs to (`realms` of this configuration): the slots of a realm are bound in "
+                "stage_slot": h("Stage slot it belongs to (`stage_slots` of this configuration): the slots of a stage slot are bound in "
                            "one lab stage. Leave out for an ad hoc "
                            "slot.", type="string"),
                 "role": h("Role it binds to in the lab (`tsq_role`): a lab role, which gives its commands.",
@@ -447,10 +447,10 @@ SLOT = h(
                 })
 
 SETUP_CONFIGURATION = h(
-    "A setup configuration: the realms and slots a datapack built with it needs (section 8.1).",
+    "A setup configuration: the stage slots and slots a datapack built with it needs (section 8.1).",
     type="object", required=["slots"], additionalProperties=False,
     properties={
-        "realms": h("Realms, by id, with the lab stage type they ask for: each is bound to any free lab stage of that "
+        "stage_slots": h("Stage slots, by id, with the lab stage type they ask for: each is bound to any free lab stage of that "
                     "type, and its slots to the lab components of that lab stage.", type="object",
                     additionalProperties=h("`{type: <stage type>}`.", type=["object", "string"],
                                            properties={"type": h("Stage type (`tsq_stage_type` in the lab).",
@@ -544,14 +544,14 @@ STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `pyt
                  "state": "running", "slot": "${2:slot}", "timeout": "20s"}}},
              {"label": "sub-pipeline", "body": {"id": "${1:up}", "uses": "${2:bring_up}"}}])
 
-PHASE = h("A phase: the resources it locks (`realms`, `slots`), its inputs from earlier phases, and its steps. "
+PHASE = h("A phase: the resources it locks (`stage_slots`, `slots`), its inputs from earlier phases, and its steps. "
           "Phases run in `needs` order.", type="object", required=["id"], additionalProperties=False,
           properties={
               "id": h("Phase id.", type="string"),
               "needs": h("Phases that must end before this one starts.", type="array", items={"type": "string"}),
-              "realms": h("Realms locked for the phase (setup configuration `realms`): their slots, and the whole "
+              "stage_slots": h("Stage slots locked for the phase (setup configuration `stage_slots`): their slots, and the whole "
                           "lab stage each is bound to, come with them.", type="array", items={"type": "string"}),
-              "slots": h("Ad hoc slots locked for the phase (those with no realm).", type="array",
+              "slots": h("Ad hoc slots locked for the phase (those with no stage slot).", type="array",
                          items={"type": "string"}),
               "inputs": h("Outputs of earlier phases copied in the run folder before the phase starts: "
                           "`{from: '<phase>:<slot>/output/<path>', to: '<slot>/input/<path>'}`.",
@@ -656,8 +656,8 @@ def schemas(context: dict) -> dict:
     logical = {c: f"{c} ({v.get('type', '')}, role {v.get('role', '')})"
                for s in ws.get("setups") or [] for cfg in (s.get("configurations") or {}).values()
                for c, v in (cfg.get("slots") or {}).items()}
-    realms = {st: f"lab stage type {ty}" for s in ws.get("setups") or []
-              for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("realms") or {}).items()}
+    stage_slots = {st: f"lab stage type {ty}" for s in ws.get("setups") or []
+              for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("stage_slots") or {}).items()}
     dp_types = {t: f"slot type: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
                 for t, v in (s.get("slot_types") or {}).items()}
     subs = {n: "sub-pipeline" for n in ws.get("subpipelines") or []}
@@ -719,9 +719,9 @@ def schemas(context: dict) -> dict:
                 props["uses"].update(_choices(subs, False))
             for name in step_types:
                 props.setdefault(name, h(f"Plugin step type `{name}`."))
-        if "realms" in props and "finally" in props:
-            if realms:
-                props["realms"]["items"] = {"type": "string", **_choices(realms, False)}
+        if "stage_slots" in props and "finally" in props:
+            if stage_slots:
+                props["stage_slots"]["items"] = {"type": "string", **_choices(stage_slots, False)}
             if logical:
                 props["slots"]["items"] = {"type": "string", **_choices(logical, False)}
         if "cmd" in props and "log" in props:

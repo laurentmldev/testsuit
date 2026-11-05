@@ -94,16 +94,16 @@ slot_types:                            # the inputs of each kind of slot, by con
 
 configurations:                        # what a test uses: its slots, of these types
   sim_bench:
-    realms: {train: {type: toytrain}}  # for the test sequencer: slots bound in one lab stage
+    stage_slots: {train: {type: toytrain}}  # for the test sequencer: slots bound in one lab stage
     slots:
-      pilot:     {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
-      telemetry: {type: telemetry_app, configuration: standard, realm: train, role: telemetry,
+      pilot:     {name: CALC-Pilot, type: pilot_app, configuration: standard, stage_slot: train, role: pilot}
+      telemetry: {type: telemetry_app, configuration: standard, stage_slot: train, role: telemetry,
                   needs: [pilot]}      # generated after pilot, can read its inputs
 ```
 
-`realms`, `realm`, `role` and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a realm groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
+`stage_slots`, `stage_slot`, `role` and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a stage slot groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
 
-The former names are refused, with the current one: `component_types` (now `slot_types`), a configuration's `components` and `stages` (now `slots` and `realms`), a slot's `stage` (now `realm`).
+The former names are refused, with the current one: `component_types` (now `slot_types`), a configuration's `components` (now `slots`), `stages` and `realms` (now `stage_slots`), a slot's `stage` and `realm` (now `stage_slot`).
 
 [model.py](model.py) holds the schemas of both files. Unknown fields are errors, to catch typos.
 
