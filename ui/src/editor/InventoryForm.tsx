@@ -202,7 +202,7 @@ function useInvHelp() {
 }
 
 const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
-  "tsq_label", "tsq_description", "tsq_transport", "tsq_remote_root", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
+  "tsq_label", "tsq_description", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
   "tsq_library"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
@@ -226,6 +226,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
         <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone="default (ssh)" />
       </Field>
       <Field label="Remote root" help={help(["all", "vars", "tsq_remote_root"])}><Text mono value={vars.tsq_remote_root} onChange={(v) => set("tsq_remote_root", v)} placeholder="/opt/testrun" /></Field>
+      <Field label="Shell" help={help(["all", "vars", "tsq_shell"])}><Text mono value={vars.tsq_shell} onChange={(v) => set("tsq_shell", v)} placeholder="default: sh, bash, bash -l…" /></Field>
       <Field label="SSH user" help={help(["all", "vars", "ansible_user"])}><Text value={vars.ansible_user} onChange={(v) => set("ansible_user", v)} /></Field>
       <Field label="SSH key" help={help(["all", "vars", "ansible_ssh_private_key_file"])}><Text mono value={vars.ansible_ssh_private_key_file} onChange={(v) => set("ansible_ssh_private_key_file", v)} /></Field>
       <Field label="Library folders" help={help(["all", "vars", "tsq_library"])}>
@@ -234,7 +235,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
       </Field>
       <Field label="Other variables" help="Any other variable is kept, and reachable in templates as `{{ component.vars.<name> }}`." wide>
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"])}
-          exclude={["tsq_transport", "tsq_remote_root", "ansible_user", "ansible_ssh_private_key_file", "tsq_library", "tsq_description"]} />
+          exclude={["tsq_transport", "tsq_remote_root", "tsq_shell", "ansible_user", "ansible_ssh_private_key_file", "tsq_library", "tsq_description"]} />
       </Field>
     </div>
   );
@@ -484,6 +485,9 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <Field label="Remote root" help={help(["all", "hosts", "_", "tsq_remote_root"])}>
         <Text mono value={vars.tsq_remote_root} onChange={(v) => set("tsq_remote_root", v)} placeholder={effective("tsq_remote_root") || "home folder"} />
       </Field>
+      <Field label="Shell" help={help(["all", "hosts", "_", "tsq_shell"])}>
+        <Text mono value={vars.tsq_shell} onChange={(v) => set("tsq_shell", v)} placeholder={effective("tsq_shell") ? `${effective("tsq_shell")} (inherited)` : "default: sh, bash, bash -l…"} />
+      </Field>
       <Section title="Its commands, as the lab resolves them" collapsed={false}>
         <HostCard name={name} />
       </Section>
@@ -494,7 +498,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
-          exclude={["tsq_label", "tsq_description", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_commands", "tsq_status", "tsq_selftest"]} />
+          exclude={["tsq_label", "tsq_description", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_commands", "tsq_status", "tsq_selftest"]} />
       </Section>
     </div>
   );
