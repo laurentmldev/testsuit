@@ -464,3 +464,6 @@ button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }
 .rendered .key-value { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; background: var(--panel-2); border-radius: 3px; }
 .listing ul { margin: 6px 0 0; padding-left: 18px; }
 .listing li { margin: 2px 0; }
+.expected-missing { margin-top: 8px; }
+.expected-input { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.role-inputs td .text-field textarea { min-height: 5em; }

@@ -548,6 +548,24 @@ roles:
   sequencer:   {extends: linux_system}     # the sequencer host: where the exploitation runs
 ```
 
+**Expected inputs.** A role can list the inputs a component of that role expects in its input folder, under `inputs`. Each one has:
+- `name`: its path there, which is the `target` of the datapack input. A folder ends with `/`.
+- `type`: `file` (the default) or `folder`.
+- `optional`: whether the component can work without it.
+- `description`: what it is and how to make it, in Markdown, as long as needed.
+
+A role extending another one adds to its inputs, or redefines one by name. In a setup, a datapack component type names the role of its components (`role: pilot`). Its configurations then start with the inputs that role requires: the Editor adds them when the role is picked, when a configuration is added, and when a type is created for a role. The Editor shows each input's description next to the datapack input that provides it. It warns about a required input a configuration lacks, and about a logical component whose role differs from its type's.
+
+```yaml
+roles:
+  pilot:
+    extends: toytrain_app
+    inputs:
+      - {name: app/, type: folder, description: "The release folder of the role: `make release`."}
+      - {name: pilot.yml, description: "Start from `templates/pilot.yml` of the setup."}
+      - {name: notes.txt, optional: true}
+```
+
 ### 7.2 Lab components
 
 ```yaml

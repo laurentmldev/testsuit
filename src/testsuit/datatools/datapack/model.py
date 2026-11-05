@@ -128,6 +128,7 @@ GONE = "is gone: the component's lab role gives its commands, implemented by the
 class ComponentType(_Model):
     configurations: dict[str, ComponentConfiguration]
     description: str = ""                    # what the type is (shown in the Editor)
+    role: str = ""                           # the lab role of its components: the inputs it expects (Editor)
 
     @model_validator(mode="before")
     @classmethod

@@ -5,7 +5,22 @@ import { post } from "../api";
 import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { DictionaryDialog } from "./DictionaryDialog";
-import { clone, roleChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
+import { clone, labRoleChoices, roleChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
+
+/** The inputs a lab role expects (its parents' included), each {name, type, optional, description, from}. */
+function expectedInputs(ctx: any, role?: string): any[] {
+  return (role && ctx.lab.roles?.[role]?.inputs) || [];
+}
+
+/** The inputs a new configuration of a type for that role starts with: the ones the role requires. */
+function defaultInputs(ctx: any, role?: string): any[] {
+  return expectedInputs(ctx, role).filter((x) => !x.optional).map((x) => ({ source: "", target: x.name, ...(x.type === "folder" ? { method: "copy" } : {}) }));
+}
+
+/** A new datapack component type for a role: bound to it, its standard configuration with the inputs it requires. */
+function newType(ctx: any, role?: string): any {
+  return { ...(role ? { role } : {}), configurations: { standard: { inputs: defaultInputs(ctx, role) } } };
+}
 
 type Sel = { kind: "general" } | { kind: "data" } | { kind: "type"; name: string } | { kind: "config"; name: string };
 
@@ -249,6 +264,7 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const configs: Record<string, any> = t.configurations || {};
   const sources = sourceChoices(session, doc, doc.data || {});
+  const expected = expectedInputs(session.ctx, t.role);
   return (
     <div>
       <div className="form-title">
@@ -268,8 +284,18 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
         }}>Delete</button>
       </div>
       <Field label="Description" help={help(["component_types", "_", "description"])}><Text value={t.description} onChange={(v) => set("description", v)} /></Field>
+      <Field label="Lab role" help={help(["component_types", "_", "role"])}
+        hint={t.role ? (expected.length ? `expects ${expected.map((x) => x.name + (x.optional ? " (optional)" : "")).join(", ")}` : "its role expects no input") : "the lab role of its components: the inputs it expects are proposed below"}>
+        <Combo value={t.role} strict choices={labRoleChoices(session.ctx)} placeholder="pilot, telemetry…" onChange={(v) => update((d) => {
+          const type = d.component_types[name];
+          if (!v) delete type.role;
+          else type.role = v;
+          // configurations without any input yet start with what the role requires
+          for (const c of Object.values<any>(type.configurations || {})) if (c && !(c.inputs || []).length) c.inputs = defaultInputs(session.ctx, v);
+        })} />
+      </Field>
       <Section title="Inputs, by configuration" help={help(["component_types", "_", "configurations"])}
-        actions={<button className="small" onClick={() => set("configurations", { ...configs, [freeName("standard", Object.keys(configs))]: { inputs: [] } })}>+ Configuration</button>}>
+        actions={<button className="small" onClick={() => set("configurations", { ...configs, [freeName("standard", Object.keys(configs))]: { inputs: defaultInputs(session.ctx, t.role) } })}>+ Configuration</button>}>
         {Object.entries(configs).map(([cfg, c]) => (
           <div key={cfg} className="sub-form">
             <div className="form-title">
@@ -280,7 +306,7 @@ function DatapackType({ doc, name, value, update, onRenamed, onDeleted }: {
                 set("configurations", next);
               }}>Remove</button>}
             </div>
-            <Inputs doc={doc} type={name} value={c?.inputs || []} sources={sources} onChange={(inputs) => set("configurations", { ...configs, [cfg]: { ...c, inputs } })} />
+            <Inputs doc={doc} type={name} value={c?.inputs || []} sources={sources} expected={expected} role={t.role} onChange={(inputs) => set("configurations", { ...configs, [cfg]: { ...c, inputs } })} />
           </div>
         ))}
       </Section>
@@ -317,8 +343,11 @@ It is run with 3 arguments: the source path, the target path and a JSON file of 
 
 A script is the simplest; a registered function suits a generator shared by several setups, or keys that must be traced.`;
 
-function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: string; value: any[]; sources: Choice[]; onChange: (v: any[]) => void }) {
+function Inputs({ doc, type, value, sources, onChange, expected = [], role }: { doc: Doc; type: string; value: any[]; sources: Choice[]; onChange: (v: any[]) => void; expected?: any[]; role?: string }) {
   const { ctx } = useSession();
+  const norm = (x: string) => String(x || "").replace(/\/+$/, "");
+  const expectedFor = (target: string) => expected.find((x) => norm(x.name) === norm(target));
+  const missing = expected.filter((x) => !value.some((inp) => norm(inp.target) === norm(x.name)));
   const [preview, setPreview] = useState<string | null>(null);
   const set = (i: number, k: string, v: any) => onChange(value.map((inp, j) => {
     if (j !== i) return inp;
@@ -336,7 +365,9 @@ function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: strin
               <td><Combo keys mono value={inp.source} onChange={(v) => set(i, "source", v)} choices={sources} placeholder="templates/config.yml" onPick={(v) => {
                 if (!inp.target) set(i, "target", v.endsWith("/") ? "app/" : v.split("/").pop());
               }} /></td>
-              <td><input className="mono" value={inp.target || ""} placeholder="config.yml or app/" onChange={(e) => set(i, "target", e.target.value)} /></td>
+              <td><input className="mono" value={inp.target || ""} placeholder="config.yml or app/" onChange={(e) => set(i, "target", e.target.value)} />
+                {expectedFor(inp.target) && <div className="muted small">expected by {role}{expectedFor(inp.target).optional ? " (optional)" : ""}
+                  {expectedFor(inp.target).description && <> <HelpIcon title={`${inp.target}: how to make it`} text={expectedFor(inp.target).description} /></>}</div>}</td>
               <td>
                 <select value={inp.method || "template"} onChange={(e) => set(i, "method", e.target.value)} title={METHODS.find((m) => m.value === (inp.method || "template"))?.description}>
                   {METHODS.map((m) => <option key={m.value} value={m.value}>{m.value}</option>)}
@@ -355,6 +386,18 @@ function Inputs({ doc, type, value, sources, onChange }: { doc: Doc; type: strin
         </tbody>
       </table>
       <button className="small" onClick={() => onChange([...value, { source: "", target: "" }])}>+ Input</button>
+      {missing.length > 0 && (
+        <div className="hint-box small expected-missing">
+          <div>Also expected by the role {role}:</div>
+          {missing.map((x) => (
+            <div key={x.name} className="expected-input">
+              <code>{x.name}</code> <span className="muted">{x.type}{x.optional ? ", optional" : ""}</span>
+              {x.description && <> <HelpIcon title={`${x.name}: how to make it`} text={x.description} /></>}
+              <button className="small" onClick={() => onChange([...value, { source: "", target: x.name, ...(x.type === "folder" ? { method: "copy" } : {}) }])}>Add</button>
+            </div>
+          ))}
+        </div>
+      )}
       {preview && <PreviewDialog setupPath={doc.path} type={type} source={preview} onClose={() => setPreview(null)} />}
     </>
   );
@@ -393,10 +436,18 @@ export function PreviewDialog({ setupPath, source, type, onClose }: { setupPath:
 }
 
 function NewDatapackType({ data, onClose, onCreate }: { data: any; onClose: () => void; onCreate: (name: string, body: any) => void }) {
+  const { ctx } = useSession();
   const [name, setName] = useState(freeName("my_app", Object.keys(data.component_types || {})));
+  const [role, setRole] = useState("");
   const taken = Object.keys(data.component_types || {});
   return (
-    <Dialog title="New datapack component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, { configurations: { standard: { inputs: [] } } })}>Create</button>}>
+    <Dialog title="New datapack component type" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, newType(ctx, role || undefined))}>Create</button>}>
+      <Field label="Lab role" help="The lab role of its components: its standard configuration starts with the inputs that role requires." hint={role ? `starts with ${defaultInputs(ctx, role).map((x) => x.target).join(", ") || "no input"}` : null}>
+        <Combo value={role} onChange={(v) => {
+          setRole(v || "");
+          if (v && (!name || name.startsWith("my_app"))) setName(freeName(`${slug(v)}_app`, taken));
+        }} choices={labRoleChoices(ctx)} strict placeholder="pilot, telemetry…" />
+      </Field>
       <Field label="Name" help="What the component gets as inputs in the test (`pilot_app`, `exploit`). Its commands come from the role of the components using it." error={idProblem(name, taken)}><Text value={name} onChange={(v) => setName(idInput(v))} /></Field>
     </Dialog>
   );
@@ -504,7 +555,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       }
       d.component_types ||= {};
       const t = typeForRole(d, role);
-      d.component_types[t] ||= { configurations: { standard: { inputs: [] } } };
+      d.component_types[t] ||= newType(ctx, role);
       const id = freeName(slug(role), Object.keys(c.components));
       c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
     });
@@ -607,7 +658,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           c.stages[stage] = { type };
           for (const role of Object.keys(ctx.lab.stage_type_roles?.[type] || {})) {
             const t = typeForRole(d, role);
-            d.component_types[t] ||= { configurations: { standard: { inputs: [] } } };
+            d.component_types[t] ||= newType(ctx, role);
             const id = freeName(slug(role), Object.keys(c.components));
             c.components[id] = { name: role, type: t, configuration: Object.keys(d.component_types[t].configurations || { standard: 1 })[0], stage, role };
           }

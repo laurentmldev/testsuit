@@ -547,11 +547,13 @@ class Editor:
             try:
                 chain = [x.name for x in lib.role_chain(name)]
                 commands = lib.role_commands(name)
+                inputs = lib.role_inputs(name)
             except SequencerError:                        # extends a role that is not there (renamed?): itself only
                 chain = [name]
                 commands = {c: {"description": d, "from": name} for c, d in r.commands.items()}
+                inputs = [{**i, "from": name} for i in r.inputs]
             roles[name] = {"extends": r.extends, "description": r.description, "source": r.source, "chain": chain,
-                           "commands": commands, "own_commands": sorted(r.commands),
+                           "commands": commands, "own_commands": sorted(r.commands), "inputs": inputs,
                            "used_by": [c.id for c in lab.inventory.components.values() if c.role == name],
                            "implemented_by": [c for c in lib.components if name in self_roles(c)],
                            "abstract": any(o.extends == name for o in lib.roles.values())}
@@ -690,7 +692,7 @@ class Editor:
         for name, t in (data.get("component_types") or {}).items():
             t = t if isinstance(t, dict) else {}
             types[name] = {"configurations": sorted(t.get("configurations") or {}),
-                           "description": t.get("description", "")}
+                           "description": t.get("description", ""), "role": t.get("role", "")}
         datasets = [{"id": ds.get("id"), "version": ds.get("version")}
                     for repo in data.get("datarepositories") or [] for src in repo.get("datasources") or []
                     for ds in src.get("datasets") or [] if isinstance(ds, dict)]
@@ -916,7 +918,23 @@ class Editor:
         lab, _ = self.lab_for(session)
         types = raw.get("component_types") or {}
         for name, t in types.items():
+            role = str(t.get("role") or "")
+            expected = []
+            if role and lab is not None:
+                try:
+                    expected = lab.library.role_inputs(role)
+                except SequencerError:
+                    where = yamledit.locate(text, ["component_types", name, "role"]) or (1, 1)
+                    problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
+                                     "message": f"type '{name}': '{role}' is not a lab role"})
             for cfg_name, cfg in (t.get("configurations") or {}).items():
+                targets = {str(i.get("target", "")).rstrip("/") for i in (cfg or {}).get("inputs") or [] if isinstance(i, dict)}
+                for item in expected:                # what its role expects and this configuration does not give
+                    if not item["optional"] and item["name"].rstrip("/") not in targets:
+                        where = yamledit.locate(text, ["component_types", name, "configurations", cfg_name]) or (1, 1)
+                        problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
+                                         "message": f"type '{name}', configuration '{cfg_name}': no input '{item['name']}', "
+                                                    f"which its role {role} expects"})
                 for i, inp in enumerate((cfg or {}).get("inputs") or []):
                     source = str(inp.get("source", ""))
                     if source and "{{" not in source and not _find_sources(source, [path.parent]):
@@ -935,6 +953,12 @@ class Editor:
                                  "message": str(e)})
                 continue
             for comp_id, comp in ((cfg or {}).get("components") or {}).items():
+                type_role = (types.get(comp.get("type")) or {}).get("role")
+                if type_role and comp.get("role") and comp["role"] != type_role:
+                    where = yamledit.locate(text, ["configurations", cfg_name, "components", comp_id, "role"]) or (1, 1)
+                    problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
+                                     "message": f"component '{comp_id}': role '{comp['role']}', but its type "
+                                                f"'{comp['type']}' is for role '{type_role}'"})
                 if comp.get("type") in types and comp.get("configuration") not in (types[comp["type"]].get("configurations") or {}):
                     where = yamledit.locate(text, ["configurations", cfg_name, "components", comp_id]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "error",

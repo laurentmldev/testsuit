@@ -17,12 +17,24 @@ roles:
       stop:    Stops the application cleanly. State afterwards idle.
       ready:   Waits until the application logs READY.
       version: Prints the version of the application, recorded in the results baseline.
+    inputs:                     # what every toy-train application gets in its input folder
+      - name: app/
+        type: folder
+        description: |
+          The application release for this calculator: the folder of its role in the
+          toy-train software release (`toytrain-sw-<version>/<role>/`), with `bin/` and `lib/`.
+          Built by `make release` in the toytrain-sw repository, or imported as a dataset.
 
   pilot:
     extends: toytrain_app
     description: CALC-Pilot, drives the train
     commands:
       install: Flashes the microcontroller part from the deployed inputs.
+    inputs:
+      - name: pilot.yml
+        description: |
+          The pilot configuration: speed profile and braking distances. Start from
+          `templates/pilot.yml` of the setup; its keys come from the test dictionaries.
 
   telemetry:
     extends: toytrain_app
