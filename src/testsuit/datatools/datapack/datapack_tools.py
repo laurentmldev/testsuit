@@ -60,7 +60,7 @@ from testsuit.datatools.datapack.generators import GeneratorError, run_generator
 from testsuit.datatools.datapack.importers import create_data_importer
 from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef, former_names
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
-from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping
+from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping, run_time_keys
 from testsuit.plugins import load_plugins
 
 WORK_FOLDER = ".current_datapack"
@@ -502,7 +502,7 @@ class _Builder:
                 return file.read_text(encoding="utf-8")
             comp_keys = {"id": comp_id, "name": component.name, "type": component.type,
                          "configuration": component.configuration, "input_dir": input_dir.as_posix()}
-            extra = {"slot": comp_keys, "slots": needed, "read_input": read_input}
+            extra = {**run_time_keys(keys.root), "slot": comp_keys, "slots": needed, "read_input": read_input}
             inputs = []
             for number, input_file in enumerate(comp_type.configurations[component.configuration].inputs, 1):
                 problem = _input_problem(input_file.source, input_file.target, input_dir)

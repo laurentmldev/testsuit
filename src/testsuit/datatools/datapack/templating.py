@@ -43,7 +43,7 @@ from typing import Any
 import jinja2
 import yaml
 
-__all__ = ["Keys", "TemplateError", "expand_dotted_keys", "has_template", "load_yaml_mapping"]
+__all__ = ["Keys", "TemplateError", "expand_dotted_keys", "has_template", "load_yaml_mapping", "run_time_keys"]
 
 
 class TemplateError(Exception):
@@ -83,6 +83,28 @@ def _environment(search_path: Iterable[Path] = ()) -> _Environment:
     env.filters["from_yaml"] = yaml.safe_load
     env.filters["from_json"] = json.loads
     return env
+
+
+# keys only a run defines (the sequencer binds slots to the lab when a run starts, after generation)
+RUN_TIME_KEYS = {
+    "component": "the lab component a slot is bound to",
+    "realms": "the lab stage each realm is bound to",
+    "stage": "the lab stage of a slot's realm",
+    "lab": "the lab",
+}
+
+
+def run_time_keys(defined: Mapping) -> dict:
+    """Placeholders for the run-time keys that ``defined`` (the dictionaries) does not hold: reading one
+    fails with a message saying why it is not defined in a template, instead of a bare 'is undefined'."""
+    found = {}
+    for name, what in RUN_TIME_KEYS.items():
+        if name not in defined:
+            found[name] = jinja2.StrictUndefined(
+                hint=f"'{name}' is a run-time key ({what}): a run binds slots to the lab when it starts, after the "
+                     f"datapack is generated, so it is not defined in an input template. Use 'slot.*' here, or "
+                     f"pass the value from a pipeline step (its env or command)", name=name)
+    return found
 
 
 def load_yaml_mapping(path: str | os.PathLike) -> dict:
