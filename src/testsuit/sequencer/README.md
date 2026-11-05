@@ -19,100 +19,6 @@ A sample configuration, a toy train on a one-stage lab with a simulated environm
 
 **Where to start.** [Section 2](#2-user-manual) is the user manual: the key concepts, then what to do for each use case. The data model is in [section 4.3](#43-data-model).
 
-## Cheat sheet
-
-The main operations, on the toy-train sample in emulated mode (section 6.2): every component is a local process, so this runs on any Linux host. Commands run from `examples/toytrain`; `TSQ_CONFIG` saves giving `--config tsq.dev.yml` to each of them. On the lab, the configuration is `/etc/testsuit/tsq.yml` and the setup configuration is the test definition's own (`sim_bench`).
-
-**Install** (from the root of the repository):
-
-```bash
-(cd ui && npm ci && npm run build)            # the web UI (Node 22), served by tsqd; skip it for the CLI only
-pip install -e ".[sequencer]"                 # testsuit with tsq and tsqd
-pip install -e "examples/toytrain[test]"      # the toy-train plugin: importer, criteria, formats
-cd examples/toytrain
-export TSQ_CONFIG=$PWD/tsq.dev.yml
-tsq config                                    # every setting, and where it comes from
-tsq lab status                                # inventory, git state of the lab folder, stages, components
-```
-
-**Build a datapack**, then check it against the lab:
-
-```bash
-datapack datapack/testdef/front_contact/testdef.yml --setup-config emulated --nocheck   # zip in .work/datapacks/
-ZIP=$(ls -t .work/datapacks/toytrain_front_contact_*.zip | head -1)
-datapack --verify $ZIP                        # checksums
-datapack --check-baseline baseline_expected.yml $ZIP   # conformity (a --nocheck datapack is not conform)
-tsq validate $ZIP                             # binding, phases and every command, fully expanded
-tsq validate datapack/testdef/max_speed/testdef.yml --setup-config emulated   # straight from a test definition
-tsq files $ZIP data/pilot/input               # browse its contents
-```
-
-**Start the daemon** (REST API on `server.listen`, here 127.0.0.1:8640; OpenAPI at `/docs`):
-
-```bash
-tsqd &                                        # or: tsqd --config tsq.dev.yml --log-level debug
-tsq components                                # monitored state, lock mode, holder
-tsq selftest                                  # self-test of the whole lab, or: tsq selftest train_emu
-```
-
-**Post a datapack and follow it:**
-
-```bash
-tsq submit $ZIP --priority 70 --follow        # steps and logs live; exit code 0 succeeded, 1 failed, 2 error
-tsq submit $ZIP --baseline baseline_expected.yml --wait   # quiet, the verdict as exit code
-tsq submit $ZIP                               # just queue it
-tsq queue                                     # waiting runs, priority, what each waits for
-tsq priority <run> 90                         # a queued run's priority
-tsq runs [--state running]                    # runs, newest first (a unique prefix of a run id is enough)
-tsq show <run>                                # state, binding, verdict, every step
-tsq logs <run>                                # steps and their logs; one log: tsq logs <run> --step test_run:up.start_tm -f
-tsq cancel <run>                              # stop commands, then kill, then finally (collect)
-tsq kill <run>                                # kill at once, then finally
-tsq repost <run>                              # an ended run back in the queue, its outputs cleaned
-```
-
-**Without a daemon** (one datapack in the foreground, same storage and locks):
-
-```bash
-tsq run $ZIP --local --follow
-```
-
-**Results:**
-
-```bash
-tsq files <run>                               # run folder: data/<slot>/{input,output}, logs/, run.yml, selftest.yml, baseline.yml
-tsq files <run> data/telemetry/output/telemetry.csv --get
-tsq files <run> --results --get               # the results zip (<run>_results.zip)
-datapack --verify <run>_results.zip
-```
-
-They are kept in `storage.results/<run>/<datapack>_results.zip`, with `_NONCONFORM` when the baseline does not match.
-
-**Web UI** (section 13.1): build it once, then start `tsqd` with the Editor on and open http://127.0.0.1:8640/ui/:
-
-```bash
-(cd ../../ui && npm ci && npm run build)      # once, Node 22: builds the UI into src/testsuit/sequencer/ui/ (already done by Install above)
-tsqd &                                        # serves it: tsq.dev.yml has server.ui and server.editor on; on the lab, set them in tsq.yml
-xdg-open http://127.0.0.1:8640/ui/            # Queue, Runs, Lab, Editor
-tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from another host (behind a reverse proxy with authentication)
-(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run dev)   # UI development: hot reload on http://127.0.0.1:5173, API proxied to tsqd
-(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run e2e)   # every page and editor view rendered in a headless Chrome (CHROMIUM=<path> if needed)
-```
-
-- **Queue**, **Runs** and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
-- **Editor** (`server.editor: true`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, lab roles and components, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
-
-**Lab operations:**
-
-```bash
-tsq maintenance train_emu --note "rewiring"   # out of scheduling; tsq resume train_emu brings it back
-tsq hold calc_tm                              # keep a component for yourself; tsq release calc_tm
-tsq release train_emu                         # also frees a lock left by a run (audited)
-tsq lab reload                                # re-read the inventory; --pull [<rev>] fetches the lab repository first
-```
-
-The example's release store only holds placeholders of the toy-train applications, so until host builds of them exist, a run of these datapacks stops at the self-test (the simulation is not installed under `~/.toytrain-emu/sim/venv`) or at the first `start`, with verdict `error`. Everything above still works on it, results included.
-
 Contents:
 1. [Functional requirements](#1-functional-requirements)
 2. [User manual](#2-user-manual)
@@ -132,6 +38,9 @@ Contents:
 16. [Implementation plan](#16-implementation-plan)
 17. [Open points](#17-open-points)
 18. [Implementation status](#18-implementation-status)
+
+Annexes:
+- A. [Cheat sheet](#annex-a-cheat-sheet)
 
 ## 1. Functional requirements
 
@@ -208,23 +117,23 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-19 | An optional UI can be added on top of the kernel later. It covers posting a datapack; managing and monitoring components, queued datapacks and running datapacks; and accessing the contents of a datapack before, during and after its run. | 13.1 |
 | SQ-29 | The UI has an optional **Editor** mode: edit the lab inventory, with helpers (for example the available roles and components when creating a component); create a new datapack definition and generate a datapack from it; create and update pipelines. Applying a modification asks the user for git credentials to push it; the sequencer then reloads this latest configuration on demand only. | 13.2 |
 | SQ-30 | One overall YAML file defines the main configuration settings: storage folders (datapacks, runs, results), lab inventory folder, server, queue, self-test and monitoring defaults. | 4.1 |
-| SQ-31 | A live example of the toy-train platform runs on a dev host, with every component emulated on the local host: the same test definitions, no hardware, no root access, no SSH. | 6.2 |
+| SQ-31 | A live example platform runs on a dev host, with every component emulated on the local host: the same test definitions, no hardware, no root access, no SSH. | 6.2 |
 | SQ-20 | The product can act as a GitLab runner, for a future CI integration. | 13 |
 | SQ-21 | Simple and modular, built on well-known open-source languages and libraries. | 3, 14 |
 | SQ-22 | A single-team lab is enough for a first version: no access control in the kernel. | 13 |
 
 ## 2. User manual
 
-What to do with the sequencer, in short; the sections after give the details. The commands are those of the [cheat sheet](#cheat-sheet), and the web UI (section 13.1) does the same from its pages.
+What to do with the sequencer, in short; the sections after give the details. The commands are those of the [cheat sheet](#annex-a-cheat-sheet), and the web UI (section 13.1) does the same from its pages.
 
 ### 2.1 Key concepts
 
 ![Slots and realms of a datapack, bound to the components and stages of the lab, through roles](../../../docs/diagrams/concepts.svg)
 
 Two sides meet when a run starts:
-- **The lab** (lab repository, lab operators) is what exists. A **component** is one element of it: a computer, a switch, a simulator on a server. Components are grouped in **stages**, each of a **stage type** (`toytrain`): a stage is locked as a whole. A component in no stage is **ad hoc**, locked on its own.
-- **Lab roles** say what a component is for, as the **commands** it offers (`deploy`, `start`, `ready`, `stop`, `collect`, `install`...). Every component has one role, and implements its commands through the **lab component** it extends: the kind of hardware or software it is (`arduino_unoq`, `rpi5`, `linux_system`).
-- **The datapack** (tests repositories, test authors) is what a test needs. A **slot** is one thing it needs, by role ("the pilot"); its **slot type** says which input files the slot gets. Slots that must be in one stage are grouped in a **realm**, which asks for a stage type. A slot in no realm is an **ad hoc slot**.
+- **The lab** (lab repository, lab operators) is what exists. A **component** is one element of it: a computer, a switch, a simulator on a server. Components are grouped in **stages**, each of a **stage type** (`bench`): a stage is locked as a whole. A component in no stage is **ad hoc**, locked on its own.
+- **Lab roles** say what a component is for, as the **commands** it offers (`deploy`, `start`, `ready`, `stop`, `collect`, `install`...). Every component has one role, and implements its commands through the **lab component** it extends: the kind of hardware or software it is (`mcu_board`, `sbc`, `linux_system`).
+- **The datapack** (tests repositories, test authors) is what a test needs. A **slot** is one thing it needs, by role ("the controller"); its **slot type** says which input files the slot gets. Slots that must be in one stage are grouped in a **realm**, which asks for a stage type. A slot in no realm is an **ad hoc slot**.
 - **A run** binds each realm to a free stage of its type and each slot to the component of its role there (an ad hoc slot to an ad hoc component of its role), locks them, then runs the **pipeline**: phases of steps, each step running a command of its slot's role on the component bound to it.
 
 A test never names a host: the same datapack runs on any stage of the right type, real or emulated. [Vocabulary](#23-vocabulary) defines every term; [section 4.3](#43-data-model) shows how they relate.
@@ -262,7 +171,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 **UC-9 Run tests from CI** (section 13): a GitLab job builds the datapack and calls `tsq submit --wait --follow`, so the run log becomes the job trace and the verdict the job status.
 
-**UC-10 Try the platform on a dev host** (section 6.2): the toy-train example's emulated lab runs every component as a local process. Follow the [cheat sheet](#cheat-sheet) with `TSQ_CONFIG=tsq.dev.yml`.
+**UC-10 Try the platform on a dev host** (section 6.2): an emulated lab runs every component as a local process; the [toy-train example](../../../examples/toytrain/README.md) has one. Follow the [cheat sheet](#annex-a-cheat-sheet) with `TSQ_CONFIG=tsq.dev.yml`.
 
 ### 2.3 Vocabulary
 
@@ -274,8 +183,8 @@ A test never names a host: the same datapack runs on any stage of the right type
 | **ad hoc component** | a component that belongs to no stage, reserved on its own (for example a server running exploitation tools). |
 | **lab inventory** | the file describing the stages and components of the lab, owned by the lab operators. |
 | **datapack** | the self-sufficient zip built by `datapack`: slot inputs, every resolved key, and the test definition and setup (pipeline included). It says *what* to run; the lab inventory says *where*. |
-| **slot** | what a datapack needs, by role ("the pilot", "the simulated propulsion"): bound to a lab component of that role at activation. A datapack has slots, the lab has components. |
-| **realm** | a group of slots of a datapack that must be bound in the same lab stage ("a toy-train stage with its pilot, telemetry and acquisition units"), asked for by stage type. A slot in no realm is an **ad hoc slot**, bound to an ad hoc component. |
+| **slot** | what a datapack needs, by role ("the controller", "the simulated actuator"): bound to a lab component of that role at activation. A datapack has slots, the lab has components. |
+| **realm** | a group of slots of a datapack that must be bound in the same lab stage ("a bench with its controller, logger and acquisition units"), asked for by stage type. A slot in no realm is an **ad hoc slot**, bound to an ad hoc component. |
 | **run** | one activation of a datapack. |
 | **phase / step** | the pipeline of a run: named phases (`test_run`, `exploit`...) made of steps (commands), run in parallel or waiting for each other (`needs`). |
 | **sequencer component** | the sequencer host itself: an ad hoc component like the others (`transport: local`), never locked. |
@@ -286,13 +195,13 @@ A test never names a host: the same datapack runs on any stage of the right type
 |---|---|
 | **lab library** | the lab's roles and components, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/components/`). |
 | **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one; datapacks bind their slots by role and run its commands. |
-| **lab component** | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2). A component `extends` another one and overrides what differs. A component lists the roles it supports (`roles: [telemetry, acquisition]`) and must implement their commands; a base component lists none. An inventory host is itself a component: it extends one with `tsq_extends`, and can add its own `tsq_commands`. A host must implement every command its role lists. |
+| **lab component** | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2). A component `extends` another one and overrides what differs. A component lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base component lists none. An inventory host is itself a component: it extends one with `tsq_extends`, and can add its own `tsq_commands`. A host must implement every command its role lists. |
 | **built-ins** | the roles and components `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and component ends up extending (section 7.3). |
 | **`extends`** | the parent of a role (whose commands it offers too) or of a component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a role adds (`install`, `feed`...). Its implementation is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | the role lists it; its implementation is resolved in this order, last wins: the host's component chain, the stage `tsq_commands`, the host's own `tsq_commands`, and an inline `run:` in a step (section 7.4). The Editor shows the source of each command. |
-| **role** | the job of a component (`pilot`, `telemetry`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role. Unique within a stage. |
-| **stage type** | the kind of a stage (`toytrain`, `counter_bench`...): a datapack's realm asks for a stage type, and any free stage of that type can be bound to it. |
+| **role** | the job of a component (`controller`, `logger`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role. Unique within a stage. |
+| **stage type** | the kind of a stage (`bench`, `rack`...): a datapack's realm asks for a stage type, and any free stage of that type can be bound to it. |
 | **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
 | **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
 | **transport** | how the sequencer reaches a component: `ssh`, `local`, or a plugin's (`tsq_transport`). |
@@ -353,7 +262,7 @@ One YAML file, `tsq.yml`, holds the main settings of a sequencer instance. It is
 # tsq.yml
 lab:
   folder: /srv/tsq/lab                 # git clone of the lab repository (section 6.1)
-  inventory: toytrain_lab.yml          # inventory file in that folder
+  inventory: lab.yml          # inventory file in that folder
   require_tag: true                    # warn unless the clone is on a clean tag
 storage:
   root: /srv/tsq
@@ -375,7 +284,7 @@ server:
 queue: {default_priority: 50, priority_aging: off}
 selftest: {before_each_run: true, when_idle: true, timeout: 60s, max_attempts: 3}   # section 7.6
 monitor: {interval: 30s}
-plugins: [toytrain]                    # in addition to the installed entry points
+plugins: [my_lab]                    # in addition to the installed entry points
 ```
 
 `tsq config` prints the settings in use, with where each one comes from (file or default).
@@ -414,19 +323,19 @@ The `datapack` tool (`testsuit.datatools.datapack`, YAML dictionaries + Jinja2 t
 
 ### 5.1 Slot-specific processing to generate inputs
 
-Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile the pilot's speed profile into the table its microcontroller reads, compute a calibration table, build a network configuration from a topology file.
+Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile the controller's speed profile into the table its microcontroller reads, compute a calibration table, build a network configuration from a topology file.
 
 ```yaml
 slot_types:
-  pilot_app:
+  controller_app:
     configurations:
       standard:
         inputs:
           - source: templates/profile.yml
             target: profile.bin
             method: generate
-            generator: toytrain-profile-compiler   # registered by a plugin
-            options: {step_mps: "{{ train.pilot_profile.step_mps }}"}
+            generator: profile-compiler   # registered by a plugin
+            options: {step: "{{ profile.step }}"}
 ```
 
 A generator is a Python callable registered like processors (`testsuit.datatools.datapack.generators.register_generator(name, fn)`), called as `fn(source, target, keys, options, slot)`. When the name is not registered, it is run as a script relative to the setup folder, with the source, the target and a JSON file of the resolved keys. The keys a generator reads are recorded in `datapack.yml` like those of templates.
@@ -442,12 +351,12 @@ A slot can declare `needs: [other_slot, ...]`. Slots are then generated in depen
 configurations:
   sim_bench:
     slots:
-      pilot:       {type: pilot_app, configuration: standard}
+      controller:       {type: controller_app, configuration: standard}
       acquisition: {type: acquisition_app, configuration: standard}
-      telemetry:
-        type: telemetry_app
+      logger:
+        type: logger_app
         configuration: standard
-        needs: [pilot, acquisition]   # records what they publish, read from their configurations
+        needs: [controller, acquisition]   # records what they publish, read from their configurations
 ```
 
 Both refinements keep the datapack self-sufficient: what a slot needed from another one is already in the zip.
@@ -460,26 +369,26 @@ The datapack tool already records part of it in `datapack.yml` (git commit, tag 
 
 ```yaml
 # baseline.yml
-datapack: {name: toytrain_max_speed_toytrain_setup_20261022T1012, format: 2, conform: true}
+datapack: {name: nominal_bench_setup_20261022T1012, format: 2, conform: true}
 sources:                          # every original input, by git origin
-  - {role: testdef, path: datapack/testdef/max_speed/testdef.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
-  - {role: setup, path: datapack/setup/toytrain_setup.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
-  - {role: dictionary, path: datapack/setup/globals.yml, repo: git@forge:toytrain/toytrain-tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
-  - {role: dataset, id: toytrain_sw, importer: toytrain-release, source: releases/toytrain-sw, version: v0.3.0}
+  - {role: testdef, path: datapack/testdef/nominal/testdef.yml, repo: git@forge:lab/tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: setup, path: datapack/setup/bench_setup.yml, repo: git@forge:lab/tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: dictionary, path: datapack/setup/globals.yml, repo: git@forge:lab/tests.git, commit: 3f2a9c1, tag: v1.4.0, clean: true}
+  - {role: dataset, id: app_sw, importer: release-store, source: releases/app, version: v0.3.0}
 tools:                            # what processed them
   - {name: testsuit, version: 3.2.0}
-  - {name: toytrain-testenv, kind: plugin, version: 0.1.0}        # generators, processors, importers
+  - {name: lab-testenv, kind: plugin, version: 0.1.0}        # generators, processors, importers
   - {name: jinja2, version: 3.1.6}
 files:                            # each generated file and what produced it
-  data/pilot/input/pilot.yml: {from: [datapack/setup/templates/pilot.yml], method: template, sha256: 9e1f...}
-  data/pilot/input/profile.bin: {from: [datapack/setup/templates/profile.yml], method: generate, generator: toytrain-profile-compiler, sha256: 44ab...}
+  data/controller/input/controller.yml: {from: [datapack/setup/templates/controller.yml], method: template, sha256: 9e1f...}
+  data/controller/input/profile.bin: {from: [datapack/setup/templates/profile.yml], method: generate, generator: profile-compiler, sha256: 44ab...}
 ```
 
 When the sequencer produces the results zip (section 10), it extends the baseline with a `run` part:
 - the sequencer version and its plugins;
 - the git commit and tag of the lab inventory and of its library (roles and components);
 - the concrete stages and components the run was bound to;
-- the software version of each component, when its role offers a `version` command (for example `toytrain-install --version` on CALC-Pilot, the firmware id of the propulsion controller), read before the first phase.
+- the software version of each component, when its role offers a `version` command (for example `app-install --version` on a controller, the firmware id of an actuator controller), read before the first phase.
 
 **Conformity.** A baseline is **conform** when every source is a clean, tagged git state and every dataset version was confirmed. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
 - by `datapack --check-baseline expected.yml pack.zip`, and when building with `datapack ... --baseline expected.yml`;
@@ -503,55 +412,55 @@ The lab inventory follows the [Ansible YAML inventory](https://docs.ansible.com/
 
 Sequencer settings use the `tsq_` prefix, the convention for tool-specific inventory variables.
 
-The examples of this document use the toy train of [examples/toytrain](../../../examples/toytrain/README.md), whose lab has one stage. Here it has a second, identical one, to show concurrent runs and a shared component:
+The examples of this document use a sample lab: two identical stages of type `bench` (a controller, a logger and an acquisition unit each, joined by a shared switch) and a lab server running two simulations as ad hoc components. Two stages show concurrent runs and a shared component; a runnable lab built the same way is the [toy-train example](../../../examples/toytrain/README.md):
 
 ```yaml
-# lab/toytrain_lab.yml (Ansible YAML inventory format)
+# lab/lab.yml (Ansible YAML inventory format)
 all:
   vars:
     ansible_user: tsq                              # standard names, reused by the sequencer
-    ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based auth only, no password prompt
+    ansible_ssh_private_key_file: ~/.ssh/id_lab   # key-based auth only, no password prompt
     tsq_remote_root: /opt/testrun                  # default target: <root>/<component>/{input,output}
     tsq_library: [roles/, components/]             # lab roles and components, relative to this file (section 7)
 
   hosts:                                           # ad hoc components: in no stage
     lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
-    sim_propulsion: {ansible_host: localhost, tsq_transport: local, tsq_extends: propulsion_sim}
-    sim_piezo:      {ansible_host: localhost, tsq_transport: local, tsq_extends: piezo_sim}
+    sim_actuator:   {ansible_host: localhost, tsq_transport: local, tsq_extends: actuator_sim}
+    sim_sensor:     {ansible_host: localhost, tsq_transport: local, tsq_extends: sensor_sim}
 
   children:
-    train_1:                                       # a stage
+    bench_1:                                       # a stage
       vars:
-        tsq_stage_type: toytrain                   # what datapacks ask for
+        tsq_stage_type: bench                      # what datapacks ask for
       hosts:
-        calc_pilot_1: {ansible_host: 10.42.1.10, tsq_extends: arduino_unoq}
-        calc_tm_1:    {ansible_host: 10.42.1.11, tsq_extends: rpi5, tsq_role: telemetry}
-        au_1:         {ansible_host: 10.42.1.12, tsq_extends: rpi5, tsq_role: acquisition}
-        switch_1:     {ansible_host: 10.42.1.2, tsq_extends: auvidea_m82, tsq_role: switch}
-        lab_switch:   {ansible_host: 10.42.0.2, tsq_extends: auvidea_m82, tsq_role: lab_network, tsq_lock: shared}
-    train_2:                                       # a second stage of the same type
+        controller_1: {ansible_host: 10.42.1.10, tsq_extends: mcu_board}
+        logger_1:     {ansible_host: 10.42.1.11, tsq_extends: sbc, tsq_role: logger}
+        acq_1:        {ansible_host: 10.42.1.12, tsq_extends: sbc, tsq_role: acquisition}
+        switch_1:     {ansible_host: 10.42.1.2, tsq_extends: plain_switch, tsq_role: switch}
+        lab_switch:   {ansible_host: 10.42.0.2, tsq_extends: plain_switch, tsq_role: lab_network, tsq_lock: shared}
+    bench_2:                                       # a second stage of the same type
       vars:
-        tsq_stage_type: toytrain
-        tsq_commands:                              # stage override: this train's pilot has no flashing helper
-          install: {run: "arduino-cli upload --input-dir {{ component.input_dir }}/app"}
+        tsq_stage_type: bench
+        tsq_commands:                              # stage override: this bench's controller has no flashing helper
+          install: {run: "flash-tool --input-dir {{ component.input_dir }}/app"}
       hosts:
-        calc_pilot_2: {ansible_host: 10.42.2.10, tsq_extends: arduino_unoq}
-        calc_tm_2:    {ansible_host: 10.42.2.11, tsq_extends: rpi5, tsq_role: telemetry}
-        au_2:         {ansible_host: 10.42.2.12, tsq_extends: rpi5, tsq_role: acquisition}
-        switch_2:     {ansible_host: 10.42.2.2, tsq_extends: auvidea_m82, tsq_role: switch}
-        lab_switch: {}                             # shared with train_1: joins both trains to lab_srv
+        controller_2: {ansible_host: 10.42.2.10, tsq_extends: mcu_board}
+        logger_2:     {ansible_host: 10.42.2.11, tsq_extends: sbc, tsq_role: logger}
+        acq_2:        {ansible_host: 10.42.2.12, tsq_extends: sbc, tsq_role: acquisition}
+        switch_2:     {ansible_host: 10.42.2.2, tsq_extends: plain_switch, tsq_role: switch}
+        lab_switch: {}                             # shared with bench_1: joins both benches to lab_srv
 ```
 
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
 - Variables follow Ansible precedence: host over stage group over `all`.
 - `tsq_description` says what an item is, shown in the editor and on the Lab page. It is set at three levels, each separate and not inherited: in `all.vars` it describes the lab, on a stage group the stage, on a host the component. `tsq_label` is the component's short name.
 - `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
-- Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`calc_pilot_1` is a pilot, as `arduino_unoq` supports only that role); when it supports several, `tsq_role` picks one (`rpi5`: telemetry or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Roles are unique within a stage.
+- Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Roles are unique within a stage.
 - `tsq_shell` is the shell the commands of a component run under, on the component (`bash`, `/bin/bash`, `"bash -l"` to read the login profile). By default, steps and commands run under `/bin/sh` (dash on Debian and Ubuntu), whatever the user's login shell, while short checks (probes, self-tests) run under the login shell; with `tsq_shell`, both use it. A POSIX shell is expected: the sequencer's own helpers (pid files, kill) run under it too.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
-  - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `train_1` and `train_2` can run two datapacks at the same time although they share `lab_switch`;
+  - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `bench_1` and `bench_2` can run two datapacks at the same time although they share `lab_switch`;
   - `none`: never locked, for the sequencer component.
   - A `shared` or `none` component gives each run its own folders, `<remote_root>/.tsq/<run>/<component>/{input,output}`, so that two runs deploying to it at once do not clobber each other's files; an `exclusive` one uses `<remote_root>/<component>/{input,output}`.
 - Components are taken out of scheduling by state, not by editing the file: a `broken` state (section 7.5), or `tsq maintenance <component>`.
@@ -574,11 +483,13 @@ A lab can have an **emulated** twin that runs on one Linux computer, for writing
 
 On the datapack side, only what the platform changes (addresses, for example) goes in a dictionary of its own, chosen by the setup configuration: `datapack <testdef> --setup-config emulated` builds the datapack of the same test definition for the emulated platform. Then `tsq run <datapack.zip> --local --config tsq.dev.yml` runs it in the foreground, or `tsqd --config tsq.dev.yml` serves the queue and the UI locally.
 
-The toy train of [examples/toytrain](../../../examples/toytrain/README.md#emulated-mode-on-a-dev-host) has one:
-- every calculator is a process with an address of its own on the loopback interface (`127.0.0.10` and up), which carries the train's multicast traffic with no setup;
-- the CALC-Pilot microcontroller becomes its host stub;
-- the AU GPIO inputs become UDP datagrams from the piezo simulation;
-- the switch disappears.
+In the sample lab, an emulated platform would make:
+- every computer a process with an address of its own on the loopback interface (`127.0.0.10` and up), which carries multicast traffic with no setup;
+- the controller's microcontroller a host stub;
+- the acquisition unit's GPIO inputs UDP datagrams from the sensor simulation;
+- the switch disappear.
+
+The [toy-train example](../../../examples/toytrain/README.md#emulated-mode-on-a-dev-host) has such an emulated platform.
 
 A run on an emulated lab is flagged non-conform against the campaign's expected baseline, whose lab tag it does not match (section 5.3).
 
@@ -592,10 +503,10 @@ Like classes in object-oriented programming:
 
 | Lab | Object-oriented parallel | Example |
 |---|---|---|
-| lab role | abstract class (an interface): the commands offered, each with what it does, and no implementation | `pilot`: `install`, `start`, `stop`, `ready`, `version` |
-| lab component | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `arduino_unoq`, extending `linux_system`, supports `pilot` |
-| inventory component (host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `calc_pilot_1: {tsq_extends: arduino_unoq, ansible_host: 10.0.0.21}` |
-| datapack slot | a variable typed by the abstract class: it uses only the commands of the role | `pilot: {type: pilot_app, realm: train, role: pilot}` in the setup |
+| lab role | abstract class (an interface): the commands offered, each with what it does, and no implementation | `controller`: `install`, `start`, `stop`, `ready`, `version` |
+| lab component | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `mcu_board`, extending `linux_system`, supports `controller` |
+| inventory component (host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `controller_1: {tsq_extends: mcu_board, ansible_host: 10.0.0.21}` |
+| datapack slot | a variable typed by the abstract class: it uses only the commands of the role | `controller: {type: controller_app, realm: bench, role: controller}` in the setup |
 
 A datapack references roles only. When it is activated, the sequencer picks, for each slot, a free inventory component of the required role (in a free stage of the type its realm asks for), and runs the role's commands with that instance's implementation: the same datapack runs on any lab whose instances implement its roles, real hardware or emulation (section 6.2).
 
@@ -604,26 +515,26 @@ Both are YAML, in the `tsq_library` folders of the inventory: a library file hol
 ### 7.1 Lab roles
 
 ```yaml
-# lab/roles/toytrain.yml
+# lab/roles/bench.yml
 roles:
-  toytrain_app:                            # abstract: the hosts take one of the roles below
+  bench_app:                               # abstract: the hosts take one of the roles below
     extends: linux_system                  # deploy, collect, kill
-    description: A toy-train application on a calculator
+    description: An application on a bench computer
     commands:                              # names, each with what it does: no implementation
       start:   Starts the application. State afterwards running.
       stop:    Stops the application cleanly. State afterwards idle.
       ready:   Waits until the application logs READY.
       version: Prints the version of the application, recorded in the results baseline.
-  pilot:
-    extends: toytrain_app
+  controller:
+    extends: bench_app
     commands:
       install: Flashes the microcontroller part from the deployed inputs.
-  telemetry:   {extends: toytrain_app}
+  logger:      {extends: bench_app}
   switch:      {extends: component}        # only monitored: no command
   lab_network: {extends: component}
-  propulsion:                              # the propulsion controller, real or simulated
+  actuator:                                # the actuator controller, real or simulated
     extends: component
-    commands: {stop: Stops the train., kill: Stops the train at once.}
+    commands: {stop: Stops the actuator., kill: Stops the actuator at once.}
   sequencer:   {extends: linux_system}     # the sequencer host: where the exploitation runs
 ```
 
@@ -633,48 +544,48 @@ roles:
 - `optional`: whether the component can work without it.
 - `description`: what it is and how to make it, in Markdown, as long as needed.
 
-A role extending another one adds to its inputs, or redefines one by name. In a setup, a slot type names the role of its slots (`role: pilot`). Its configurations then start with the inputs that role requires: the Editor adds them when the role is picked, when a configuration is added, and when a type is created for a role. The Editor shows each input's description next to the datapack input that provides it. It warns about a required input a configuration lacks, and about a slot whose role differs from its type's.
+A role extending another one adds to its inputs, or redefines one by name. In a setup, a slot type names the role of its slots (`role: controller`). Its configurations then start with the inputs that role requires: the Editor adds them when the role is picked, when a configuration is added, and when a type is created for a role. The Editor shows each input's description next to the datapack input that provides it. It warns about a required input a configuration lacks, and about a slot whose role differs from its type's.
 
 ```yaml
 roles:
-  pilot:
-    extends: toytrain_app
+  controller:
+    extends: bench_app
     inputs:
       - {name: app/, type: folder, description: "The release folder of the role: `make release`."}
-      - {name: pilot.yml, description: "Start from `templates/pilot.yml` of the setup."}
+      - {name: controller.yml, description: "Start from `templates/controller.yml` of the setup."}
       - {name: notes.txt, optional: true}
 ```
 
 ### 7.2 Lab components
 
 ```yaml
-# lab/components/toytrain.yml
+# lab/components/bench.yml
 components:
-  rpi5:
+  sbc:
     extends: linux_system
-    roles: [telemetry, acquisition]        # the roles it supports: it implements their commands
+    roles: [logger, acquisition]           # the roles it supports: it implements their commands
     commands:
-      start:   {run: "sudo systemctl start toytrain-{{ component.role }}", timeout: 30s}
-      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}", timeout: 30s}
+      start:   {run: "sudo systemctl start app-{{ component.role }}", timeout: 30s}
+      stop:    {run: "sudo systemctl stop app-{{ component.role }}", timeout: 30s}
       ready:   {wait_for: {log: {file: "{{ component.output_dir }}/app.log", regex: "READY"}, timeout: 30s}}
-      version: {run: "toytrain-{{ component.role }} --version"}
+      version: {run: "app-{{ component.role }} --version"}
     status:
-      probe: {run: "systemctl is-active toytrain-{{ component.role }}"}
+      probe: {run: "systemctl is-active app-{{ component.role }}"}
       states:                              # first match wins, on the probe output
         running: {regex: "^active"}
         broken:  {regex: "^failed"}
         idle:    {regex: "^inactive"}
 
-  arduino_unoq:
+  mcu_board:
     extends: linux_system                  # Debian on the MPU, plus a microcontroller to flash
-    roles: [pilot]                         # its hosts are pilots, without tsq_role
+    roles: [controller]                    # its hosts are controllers, without tsq_role
     commands:
-      install: {run: "sudo /usr/local/bin/toytrain-install --input {{ component.input_dir }}", timeout: 2m}
-      start:   {run: "sudo systemctl start toytrain-{{ component.role }}"}
-      stop:    {run: "sudo systemctl stop toytrain-{{ component.role }}"}
-      # ready and version too: a pilot host must implement every command of its role
+      install: {run: "sudo /usr/local/bin/app-install --input {{ component.input_dir }}", timeout: 2m}
+      start:   {run: "sudo systemctl start app-{{ component.role }}"}
+      stop:    {run: "sudo systemctl stop app-{{ component.role }}"}
+      # ready and version too: a controller host must implement every command of its role
 
-  auvidea_m82:
+  plain_switch:
     extends: component                     # an unmanaged switch: only monitored
     roles: [switch, lab_network]
     transport: local                       # probed from the sequencer host
@@ -682,10 +593,10 @@ components:
       probe: {run: "ping -c 1 -W 1 {{ component.host }}"}
       states: {running: {exit: 0}, offline: {exit: nonzero}}
 
-  propulsion_controller:                   # the real one, on the real train
+  actuator_controller:                     # the real one, on the real bench
     extends: component                     # not a Linux system: its own protocol
-    roles: [propulsion]
-    transport: toytrain-udp                # plugin (section 12)
+    roles: [actuator]
+    transport: vendor-udp                  # plugin (section 12)
     commands:
       stop:  {run: "stop"}
       kill:  {run: "stop"}
@@ -693,14 +604,14 @@ components:
       probe: {run: "speed"}
       states: {running: {regex: "^[1-9]"}, idle: {regex: "^0"}}
 
-  propulsion_sim:                          # a simulation, from the inputs a datapack deploys
-    extends: toytrain_sim                  # the base of the simulations, listing no role
-    roles: [propulsion_sim]
+  actuator_sim:                            # a simulation, from the inputs a datapack deploys
+    extends: sim_base                      # the base of the simulations, listing no role
+    roles: [actuator_sim]
     commands:
-      start: {run: "toytrain-sim propulsion --config {{ component.input_dir }}/propulsion_sim.yml", detach: true}
+      start: {run: "sim actuator --config {{ component.input_dir }}/actuator_sim.yml", detach: true}
 ```
 
-`roles` is inherited by the components extending one, unless they list their own; a base component (`toytrain_sim`) lists none. An inventory host extends one of them (`calc_pilot_1: {tsq_extends: arduino_unoq}`, a pilot), or another host. The same roles can be implemented by other components in another lab: the emulated toy train implements them with local processes (`lab/components_emulated/`), so the datapacks bind to it unchanged (section 6.2).
+`roles` is inherited by the components extending one, unless they list their own; a base component (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/components_emulated/`, and the datapacks bind to it unchanged (section 6.2).
 
 ### 7.3 Built-ins
 
@@ -711,8 +622,8 @@ components:
 
 ### 7.4 Where commands come from
 
-The commands of a component come from the lab only: its role lists them (with its parent roles: `pilot` → `toytrain_app` → `linux_system`), and the implementation used is resolved in this order, last wins:
-1. the chain of the host's component, from the base down (`component` → `linux_system` → `arduino_unoq`);
+The commands of a component come from the lab only: its role lists them (with its parent roles: `controller` → `bench_app` → `linux_system`), and the implementation used is resolved in this order, last wins:
+1. the chain of the host's component, from the base down (`component` → `linux_system` → `mcu_board`);
 2. the stage `tsq_commands` (lab inventory);
 3. the host's own `tsq_commands` (lab inventory);
 4. an inline `run:` in a pipeline step.
@@ -770,14 +681,14 @@ A lab component gives its checks in `selftest` (a host in `tsq_selftest`), and a
 |---|---|
 | `component` | its `status` probe answers, and the state is not `broken` or `offline` |
 | `linux_system` | the above, plus: SSH login with the lab key, `<remote_root>/<component>/` writable, free disk space above `min_free_space`, clock offset with the sequencer host under `max_clock_offset` (default 1 s) |
-| lab components | anything specific, for example `toytrain-install --check` on CALC-Pilot, or a ping of the switch |
+| lab components | anything specific, for example `app-install --check` on a controller, or a ping of the switch |
 
 ```yaml
 components:
-  arduino_unoq:
+  mcu_board:
     extends: linux_system
     selftest:
-      - {id: mcu_link, run: "sudo /usr/local/bin/toytrain-install --check", timeout: 20s}
+      - {id: mcu_link, run: "sudo /usr/local/bin/app-install --check", timeout: 20s}
 ```
 
 - **When it passes**, the run goes on, and the results are kept in the run record and in the results datapack (`selftest.yml`).
@@ -812,14 +723,14 @@ A datapack has slots and realms; the lab has components and stages. The former d
 configurations:
   sim_bench:
     realms:
-      train: {type: toytrain}            # bound to the lab stage train_1 or train_2, whichever is free
+      bench: {type: bench}               # bound to the lab stage bench_1 or bench_2, whichever is free
     slots:
-      pilot:       {type: pilot_app, configuration: standard, realm: train, role: pilot}
-      telemetry:   {type: telemetry_app, configuration: standard, realm: train, role: telemetry}
-      acquisition: {type: acquisition_app, configuration: standard, realm: train, role: acquisition}
-      propulsion:  {type: propulsion_sim, configuration: standard, role: propulsion_sim}   # ad hoc
-      piezo:       {type: piezo_sim, configuration: standard, role: piezo_sim}             # ad hoc
-      analysis:    {type: exploit, configuration: standard, role: sequencer}               # ad hoc: lab_srv
+      controller:  {type: controller_app, configuration: standard, realm: bench, role: controller}
+      logger:      {type: logger_app, configuration: standard, realm: bench, role: logger}
+      acquisition: {type: acquisition_app, configuration: standard, realm: bench, role: acquisition}
+      actuator:    {type: actuator_sim, configuration: standard, role: actuator_sim}   # ad hoc
+      sensor:      {type: sensor_sim, configuration: standard, role: sensor_sim}       # ad hoc
+      analysis:    {type: exploit, configuration: standard, role: sequencer}           # ad hoc: lab_srv
 ```
 
 A datapack can therefore lock several lab stages (one per realm) and ad hoc components. Here the analysis runs on the sequencer host (`role: sequencer`); a separate exploitation server would be an ad hoc component with its own role.
@@ -830,20 +741,20 @@ Slot types (in the setup file) declare the inputs of the slots, by configuration
 
 ```yaml
 slot_types:
-  pilot_app:
+  controller_app:
     configurations:
       standard:
         inputs:
-          - {source: "{{ toytrain_sw.path }}/pilot/", target: app/, method: copy}
-          - {source: templates/pilot.yml, target: pilot.yml}
-  propulsion_sim:
-    configurations: {standard: {inputs: [{source: templates/propulsion_sim.yml, target: propulsion_sim.yml}]}}
+          - {source: "{{ app_sw.path }}/controller/", target: app/, method: copy}
+          - {source: templates/controller.yml, target: controller.yml}
+  actuator_sim:
+    configurations: {standard: {inputs: [{source: templates/actuator_sim.yml, target: actuator_sim.yml}]}}
   exploit:
     configurations:
       standard:
         inputs:
           - {source: templates/exploit.yml, target: exploit.yml}
-          - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
+          - {source: "{{ testdef.path }}/criteria/", target: scenario/, method: copy}
 ```
 
 `extends` and `commands` in a slot type, or `commands` in a slot, are refused with what to write instead. A command only this test needs is a `run:` step of the pipeline, on the slot (section 8.3).
@@ -857,25 +768,25 @@ pipeline:
   timeout: 15m
   phases:
     - id: test_run
-      realms: [train]                      # realm locked for this phase (with its lab stage)
-      slots: [propulsion, piezo]           # ad hoc slots locked for this phase
+      realms: [bench]                      # realm locked for this phase (with its lab stage)
+      slots: [actuator, sensor]            # ad hoc slots locked for this phase
       steps:
         - {id: deploy, for_each: slots, do: deploy}                    # fan-out, in parallel
-        - {id: flash_pilot, slot: pilot, do: install, needs: [deploy]}
-        - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
-        - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
-        - {id: start_tm, slot: telemetry, do: start, needs: [deploy]}
-        - {id: tm_ready, slot: telemetry, do: ready, needs: [start_tm]}
-        - {id: start_au, slot: acquisition, do: start, needs: [deploy, sims_ready]}
-        - {id: au_ready, slot: acquisition, do: ready, needs: [start_au]}
-        - id: start_pilot                                                   # rendez-vous
-          slot: pilot
+        - {id: flash_controller, slot: controller, do: install, needs: [deploy]}
+        - {id: start_sims, for_each: [actuator, sensor], do: start, needs: [deploy]}
+        - {id: sims_ready, for_each: [actuator, sensor], do: ready, needs: [start_sims]}
+        - {id: start_logger, slot: logger, do: start, needs: [deploy]}
+        - {id: logger_ready, slot: logger, do: ready, needs: [start_logger]}
+        - {id: start_acq, slot: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: acq_ready, slot: acquisition, do: ready, needs: [start_acq]}
+        - id: start_controller                                                   # rendez-vous
+          slot: controller
           do: start
-          needs: [flash_pilot, sims_ready, tm_ready, au_ready]
-        - {id: pilot_running, wait_for: {state: running, slot: pilot, timeout: 20s}, needs: [start_pilot]}
-        - {id: run, delay: "{{ scenario.duration_s }}s", needs: [pilot_running]}   # no objective end
-        - {id: stop_pilot, slot: pilot, do: stop, needs: [run]}
-        - {id: stop_all, for_each: [acquisition, telemetry, propulsion, piezo], do: stop, needs: [stop_pilot]}
+          needs: [flash_controller, sims_ready, logger_ready, acq_ready]
+        - {id: controller_running, wait_for: {state: running, slot: controller, timeout: 20s}, needs: [start_controller]}
+        - {id: run, delay: "{{ scenario.duration_s }}s", needs: [controller_running]}   # no objective end
+        - {id: stop_controller, slot: controller, do: stop, needs: [run]}
+        - {id: stop_all, for_each: [acquisition, logger, actuator, sensor], do: stop, needs: [stop_controller]}
       finally:                                                              # always runs, even on abort
         - {id: kill_leftovers, for_each: slots, do: kill, if: "not succeeded('stop_all')"}
         - {id: collect, for_each: slots, do: collect}
@@ -884,8 +795,8 @@ pipeline:
       needs: [test_run]
       slots: [analysis]                    # an ad hoc slot (bound to the sequencer host)
       inputs:                              # outputs of earlier phases become inputs
-        - {from: "test_run:telemetry/output/telemetry.csv", to: "analysis/input/data/"}
-        - {from: "test_run:propulsion/output/propulsion.propj", to: "analysis/input/data/"}
+        - {from: "test_run:logger/output/logger.csv", to: "analysis/input/data/"}
+        - {from: "test_run:actuator/output/actuator.log", to: "analysis/input/data/"}
       steps:
         - {id: deploy, slot: analysis, do: deploy}
         - id: analyse                      # a command of this test only: a run step on the slot
@@ -910,15 +821,15 @@ Step fields:
 **Python steps** (SQ-32). `python` runs a Python script where `run` would run a shell command: on the lab component bound to the step's slot, or on the sequencer host for a step without one. It is also allowed wherever a lab component implements a command, so a component's `start` or `ready` can be a script.
 
 ```yaml
-- id: check_speed                          # inline code, on the sequencer host
+- id: check_peak                           # inline code, on the sequencer host
   needs: [run]
   python:
     code: |
       import csv, sys
-      rows = list(csv.DictReader(open(keys["run"]["dir"] + "/data/telemetry/output/telemetry.csv")))
-      top = max(float(r["speed_mps"]) for r in rows)
-      print(f"top speed {top} m/s")
-      sys.exit(0 if top <= keys["train"]["speed_limit_mps"] else 1)
+      rows = list(csv.DictReader(open(keys["run"]["dir"] + "/data/logger/output/logger.csv")))
+      top = max(float(r["value"]) for r in rows)
+      print(f"peak value {top}")
+      sys.exit(0 if top <= keys["limits"]["max_value"] else 1)
 - id: analyse                              # a script deployed with the slot's inputs
   slot: analysis
   needs: [deploy]
@@ -931,10 +842,10 @@ Step fields:
 - **Source**: `script` is a path on the target, usually an input of the slot (`data/<slot>/input/`, so it is part of the datapack and of its baseline); `code` is inline and sent with the command. One of the two.
 - **Keys**: before the script runs, the sequencer writes every key the step's templates can use (the datapack's `context.yml` and the run-time keys) to a JSON file, under `<remote_root>/.tsq/<run>/<lab component>/python/<step>/` with the wrapper below, and gives its path in `TSQ_KEYS`. The script finds them already loaded as `keys`, or reads them with `json.load(open(os.environ["TSQ_KEYS"]))`. `args`, `env`, `script` and `interpreter` are Jinja2 templates like any command; inline `code` is not (it reads `keys`).
 - **Result**: the same as for `run`: the exit status and output are checked against `expect`, and `timeout`, `retries`, `detach` and `continue_on_error` apply. A small wrapper runs the script and turns an uncaught exception into exit status 70 with its traceback on stderr, which makes the step `error`, not `failed`: a crashed check says nothing about the system under test.
-- **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it, with `interpreter`, else the component's `tsq_python` variable, else `python3`. The target needs nothing but a Python 3 interpreter, not testsuit. Without a slot, it runs on the sequencer host in the run folder (relative paths such as `data/telemetry/output/telemetry.csv` work), with the daemon's own interpreter by default, so testsuit and its libraries are there; still as a separate process, never inside `tsqd`, so a script cannot block the daemon or crash it.
+- **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it, with `interpreter`, else the component's `tsq_python` variable, else `python3`. The target needs nothing but a Python 3 interpreter, not testsuit. Without a slot, it runs on the sequencer host in the run folder (relative paths such as `data/logger/output/logger.csv` work), with the daemon's own interpreter by default, so testsuit and its libraries are there; still as a separate process, never inside `tsqd`, so a script cannot block the daemon or crash it.
 - **Help in the Editor**: the step palette offers **Python script** next to **shell command**, the step and command forms switch between a script file (with its arguments) and inline code edited as Python, and `tsq validate` lists each python step with its script.
 
-The toy-train sample has one: `check_data` in the exploit phase of both test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before `exploit_runner` judges it.
+The toy-train example has one: `check_data` in the exploit phase of its test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before `exploit_runner` judges it.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.5), `tcp`, `http` (status or regex), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -948,33 +859,33 @@ Templates in commands are rendered with Jinja2, the same environment as the data
 
 ### 8.4 Sub-pipelines
 
-A pipeline can be built from **sub-pipelines**: named groups of steps, declared once under `pipeline.subpipelines` and used as a single step with `uses`. The toy-train pipeline of section 8.3 becomes:
+A pipeline can be built from **sub-pipelines**: named groups of steps, declared once under `pipeline.subpipelines` and used as a single step with `uses`. The pipeline of section 8.3 becomes:
 
 ```yaml
 pipeline:
   subpipelines:
-    bring_up:                              # deploy, start everything, pilot last
+    bring_up:                              # deploy, start everything, controller last
       steps:
         - {id: deploy, for_each: slots, do: deploy}
-        - {id: flash_pilot, slot: pilot, do: install, needs: [deploy]}
-        - {id: start_sims, for_each: [propulsion, piezo], do: start, needs: [deploy]}
-        - {id: sims_ready, for_each: [propulsion, piezo], do: ready, needs: [start_sims]}
-        - {id: start_tm, slot: telemetry, do: start, needs: [deploy]}
-        - {id: tm_ready, slot: telemetry, do: ready, needs: [start_tm]}
-        - {id: start_au, slot: acquisition, do: start, needs: [deploy, sims_ready]}
-        - {id: au_ready, slot: acquisition, do: ready, needs: [start_au]}
-        - {id: start_pilot, slot: pilot, do: start, needs: [flash_pilot, sims_ready, tm_ready, au_ready]}
-        - {id: pilot_running, wait_for: {state: running, slot: pilot, timeout: 20s}, needs: [start_pilot]}
-    shut_down:                             # pilot first, then the others given as a parameter
-      params: {others: [acquisition, telemetry, propulsion, piezo]}
+        - {id: flash_controller, slot: controller, do: install, needs: [deploy]}
+        - {id: start_sims, for_each: [actuator, sensor], do: start, needs: [deploy]}
+        - {id: sims_ready, for_each: [actuator, sensor], do: ready, needs: [start_sims]}
+        - {id: start_logger, slot: logger, do: start, needs: [deploy]}
+        - {id: logger_ready, slot: logger, do: ready, needs: [start_logger]}
+        - {id: start_acq, slot: acquisition, do: start, needs: [deploy, sims_ready]}
+        - {id: acq_ready, slot: acquisition, do: ready, needs: [start_acq]}
+        - {id: start_controller, slot: controller, do: start, needs: [flash_controller, sims_ready, logger_ready, acq_ready]}
+        - {id: controller_running, wait_for: {state: running, slot: controller, timeout: 20s}, needs: [start_controller]}
+    shut_down:                             # controller first, then the others given as a parameter
+      params: {others: [acquisition, logger, actuator, sensor]}
       steps:
-        - {id: stop_pilot, slot: pilot, do: stop}
-        - {id: stop_others, for_each: "{{ params.others }}", do: stop, needs: [stop_pilot]}
+        - {id: stop_controller, slot: controller, do: stop}
+        - {id: stop_others, for_each: "{{ params.others }}", do: stop, needs: [stop_controller]}
 
   phases:
     - id: test_run
-      realms: [train]
-      slots: [propulsion, piezo]
+      realms: [bench]
+      slots: [actuator, sensor]
       steps:
         - {id: up, uses: bring_up}
         - {id: run, delay: "{{ scenario.duration_s }}s", needs: [up]}
@@ -986,7 +897,7 @@ pipeline:
 
 - A `uses` step stands for the whole group. Its `needs` apply to the group's first steps, and a step that needs it waits for all the group's steps. Its verdict is the worst of its steps' verdicts.
 - Inside a group, steps keep their own `needs`, so a sub-pipeline has its own parallelism and rendez-vous points.
-- Step ids are namespaced in logs, status and the UI (`up.start_tm`), so the same sub-pipeline can be used several times.
+- Step ids are namespaced in logs, status and the UI (`up.start_logger`), so the same sub-pipeline can be used several times.
 - `params` declares parameters with their defaults, given by `with:` on the `uses` step and read as `params.*` in the group.
 - A sub-pipeline can use other sub-pipelines. Cycles and unknown names are rejected at validation, and `tsq validate` can print the pipeline flattened.
 - Sub-pipelines shared by several test definitions can live in YAML files listed in `pipeline.include`, relative to the test definition. The datapack tool copies them into the datapack's `definition/` folder, so the datapack stays self-sufficient.
@@ -1002,7 +913,7 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 | `slot.{id, name, type, configuration, input_dir}` | the slot being generated | | no |
 | `slots.<id>.{id, input_dir}`, `read_input('<id>/<file>')` | the slots it `needs` | | no |
 | `slot.{id, name, type, role, realm, component, input_dir, output_dir, remote_root}` | | the step's slot; `slot.component` is the id of the lab component bound to it | no |
-| `slots.<id>.*` | | the same keys, for any slot of the run (`slots.pilot.component`) | no |
+| `slots.<id>.*` | | the same keys, for any slot of the run (`slots.controller.component`) | no |
 | `realms.<id>.stage` | | the lab stage a realm is bound to | no |
 | `component.{id, host, label, role, extends, stage, vars, input_dir, output_dir, remote_root, state}` | | the lab component bound to the step's slot: `id` is its inventory name, `stage` its lab stage, `slot` the slot it is bound to | the component itself |
 | `remote_root` | | the lab component's remote root | the component's |
@@ -1027,7 +938,7 @@ An input template is rendered at generation, before any run binds its slots to t
 
 A lower-priority run may start while a higher-priority one waits, but only on resources the waiting run cannot use (backfilling), so priority is respected without leaving the lab idle. Among several free candidates, the stage used last by the same test definition is preferred, then the least used one.
 
-**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, a toy-train datapack runs on `train_1` and holds the two simulations of `lab_srv`. A second one can only bind `train_2` once simulations are free too: with a second pair (two more ad hoc components with the same roles), both run together, sharing `lab_switch`, while a third one waits for a stage.
+**Concurrency.** Runs that bind to different stages and ad hoc components run at the same time. In the example inventory, a `bench` datapack runs on `bench_1` and holds the two simulations of `lab_srv`. A second one can only bind `bench_2` once simulations are free too: with a second pair (two more ad hoc components with the same roles), both run together, sharing `lab_switch`, while a third one waits for a stage.
 
 **Locking.**
 - The granularity is the **stage** for components that belong to a stage, and the **component** for ad hoc components.
@@ -1038,7 +949,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
 **Per phase.** At the end of a phase, the resources the next phase doesn't use are released, and those it does use stay held. Optionally, a run can pre-reserve the resources of all its phases at activation (`reserve: all`), so it isn't stuck between phases.
 
 **Visibility.**
-- `tsq queue` shows each waiting run with its priority and what it waits for (no free `toytrain` stage: `train_1` held by run A, `train_2` broken).
+- `tsq queue` shows each waiting run with its priority and what it waits for (no free `bench` stage: `bench_1` held by run A, `bench_2` broken).
 - `tsq stages` and `tsq components` show stages and components with their monitored state, lock state and holder.
 
 ## 10. Running a datapack
@@ -1092,7 +1003,7 @@ During the run, the outputs are already in the run folder as they are collected,
   - `setsid -w sh -c ...` (ssh) or a new session (local), the group id written to `<remote_root>/.tsq/<run>/<component>/<step>.pid`;
   - `kill -KILL -<pgid>` for each pid file kills whole process trees, even when the ssh session is gone, and a group is alive while `ps` lists a member that is not a zombie;
   - it needs nothing on the target but a POSIX shell, `setsid` and `ps`; a component that prefers systemd units overrides `start` and `kill`.
-- **Other lab components** override `kill`: stop the propulsion controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
+- **Other lab components** override `kill`: stop the actuator controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
 - **`tsq repost <run>`** (or Re-post in the run view of the UI): an ended run (done or cancelled) goes back to the queue under the same run id, with the same priority. Its outputs are removed (the run folder and the results zip) and the datapack is unpacked again from the zip that was posted, after the same check against the lab as a new post.
 - **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <stage | component>` is the audited manual escape hatch.
 
@@ -1109,7 +1020,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
 
-Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the propulsion controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
+Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
 
 ## 13. Interfaces: CLI, REST API, UI, GitLab runner
 
@@ -1341,9 +1252,103 @@ Where the code differs from this document, and why:
 | Editor forms | written for each file kind, not generated from the schemas (react-jsonschema-form) | the help needs the lab's names in context: types with their commands, roles per stage type, commands per component |
 | Generator scripts (5.1) | get every resolved key in their JSON file, so no key is recorded for them in `datapack.yml` | only a registered generator's reads can be tracked |
 
-The main operations are in the [cheat sheet](#cheat-sheet).
+The main operations are in the [cheat sheet](#annex-a-cheat-sheet).
 
 Not done yet:
 - `collect` resuming an interrupted transfer, checksums computed during the transfer, and `collect: {max_size}` (`include` and `exclude` work);
 - the `http` transport;
 - the end-to-end emulated toy-train run in CI (section 15).
+
+## Annex A. Cheat sheet
+
+The main operations, on the [toy-train example](../../../examples/toytrain/README.md) in emulated mode (section 6.2): every component is a local process, so this runs on any Linux host. Commands run from `examples/toytrain`; `TSQ_CONFIG` saves giving `--config tsq.dev.yml` to each of them. On the lab, the configuration is `/etc/testsuit/tsq.yml` and the setup configuration is the test definition's own (`sim_bench`).
+
+**Install** (from the root of the repository):
+
+```bash
+(cd ui && npm ci && npm run build)            # the web UI (Node 22), served by tsqd; skip it for the CLI only
+pip install -e ".[sequencer]"                 # testsuit with tsq and tsqd
+pip install -e "examples/toytrain[test]"      # the toy-train plugin: importer, criteria, formats
+cd examples/toytrain
+export TSQ_CONFIG=$PWD/tsq.dev.yml
+tsq config                                    # every setting, and where it comes from
+tsq lab status                                # inventory, git state of the lab folder, stages, components
+```
+
+**Build a datapack**, then check it against the lab:
+
+```bash
+datapack datapack/testdef/front_contact/testdef.yml --setup-config emulated --nocheck   # zip in .work/datapacks/
+ZIP=$(ls -t .work/datapacks/toytrain_front_contact_*.zip | head -1)
+datapack --verify $ZIP                        # checksums
+datapack --check-baseline baseline_expected.yml $ZIP   # conformity (a --nocheck datapack is not conform)
+tsq validate $ZIP                             # binding, phases and every command, fully expanded
+tsq validate datapack/testdef/max_speed/testdef.yml --setup-config emulated   # straight from a test definition
+tsq files $ZIP data/pilot/input               # browse its contents
+```
+
+**Start the daemon** (REST API on `server.listen`, here 127.0.0.1:8640; OpenAPI at `/docs`):
+
+```bash
+tsqd &                                        # or: tsqd --config tsq.dev.yml --log-level debug
+tsq components                                # monitored state, lock mode, holder
+tsq selftest                                  # self-test of the whole lab, or: tsq selftest train_emu
+```
+
+**Post a datapack and follow it:**
+
+```bash
+tsq submit $ZIP --priority 70 --follow        # steps and logs live; exit code 0 succeeded, 1 failed, 2 error
+tsq submit $ZIP --baseline baseline_expected.yml --wait   # quiet, the verdict as exit code
+tsq submit $ZIP                               # just queue it
+tsq queue                                     # waiting runs, priority, what each waits for
+tsq priority <run> 90                         # a queued run's priority
+tsq runs [--state running]                    # runs, newest first (a unique prefix of a run id is enough)
+tsq show <run>                                # state, binding, verdict, every step
+tsq logs <run>                                # steps and their logs; one log: tsq logs <run> --step test_run:up.start_tm -f
+tsq cancel <run>                              # stop commands, then kill, then finally (collect)
+tsq kill <run>                                # kill at once, then finally
+tsq repost <run>                              # an ended run back in the queue, its outputs cleaned
+```
+
+**Without a daemon** (one datapack in the foreground, same storage and locks):
+
+```bash
+tsq run $ZIP --local --follow
+```
+
+**Results:**
+
+```bash
+tsq files <run>                               # run folder: data/<slot>/{input,output}, logs/, run.yml, selftest.yml, baseline.yml
+tsq files <run> data/telemetry/output/telemetry.csv --get
+tsq files <run> --results --get               # the results zip (<run>_results.zip)
+datapack --verify <run>_results.zip
+```
+
+They are kept in `storage.results/<run>/<datapack>_results.zip`, with `_NONCONFORM` when the baseline does not match.
+
+**Web UI** (section 13.1): build it once, then start `tsqd` with the Editor on and open http://127.0.0.1:8640/ui/:
+
+```bash
+(cd ../../ui && npm ci && npm run build)      # once, Node 22: builds the UI into src/testsuit/sequencer/ui/ (already done by Install above)
+tsqd &                                        # serves it: tsq.dev.yml has server.ui and server.editor on; on the lab, set them in tsq.yml
+xdg-open http://127.0.0.1:8640/ui/            # Queue, Runs, Lab, Editor
+tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from another host (behind a reverse proxy with authentication)
+(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run dev)   # UI development: hot reload on http://127.0.0.1:5173, API proxied to tsqd
+(cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run e2e)   # every page and editor view rendered in a headless Chrome (CHROMIUM=<path> if needed)
+```
+
+- **Queue**, **Runs** and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
+- **Editor** (`server.editor: true`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, lab roles and components, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
+
+**Lab operations:**
+
+```bash
+tsq maintenance train_emu --note "rewiring"   # out of scheduling; tsq resume train_emu brings it back
+tsq hold calc_tm                              # keep a component for yourself; tsq release calc_tm
+tsq release train_emu                         # also frees a lock left by a run (audited)
+tsq lab reload                                # re-read the inventory; --pull [<rev>] fetches the lab repository first
+```
+
+The example's release store only holds placeholders of the toy-train applications, so until host builds of them exist, a run of these datapacks stops at the self-test (the simulation is not installed under `~/.toytrain-emu/sim/venv`) or at the first `start`, with verdict `error`. Everything above still works on it, results included.

@@ -4,7 +4,7 @@ The example project of testsuit: the test environment of a small system, a toy t
 
 It has two parts:
 - **the `toytrain` package**, a Python library extending testsuit without changing it: file formats for the train's recordings, mexploit criteria, a datapack importer for its software releases, a report logo and a command-line tool;
-- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, roles and lab components, datapack setup (slots and slot types), test definitions with their pipeline, and exploitation criteria. The [sequencer cheat sheet](../../src/testsuit/sequencer/README.md#cheat-sheet) shows how to build, post and follow these datapacks.
+- **the test configuration**, run by the [sequencer](../../src/testsuit/sequencer/README.md): lab inventory, roles and lab components, datapack setup (slots and slot types), test definitions with their pipeline, and exploitation criteria. The [sequencer cheat sheet](../../src/testsuit/sequencer/README.md#annex-a-cheat-sheet) shows how to build, post and follow these datapacks.
 
 ## The system under test
 
