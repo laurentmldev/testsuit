@@ -467,3 +467,10 @@ button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }
 .expected-missing { margin-top: 8px; }
 .expected-input { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .role-inputs td .text-field textarea { min-height: 5em; }
+.gen-checks { list-style: none; padding: 0; margin: 0 0 10px; }
+.gen-checks li { padding: 3px 0; }
+.gen-checks .mark { display: inline-block; width: 1.2em; font-weight: 600; }
+.gen-checks .ok .mark { color: var(--ok); }
+.gen-checks .problems .mark, .gen-checks .error .mark { color: var(--warn); }
+.pipeline-preview .graph-box { height: 380px; }
+.pipeline-preview .step-node { cursor: default; }

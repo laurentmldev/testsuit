@@ -224,6 +224,12 @@ def cmd_abort(args, client: Client) -> int:
     return 0
 
 
+def cmd_repost(args, client: Client) -> int:
+    run = client.post(f"/runs/{args.run}/repost")
+    print(f"run {run['id']}: {run['state']} again, outputs cleaned")
+    return 0
+
+
 def cmd_resources(args, client: Client) -> int:
     rows = client.get(f"/{args.command}")
     for row in rows:
@@ -480,6 +486,9 @@ def parser() -> argparse.ArgumentParser:
         s = sub.add_parser(name, help=f"{name} a run")
         s.add_argument("run")
         s.set_defaults(fn=cmd_abort)
+    s = sub.add_parser("repost", help="queue an ended run again, its outputs cleaned")
+    s.add_argument("run")
+    s.set_defaults(fn=cmd_repost)
     for name in ("stages", "components"):
         sub.add_parser(name, help=f"{name}: monitored state, lock state, holder").set_defaults(fn=cmd_resources)
     for name in ("hold", "release", "maintenance", "resume"):

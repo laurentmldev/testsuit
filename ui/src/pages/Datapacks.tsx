@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { get, post, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
+import { RunGraph } from "./Run";
 import { Section } from "../fields";
 import { attempt, classes, Markdown, navigate, setQuery, Spinner, type Route } from "../util";
 
@@ -173,6 +174,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
         <>
           <Baseline sid={sid} testdef={testdef} config={config} datasets={data.baseline} onChanged={load} edit={edit} />
           <LogicalConfig data={data} edit={edit} />
+          <PipelineGraph sid={sid} testdef={testdef} config={config} edit={edit} />
           <Inputs data={data} edit={edit} />
           <Dictionaries data={data} edit={edit} />
         </>
@@ -186,6 +188,32 @@ function FileLink({ path, edit }: { path?: string | null; edit: (f: string) => v
   if (!path) return null;
   if (path.startsWith("/") || path.startsWith("<")) return <code className="small">{path}</code>;
   return <button className="link mono small" onClick={() => edit(path)}>{path}</button>;
+}
+
+/** The pipeline of the test definition as the sequencer will run it (sub-pipelines expanded), read-only. */
+function PipelineGraph({ sid, testdef, config, edit }: { sid: string; testdef: string; config: string | null; edit: (f: string) => void }) {
+  const [flat, setFlat] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setFlat(null);
+    setError(null);
+    post(`edit/sessions/${sid}/flatten`, { testdef, setup_config: config }).then(setFlat).catch((e) => setError(e.message));
+  }, [sid, testdef, config]);
+  // the shape of a run's pipeline: each step's target and condition at its top level
+  const pipeline = flat && {
+    phases: flat.phases.map((ph: any) => ({
+      ...ph, steps: ph.steps.map((s: any) => ({ ...s, component: s.step.component, for_each: s.step.for_each, if: s.step.if })),
+    })),
+  };
+  const steps = pipeline ? pipeline.phases.reduce((n: number, ph: any) => n + ph.steps.length, 0) : 0;
+  return (
+    <Section title={<>Pipeline <span className="muted small">{pipeline ? `${pipeline.phases.length} phase(s), ${steps} steps, sub-pipelines expanded` : ""}</span></>}
+      actions={<button className="link small" onClick={() => edit(testdef)}>edit</button>}>
+      {error && <pre className="error-box">{error}</pre>}
+      {!flat && !error && <Spinner text="Expanding the pipeline…" />}
+      {pipeline && <div className="pipeline-preview"><RunGraph pipeline={pipeline} records={[]} selected={null} onSelect={() => {}} /></div>}
+    </Section>
+  );
 }
 
 function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void }) {

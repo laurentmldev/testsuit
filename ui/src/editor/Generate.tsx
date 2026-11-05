@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { get, post, url } from "../api";
 import { Choices, Dialog, Field, Toggle } from "../fields";
 import { FileBrowser } from "../files";
-import { attempt, Markdown, navigate, size } from "../util";
+import { attempt, Markdown, navigate, size, Spinner } from "../util";
 import { useSession } from "./state";
 
 export function GenerateDialog({ onClose }: { onClose: () => void }) {
@@ -46,19 +46,45 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   // the problems the configuration shows before generating: the user confirms, or goes back to fix them
   const [problems, setProblems] = useState<string[] | null>(null);
   const [checking, setChecking] = useState(false);
+  // the checks before generating, one at a time: what each looks at, how long it took, what it found
+  const [checks, setChecks] = useState<Check[]>([]);
   const request = async () => {
     setChecking(true);
     setResult(null);
     setPosted(null);
+    setChecks([]);
+    const found: string[] = [];
+    const step = async (label: string, call: () => Promise<any>, detail: (r: any) => string): Promise<boolean> => {
+      const started = Date.now();
+      setChecks((c) => [...c, { label, state: "running" }]);
+      const end = (patch: Partial<Check>) => setChecks((c) => c.map((x, i) => i === c.length - 1 ? { ...x, seconds: (Date.now() - started) / 1000, ...patch } : x));
+      try {
+        const r = await call();
+        found.push(...(r.problems || []));
+        end({ state: r.problems?.length ? "problems" : "ok", detail: detail(r) + (r.problems?.length ? ` · ${r.problems.length} problem(s)` : "") });
+        return true;
+      } catch (e: any) {
+        end({ state: "error", detail: e.message });
+        found.push(`The configuration cannot be read: ${e.message}`);
+        return false;
+      }
+    };
     try {
-      const found: any = await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config });
-      if (found.problems?.length) {
-        setProblems(found.problems);
+      const body = { testdef, setup_config: config };
+      const read = await step("Setup, dictionaries and inputs",
+        () => post(`edit/sessions/${sid}/synthesis`, { ...body, versions: false, run_checks: false }),
+        (r) => {
+          const inputs = (r.components || []).flatMap((c: any) => c.inputs || []);
+          return `${(r.components || []).length} components, ${inputs.length} inputs looked up, ${(r.dictionaries || []).length} dictionaries`;
+        });
+      if (read)
+        await step("Pipeline and lab: phases, stages, components, step targets",
+          () => post(`edit/sessions/${sid}/run_problems`, body), () => "against the lab as it is now");
+      if (!live.current) return;
+      if (found.length) {
+        setProblems(found);
         return;
       }
-    } catch (e: any) {
-      setProblems([`The configuration cannot be read: ${e.message}`]);
-      return;
     } finally {
       setChecking(false);
     }
@@ -115,7 +141,11 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   };
   const submit = async () => {
     const run = await attempt(() => post(`edit/sessions/${sid}/datapack/${result.name}/submit`, priority ? { priority: Number(priority) } : {}), "posted to the queue");
-    if (run) setPosted(run);
+    if (run) {
+      setPosted(run);
+      navigate(`/runs/${run.id}`);          // follow the run it became
+      onClose();
+    }
   };
 
   const footer = result?.ok ? (
@@ -138,6 +168,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   );
   return (
     <Dialog title="Generate a datapack" onClose={onClose} footer={footer} wide>
+      {!result && checks.length > 0 && <Checks checks={checks} />}
       {busy && (
         <>
           <LiveLog lines={lines} />
@@ -205,6 +236,23 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
         </>
       )}
     </Dialog>
+  );
+}
+
+type Check = { label: string; state: "running" | "ok" | "problems" | "error"; detail?: string; seconds?: number };
+
+/** The checks before generating, as they go: running, then what each found and how long it took. */
+function Checks({ checks }: { checks: Check[] }) {
+  return (
+    <ul className="gen-checks">
+      {checks.map((c, i) => (
+        <li key={i} className={c.state}>
+          {c.state === "running" ? <Spinner text={`${c.label}…`} /> : <><span className="mark">{c.state === "ok" ? "✓" : "!"}</span> {c.label}</>}
+          {c.detail && <span className="muted small"> · {c.detail}</span>}
+          {c.seconds !== undefined && <span className="muted small"> · {c.seconds.toFixed(1)} s</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

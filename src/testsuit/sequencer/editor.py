@@ -885,6 +885,16 @@ class Editor:
         except Exception:
             return []
 
+    def run_problems(self, session: EditSession, testdef_rel: str, setup_config: str | None = None) -> list[str]:
+        """The pipeline and lab checks of the synthesis, on their own (the checks before generating, step by step)."""
+        try:
+            _, testdef, _ = self._builder(session, testdef_rel, setup_config)
+        except SequencerError:
+            raise
+        except Exception as e:
+            raise SequencerError(str(e)) from e
+        return self._run_problems(session, testdef_rel, testdef.setup_config)
+
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
         setup configuration (phases, logical stages and components, step targets), and what the lab cannot provide."""
@@ -1229,11 +1239,12 @@ class Editor:
     # ── Datapacks page: what a test definition is made of, its baseline ──
 
     def synthesis(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                  versions: bool = True) -> dict:
+                  versions: bool = True, run_checks: bool = True) -> dict:
         """A test definition at a glance: the logical configuration of its setup, the inputs of each
         component, its dictionaries with their keys, and the datasets of its baseline with the versions
         their importer offers. versions=False: only the versions already listed less than a minute ago,
-        the others marked ``versions_pending`` (listed then one source at a time: ``versions()``)."""
+        the others marked ``versions_pending`` (listed then one source at a time: ``versions()``).
+        run_checks=False: without the pipeline and lab checks (asked then on their own: ``run_problems()``)."""
         from testsuit.datatools.datapack.datapack_tools import _find_sources
         from testsuit.datatools.datapack.templating import TemplateError
         try:
@@ -1320,7 +1331,8 @@ class Editor:
                     problems.append(f"{where}: '{item['resolved']}' holds the datapack being generated (a key with an empty value?)")
                 elif not item["files"] and not item["optional"] and "<" not in item["resolved"]:   # <a dataset folder>: not checked
                     problems.append(f"{where}: '{item['resolved']}' not found")
-        problems += self._run_problems(session, testdef_rel, config)
+        if run_checks:
+            problems += self._run_problems(session, testdef_rel, config)
         return {"testdef": {"path": testdef_rel, "id": testdef.id, "name": testdef.name,
                             "description": getattr(testdef, "description", "") or "",
                             "setup_file": shown(builder.setup_file), "setup_config": config,

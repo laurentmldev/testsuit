@@ -531,6 +531,34 @@ def test_cancel_queued_and_priority(bench):
     assert run["state"] == "cancelled" and run["verdict"] == "error"
 
 
+def test_repost(bench):
+    """An ended run goes back to the queue under its id, its outputs removed, and runs again."""
+    from testsuit.sequencer.util import SequencerError
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build())
+        with pytest.raises(SequencerError, match="only an ended run"):
+            seq.repost(run["id"])
+        [first] = await run_until_done(seq, [run["id"]])
+        results = Path(first["results"])
+        stray = Path(first["dir"]) / "data" / "stray.txt"
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("from the first run")
+        again = seq.repost(run["id"])
+        queued = dict(again)
+        [second] = await run_until_done(seq, [run["id"]])
+        await seq.close()
+        return first, results, stray, queued, second
+    first, results, stray, queued, second = asyncio.run(main())
+    assert first["verdict"] == "succeeded"
+    assert queued["state"] == "queued" and queued["verdict"] is None and queued["results"] is None
+    assert not queued["steps"] and queued["ended_at"] is None and queued["priority"] == first["priority"]
+    assert not stray.exists()                                     # the first run's outputs were cleaned
+    assert second["id"] == first["id"] and second["verdict"] == "succeeded" and Path(second["results"]).exists()
+    assert second["submitted_at"] >= first["ended_at"] and results.exists()      # results made again by the second run
+
+
 def test_selftest_failure(tmp_path, no_git):
     """A broken component is marked broken, the run requeued, then ends in error after max_attempts."""
     bench = Bench(tmp_path, stages=1)

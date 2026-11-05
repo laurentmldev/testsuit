@@ -151,6 +151,10 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     async def cancel(run_id: str):
         return await seq.abort(run_or_404(run_id)["id"], "cancel")
 
+    @app.post("/runs/{run_id}/repost")
+    async def repost(run_id: str):
+        return await asyncio.to_thread(seq.repost, run_or_404(run_id)["id"])
+
     @app.post("/runs/{run_id}/kill")
     async def kill(run_id: str):
         return await seq.abort(run_or_404(run_id)["id"], "kill")
