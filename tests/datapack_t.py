@@ -127,6 +127,7 @@ def _edit(path, old, new):
 
 @pytest.mark.parametrize("file,old,new,error", [
     ("setup/utest_ref_files/ref1.txt", "{{ platform.vendor }}", "{{ platform.nope }}", "'dict object' has no attribute 'nope'|nope"),
+    ("setup/utest_ref_files/ref1.txt", "{{ platform.vendor }}", "{{ component.host }}", "'component' is a run-time key"),
     ("testdef/values.yml", "beta: Hello world", "beta: \"{{ value.gamma }}\"\n  gamma: \"{{ value.beta }}\"", "circular reference"),
     ("setup/utest_setup.yml", "source: utest_ref_files/ref2.txt", "source: utest_ref_files/nope.txt", "input 'utest_ref_files/nope.txt' not found"),
     ("testdef/datapack_utest.yml", "setup_config: nominal", "setup_config: unknown", "no configuration 'unknown'"),

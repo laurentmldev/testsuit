@@ -183,6 +183,14 @@ def test_workspace_session(repos):
     preview = editor.preview(session, "testdef/count/testdef.yml", "setup/files/check.sh")
     assert preview["ok"] and "min 3" in preview["text"] and preview["slot"] == "analysis"
 
+    # a run-time key in an input template: said to be one, not a bare 'undefined'
+    check = session.folder / "setup/files/check.sh"
+    original = check.read_text()
+    check.write_text(original + "# on {{ component.host }}\n")
+    preview = editor.preview(session, "testdef/count/testdef.yml", "setup/files/check.sh")
+    assert not preview["ok"] and "run-time key" in preview["error"] and "slot.*" in preview["error"], preview
+    check.write_text(original)
+
     # an unknown command is a problem of the step, located in the file
     testdef["pipeline"]["phases"][0]["steps"][0]["do"] = "launch"
     problems = editor.write(session, "testdef/count/testdef.yml", data=testdef)["problems"]

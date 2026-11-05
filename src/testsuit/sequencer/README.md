@@ -941,6 +941,8 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 
 `input_dir` and `output_dir` are the same in `slot` and `component`: `<remote_root>/<slot>/input` and `/output` on the lab component (under `<remote_root>/.tsq/<run>/` for a shared or unlocked component). A step with no slot (a `run` or `python` on the sequencer host) has no `slot`, `component` or `stage` key. The Editor completes these keys after `{{` in every field rendered with them, with this help.
 
+An input template is rendered at generation, before any run binds its slots to the lab, so a run-time key there (`component.*`, `realms.*`, `stage.*`, `lab.*`) is an error that says so, with the way out: `slot.*` in the template, or the value passed from a pipeline step (its `env` or command). The Editor's template preview shows the same message, and completes only the generation keys in a template.
+
 ## 9. Queue, scheduling and locking
 
 **Priority.** Each run has a priority, an integer from 0 to 100 (default 50), given at submission (`tsq submit --priority 80`) and changeable while queued (`tsq priority <run> 90`). The queue is ordered by priority, then by submission time. Optional aging (`priority_aging: +1 per 30 min`, off by default) keeps low-priority runs from waiting forever.

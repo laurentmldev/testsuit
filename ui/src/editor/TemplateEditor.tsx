@@ -43,7 +43,6 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
     if (!keys) return [];
     const list = keys.keys.map((k: any) => ({ label: k.key, detail: k.value, doc: k.origin ? `from ${k.origin}` : "" }));
     for (const [k, v] of Object.entries<string>(keys.datapack || {})) list.push({ label: k, detail: "", doc: v });
-    for (const [k, v] of Object.entries<string>(keys.runtime || {})) list.push({ label: k, detail: "at run time", doc: v });
     return list;
   }, [keys]);
 
@@ -99,11 +98,9 @@ export function TemplateEditor({ doc, api }: { doc: Doc; api: { setText: (t: str
                 {Object.entries<string>(keys.datapack || {}).map(([k, v]) => (
                   <tr key={k}><td className="mono">{k}</td><td colSpan={2} className="muted small">{v}</td></tr>
                 ))}
-                {Object.entries<string>(keys.runtime || {}).map(([k, v]) => (
-                  <tr key={k}><td className="mono">{k}</td><td colSpan={2} className="muted small">at run time: {v}</td></tr>
-                ))}
               </tbody>
             </table>
+            <Markdown className="small muted" text="An input template is rendered when the datapack is generated, before a run binds its slots to the lab: the run-time keys (`component.*`, `realms.*`, `stage.*`, `lab.*`, a slot's `role` or `output_dir`...) are not defined here. They are for pipeline steps and lab commands (README section 8.5)." />
           </div>
         )}
       </div>

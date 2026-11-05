@@ -1220,7 +1220,7 @@ class Editor:
                 setup_config: str | None = None) -> dict:
         """A template rendered as the datapack tool would, for a slot of the test definition's setup."""
         from testsuit.datatools.datapack.datapack_tools import _find_sources
-        from testsuit.datatools.datapack.templating import TemplateError
+        from testsuit.datatools.datapack.templating import TemplateError, run_time_keys
         builder, testdef, raw = self._builder(session, testdef_rel, setup_config)
         setup_dir = builder.setup_file.parent
         path = self.path(session, source)
@@ -1243,6 +1243,7 @@ class Editor:
                  "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []},
                  "read_input": lambda p: f"<read_input('{p}'): available when the datapack is generated>"}
         keys = builder.keys()
+        extra = {**run_time_keys(keys.root), **extra}
         try:
             text, used = keys.render_file(path, [builder.testdef_dir, setup_dir], extra)
         except TemplateError as e:
