@@ -139,10 +139,12 @@ class Lab:
 
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
+                "description": self.inventory.description,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
-                "stages": {s.id: {"type": s.type, "components": s.components} for s in self.inventory.stages.values()},
+                "stages": {s.id: {"type": s.type, "components": s.components, "description": s.description}
+                           for s in self.inventory.stages.values()},
                 "components": {c.id: {"role": c.role, "extends": c.extends, "host": c.host, "lock": c.lock,
-                                      "stages": c.stages, "label": c.label}
+                                      "stages": c.stages, "label": c.label, "description": c.description}
                                for c in self.inventory.components.values()},
                 "roles": {r.name: {"extends": r.extends, "source": r.source, "commands": sorted(r.commands)}
                           for r in self.library.roles.values()}}

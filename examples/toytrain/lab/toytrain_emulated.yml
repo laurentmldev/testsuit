@@ -19,6 +19,7 @@ all:
     tsq_transport: local                           # no SSH: commands run as the user running the sequencer
     tsq_remote_root: ~/.toytrain-emu/run           # <root>/<component>/{input,output}
     tsq_library: [roles/, components_emulated/]    # the lab's roles, implemented by local processes
+    tsq_description: The toy-train platform emulated on one dev host, every component a local process.
 
   hosts:                                           # ad hoc components
     dev_host:
@@ -39,10 +40,12 @@ all:
     train_emu:
       vars:
         tsq_stage_type: toytrain
+        tsq_description: One emulated train, its calculators and acquisition unit on the loopback interface.
       hosts:
         calc_pilot:
           tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot (emulated)
+          tsq_description: Drives the train; its microcontroller is replaced by the host stub.
           tsq_start_args: --mcu host               # microcontroller replaced by its host stub
         calc_tm:
           tsq_role: telemetry

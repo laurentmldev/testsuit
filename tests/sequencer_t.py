@@ -199,6 +199,22 @@ def test_inventory(bench):
     assert inv.components["counter_1"].extends == "counter_host" and inv.components["seq_host"].adhoc
 
 
+def test_inventory_descriptions(tmp_path):
+    """Each level has its own tsq_description: the lab's, a stage's and a component's, none inherited."""
+    path = tmp_path / "inv.yml"
+    path.write_text(yaml.safe_dump({"all": {
+        "vars": {"tsq_description": "the lab", "x": 1},
+        "hosts": {"adhoc": {}},
+        "children": {"st": {"vars": {"tsq_stage_type": "t", "tsq_description": "the stage"},
+                            "hosts": {"a": {"tsq_description": "comp a"}, "b": {}}}}}}))
+    inv = load_inventory(path)
+    assert inv.description == "the lab" and inv.stages["st"].description == "the stage"
+    assert inv.components["a"].description == "comp a"
+    assert inv.components["b"].description == "" and inv.components["adhoc"].description == ""
+    assert "tsq_description" not in inv.components["b"].vars_in(inv.stages["st"])
+    assert inv.components["b"].vars_in(inv.stages["st"])["x"] == 1
+
+
 def test_roles_and_components(bench):
     """A role lists commands, the components implement them: a component, or a host, missing one of its role's
     commands does not load; a host has the role of its component, or picks one of its roles; tsq_type and
