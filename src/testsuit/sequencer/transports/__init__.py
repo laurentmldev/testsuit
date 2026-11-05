@@ -8,6 +8,7 @@ whole run is then a ``kill`` of those groups, even after the ssh session or the 
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +75,11 @@ class Transport:
         self.host = component.host
         self.vars = component.vars
         self._root = remote_root if remote_root is not None else str(component.vars.get("tsq_remote_root", "/tmp/tsq"))
+        self.shell_command = shell_of(component)
+
+    def in_shell(self, script: str) -> str:
+        """The script as the component's shell (tsq_shell) runs it: itself under /bin/sh, the default."""
+        return f"exec {self.shell_command} -c {shlex.quote(script)}" if self.shell_command else script
 
     # ── to implement ─────────────────────────────────────────────────────
     async def start(self, command: str, *, env: dict | None = None, log: LogSink | None = None,
@@ -149,6 +155,15 @@ def create_transport(name: str, component, remote_root: str | None = None) -> Tr
         raise SequencerError(f"component '{component.id}': unknown transport '{name}' "
                              f"(available: {', '.join(sorted(set(builtin) | set(registry.transports)))})")
     return cls(component, remote_root)
+
+
+def shell_of(component) -> str:
+    """The shell commands run under on a component (tsq_shell: bash, "bash -l"...), '' for /bin/sh."""
+    value = str(component.vars.get("tsq_shell") or "").strip()
+    if value and not re.fullmatch(r"[\w./+-]+( +-[\w-]+)*", value):
+        raise SequencerError(f"component '{component.id}': tsq_shell '{value}' is not a shell, with options "
+                             "if any (bash, /bin/bash, \"bash -l\")")
+    return value
 
 
 def env_prefix(env: dict[str, Any] | None) -> str:
