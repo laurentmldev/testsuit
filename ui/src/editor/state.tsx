@@ -47,8 +47,11 @@ export function useSessionData(sid: string, openFile: (path: string, line?: numb
     setFiles(await get(`edit/sessions/${sid}/files`));
     setInfo(await get(`edit/sessions/${sid}`));
   }, [sid]);
+  const contextCall = useRef(0);
   const refreshContext = useCallback(async () => {
+    const call = ++contextCall.current;      // each save asks again: only the latest answer is kept
     const [c, s] = await Promise.all([get(`edit/sessions/${sid}/context`), get(`edit/sessions/${sid}/schemas`)]);
+    if (call !== contextCall.current) return;
     setCtx(c);
     setSchemas(s);
   }, [sid]);
@@ -90,6 +93,7 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
   const past = useRef<any[]>([]);
   const future = useRef<any[]>([]);
   const lastEdit = useRef(0);
+  const edits = useRef(0);                   // counts the edits: a save answering an older one keeps what is typed
   const [, setHistory] = useState(0);
 
   useEffect(() => {
@@ -112,20 +116,21 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
   const flush = useCallback(async () => {
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = null;
-    if (saving.current) await saving.current;
+    // one save at a time, in the order of the edits: two at once could end in the older one
+    while (saving.current) await saving.current;
     const body = pending.current;
     if (!body || !path) return;
     pending.current = null;
+    const sent = edits.current;
     setState("saving");
     saving.current = (async () => {
       try {
         const result = await put(`edit/sessions/${sid}/files/${path}`, body);
-        setDoc((d) => ({
-          ...result,
-          // keep what was typed meanwhile
-          content: pending.current?.content ?? result.content,
-          data: pending.current?.data ?? (body.content !== undefined && d ? result.data ?? d.data : result.data),
-        }));
+        setDoc((d) => {
+          // typed since this save was sent: the field keeps it (the next save writes it)
+          if (d && edits.current !== sent) return { ...result, content: d.content, data: d.data };
+          return { ...result, data: body.content !== undefined && d ? result.data ?? d.data : result.data };
+        });
         setState(pending.current ? "pending" : "saved");
         setError(null);
         savedRef.current?.(result);
@@ -159,6 +164,7 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     setHistory((n) => n + 1);
   };
   const apply = (data: any) => {
+    edits.current++;
     setDoc((d) => (d ? { ...d, data } : d));
     pending.current = { data };
     schedule(500);
@@ -179,6 +185,7 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
   const redo = () => step(future, past);
   const setText = (content: string) => {
     record();
+    edits.current++;
     setDoc((d) => (d ? { ...d, content } : d));
     pending.current = { content };
     schedule(1200);

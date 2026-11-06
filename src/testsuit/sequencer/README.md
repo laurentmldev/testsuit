@@ -221,7 +221,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 | **template** | an input file rendered with Jinja2 and the datapack keys (`{{ key }}`), one per slot. |
 | **input methods** | how an input file is made: `template`, `copy`, or `generate` (a registered **generator**), optionally followed by `postprocess` **processors** (section 5.1). An **importer** fetches the datasets of a datasource (`importer: git`, a release store...). |
 | **pipeline** | the phases and steps of a test definition; **`needs`** are the edges between steps, and each phase has **`finally`** steps that always run. |
-| **step type** | what a step does: a command of its slot's role (`do`), `run`, `python` (a Python script), `wait_for`, `uses` (a sub-pipeline) or a plugin step type. A **ready check** is one condition of `wait_for` (port, log, file, command, or a plugin's). |
+| **step type** | what a step does: a command of its slot's role (`do`), `run`, `python` (a Python script), `http` (a REST API call), `wait_for`, `uses` (a sub-pipeline) or a plugin step type. A **ready check** is one condition of `wait_for` (port, log, file, command, or a plugin's). |
 | **sub-pipeline** | a reusable group of steps with parameters, in the test definition or in a shared file, called with `uses` (section 8.4). |
 | **baseline** | where each content of a datapack comes from (revisions, tags, tool versions) and, for results, the run; checked against an expected baseline, a mismatch makes the datapack **non-conform**. |
 | **verdict** | the outcome of a run: `succeeded`, `failed` or `error`. |
@@ -633,6 +633,36 @@ A datapack does not redefine commands: what a test runs that the role does not o
 
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
+**REST API commands.** A command (or a pipeline step, or a status probe, or a `wait_for`) can be an HTTP request rather than a shell command, for an instrument or a service driven through a REST API:
+
+```yaml
+components:
+  power_supply:
+    extends: component
+    roles: [power]
+    commands:
+      start:
+        http:
+          url: "{{ component.vars.api }}/outputs/1"            # a plain string is a GET of that URL
+          method: PUT                                           # default GET
+          headers: {Authorization: "Bearer {{ component.vars.token }}"}
+          json: {enabled: true, voltage: "{{ component.vars.voltage }}"}   # or body: "raw text"; params: query string
+          expect: {status: [200, 204], json: {enabled: true}}  # default: a status below 400
+          save: start_answer.json                               # the answer, in data/<slot>/http/ of the results
+          timeout: 10s                                          # default 30 s
+          verify: false                                         # a self-signed lab server
+      stop: {http: {url: "{{ component.vars.api }}/outputs/1", method: PUT, json: {enabled: false}}}
+    status:
+      probe: {http: "{{ component.vars.api }}/outputs/1"}       # states match the answer's body
+      states: {running: {regex: '"enabled": ?true'}, idle: {regex: '"enabled": ?false'}, offline: {exit: nonzero}}
+```
+
+- **Result**: the step succeeds when the answer is the expected one: every `expect` given (status codes, `regex` on the body, `json` values the answer must contain, other fields ignored), else a status below 400. A wrong answer makes the step `failed`; no answer (refused, timeout) makes it `error`. The answer goes to the step's log.
+- **Where**: from the sequencer host. With `via` (a role of the stage, or a host), from that component with `curl`, for an API only reachable from inside a stage.
+- **Secrets**: templates take tokens from variables (`{{ component.vars.token }}`). Headers whose name looks secret (`Authorization`, `X-Api-Key`, `token`, `cookie`...) are shown as `***` in the logs and the Lab page.
+- **A status probe**: its states match the answer's body; an `exit` rule sees 0 when the answer is the expected one, else the HTTP status. A `wait_for: {http: ...}` takes the same request and polls until the answer is the expected one. The former `wait_for` `http` keys `status` and `regex` are now under `expect`, and refused at their old place.
+- **In the Editor**: **REST API** is a command kind and a step action, next to shell command and Python script, with fields for the method, URL, headers, query, body, expected answer and the file the answer is saved in; the step palette offers **REST API call**.
+
 The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
 - `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage (the first one when the stage has several), for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
 - `{{ stage.components.<host>.host }}`, `{{ stage.id }}`, `{{ stage.type }}`, `{{ stage.vars }}`: the stage itself and its components by inventory name;
@@ -657,7 +687,7 @@ Each component has a monitored **state**:
 - The sequencer also knows the **expected** state: `configured` after `deploy`, `running` after `start`, `idle` after `stop`. When the probed state differs from the expected one (expected `running`, probed `idle` or `broken`), an event is raised. The step fails or only warns, as set by `on_state_mismatch: fail | warn` (default `warn`).
 - A state can be waited for in a pipeline: `wait_for: {state: running}`.
 - A probe can hold **several checks**, `run: [<command>, <command>...]`: each runs whatever the others gave, and is OK when it exits with 0. The rules match their outputs, one after the other, and an `exit` rule the first non-zero exit status (0 when all are OK). The Lab page shows each check with its answer, OK or FAILED.
-- A component the sequencer cannot reach itself, in a sub-network behind the stage server, is probed **through another component**: `status.via` names a role of its stage (or another host). The probe's command runs there, with that component's transport, and gets `{{ component.host }}` (the component probed) and `{{ via.host }}`. The `run` checks of its self-test run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped. `via` takes a `run` or plugin probe. A component that is off between runs is mapped to `idle`, not `offline`, so that its stage stays available:
+- A component the sequencer cannot reach itself, in a sub-network behind the stage server, is probed **through another component**: `status.via` names a role of its stage (or another host). The probe's command runs there, with that component's transport, and gets `{{ component.host }}` (the component probed) and `{{ via.host }}`. The `run` checks of its self-test run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped. `via` takes a `run`, `http` (sent with curl from there) or plugin probe. A component that is off between runs is mapped to `idle`, not `offline`, so that its stage stays available:
 
   ```yaml
   obc:
@@ -705,6 +735,7 @@ A component in maintenance (or in a stage in maintenance) can have its commands 
 - **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, `slot`, `slots`), so a command that needs one does not render. A command with `via` runs through that component.
 - **A detached command** (`detach: true`, such as `start`) keeps running. Its pid file goes under `<root>/.tsq/manual/<component>/`.
 - **`signal` commands and the built-in `kill`** stop the processes started by hand there.
+- **`http` commands** send their request with the keys of the lab, from the sequencer host or through their `via`; the Lab page shows the status and the answer.
 - **Other commands** (`deploy`, `collect`, `wait_for`, `python`) need a run, and are not offered.
 - **Each command run by hand** is recorded as a `manual_command` event, which is kept for audit.
 
@@ -825,7 +856,7 @@ Phase fields: `id`, `needs`, `stage_slots` (stage slots, each with the lab stage
 
 Step fields:
 - target: `slot`, or `for_each` (a list of slots, `slots` for all the slots of the phase, or a role); the step runs on the lab component bound to each slot;
-- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
+- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
 - options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
 
 `expect` gives the expected result of a step: `exit` (exit codes, default `[0]`), and optionally `stdout` or `stderr` (regex). A step that ran but did not give the expected result is `failed`. A step that could not run or did not finish normally is `error`: a crash (killed by a signal), a timeout, a transport failure, an unreachable or broken component, or an internal sequencer error.
@@ -859,7 +890,7 @@ Step fields:
 
 The toy-train example has one: `check_data` in the exploit phase of its test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before `exploit_runner` judges it.
 
-`wait_for` covers ready checks done from outside: `state` (section 7.5), `tcp`, `http` (status or regex), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
+`wait_for` covers ready checks done from outside: `state` (section 7.5), `tcp`, `http` (a request and its `expect`, section 7.4), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
 `inputs` copies files inside the run folder, from `<phase>:<slot or *>/output/...` to `<slot>/input/...`, before the phase starts. Nothing is copied from host to host.
 
@@ -1115,7 +1146,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
 - a graph view of phases, sub-pipelines and steps, where `needs` are the edges: add, remove and connect steps, group steps into a new sub-pipeline, or expand a `uses` step to see its steps;
-- a palette of what a step can do on each slot, built from the commands its lab role offers, with the implementation of each bound host (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's stage slots and slots;
+- a palette of what a step can do on each slot, built from the commands its lab role offers, with the implementation of each bound host (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `http`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's stage slots and slots;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
 

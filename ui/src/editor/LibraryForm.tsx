@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text, Toggle } from "../fields";
 import { post } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
-import { CommandEditor, CommandsEditor, summary, WELL_KNOWN } from "./commands";
+import { CommandEditor, CommandsEditor, HttpEditor, summary, WELL_KNOWN } from "./commands";
 import { ItemLink, ItemLinks, useItemRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
@@ -362,6 +362,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
     onChange(next);
   };
   // one command, or several checks (run: [...]) that all run
+  const isHttp = !!s?.probe && "http" in s.probe;
   const runs: string[] = Array.isArray(s?.probe?.run) ? s.probe.run : [s?.probe?.run ?? ""];
   const setRuns = (list: string[]) => set("probe", { ...s.probe, run: list.length > 1 ? list : list[0] ?? "" });
   return (
@@ -374,6 +375,18 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
       )}
       {s && (
         <>
+          <Field label="Probe with" help={help(["probe"])}>
+            <Choices value={isHttp ? "http" : "run"} onChange={(k) => {
+              if (!k || k === (isHttp ? "http" : "run")) return;
+              set("probe", k === "http" ? { http: { url: "http://{{ component.host }}:8080/health" } } : { run: "" });
+            }} choices={[{ value: "run", label: "shell command(s)", description: "on the component, or the component it goes through" },
+              { value: "http", label: "HTTP request", description: "a REST API call; the states match its answer" }]} />
+          </Field>
+          {isHttp ? (
+            <Field label="Request" help={help(["probe", "http"])} wide hint="sent from the sequencer host, or with curl from the component it goes through; the exit rules see 0 when the answer is the expected one, else the HTTP status">
+              <div className="sub-form"><HttpEditor value={s.probe.http} onChange={(v) => set("probe", { ...s.probe, http: v })} help={(f) => help(["probe", "http", ...(f ? [f] : [])])} /></div>
+            </Field>
+          ) : (
           <Field label={runs.length > 1 ? "Probe commands" : "Probe command"} help={help(["probe"])} wide
             hint={runs.length > 1 ? "each check runs and is OK when it exits with 0; the rules match their outputs, one after the other" : "shell command, over several lines if long; + Add a check probes several items, each with its own result"}>
             {runs.map((r, i) => (
@@ -385,6 +398,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
             ))}
             <button className="small" onClick={() => setRuns([...runs, ""])}>+ Add a check</button>
           </Field>
+          )}
           <Field label="Run it through" help={help(["via"])}
             hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
             <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices(ctx)} placeholder="stage_server" mono />

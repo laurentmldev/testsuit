@@ -207,25 +207,23 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
                              f"its answer (status {exit_status})")
             return state, str(output)[-200:]
     if "http" in probe:
-        import urllib.request
+        from testsuit.sequencer import httpcall
         report["kind"] = "http"
-        url = render(probe["http"] if isinstance(probe["http"], str) else probe["http"]["url"], keys)
-        step = {"action": "HTTP GET", "command": str(url)}
+        spec = httpcall.normalize(render(probe["http"], keys), f"{comp.id} status probe")
+        limit = parse_duration(probe.get("timeout")) or httpcall.timeout_of(spec, 5)
+        step = {"action": "HTTP request" + (f" from {via.id} (curl)" if via else " from the sequencer")
+                + f" (timeout {limit:g} s)", "command": httpcall.describe(spec)}
         steps.append(step)
-
-        def get():
-            try:
-                with urllib.request.urlopen(url, timeout=5) as r:
-                    return r.read(1 << 16).decode("utf-8", "replace"), 0 if r.status < 400 else r.status
-            except Exception as e:
-                return str(e), None
-        output, code = await asyncio.to_thread(get)
-        step.update(exit=code, output=output[-4000:], ok=code == 0)
-        if code is None:
-            step["error"] = output
-            report["why"] = f"the request failed: {output}"
-            return "offline", output
-        return _matched(report, status.get("states") or {}, output, code, f"its answer (HTTP code {code or '< 400'})"), output[-200:]
+        answer = await httpcall.request(spec, transport if via else None, limit)
+        ok, why = httpcall.judge(spec, answer)
+        step.update(exit=answer.status, output=answer.body[-4000:], ok=ok)
+        if answer.status is None:
+            step["error"] = answer.error
+            report["why"] = f"the request failed: {answer.error}"
+            return "offline", answer.error
+        # its states match the answer; the code is 0 when it is the expected one, else the HTTP status
+        return _matched(report, status.get("states") or {}, answer.body, 0 if ok else answer.status,
+                        f"its answer ({why})"), answer.body[-200:]
     report["why"] = f"unsupported probe {sorted(probe)}"
     return "unknown", f"unsupported probe {sorted(probe)}"
 
