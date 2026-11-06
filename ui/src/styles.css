@@ -227,6 +227,9 @@ tr.finally-row td { color: var(--muted); }
 .choice span { font-size: 11.5px; color: var(--muted); }
 .choice span p { margin: 0; }
 .choice.selected { border-color: var(--accent); background: var(--accent-soft); }
+/* cards with a description: as many per line as the width allows, all the same width */
+.choices.described { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
+.choices.described .choice { max-width: none; justify-content: flex-start; }
 .combo { position: relative; }
 .combo-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .combo-desc p, .combo-item-desc p { margin: 0; }
