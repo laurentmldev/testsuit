@@ -283,6 +283,8 @@ class StepRunner:
                 spec = {"run": self.step.run}
             elif action == "python":
                 spec = {"python": self.step.python}
+            elif action == "http":
+                spec = {"http": self.step.http}
             elif action == "do":
                 spec = self.command(self.step.do)
             elif action in ("push", "pull"):
@@ -322,6 +324,8 @@ class StepRunner:
             return await self.signal(str(spec["signal"]), grace)
         if "python" in spec:
             return await self.python(spec, keys, timeout)
+        if "http" in spec:
+            return await self.http(spec, keys, timeout)
         if "run" in spec:
             on = None
             if spec.get("via"):                        # on another component: one in a sub-network behind it
@@ -343,8 +347,38 @@ class StepRunner:
             if name.lower() in registry.step_types:
                 outcome = await registry.step_types[name.lower()](self, render(value, keys, self.fs.id))
                 return outcome if isinstance(outcome, tuple) else ((SUCCEEDED, "") if outcome else (FAILED, "plugin step failed"))
-        raise SequencerError(f"step '{self.fs.id}': command {spec} has no 'run', 'python', 'wait_for', 'signal' "
-                             f"or known step type")
+        raise SequencerError(f"step '{self.fs.id}': command {spec} has no 'run', 'python', 'http', 'wait_for', "
+                             f"'signal' or known step type")
+
+    async def http(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
+        """An HTTP request (README section 7.4): from the sequencer host, or from the component ``via`` names
+        (with curl there). Succeeded when the answer is the expected one (default: a status below 400)."""
+        from testsuit.sequencer import httpcall
+        where = f"step '{self.fs.id}'"
+        request = httpcall.normalize(render(spec["http"], keys, self.fs.id), where)
+        transport = None
+        if spec.get("via"):
+            via, transport, _ = self.via_place(str(render(spec["via"], keys, self.fs.id)))
+            self.note(f"through {via.id} ({via.host}), with curl")
+        limit = timeout if timeout is not None else httpcall.timeout_of(request)
+        self.note(f"HTTP {httpcall.describe(request)}")
+        answer = await httpcall.request(request, transport, limit)
+        if answer.status is None:
+            self.note(f"no answer: {answer.error}")
+            return ERROR, f"no answer: {answer.error}"
+        self.write(answer.body + ("" if answer.body.endswith("\n") or not answer.body else "\n"))
+        if request.get("save"):
+            name = str(request["save"])
+            folder = self.ctx.bag / "data" / (self.slot.id if self.slot else "_sequencer") / "http"
+            target = (folder / name).resolve()
+            if not target.is_relative_to(folder.resolve()):
+                raise SequencerError(f"{where}: 'http.save' must stay in its folder ('{name}')")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(answer.body, encoding="utf-8")
+            self.note(f"answer saved in {target.relative_to(self.ctx.bag).as_posix()}")
+        ok, why = httpcall.judge(request, answer)
+        self.note(why)
+        return (SUCCEEDED, "") if ok else (FAILED, why)
 
     async def python(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
         """A Python script (README section 8.3, SQ-32): the step's keys in a JSON file named by TSQ_KEYS, run
@@ -630,23 +664,12 @@ class StepRunner:
                     return False, str(e)
             return check
         if kind == "http":
-            spec = value if isinstance(value, dict) else {"url": value}
+            from testsuit.sequencer import httpcall
+            spec = httpcall.normalize(value, f"step '{self.fs.id}': wait_for")
 
             async def check():
-                import urllib.request
-
-                def get():
-                    try:
-                        with urllib.request.urlopen(spec["url"], timeout=3) as response:
-                            return response.status, response.read(1 << 20).decode("utf-8", "replace")
-                    except urllib.error.HTTPError as e:
-                        return e.code, ""
-                    except Exception as e:
-                        return None, str(e)
-                status, body = await asyncio.to_thread(get)
-                ok = status == int(spec.get("status", 200)) and (
-                    not spec.get("regex") or re.search(spec["regex"], body) is not None)
-                return ok, f"status {status}"
+                answer = await httpcall.request(spec, None, min(httpcall.timeout_of(spec, 3), 10))
+                return httpcall.judge(spec, answer)
             return check
         if kind in ("file", "log", "cmd"):
             if kind == "file":

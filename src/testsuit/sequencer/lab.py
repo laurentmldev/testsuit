@@ -161,9 +161,8 @@ class Lab:
             return None
         name = str(name)
         where = f"component '{component.id}': its status probe goes via '{name}'"
-        if status.get("builtin") or "http" in (status.get("probe") or {}):
-            raise SequencerError(f"{where}: 'via' needs a 'run' or plugin probe (on the component it goes through, "
-                                 "'curl' does an HTTP check)")
+        if status.get("builtin"):
+            raise SequencerError(f"{where}: 'via' needs a 'run', 'http' or plugin probe")
         return self.find_via(component, stage, name, where)
 
     def find_via(self, component: Component, stage: Stage | None, name: str, where: str) -> Component:
@@ -188,8 +187,8 @@ class Lab:
             if not isinstance(spec, dict) or not spec.get("via"):
                 continue
             where = f"component '{component.id}': its command '{name}' goes via '{spec['via']}'"
-            if "run" not in spec:
-                raise SequencerError(f"{where}: 'via' needs a 'run' command")
+            if "run" not in spec and "http" not in spec:
+                raise SequencerError(f"{where}: 'via' needs a 'run' or 'http' command")
             vias[name] = self.find_via(component, stage, str(spec["via"]), where)
         return vias
 

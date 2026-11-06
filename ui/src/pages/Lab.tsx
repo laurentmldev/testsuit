@@ -75,7 +75,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               {info.commands.map((c: any) => (
                 <tr key={c.name}>
                   <td><code>{c.name}</code></td>
-                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
+                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
                   <td>{c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
                     : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>

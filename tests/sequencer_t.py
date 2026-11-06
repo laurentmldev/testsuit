@@ -1331,3 +1331,165 @@ def test_same_role_and_tags(bench):
                         "(bench_2)"]
     assert bind({"a": {"role": "dut"}}, {"tags": ["rev_c"]})[1] == [
         "stage slot 'bench': no 'counter_bench' stage tagged rev_c"]
+
+
+class _Api:
+    """A small REST API on a free local port: GET /status, POST /jobs (echoes its JSON, 201), GET /fail (500).
+    It records the requests it got."""
+
+    def __init__(self):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        api = self
+        self.requests: list[tuple[str, str, dict, str]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def answer(self, code: int, body: dict):
+                data = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                api.requests.append(("GET", self.path, dict(self.headers), ""))
+                if self.path.startswith("/status"):
+                    self.answer(200, {"state": api.state, "version": "1.2"})
+                else:
+                    self.answer(500, {"error": "boom"})
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                api.requests.append(("POST", self.path, dict(self.headers), body))
+                self.answer(201, {"job": 7, **json.loads(body or "{}")})
+
+        self.state = "ready"
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+
+
+@pytest.fixture
+def api():
+    server = _Api()
+    yield server
+    server.close()
+
+
+def test_http_steps(bench, api):
+    """An http step or command calls a REST API: method, headers, JSON body and query, the answer checked (status,
+    regex, a JSON subset) and saved with the results; secret headers stay out of the logs; a wait_for http polls."""
+    pipeline = python_bench(bench, [
+        {"id": "post", "slot": "analysis", "needs": ["deploy"], "http": {
+            "url": f"{api.url}/jobs", "method": "POST", "params": {"run": "{{ run.id }}"},
+            "headers": {"Authorization": "Bearer s3cret"}, "json": {"min": "{{ min_count }}"},
+            "expect": {"status": [201], "json": {"min": "3"}}, "save": "job.json"}},
+        {"id": "ready", "needs": ["post"], "wait_for": {"http": {"url": f"{api.url}/status",
+                                                                 "expect": {"json": {"state": "ready"}}}}},
+        {"id": "get", "needs": ["ready"], "http": f"{api.url}/status"},
+        {"id": "wrong", "needs": ["get"], "continue_on_error": True,
+         "http": {"url": f"{api.url}/status", "expect": {"regex": "busy"}}},
+        {"id": "boom", "needs": ["get"], "continue_on_error": True, "http": f"{api.url}/fail"},
+        {"id": "down", "needs": ["get"], "continue_on_error": True, "http": {"url": "http://127.0.0.1:9/x",
+                                                                            "timeout": "2s"}}])
+    run = run_one(bench, bench.build("http", pipeline=pipeline))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    states = {s["id"]: s["state"] for s in record["steps"] if s["phase"] == "exploit"}
+    assert states == {"deploy": "succeeded", "collect": "succeeded", "post": "succeeded", "ready": "succeeded", "get": "succeeded",
+                      "wrong": "failed", "boom": "failed", "down": "error"}
+    method, path, headers, body = api.requests[0]
+    assert (method, path, headers["Authorization"], body) == ("POST", f"/jobs?run={run['id']}", "Bearer s3cret",
+                                                              '{"min": 3}')
+    assert yaml.safe_load(read_member(run, "data/analysis/http/job.json")) == {"job": 7, "min": 3}
+    log = read_member(run, "logs/exploit/post[analysis].log")
+    assert "POST " in log and "Authorization: ***" in log and "s3cret" not in log
+    assert "status 500" in read_member(run, "logs/exploit/boom.log")
+
+
+def test_http_checked():
+    """An http request is checked when the pipeline or the lab loads: former keys, unknown ones, json and body."""
+    from testsuit.sequencer.httpcall import Answer, judge, normalize, parse_curl
+    from testsuit.sequencer.util import SequencerError
+    for spec, message in ((7, "takes a URL or a mapping"), ({"method": "GET"}, "needs a 'url'"),
+                          ({"url": "x", "status": 200}, r"'http' status is now 'expect: \{status\}'"),
+                          ({"url": "x", "data": 1}, "unknown 'http' key"),
+                          ({"url": "x", "json": {}, "body": ""}, "'json' or 'body'"),
+                          ({"url": "x", "method": "FETCH"}, "not one of"),
+                          ({"url": "x", "expect": {"code": 1}}, "unknown 'http.expect' key")):
+        with pytest.raises(SequencerError, match=message):
+            normalize(spec, "here")
+    assert parse_curl('{"a": 1}\n__tsq_http_status__ 200', 0) == Answer(200, '{"a": 1}')
+    assert parse_curl("curl: (7) refused\n__tsq_http_status__ 000", 7).status is None
+    assert judge({}, Answer(404, "")) == (False, "status 404")
+    assert judge({"expect": {"status": 404}}, Answer(404, ""))[0]
+    assert judge({"expect": {"json": {"a": [1, 2]}}}, Answer(200, '{"a": [1, 2], "b": 0}'))[0]
+    assert not judge({"expect": {"json": {"a": 1}}}, Answer(200, "<html>"))[0]
+
+
+def test_http_probe(tmp_path, no_git, api):
+    """A status probe can be an HTTP request: its states match the answer, exit 0 when it is the expected one."""
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["status"] = {
+        "probe": {"http": {"url": f"{api.url}/status", "expect": {"json": {"state": "ready"}}}},
+        "states": {"idle": {"exit": 0}, "running": {"regex": "busy"}, "offline": {"regex": "odd"}}}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        states = []
+        for state in ("ready", "busy", "odd"):
+            api.state = state
+            states.append(await seq.monitor.probe("counter_1"))
+        report = seq.monitor.reports["counter_1"]
+        await seq.close()
+        return states, report
+    states, report = asyncio.run(main())
+    assert states == ["idle", "running", "offline"]
+    assert report["kind"] == "http" and report["steps"][-1]["command"] == f"GET {api.url}/status"
+
+
+def test_http_command_via(tmp_path, no_git, api):
+    """A lab component's command can be an HTTP request, sent through another component with curl (via)."""
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"version": {
+        "http": {"url": f"{api.url}/status", "headers": {"X-Api-Key": "k3y"}, "expect": {"json": {"version": "1.2"}},
+                 "save": "version.json"}, "via": "seq_host"}}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][0]["steps"].append({"id": "version", "slot": "dut", "do": "version", "needs": ["ready"]})
+    run = run_one(bench, bench.build("via_http", pipeline=pipeline))
+    assert run["verdict"] == "succeeded", run["reason"]
+    log = read_member(run, "logs/test_run/version[dut].log")
+    assert "through seq_host" in log and "X-Api-Key: ***" in log and "k3y" not in log
+    assert yaml.safe_load(read_member(run, "data/dut/http/version.json"))["version"] == "1.2"
+    assert api.requests[-1][2]["X-Api-Key"] == "k3y"
+
+
+def test_http_manual_command(tmp_path, no_git, api):
+    """In maintenance, an http command can be run by hand from the Lab page: its answer comes back."""
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {
+        "version": {"http": {"url": f"{api.url}/status", "expect": {"json": {"version": "1.2"}}}}}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.set_flag("counter_1", "maintenance", True)
+        result = await seq.manual_command("counter_1", "version")
+        await seq.close()
+        return result
+    result = asyncio.run(main())
+    assert result["ok"] and result["exit"] == 200 and '"version": "1.2"' in result["output"]
+    assert result["run"] == f"GET {api.url}/status"

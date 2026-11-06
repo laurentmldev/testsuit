@@ -36,15 +36,46 @@ EXPECT = h("What a successful command gives. `exit`: accepted exit codes (defaul
                        "stderr": h("Regular expression the error output must match.", type="string")},
            defaultSnippets=[{"label": "exit codes", "body": {"exit": [0]}}])
 
+HTTP = h(
+    "An HTTP request (a REST API call): a URL, or a mapping. Sent from the sequencer host, or with `via` from "
+    "another component (with curl there). It passes when the answer is the expected one: by default a status "
+    "below 400. Templates allowed in every field.",
+    type=["string", "object"], additionalProperties=False,
+    properties={
+        "url": h("The URL (`{{ component.vars.api }}/jobs`).", type="string"),
+        "method": h("HTTP method (default GET).", type="string",
+                    enum=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
+        "headers": h("Request headers. A header whose name looks secret (`Authorization`, `X-Api-Key`, "
+                     "token...) is hidden in the logs: take its value from a variable.", type="object",
+                     additionalProperties={"type": "string"},
+                     examples=[{"Authorization": "Bearer {{ component.vars.token }}"}]),
+        "params": h("Query string parameters.", type="object", additionalProperties={"type": ["string", "number", "boolean"]}),
+        "json": h("JSON body (sets `Content-Type: application/json`).", type=["object", "array", "string", "number", "boolean"]),
+        "body": h("Raw body, as written.", type="string"),
+        "timeout": DURATION,
+        "verify": h("Check the server's TLS certificate (default true; false for a self-signed lab server).",
+                    type="boolean"),
+        "expect": h("The expected answer (default: a status below 400).", type="object", additionalProperties=False,
+                    properties={"status": h("Accepted status codes.", type=["integer", "array"], items={"type": "integer"},
+                                            examples=[200, [200, 201]]),
+                                "regex": h("Regular expression the body must match.", type="string"),
+                                "json": h("Values the JSON answer must contain (a subset: other fields are ignored).",
+                                          type=["object", "array", "string", "number", "boolean"],
+                                          examples=[{"state": "started"}])}),
+        "save": h("Keep the answer with the results: `data/<slot>/http/<file>` (commands and steps).",
+                  type="string", examples=["answer.json"]),
+    },
+    defaultSnippets=[{"label": "GET", "body": {"url": "${1:http://localhost:8080/api/status}"}},
+                     {"label": "POST JSON", "body": {"url": "${1:http://localhost:8080/api/jobs}", "method": "POST",
+                                                     "json": {}, "expect": {"status": [200, 201]}}}])
+
 WAIT_KINDS = {
     "state": h("The monitored state of the component (section 7.5): `running`, `idle`, `configured`, `broken`, "
                "`offline`, `unknown`, or a list of them.", type=["string", "array"],
                examples=["running", "idle", ["idle", "configured"]]),
     "tcp": h("A TCP port accepting connections: `host:port`, or `{host, port}` (host: the component's by default).",
              type=["string", "object", "integer"], examples=["10.42.0.10:5000", {"port": 8080}]),
-    "http": h("An HTTP answer: a URL, or `{url, status (default 200), regex}` on the body.",
-              type=["string", "object"], examples=["http://localhost:8080/health",
-                                                   {"url": "http://localhost:8080/health", "status": 200}]),
+    "http": HTTP,
     "file": h("A file or folder that exists on the component.", type="string",
               examples=["{{ component.output_dir }}/done"]),
     "log": h("A line of a log file on the component matching a regular expression: `{file, regex}`.",
@@ -93,6 +124,7 @@ COMMAND = h(
     "What a command does, one of:\n"
     "- `run`: a shell command on the component (over its transport), with `timeout`, `detach`, `expect`, `env`;\n"
     "- `python`: a Python script, `script` or inline `code`, with the same options as `run`;\n"
+    "- `http`: an HTTP request (a REST API call): `url`, `method`, `headers`, `json` or `body`, `expect`, `save`;\n"
     "- `wait_for`: a ready check (state, tcp, http, file, log, cmd);\n"
     "- `signal`: send a signal to the processes the run started on the component (`TERM`, then `KILL` after "
     "`timeout`, default 10 s);\n"
@@ -102,12 +134,14 @@ COMMAND = h(
     properties={
         "run": h("Shell command run on the component. " + TEMPLATE_NOTE, type="string"),
         "python": PYTHON,
+        "http": HTTP,
         "detach": h("Start the command and go on without waiting for it to end (a server, a simulation). "
                     "Its processes are recorded, then stopped by `signal` or `kill`.", type="boolean"),
         "via": h("Run the command on another component, for a component the sequencer cannot reach itself (in a "
                  "sub-network behind the stage server): a role of its stage (`stage_server`), or another host. It "
                  "gets `{{ component.host }}` (this component) and `{{ via.host }}`; its processes are recorded "
-                 "there, so `signal`, `kill` and the end of the run stop them. A `run` command only.",
+                 "there, so `signal`, `kill` and the end of the run stop them. A `run` or `http` command (sent with curl "
+                 "from there).",
                  type="string"),
         "timeout": DURATION,
         "expect": EXPECT,
@@ -164,7 +198,8 @@ STATUS = h(
     "more often during runs).",
     type="object",
     properties={
-        "probe": h("The probe: `{run: <shell command>}`, `{http: <url>}`, or a plugin state probe.",
+        "probe": h("The probe: `{run: <shell command>}`, `{http: <request>}` (its states match the answer's body; "
+                   "`exit` is 0 when the answer is the expected one, else the HTTP status), or a plugin state probe.",
                    type="object", properties={"run": h("Shell command run on the component (locally with "
                                                        "`transport: local`, on the `via` component with `via`). "
                                                        "A list of commands: several checks, each run whatever the "
@@ -172,7 +207,7 @@ STATUS = h(
                                                        "their outputs one after the other, `exit` rules the first "
                                                        "non-zero exit status.",
                                                        type=["string", "array"], items={"type": "string"}),
-                                              "http": {"type": ["string", "object"]}, "timeout": DURATION}),
+                                              "http": HTTP, "timeout": DURATION}),
         "states": h("Rules giving a state from the probe result, first match wins: `{regex: ...}` on the output, "
                     "or `{exit: 0 | nonzero}`.", type="object",
                     properties={s: h(f"`{s}`: {STATE_HELP[s]}.", type="object",
@@ -515,6 +550,7 @@ STEP_FIELDS = {
     "run": h("An inline shell command, on the component (or in the run folder on the sequencer host without one). "
              + TEMPLATE_NOTE, type="string"),
     "python": PYTHON,
+    "http": HTTP,
     "push": h("Copy files to the component: `{from: <path in the run folder>, to: <path on the component>}`.",
               type="object"),
     "pull": h("Copy files from the component: `{from: <path on the component>, to: <path in the run folder>}`.",
@@ -538,7 +574,7 @@ STEP_FIELDS = {
     "env": h("Environment variables of the step's command.", type="object"),
 }
 
-STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `push`, `pull`, `delay`, "
+STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `http`, `push`, `pull`, `delay`, "
          "`wait_for`, `uses`, or a plugin step type), and options.", type="object", required=["id"],
          properties=STEP_FIELDS, additionalProperties=True,
          defaultSnippets=[

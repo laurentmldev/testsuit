@@ -17,7 +17,7 @@ from testsuit.datatools.datapack.model import FORMER_PHASE, FORMER_STEP, former_
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-BUILTIN_ACTIONS = ("do", "run", "python", "push", "pull", "delay", "wait_for", "uses")
+BUILTIN_ACTIONS = ("do", "run", "python", "http", "push", "pull", "delay", "wait_for", "uses")
 PYTHON_KEYS = ("script", "code", "args", "interpreter")
 
 
@@ -59,6 +59,7 @@ class Step(BaseModel):
     do: str | None = None
     run: str | None = None
     python: dict | None = None
+    http: dict | str | None = None
     push: dict | None = None
     pull: dict | None = None
     delay: str | float | None = None
@@ -106,6 +107,9 @@ class Step(BaseModel):
             raise SequencerError(f"step '{self.id}': unknown key or step type '{action}'")
         if action == "python":
             check_python(self.python, f"step '{self.id}'")
+        if action == "http":
+            from testsuit.sequencer.httpcall import normalize
+            normalize(self.http, f"step '{self.id}'")
         if action in ("do", "push", "pull") and not (self.slot or self.for_each):
             raise SequencerError(f"step '{self.id}': '{action}' needs a 'slot' or 'for_each'")
         if self.slot and self.for_each is not None:

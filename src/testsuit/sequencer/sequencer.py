@@ -404,7 +404,7 @@ class Sequencer:
         return result
 
     # ── commands run by hand, on a component in maintenance ─────────────
-    MANUAL_KINDS = ("run", "signal", "builtin kill")
+    MANUAL_KINDS = ("run", "http", "signal", "builtin kill")
 
     def _in_maintenance(self, comp_id: str) -> bool:
         resources = self.store.resources()
@@ -456,7 +456,7 @@ class Sequencer:
         commands = []
         for name, spec in sorted(resolved.commands.items()):
             spec = dict(spec or {})
-            kind = ("run" if "run" in spec else "signal" if "signal" in spec
+            kind = ("run" if "run" in spec else "http" if "http" in spec else "signal" if "signal" in spec
                     else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(spec), "?"))
             entry = {"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS}
             if kind == "run":
@@ -489,8 +489,8 @@ class Sequencer:
             raise SequencerError(f"component '{comp_id}' has no command '{name}' "
                                  f"(has: {', '.join(c['name'] for c in info['commands']) or 'none'})")
         if not command["manual"]:
-            raise SequencerError(f"'{name}' is a {command['kind']} command: only run and signal commands, and the "
-                                 "built-in kill, can be run by hand (deploy and collect need a datapack)")
+            raise SequencerError(f"'{name}' is a {command['kind']} command: only run, http and signal commands, and "
+                                 "the built-in kill, can be run by hand (deploy and collect need a datapack)")
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         spec = command["spec"]
@@ -502,7 +502,21 @@ class Sequencer:
             return {**result, "ok": False, "error": f"cannot reach {comp.host}: {e}"}
         manual_dir = f"{root}/.tsq/manual/{comp_id}"
         started = time.monotonic()
-        if command["kind"] != "run":                   # signal, kill: the processes started by hand
+        if command["kind"] == "http":                  # a REST API call, from here or through its via
+            from testsuit.sequencer import httpcall
+            via = None
+            if spec.get("via"):
+                via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
+            keys = self._manual_keys(comp, stage, root, via)
+            request = httpcall.normalize(render(spec["http"], keys, f"{comp_id}.{name}"), f"command '{name}'")
+            limit = timeout or (parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
+                                if spec.get("timeout") is not None else httpcall.timeout_of(request))
+            answer = await httpcall.request(request, self.transport_for(via.id) if via else None, limit)
+            ok, why = httpcall.judge(request, answer)
+            result.update(ok=ok, run=httpcall.describe(request), via=via.id if via else None,
+                          on=via.host if via else "the sequencer host", exit=answer.status, output=answer.body,
+                          error=answer.error or ("" if ok else why))
+        elif command["kind"] != "run":                 # signal, kill: the processes started by hand
             sig = "KILL" if command["kind"] == "builtin kill" else str(spec["signal"])
             places = [(transport, manual_dir)]         # on the component, and on what its commands run through
             for via in {v.id: v for v in self.lab.command_vias(comp, stage).values()}.values():

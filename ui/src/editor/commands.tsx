@@ -1,7 +1,7 @@
 // Editors of command definitions (lab components, stage and host overrides), ready checks
 // (wait_for) and expected results, used by every form that has commands.
 import { useState } from "react";
-import { Choices, Combo, Field, helpText, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { Choices, Combo, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { CodeEditor } from "../monaco";
 import { classes, Markdown } from "../util";
 import { clone, useSession, viaChoices } from "./state";
@@ -12,7 +12,7 @@ export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "depl
 
 export function commandKind(spec: any): string {
   if (!spec || typeof spec !== "object") return "run";
-  for (const k of ["builtin", "wait_for", "signal", "run", "python"]) if (k in spec) return k;
+  for (const k of ["builtin", "wait_for", "signal", "run", "python", "http"]) if (k in spec) return k;
   return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via"].includes(k)) || "run";
 }
 
@@ -72,6 +72,7 @@ export function summary(spec: any): string {
   const kind = commandKind(spec);
   if (kind === "run") return `${spec.detach ? "start " : ""}${spec.run ?? ""}${spec.via ? ` (via ${spec.via})` : ""}`;
   if (kind === "python") return `python ${pythonSummary(spec.python)}`;
+  if (kind === "http") return `${httpSummary(spec.http)}${spec.via ? ` (via ${spec.via})` : ""}`;
   if (kind === "builtin") return `built-in ${spec.builtin}`;
   if (kind === "signal") return `signal ${spec.signal}${spec.timeout ? `, then KILL after ${spec.timeout}` : ""}`;
   if (kind === "wait_for") {
@@ -111,6 +112,96 @@ export function ExpectEditor({ value, onChange }: { value: any; onChange: (v: an
         <Text mono value={v.stdout} onChange={(x) => set("stdout", x)} placeholder="regex, optional" />
       </Field>
     </div>
+  );
+}
+
+/** A short line for an HTTP request: its method and URL. */
+export function httpSummary(h: any): string {
+  if (!h) return "";
+  if (typeof h === "string") return `GET ${h}`;
+  return `${String(h.method || "GET").toUpperCase()} ${h.url || ""}`;
+}
+
+/** Parses a JSON value typed in a field; undefined while it is not valid JSON yet. */
+function parseJson(text: string): { ok: boolean; value?: any } {
+  if (!text.trim()) return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** A JSON value edited as text, kept as typed until it parses. */
+function JsonField({ value, onChange, placeholder }: { value: any; onChange: (v: any) => void; placeholder?: string }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (value === undefined ? "" : JSON.stringify(value, null, 1));
+  const parsed = parseJson(shown);
+  return <Text keys mono multiline value={shown} invalid={!parsed.ok} placeholder={placeholder} onChange={(x) => {
+    setDraft(x);
+    const p = parseJson(x);
+    if (p.ok) onChange(p.value);
+  }} onBlur={() => setDraft(null)} />;
+}
+
+/** An HTTP request (a REST API call): the `http` of a command, a step, a status probe or a wait_for.
+ * withSave: commands and steps keep the answer with the results. */
+export function HttpEditor({ value, onChange, help, withSave }: {
+  value: any; onChange: (v: any) => void; help: (field: string) => string | undefined; withSave?: boolean;
+}) {
+  const v = typeof value === "string" ? { url: value } : value && typeof value === "object" ? value : {};
+  const set = (k: string, x: any) => {
+    const next = { ...v, [k]: x };
+    if (x === "" || x === undefined || x === null || (typeof x === "object" && !Array.isArray(x) && !Object.keys(x).length)) delete next[k];
+    onChange(next);
+  };
+  const expect = v.expect || {};
+  const setExpect = (k: string, x: any) => {
+    const next = { ...expect, [k]: x };
+    if (x === "" || x === undefined || (Array.isArray(x) && !x.length)) delete next[k];
+    set("expect", Object.keys(next).length ? next : undefined);
+  };
+  const bodyKind = "json" in v ? "json" : "body" in v ? "body" : "none";
+  const statuses: string[] = (Array.isArray(expect.status) ? expect.status : expect.status !== undefined ? [expect.status] : []).map(String);
+  return (
+    <>
+      <div className="inline-fields">
+        <Field label="Method" help={help("method")}>
+          <Combo value={v.method} onChange={(x) => set("method", x ? x.toUpperCase() : undefined)} placeholder="GET"
+            choices={["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map((m) => ({ value: m }))} />
+        </Field>
+        <Field label="URL" help={help("url")} wide>
+          <Text keys mono value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
+        </Field>
+      </div>
+      <Field label="Headers" help={help("headers")}><KeyValues value={v.headers} onChange={(x) => set("headers", x)} /></Field>
+      <Field label="Query parameters" help={help("params")}><KeyValues value={v.params} onChange={(x) => set("params", x)} /></Field>
+      <Field label="Body" help={help("json")}>
+        <Choices value={bodyKind} onChange={(k) => {
+          if (!k || k === bodyKind) return;
+          const { json: _j, body: _b, ...rest } = v;
+          onChange(k === "json" ? { ...rest, json: {} } : k === "body" ? { ...rest, body: "" } : rest);
+        }} choices={[{ value: "none", label: "none" }, { value: "json", label: "JSON" }, { value: "body", label: "raw text" }]} />
+      </Field>
+      {bodyKind === "json" && <Field label="JSON body" help={help("json")} wide><JsonField value={v.json} onChange={(x) => onChange({ ...v, json: x ?? {} })} placeholder='{"mode": "run"}' /></Field>}
+      {bodyKind === "body" && <Field label="Raw body" help={help("body")} wide><Text keys mono multiline value={v.body} onChange={(x) => onChange({ ...v, body: x })} /></Field>}
+      <Section title="Expected answer" help={help("expect")}>
+        <div className="inline-fields">
+          <Field label="Status" help={help("expect")}>
+            <Tags value={statuses} onChange={(l) => setExpect("status", l.length === 1 ? Number(l[0]) : l.map(Number).filter((n) => !Number.isNaN(n)))} placeholder="below 400" />
+          </Field>
+          <Field label="Body matches" help="A regular expression the body must match."><Text mono value={expect.regex} onChange={(x) => setExpect("regex", x)} /></Field>
+        </div>
+        <Field label="JSON contains" help="Values the JSON answer must contain; other fields are ignored." wide>
+          <JsonField value={expect.json} onChange={(x) => setExpect("json", x)} placeholder='{"state": "started"}' />
+        </Field>
+      </Section>
+      <div className="inline-fields">
+        <Field label="Request timeout" help={help("timeout")}><Text keys value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="30s" /></Field>
+        <Field label="TLS" help={help("verify")}><Toggle value={v.verify === false} onChange={(x) => set("verify", x ? false : undefined)} label="accept a self-signed certificate" /></Field>
+        {withSave && <Field label="Save the answer as" help={help("save")}><Text mono value={v.save} onChange={(x) => set("save", x)} placeholder="answer.json" /></Field>}
+      </div>
+    </>
   );
 }
 
@@ -161,11 +252,7 @@ export function WaitForEditor({ value, onChange, withSlot, slots }: {
         </>
       )}
       {kind === "http" && (
-        <>
-          <Field label="URL" help={waitHelp("http")}><Text keys mono value={typeof val === "string" ? val : val?.url} onChange={(x) => set("http", { ...(typeof val === "object" ? val : {}), url: x })} /></Field>
-          <Field label="Status" help="Expected HTTP status (default 200)."><Text value={val?.status} onChange={(x) => set("http", { ...(typeof val === "object" ? val : { url: val }), status: x ? Number(x) : undefined })} placeholder="200" /></Field>
-          <Field label="Body matches" help="Optional regular expression on the body."><Text mono value={val?.regex} onChange={(x) => set("http", { ...(typeof val === "object" ? val : { url: val }), regex: x || undefined })} /></Field>
-        </>
+        <HttpEditor value={val} onChange={(x) => set("http", x)} help={(f) => helpText(schemas.library, [...CMD_PATH, "wait_for", "http", ...(f ? [f] : [])]) || waitHelp("http")} />
       )}
       {(kind === "tcp" || kind === "file" || kind === "cmd") && (
         <Field label={kind === "tcp" ? "host:port" : kind === "file" ? "Path" : "Command"} help={waitHelp(kind)}>
@@ -191,6 +278,7 @@ export function WaitForEditor({ value, onChange, withSlot, slots }: {
 const KINDS: Choice[] = [
   { value: "run", label: "shell command", description: "Run a command on the component (or start it, detached)." },
   { value: "python", label: "Python script", description: "A script or inline code, with the run's keys; an exception is an error." },
+  { value: "http", label: "REST API", description: "An HTTP request: URL, method, headers, body, the expected answer." },
   { value: "wait_for", label: "wait for", description: "Wait until a check passes: state, log line, port, URL…" },
   { value: "signal", label: "signal", description: "Signal the processes the run started (TERM, then KILL)." },
   { value: "builtin", label: "built-in", description: "deploy, collect or kill, as linux_system does them." },
@@ -214,6 +302,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
     onChange({
       ...keep,
       ...(k === "run" ? { run: "" } : k === "python" ? { python: { script: "{{ component.input_dir }}/check.py" } } : k === "wait_for" ? { wait_for: { log: { file: "{{ component.output_dir }}/app.log", regex: "READY" }, timeout: "30s" } }
+        : k === "http" ? { http: { url: "http://{{ component.host }}:8080/api/status" } }
         : k === "signal" ? { signal: "TERM", timeout: "10s" } : k === "builtin" ? { builtin: WELL_KNOWN.includes(name) && ["deploy", "collect", "kill"].includes(name) ? name : "deploy" } : { [k]: {} }),
     });
   };
@@ -252,6 +341,16 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
         </>
       )}
       {kind === "wait_for" && <WaitForEditor value={s.wait_for} onChange={(x) => set("wait_for", x)} />}
+      {kind === "http" && (
+        <>
+          <HttpEditor value={s.http} onChange={(x) => set("http", x)} withSave help={(f) => helpText(schemas.library, [...CMD_PATH, "http", ...(f ? [f] : [])])} />
+          {!noVia && (
+            <Field label="Send it from" help={help("via")} hint={s.via ? <>sent from <code>{s.via}</code> with curl</> : "empty: from the sequencer host"}>
+              <Combo value={s.via} onChange={(x) => set("via", x)} choices={viaChoices(ctx)} placeholder="stage_server" mono />
+            </Field>
+          )}
+        </>
+      )}
       {kind === "signal" && (
         <div className="inline-fields">
           <Field label="Signal" help={help("signal")}><Combo value={s.signal} onChange={(x) => set("signal", x)} choices={["TERM", "INT", "HUP", "USR1", "KILL"].map((v) => ({ value: v }))} /></Field>
@@ -267,7 +366,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
           ]} />
         </Field>
       )}
-      {!["run", "python", "wait_for", "signal", "builtin"].includes(kind) && (
+      {!["run", "python", "http", "wait_for", "signal", "builtin"].includes(kind) && (
         <Field label="Options" help="Given to the plugin step type (YAML / JSON)."><Text mono multiline value={JSON.stringify(s[kind] ?? {})} onChange={(x) => {
           try {
             set(kind, JSON.parse(x));

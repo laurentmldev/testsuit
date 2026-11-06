@@ -386,6 +386,10 @@ class Library:
         resolved = self.resolve(component, stage, hosts)
         if not resolved.role:
             raise SequencerError(f"component '{component.id}' has no role (tsq_role)")
+        from testsuit.sequencer.httpcall import normalize
+        for name, spec in resolved.commands.items():
+            if isinstance(spec, dict) and "http" in spec:
+                normalize(spec["http"], f"command '{name}' (from {resolved.command_sources.get(name, '?')})")
         offered = self.role_commands(resolved.role)
         missing = sorted(set(offered) - set(resolved.commands))
         extra = sorted(set(resolved.commands) - set(offered))
