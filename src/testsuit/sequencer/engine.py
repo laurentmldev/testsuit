@@ -379,6 +379,8 @@ class StepRunner:
         if answer.status is None:
             self.note(f"no answer: {answer.error}")
             return ERROR, f"no answer: {answer.error}"
+        if request.get("extract") is not None:
+            self.note(f"extract {request['extract']}" + (f": {answer.extract_error}" if answer.extract_error else ""))
         self.write(answer.body + ("" if answer.body.endswith("\n") or not answer.body else "\n"))
         if request.get("save"):
             name = str(request["save"])
@@ -387,7 +389,7 @@ class StepRunner:
             if not target.is_relative_to(folder.resolve()):
                 raise SequencerError(f"{where}: 'http.save' must stay in its folder ('{name}')")
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(answer.body, encoding="utf-8")
+            target.write_text(answer.body if answer.raw is None else answer.raw, encoding="utf-8")   # the whole answer
             self.note(f"answer saved in {target.relative_to(self.ctx.bag).as_posix()}")
         ok, why = httpcall.judge(request, answer)
         self.note(why)

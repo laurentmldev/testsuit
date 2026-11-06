@@ -23,6 +23,7 @@ One request description everywhere::
       json: {mode: run}                         # or body: "raw text" (not both)
       timeout: 10s                              # of the request (default 30 s)
       verify: true                              # TLS certificate check (false for a self-signed lab server)
+      extract: .jobs[0].state                   # jq-style path: what the expectations and states see
       expect: {status: [200, 201], regex: "ok", json: {state: started}}   # default: a status below 400
       save: start_response.json                 # commands and steps: the answer, kept with the results
 
@@ -44,7 +45,7 @@ from typing import Any
 
 from testsuit.sequencer.util import SequencerError, parse_duration
 
-HTTP_KEYS = ("url", "method", "headers", "params", "json", "body", "timeout", "verify", "expect", "save")
+HTTP_KEYS = ("url", "method", "headers", "params", "json", "body", "timeout", "verify", "extract", "expect", "save")
 EXPECT_KEYS = ("status", "regex", "json")
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 SECRET = re.compile(r"auth|token|key|secret|password|cookie", re.IGNORECASE)
@@ -55,8 +56,82 @@ MAX_BODY = 4 << 20
 @dataclass
 class Answer:
     status: int | None          # None: no answer (connection refused, timeout...)
-    body: str = ""
+    body: str = ""              # the answer, or the part ``extract`` takes out of it
     error: str = ""
+    raw: str | None = None      # the whole answer, when ``extract`` took a part of it
+    extract_error: str = ""     # why ``extract`` could not take its part
+
+
+_PATH_TOKEN = re.compile(r"""\.(?P<name>[A-Za-z_][A-Za-z0-9_-]*)|\.?"(?P<quoted>(?:[^"\\]|\\.)*)"|\.?\[\s*(?:(?P<index>-?\d+)|"(?P<key>(?:[^"\\]|\\.)*)"|(?P<all>))\s*\]""")
+
+
+def parse_path(path: str) -> list[tuple[str, Any]]:
+    """A jq-style path in steps: ``.a.b``, ``."a b"``, ``.["a"]``, ``.items[0]``, ``.items[-1]``, ``.items[]``
+    (every element), and ``.`` (the whole answer). Raises ValueError on anything else."""
+    text = path.strip()
+    if text in ("", "."):
+        return []
+    if not text.startswith("."):
+        raise ValueError("starts with '.'")
+    steps, pos = [], 0
+    while pos < len(text):
+        m = _PATH_TOKEN.match(text, pos)
+        if not m:
+            raise ValueError(f"unexpected '{text[pos:]}'")
+        if m["name"] is not None:
+            steps.append(("key", m["name"]))
+        elif m["quoted"] is not None:
+            steps.append(("key", json.loads(f'"{m["quoted"]}"')))
+        elif m["index"] is not None:
+            steps.append(("index", int(m["index"])))
+        elif m["key"] is not None:
+            steps.append(("key", json.loads(f'"{m["key"]}"')))
+        else:
+            steps.append(("all", None))
+        pos = m.end()
+    return steps
+
+
+def extract(data: Any, path: str) -> Any:
+    """The part of a JSON value a jq-style path gives, as jq does: a missing key or index gives null; ``[]``
+    gives the list of what follows for each element."""
+    values, many = [data], False
+    for kind, arg in parse_path(path):
+        nxt = []
+        for v in values:
+            if kind == "key":
+                if v is not None and not isinstance(v, dict):
+                    raise ValueError(f"cannot take '{arg}' of a {type(v).__name__}")
+                nxt.append(None if v is None else v.get(arg))
+            elif kind == "index":
+                if v is not None and not isinstance(v, list):
+                    raise ValueError(f"cannot index a {type(v).__name__}")
+                nxt.append(v[arg] if v is not None and -len(v) <= arg < len(v) else None)
+            else:
+                if isinstance(v, dict):
+                    nxt.extend(v.values())
+                elif isinstance(v, list):
+                    nxt.extend(v)
+                else:
+                    raise ValueError(f"cannot iterate over a {type(v).__name__}")
+                many = True
+        values = nxt
+    return values if many else values[0]
+
+
+def apply_extract(spec: dict, answer: Answer) -> Answer:
+    """The answer as the expectations, states and logs see it: the ``extract`` part of the JSON answer (a string
+    as is, like ``jq -r``, anything else as JSON); the whole answer stays in ``raw``."""
+    path = spec.get("extract")
+    if path is None or str(path).strip() in ("", ".") or answer.status is None:
+        return answer
+    try:
+        value = extract(json.loads(answer.body), str(path))
+    except ValueError as e:      # not JSON (JSONDecodeError is a ValueError), or a path that does not apply
+        reason = "the answer is not JSON" if isinstance(e, json.JSONDecodeError) else str(e)
+        return Answer(answer.status, "", answer.error, answer.body, f"cannot extract '{path}': {reason}")
+    text = value if isinstance(value, str) else json.dumps(value)
+    return Answer(answer.status, text, answer.error, answer.body)
 
 
 def normalize(spec: Any, where: str) -> dict:
@@ -86,6 +161,12 @@ def normalize(spec: Any, where: str) -> dict:
         if unknown:
             raise SequencerError(f"{where}: unknown 'http.expect' key(s) {', '.join(unknown)} "
                                  f"(known: {', '.join(EXPECT_KEYS)})")
+    if spec.get("extract") is not None and "{{" not in str(spec["extract"]):
+        try:
+            parse_path(str(spec["extract"]))
+        except ValueError as e:
+            raise SequencerError(f"{where}: 'http.extract' '{spec['extract']}' is not a path like "
+                                 f".items[0].state ({e})") from None
     for key in ("headers", "params"):
         if spec.get(key) is not None and not isinstance(spec[key], dict):
             raise SequencerError(f"{where}: 'http.{key}' takes a mapping")
@@ -171,14 +252,15 @@ def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
 
 
 async def request(spec: dict, transport=None, timeout: float | None = None) -> Answer:
-    """Send the request: from the sequencer host, or through a component's transport (curl there)."""
+    """Send the request: from the sequencer host, or through a component's transport (curl there); with
+    ``extract``, the answer's body is that part of it (the whole answer in ``raw``)."""
     if transport is None:
-        return await asyncio.to_thread(send, spec, timeout)
+        return apply_extract(spec, await asyncio.to_thread(send, spec, timeout))
     limit = timeout or timeout_of(spec)
     result = await transport.shell(curl_command(spec, limit), timeout=limit + 5)
     if not result.completed:
         return Answer(None, "", result.error or "no answer")
-    return parse_curl(result.output, result.exit_status, result.error or "")
+    return apply_extract(spec, parse_curl(result.output, result.exit_status, result.error or ""))
 
 
 def _contains(answer: Any, wanted: Any) -> bool:
@@ -202,11 +284,15 @@ def judge(spec: dict, answer: Answer) -> tuple[bool, str]:
         wanted = [int(s) for s in (statuses if isinstance(statuses, list) else [statuses])]
         if answer.status not in wanted:
             return False, f"status {answer.status}, expected {', '.join(map(str, wanted))}"
+    if answer.extract_error:
+        return False, answer.extract_error
     if expect.get("regex") and not re.search(str(expect["regex"]), answer.body, re.MULTILINE):
         return False, f"the answer does not match '{expect['regex']}'"
     if expect.get("json") is not None:
         try:
-            parsed = json.loads(answer.body)
+            parsed = json.loads(answer.body if answer.raw is None else answer.raw)
+            if answer.raw is not None:                 # the extracted part, a string included
+                parsed = extract(parsed, str(spec["extract"]))
         except ValueError:
             return False, "the answer is not JSON"
         if not _contains(parsed, expect["json"]):

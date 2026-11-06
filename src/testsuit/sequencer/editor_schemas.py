@@ -68,10 +68,14 @@ HTTP = h(
         "timeout": DURATION,
         "verify": h("Check the server's TLS certificate (default true; false for a self-signed lab server).",
                     type="boolean"),
+        "extract": h("Take a part of the JSON answer, with a jq-style path: `.state`, `.jobs[0].state`, `.jobs[-1]`, "
+                     "`.jobs[].id` (a list), `.\"a key\".x`. The expectations, a probe's states and the logs see that "
+                     "part (a string as is, like `jq -r`, anything else as JSON); `save` keeps the whole answer.",
+                     type="string", examples=[".status.state", ".jobs[0].state", ".items[].name"]),
         "expect": h("The expected answer (default: a status below 400).", type="object", additionalProperties=False,
                     properties={"status": h("Accepted status codes.", type=["integer", "array"], items={"type": "integer"},
                                             examples=[200, [200, 201]]),
-                                "regex": h("Regular expression the body must match.", type="string"),
+                                "regex": h("Regular expression the body (or the extracted part) must match.", type="string"),
                                 "json": h("Values the JSON answer must contain (a subset: other fields are ignored).",
                                           type=["object", "array", "string", "number", "boolean"],
                                           examples=[{"state": "started"}])}),
