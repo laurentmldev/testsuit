@@ -287,7 +287,7 @@ export function Choices({ value, onChange, choices, allowNone }: {
   value?: string | null; onChange: (v: string | null) => void; choices: Choice[]; allowNone?: string;
 }) {
   return (
-    <div className="choices">
+    <div className={classes("choices", choices.some((c) => c.description) && "described")}>
       {allowNone && (
         <button type="button" className={classes("choice", !value && "selected")} onClick={() => onChange(null)}>
           <strong>{allowNone}</strong>
