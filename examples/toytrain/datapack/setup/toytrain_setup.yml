@@ -2,7 +2,7 @@
 # It says what each slot gets as inputs and how this test drives it; the lab inventory says
 # where the lab components bound to the slots are.
 #
-# The sequencer fields (realms, realm, role) are kept in the datapack as written, for the sequencer
+# The sequencer fields (stage_slots, stage_slot, role) are kept in the datapack as written, for the sequencer
 # to use at run time. A slot's role is a type of the lab: the slot binds to a lab component with that
 # role, which gives the commands.
 
@@ -81,12 +81,12 @@ slot_types:
 # The datapack does not drive the train's switch: on the lab it is locked with its lab stage all the same.
 configurations:
   sim_bench: &toytrain_slots                  # the lab: real calculators, simulated propulsion and sensors
-    realms:
+    stage_slots:
       train: {type: toytrain}                 # bound to train_1 (the only lab stage of this type)
     slots:
-      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, realm: train, role: pilot}
-      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, realm: train, role: telemetry}
-      acquisition: {name: AU, type: acquisition_app, configuration: standard, realm: train, role: acquisition}
+      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage_slot: train, role: pilot}
+      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage_slot: train, role: telemetry}
+      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage_slot: train, role: acquisition}
       propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
       piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
       analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}

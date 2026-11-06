@@ -239,7 +239,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const held: string[] = useMemo(() => {
     if (!palette) return [];
     if (!phase) return Object.keys(palette.slots);
-    return Object.entries<any>(palette.slots).filter(([id, c]) => (c.realm && (phase.realms || []).includes(c.realm)) || (phase.slots || []).includes(id)).map(([id]) => id);
+    return Object.entries<any>(palette.slots).filter(([id, c]) => (c.stage_slot && (phase.stage_slots || []).includes(c.stage_slot)) || (phase.slots || []).includes(id)).map(([id]) => id);
   }, [palette, phase]);
 
   const problems: Record<string, string> = {};
@@ -374,7 +374,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
               }} />
           ) : (
             <div className="muted pad">
-              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps.\n\nA phase locks its **realms** (each with the lab stage it is bound to) and ad hoc **slots**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
+              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps.\n\nA phase locks its **stage slots** (each with the lab stage it is bound to) and ad hoc **slots**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
             </div>
           )}
         </div>
@@ -450,7 +450,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.realm ? `, realm ${c.realm}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
+          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
               onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})`).join("")}` })}>
@@ -498,7 +498,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     onChange(next);
   };
   const comps: Choice[] = (palette ? Object.entries<any>(palette.slots) : []).filter(([id]) => isSub || held.includes(id))
-    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.type}${c.realm ? ` · realm ${c.realm}` : " · ad hoc"}` }));
+    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.type}${c.stage_slot ? ` · stage_slot ${c.stage_slot}` : " · ad hoc"}` }));
   const roles = [...new Set(comps.map((c) => palette.slots[c.value].role))];
   const targetMode = step.slot ? "slot" : step.for_each === "slots" ? "all" : Array.isArray(step.for_each) ? "list"
     : typeof step.for_each === "string" && roles.includes(step.for_each) ? "role" : typeof step.for_each === "string" ? "expr" : "none";
@@ -627,11 +627,11 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete ph[k];
     else ph[k] = v;
   });
-  const realmChoices: Choice[] = Object.entries<any>(palette?.realms || {}).map(([s, t]) => ({ value: s, description: `lab stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.realm === s).map(([id]) => id).join(", ")}` }));
-  const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.realm).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
+  const stageSlotChoices: Choice[] = Object.entries<any>(palette?.stage_slots || {}).map(([s, t]) => ({ value: s, description: `lab stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.stage_slot === s).map(([id]) => id).join(", ")}` }));
+  const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.stage_slot).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
   const earlier = phases.slice(0, index);
   const fromChoices: Choice[] = earlier.flatMap((p: any) => {
-    const comps = palette ? Object.entries<any>(palette.slots).filter(([id, c]) => (c.realm && (p.realms || []).includes(c.realm)) || (p.slots || []).includes(id)).map(([id]) => id) : [];
+    const comps = palette ? Object.entries<any>(palette.slots).filter(([id, c]) => (c.stage_slot && (p.stage_slots || []).includes(c.stage_slot)) || (p.slots || []).includes(id)).map(([id]) => id) : [];
     return [...comps.map((c) => ({ value: `${p.id}:${c}/output/`, description: `outputs of ${c} in phase ${p.id}` })), { value: `${p.id}:*/output/`, description: `outputs of every slot of ${p.id}` }];
   });
   const [open, setOpen] = useState(true);
@@ -641,7 +641,7 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
         <button className="fold" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"}</button>
         <strong>Phase</strong>
         <input className="inline-name" key={phase.id} defaultValue={phase.id} onBlur={(e) => e.target.value && set("id", slug(e.target.value))} />
-        <span className="muted small">locks {[...(phase.realms || []), ...(phase.slots || [])].join(", ") || "nothing"}</span>
+        <span className="muted small">locks {[...(phase.stage_slots || []), ...(phase.slots || [])].join(", ") || "nothing"}</span>
         <span className="spacer" />
         <button className="small" disabled={index === 0} onClick={() => write((d) => {
           const [ph] = d.pipeline.phases.splice(index, 1);
@@ -659,7 +659,7 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
       {open && (
         <div className="phase-fields">
           <Field label="After phases" help={help("needs")}><Tags value={phase.needs} onChange={(v) => set("needs", v)} choices={phases.filter((p) => p.id !== phase.id).map((p) => ({ value: p.id }))} /></Field>
-          <Field label="Realms" help={help("realms")}><Tags value={phase.realms} onChange={(v) => set("realms", v)} choices={realmChoices} /></Field>
+          <Field label="Stage slots" help={help("stage_slots")}><Tags value={phase.stage_slots} onChange={(v) => set("stage_slots", v)} choices={stageSlotChoices} /></Field>
           <Field label="Ad hoc slots" help={help("slots")}><Tags value={phase.slots} onChange={(v) => set("slots", v)} choices={adhocChoices} /></Field>
           <Field label="Timeout" help={help("timeout")}><Text value={phase.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
           {index > 0 && (
@@ -669,7 +669,7 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
                   <Combo mono value={inp.from} onChange={(v) => set("inputs", phase.inputs.map((x: any, j: number) => (j === i ? { ...x, from: v } : x)))} choices={fromChoices} placeholder="phase:slot/output/file" />
                   <span>→</span>
                   <Combo mono value={inp.to} onChange={(v) => set("inputs", phase.inputs.map((x: any, j: number) => (j === i ? { ...x, to: v } : x)))}
-                    choices={[...(phase.slots || []), ...Object.entries<any>(palette?.slots || {}).filter(([, c]) => (phase.realms || []).includes(c.realm)).map(([id]) => id)].map((c: string) => ({ value: `${c}/input/data/`, description: `into the inputs of ${c}` }))} placeholder="slot/input/..." />
+                    choices={[...(phase.slots || []), ...Object.entries<any>(palette?.slots || {}).filter(([, c]) => (phase.stage_slots || []).includes(c.stage_slot)).map(([id]) => id)].map((c: string) => ({ value: `${c}/input/data/`, description: `into the inputs of ${c}` }))} placeholder="slot/input/..." />
                   <button className="icon" onClick={() => set("inputs", phase.inputs.filter((_: any, j: number) => j !== i))}>×</button>
                 </div>
               ))}
@@ -758,7 +758,7 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
     <div className="pad flattened">
       <p>
         Setup <code>{flat.setup}</code>. Binding against the lab (locks ignored):{" "}
-        {flat.binding ? Object.entries<any>({ ...flat.binding.realms, ...flat.binding.slots }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
+        {flat.binding ? Object.entries<any>({ ...flat.binding.stage_slots, ...flat.binding.slots }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
       </p>
       {flat.problems.length > 0 && <ul className="warn-list">{flat.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
       {flat.phases.map((ph: any) => (

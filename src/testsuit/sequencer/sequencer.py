@@ -249,7 +249,7 @@ class Sequencer:
     def activate(self, run: dict, datapack: Datapack, binding: Binding) -> None:
         self.store.update_run(run["id"], state="reserved", activated_at=now(), waiting_for="",
                               binding=binding.as_dict(), warnings=self.lab.warnings)
-        for resource in set(binding.realms.values()) | set(binding.slots.values()):
+        for resource in set(binding.stage_slots.values()) | set(binding.slots.values()):
             self.store.add_usage(resource, datapack.testdef_id)
         self.notify("run", {"run": run["id"], "state": "reserved", "binding": binding.as_dict()})
         execution = RunExecution(self, run["id"], datapack, binding)
@@ -608,7 +608,7 @@ class RunExecution:
 
     async def bind_slots(self, ids: list[str] | None = None) -> None:
         inv = self.seq.lab.inventory
-        realm_of = {c.id: c.realm for c in self.datapack.needs.slots.values()}
+        stage_slot_of = {c.id: c.stage_slot for c in self.datapack.needs.slots.values()}
         for logical, concrete_id in self.binding.slots.items():
             if ids is not None and logical not in ids:
                 continue
@@ -616,11 +616,11 @@ class RunExecution:
                 continue
             lc = self.datapack.needs.slots[logical]
             concrete = inv.components[concrete_id]
-            realm = realm_of.get(logical) or ""
-            stage = inv.stages[self.binding.realms[realm]] if realm else None
+            stage_slot = stage_slot_of.get(logical) or ""
+            stage = inv.stages[self.binding.stage_slots[stage_slot]] if stage_slot else None
             resolved = self.seq.lab.resolve(concrete, stage)
             transport = self.seq.transport_for(concrete_id)
-            bound = BoundSlot(logical=lc, concrete=concrete, stage=stage, realm=realm,
+            bound = BoundSlot(logical=lc, concrete=concrete, stage=stage, stage_slot=stage_slot,
                                    resolved=resolved, transport=transport)
             for via in self.seq.lab.command_vias(concrete, stage, resolved).values():
                 if via.id not in bound.vias:           # commands run through it: where their pid files go
@@ -636,7 +636,7 @@ class RunExecution:
                 # Several runs may hold it at once: each gets its own input/output folders.
                 bound.work = f"{bound.root}/.tsq/{self.run_id}"
             self.ctx.bound[logical] = bound
-        self.ctx.realm_binding = dict(self.binding.realms)
+        self.ctx.stage_slot_binding = dict(self.binding.stage_slots)
         self.seq.monitor.active |= {b.concrete.id for b in self.ctx.bound.values()}
 
     def make_context(self) -> RunContext:
@@ -651,7 +651,7 @@ class RunExecution:
                 self.snapshot_steps()
 
         return RunContext(run_id=self.run_id, bag=self.datapack.dir, datapack=self.datapack, bound={},
-                          realm_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
+                          stage_slot_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
                           expect_state=lambda concrete, state: self.store.set_expected(concrete, state),
                           on_state_mismatch=self.datapack.pipeline.on_state_mismatch,
                           max_output=self.seq.config.storage.max_run_output, lab=self.seq.lab)
@@ -711,7 +711,7 @@ class RunExecution:
     async def selftest(self, logical_ids: list[str]) -> bool:
         concrete = sorted({self.ctx.bound[l].concrete.id for l in logical_ids if l in self.ctx.bound})
         # every component of a locked stage is checked, used by the datapack or not
-        for stage_id in self.binding.realms.values():
+        for stage_id in self.binding.stage_slots.values():
             concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components if c not in concrete]
         results = await asyncio.gather(*[self.seq._selftest_one(c) for c in concrete])
         self.selftests += results
@@ -788,10 +788,10 @@ class RunExecution:
 
     async def acquire(self, flat) -> bool:
         """Bind and lock what a later phase needs and the run does not hold yet."""
-        held = Binding(realms={s: c for s, c in self.binding.realms.items() if s in flat.phase.realms},
+        held = Binding(stage_slots={s: c for s, c in self.binding.stage_slots.items() if s in flat.phase.stage_slots},
                        slots={l: c for l, c in self.binding.slots.items()
-                              if self.datapack.needs.slots[l].realm in flat.phase.realms or l in flat.phase.slots})
-        missing_stages = [s for s in flat.phase.realms if s not in held.realms]
+                              if self.datapack.needs.slots[l].stage_slot in flat.phase.stage_slots or l in flat.phase.slots})
+        missing_stages = [s for s in flat.phase.stage_slots if s not in held.stage_slots]
         missing_comps = [c for c in flat.phase.slots if c not in held.slots]
         if not missing_stages and not missing_comps:
             # still locked? (released after an earlier phase if no phase in between needed it)
@@ -804,7 +804,7 @@ class RunExecution:
             if binding is not None:
                 conflicts = self.store.try_lock(self.run_id, binding.locks(self.seq.lab))
                 if not conflicts:
-                    self.binding.realms.update(binding.realms)
+                    self.binding.stage_slots.update(binding.stage_slots)
                     self.binding.slots.update(binding.slots)
                     self.store.update_run(self.run_id, binding=self.binding.as_dict(), waiting_for="")
                     new = [l for l in binding.slots if l not in self.ctx.bound]
@@ -826,11 +826,11 @@ class RunExecution:
         keep_binding = Binding()
         for pid in later:
             phase = phases[pid]
-            for s in phase.realms:
-                if s in self.binding.realms:
-                    keep_binding.realms[s] = self.binding.realms[s]
+            for s in phase.stage_slots:
+                if s in self.binding.stage_slots:
+                    keep_binding.stage_slots[s] = self.binding.stage_slots[s]
             for l, c in self.binding.slots.items():
-                if l in phase.slots or self.datapack.needs.slots[l].realm in phase.realms:
+                if l in phase.slots or self.datapack.needs.slots[l].stage_slot in phase.stage_slots:
                     keep_binding.slots[l] = c
         keep = {(k, r) for k, r, _ in keep_binding.locks(self.seq.lab)}
         released = self.store.release(self.run_id, keep=keep)

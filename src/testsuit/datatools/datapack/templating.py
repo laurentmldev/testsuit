@@ -88,8 +88,8 @@ def _environment(search_path: Iterable[Path] = ()) -> _Environment:
 # keys only a run defines (the sequencer binds slots to the lab when a run starts, after generation)
 RUN_TIME_KEYS = {
     "component": "the lab component a slot is bound to",
-    "realms": "the lab stage each realm is bound to",
-    "stage": "the lab stage of a slot's realm",
+    "stage_slots": "the lab stage each stage slot is bound to",
+    "stage": "the lab stage of a slot's stage_slot",
     "lab": "the lab",
 }
 

@@ -20,7 +20,7 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their
  * needs, wait until they are ready, run, then stop them and collect their outputs in finally. */
 export function starterPipeline(setup: any, configName: string, ctx: any): any {
-  const cfg = { realms: {}, slots: {}, ...(setup.configurations[configName] || {}) };
+  const cfg = { stage_slots: {}, slots: {}, ...(setup.configurations[configName] || {}) };
   const labRoles = ctx.lab.roles || {};
   const comps = Object.entries<any>(cfg.slots);
   // the commands of a slot: those its lab role offers
@@ -61,8 +61,8 @@ export function starterPipeline(setup: any, configName: string, ctx: any): any {
   return {
     phases: [{
       id: "main",
-      ...(Object.keys(cfg.realms).length ? { realms: Object.keys(cfg.realms) } : {}),
-      ...(comps.some(([, c]) => !c.realm) ? { slots: comps.filter(([, c]) => !c.realm).map(([id]) => id) } : {}),
+      ...(Object.keys(cfg.stage_slots).length ? { stage_slots: Object.keys(cfg.stage_slots) } : {}),
+      ...(comps.some(([, c]) => !c.stage_slot) ? { slots: comps.filter(([, c]) => !c.stage_slot).map(([id]) => id) } : {}),
       steps, ...(fin.length ? { finally: fin } : {}),
     }],
   };
@@ -109,7 +109,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
         pipeline: starterPipeline(setup, config, ctx),
       };
     } else if (kind === "setup") {
-      data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { realms: {}, slots: {} } }, slot_types: {} };
+      data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { stage_slots: {}, slots: {} } }, slot_types: {} };
     } else if (kind === "library") data = { roles: {}, components: {} };
     else if (kind === "subpipelines") data = { subpipelines: {} };
     else if (kind === "dictionary") content = `# Keys for the templates and commands: {{ ${slug(id || name || "section")}.example }}\n${slug(id || name || "section")}:\n  example: value\n`;
@@ -128,14 +128,14 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
       {kind === "testdef" && (
         <>
           {!setups.length && <div className="banner warn">No setup in this session yet: create one first.</div>}
-          <Field label="Setup" help="The test uses one configuration of a setup: its realms and slots.">
+          <Field label="Setup" help="The test uses one configuration of a setup: its stage slots and slots.">
             <Choices value={setupPath} onChange={(v) => {
               setSetupPath(v || "");
               setConfig(Object.keys(setups.find((s) => s.path === v)?.configurations || {})[0] || "");
             }} choices={setups.map((s) => ({ value: s.path, label: s.name || s.id, description: s.path }))} />
           </Field>
           <Field label="Configuration"><Choices value={config} onChange={(v) => setConfig(v || "")} choices={configChoices} /></Field>
-          <Markdown className="small muted" text="The pipeline starts with one phase that locks the realms and slots of the configuration: each slot is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the slots and collects their outputs. Only the commands their lab roles offer are used." />
+          <Markdown className="small muted" text="The pipeline starts with one phase that locks the stage slots and slots of the configuration: each slot is deployed, started and waited for in the order of its `needs`, a `delay` stands for the test itself, and **finally** stops the slots and collects their outputs. Only the commands their lab roles offer are used." />
         </>
       )}
       {["testdef", "setup", "dictionary"].includes(kind) && (

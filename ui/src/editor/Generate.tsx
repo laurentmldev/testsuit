@@ -78,7 +78,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
           return `${(r.slots || []).length} slots, ${inputs.length} inputs looked up, ${(r.dictionaries || []).length} dictionaries`;
         });
       if (read)
-        await step("Pipeline and lab: phases, realms, slots, step targets",
+        await step("Pipeline and lab: phases, stage slots, slots, step targets",
           () => post(`edit/sessions/${sid}/run_problems`, body), () => "against the lab as it is now");
       if (!live.current) return;
       if (found.length) {

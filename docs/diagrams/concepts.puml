@@ -18,7 +18,7 @@ skinparam frame {
 }
 
 rectangle "**Datapack** (tests side): what a test needs" as dp #FFFFFF {
-  frame "**realm** bench\nasks for stage type //bench//" as realm {
+  frame "**stage slot** bench\nasks for stage type //bench//" as stage_slot {
     card "**slot** controller\nrole //controller//\nslot type controller_app" as s_pilot
     card "**slot** logger\nrole //logger//\nslot type logger_app" as s_tm
   }
@@ -42,7 +42,7 @@ rectangle "**Lab** (lab side): what exists" as lab #FFFFFF {
 s_pilot -[#3A78C2,bold]-> c_pilot : bound at run start\n(same role)
 s_tm -[#3A78C2,bold]-> c_tm
 s_prop -[#3A78C2,bold]-> c_prop
-realm .[#3A78C2,bold].> stage : bound and locked\n(same stage type)
+stage_slot .[#3A78C2,bold].> stage : bound and locked\n(same stage type)
 
 s_pilot -[#999999,dashed]-> r_pilot : role
 r_pilot <-[#999999,dashed]- c_pilot : implements\nits commands

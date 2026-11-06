@@ -127,7 +127,7 @@ class PhaseInput(_Model):
 class Phase(_Model):
     id: str
     needs: list[str] = Field(default_factory=list)
-    realms: list[str] = Field(default_factory=list)
+    stage_slots: list[str] = Field(default_factory=list)
     slots: list[str] = Field(default_factory=list)
     inputs: list[PhaseInput] = Field(default_factory=list)
     steps: list[Step] = Field(default_factory=list)
@@ -164,18 +164,18 @@ class LogicalSlot:
     id: str
     type: str                                    # slot type (setup 'slot_types')
     name: str = ""
-    realm: str = ""                              # its realm, '' for an ad hoc slot
+    stage_slot: str = ""                              # its stage slot, '' for an ad hoc slot
     role: str = ""                               # a type of the lab: binds to a lab component, which gives the commands
 
 
 @dataclass
 class Needs:
-    realms: dict[str, str]                       # realm -> lab stage type
+    stage_slots: dict[str, str]                       # stage_slot -> lab stage type
     slots: dict[str, LogicalSlot]
     slot_types: dict[str, dict]                  # slot types (setup file)
 
-    def in_realm(self, realm: str) -> list[LogicalSlot]:
-        return [c for c in self.slots.values() if c.realm == realm]
+    def in_stage_slot(self, stage_slot: str) -> list[LogicalSlot]:
+        return [c for c in self.slots.values() if c.stage_slot == stage_slot]
 
 
 def check_sequencer_fields(setup: dict) -> None:
@@ -201,23 +201,23 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
     if configuration not in configurations:
         raise SequencerError(f"setup has no configuration '{configuration}'")
     config = configurations[configuration] or {}
-    realms = {}
-    for realm_id, realm in (config.get("realms") or {}).items():
-        stage_type = realm.get("type") if isinstance(realm, dict) else realm
+    stage_slots = {}
+    for stage_slot_id, stage_slot in (config.get("stage_slots") or {}).items():
+        stage_type = stage_slot.get("type") if isinstance(stage_slot, dict) else stage_slot
         if not stage_type:
-            raise SequencerError(f"setup configuration '{configuration}': realm '{realm_id}' has no type")
-        realms[realm_id] = str(stage_type)
+            raise SequencerError(f"setup configuration '{configuration}': stage slot '{stage_slot_id}' has no type")
+        stage_slots[stage_slot_id] = str(stage_type)
     slots = {}
     for slot_id, slot in (config.get("slots") or {}).items():
-        realm = slot.get("realm") or ""
-        if realm and realm not in realms:
-            raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' is in unknown realm '{realm}'")
+        stage_slot = slot.get("stage_slot") or ""
+        if stage_slot and stage_slot not in stage_slots:
+            raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' is in unknown stage slot '{stage_slot}'")
         if not slot.get("role"):
             raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' has no role "
                                  "(needed to bind it to a lab component)")
         slots[slot_id] = LogicalSlot(id=slot_id, type=slot.get("type", ""), name=slot.get("name", ""),
-                                     realm=realm, role=slot["role"])
-    return Needs(realms=realms, slots=slots, slot_types=setup.get("slot_types") or {})
+                                     stage_slot=stage_slot, role=slot["role"])
+    return Needs(stage_slots=stage_slots, slots=slots, slot_types=setup.get("slot_types") or {})
 
 
 # ── pipeline loading, sub-pipelines, validation ────────────────────────────
@@ -346,28 +346,28 @@ def flatten_phase(phase: Phase, pipeline: Pipeline) -> FlatPhase:
 
 
 def phase_slots(phase: Phase, needs: Needs) -> list[str]:
-    """Slots a phase holds: those of its realms, then its ad hoc ones."""
-    result = [c.id for r in phase.realms for c in needs.in_realm(r)]
+    """Slots a phase holds: those of its stage slots, then its ad hoc ones."""
+    result = [c.id for r in phase.stage_slots for c in needs.in_stage_slot(r)]
     return result + [c for c in phase.slots if c not in result]
 
 
 def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
-    """Every realm and slot the phases name that the setup configuration does not define
+    """Every stage_slot and slot the phases name that the setup configuration does not define
     as such (a setup changed without its pipeline, or the other way round)."""
     problems = []
-    adhoc = [c.id for c in needs.slots.values() if not c.realm]
+    adhoc = [c.id for c in needs.slots.values() if not c.stage_slot]
     for phase in pipeline.phases:
-        for realm in phase.realms:
-            if realm not in needs.realms:
-                problems.append(f"phase '{phase.id}': unknown realm '{realm}' "
-                                f"(setup realms: {', '.join(needs.realms) or 'none'})")
+        for stage_slot in phase.stage_slots:
+            if stage_slot not in needs.stage_slots:
+                problems.append(f"phase '{phase.id}': unknown stage slot '{stage_slot}' "
+                                f"(setup stage_slots: {', '.join(needs.stage_slots) or 'none'})")
         for slot in phase.slots:
             if slot not in needs.slots:
                 problems.append(f"phase '{phase.id}': unknown slot '{slot}' "
                                 f"(setup ad hoc slots: {', '.join(adhoc) or 'none'})")
-            elif needs.slots[slot].realm:
-                problems.append(f"phase '{phase.id}': slot '{slot}' belongs to realm "
-                                f"'{needs.slots[slot].realm}': list the realm instead")
+            elif needs.slots[slot].stage_slot:
+                problems.append(f"phase '{phase.id}': slot '{slot}' belongs to stage slot "
+                                f"'{needs.slots[slot].stage_slot}': list the stage slot instead")
     return problems
 
 

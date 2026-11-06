@@ -354,11 +354,11 @@ def cmd_validate(args, client: Client | None) -> int:
         if binding is None:
             problems += [f"cannot bind: {r}" for r in reasons]
         else:
-            print("binding (locks ignored): " + _cell(binding.as_dict()["realms"]) + " " +
+            print("binding (locks ignored): " + _cell(binding.as_dict()["stage_slots"]) + " " +
                   _cell(binding.as_dict()["slots"]))
         for flat in dp.phases:
             print(f"\nphase {flat.phase.id}" + (f" (needs {', '.join(flat.phase.needs)})" if flat.phase.needs else "")
-                  + f": realms {_cell(flat.phase.realms)}, slots {_cell(flat.phase.slots)}")
+                  + f": stage_slots {_cell(flat.phase.stage_slots)}, slots {_cell(flat.phase.slots)}")
             for part, steps in (("steps", flat.steps), ("finally", flat.finally_)):
                 for fs in steps:
                     step = fs.step
@@ -368,7 +368,7 @@ def cmd_validate(args, client: Client | None) -> int:
                     if binding is not None and step.action == "do" and step.slot in binding.slots:
                         concrete = lab.inventory.components[binding.slots[step.slot]]
                         lc = dp.needs.slots[step.slot]
-                        stage = lab.inventory.stages.get(binding.realms.get(lc.realm, ""))
+                        stage = lab.inventory.stages.get(binding.stage_slots.get(lc.stage_slot, ""))
                         resolved = lab.resolve(concrete, stage)
                         spec = resolved.commands.get(step.do)
                         if spec is None:

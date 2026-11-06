@@ -82,7 +82,7 @@ def test_sample_datapack(sample_copy, test):
 
     # the sequencer fields are kept as written: the pipeline is rendered at run time
     definition = yaml.safe_load((pack / "definition" / "testdef.yml").read_text())
-    assert definition["pipeline"]["phases"][0]["realms"] == ["train"]
+    assert definition["pipeline"]["phases"][0]["stage_slots"] == ["train"]
     assert "{{ scenario.duration_s }}" in str(definition["pipeline"])
     setup = yaml.safe_load((pack / "definition" / "setup.yml").read_text())
     assert "{{ slot.input_dir }}" in str(definition["pipeline"])          # the exploitation step

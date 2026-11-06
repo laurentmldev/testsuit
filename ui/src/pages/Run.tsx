@@ -238,7 +238,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         <span title={time(r.submitted_at)}>submitted {ago(r.submitted_at)}</span>
         {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} {duration(r.activated_at, r.ended_at)}</span>}
         {r.phase && <span>phase <strong>{r.phase}</strong></span>}
-        {r.binding && <span title="realm = lab stage, slot = lab component">on {Object.entries(r.binding.realms || r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
+        {r.binding && <span title="stage slot = lab stage, slot = lab component">on {Object.entries(r.binding.stage_slots || r.binding.realms || r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
       {r.reason && <div className="banner warn">{r.reason}</div>}
@@ -353,7 +353,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
   const d = res.data;
   if (res.error) return <div className="error-box">{res.error}</div>;
   if (!d) return <p className="muted">Loading…</p>;
-  const needs = [...d.realms, ...d.slots];
+  const needs = [...d.stage_slots, ...d.slots];
   const ok = needs.filter((n) => needStatus(n)[1] === "ok").length;
   return (
     <div className="scroll resources-tab">
@@ -370,13 +370,13 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
           <ul className="problems">{d.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>
         </div>
       )}
-      {d.realms.length > 0 && <h3>Realms</h3>}
-      {d.realms.map((s: any) => {
+      {d.stage_slots.length > 0 && <h3>Stage slots</h3>}
+      {d.stage_slots.map((s: any) => {
         const [label, color] = needStatus(s);
         return (
           <div key={s.logical} className="need">
             <div className="need-head">
-              <code>{s.logical}</code> <span className="muted">realm, on a lab stage of type</span> <code>{s.type}</code>
+              <code>{s.logical}</code> <span className="muted">stage slot, on a lab stage of type</span> <code>{s.type}</code>
               <span className={classes("chip", color)}>{label}{s.bound && <> on {s.bound}</>}</span>
               <span className="spacer" />
               <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>

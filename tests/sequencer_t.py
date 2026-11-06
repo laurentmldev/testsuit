@@ -69,9 +69,9 @@ SETUP = {
             {"source": "files/check.sh", "target": "check.sh"}]}}},
     },
     "configurations": {"bench": {
-        "realms": {"bench": {"type": "counter_bench"}},
+        "stage_slots": {"bench": {"type": "counter_bench"}},
         "slots": {
-            "dut": {"name": "Device under test", "type": "dut_app", "configuration": "standard", "realm": "bench",
+            "dut": {"name": "Device under test", "type": "dut_app", "configuration": "standard", "stage_slot": "bench",
                     "role": "dut"},
             "analysis": {"name": "Analysis", "type": "analysis", "configuration": "standard", "role": "sequencer"},
         }}},
@@ -80,7 +80,7 @@ SETUP = {
 PIPELINE = {
     "timeout": "2m",
     "phases": [
-        {"id": "test_run", "realms": ["bench"],
+        {"id": "test_run", "stage_slots": ["bench"],
          "steps": [
              {"id": "deploy", "for_each": "slots", "do": "deploy"},
              {"id": "start", "slot": "dut", "do": "start", "needs": ["deploy"]},
@@ -350,7 +350,7 @@ def test_run_succeeded(bench):
     assert verify_datapack(Path(run["results"])) == []
     record = yaml.safe_load(read_member(run, "run.yml"))
     assert record["phases"] == {"test_run": "succeeded", "exploit": "succeeded"}
-    assert record["binding"]["realms"]["bench"] in ("bench_1", "bench_2")
+    assert record["binding"]["stage_slots"]["bench"] in ("bench_1", "bench_2")
     assert int(read_member(run, "data/dut/output/count.txt")) >= 3
     assert read_member(run, "data/dut/output/app.log").splitlines() == ["READY count", "stopped"]
     assert read_member(run, "data/analysis/output/verdict.txt").startswith("count ")
@@ -485,7 +485,7 @@ def test_queue_and_parallel_stages(tmp_path, no_git):
     assert [r["verdict"] for r in done] == ["succeeded"] * 3
     # the lowest priority waited; the two others ran at the same time, on both stages
     assert seen_waiting and seen_waiting[0][done[0]["id"]] == "waiting_resources"
-    assert {r["binding"]["realms"]["bench"] for r in done[1:]} == {"bench_1", "bench_2"}
+    assert {r["binding"]["stage_slots"]["bench"] for r in done[1:]} == {"bench_1", "bench_2"}
     # it started once a stage was released: after the test_run phase of another run (exploit needs no stage)
     assert done[0]["activated_at"] > max(r["activated_at"] for r in done[1:])
     # the analysis host is not locked: each run had its own folders there, never clobbered by another run
@@ -706,7 +706,7 @@ def test_probe_via(tmp_path, no_git):
     from testsuit.sequencer.engine import RunContext
     lab = bench.sequencer().lab
     keys = RunContext(run_id="r", bag=tmp_path, datapack=type("D", (), {"context": {}})(), bound={},
-                      realm_binding={}, lab=lab).keys("main")       # run steps get them too
+                      stage_slot_binding={}, lab=lab).keys("main")       # run steps get them too
     assert keys["stage"]["id"] == "" and keys["lab"]["components"]["obc_1"]["host"] == "192.0.2.7"
     assert lab.lab_keys(lab.inventory.components["obc_1"], lab.inventory.stages["bench_1"])["stage"]["roles"]["dut"]["id"] \
         == "counter_1"
@@ -819,7 +819,7 @@ def test_maintenance_blocks(bench):
         return waiting, done
     waiting, done = asyncio.run(main())
     assert waiting["state"] == "waiting_resources" and "maintenance" in waiting["waiting_for"]
-    assert done["verdict"] == "succeeded" and done["binding"]["realms"]["bench"] == "bench_2"
+    assert done["verdict"] == "succeeded" and done["binding"]["stage_slots"]["bench"] == "bench_2"
 
 
 def test_resource_overview(bench):
@@ -842,19 +842,19 @@ def test_resource_overview(bench):
         await seq.close()
         return waiting, bound
     waiting, bound = asyncio.run(main())
-    [stage] = waiting["realms"]
+    [stage] = waiting["stage_slots"]
     assert stage["logical"] == "bench" and stage["bound"] is None and stage["phases"]
     assert {c["id"]: c["why"] for c in stage["candidates"]} == {
         "bench_1": "bench_1 in maintenance or held", "bench_2": "bench_2 in maintenance or held"}
     assert all(c["maintenance"] and c["roles"] for c in stage["candidates"])
-    [stage] = bound["realms"]
+    [stage] = bound["stage_slots"]
     assert stage["bound"] == "bench_2"
     assert {c["id"]: (c["bound"], c["why"]) for c in stage["candidates"]} == {
         "bench_1": (False, "bench_1 in maintenance or held"), "bench_2": (True, None)}
 
 
 def test_rejected_datapack(bench):
-    pipeline = {"phases": [{"id": "p", "realms": ["bench"], "steps": [{"id": "x", "run": "true", "needs": ["nope"]}]}]}
+    pipeline = {"phases": [{"id": "p", "stage_slots": ["bench"], "steps": [{"id": "x", "run": "true", "needs": ["nope"]}]}]}
     seq = bench.sequencer()
     with pytest.raises(Exception, match="nope"):
         seq.submit(bench.build("bad", pipeline=pipeline))
@@ -1007,7 +1007,7 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
 
     resources = requests.get(f"{url}/runs/{run['id']}/resources").json()
-    assert resources["realms"][0]["bound"] == "bench_1" and resources["problems"] == []
+    assert resources["stage_slots"][0]["bound"] == "bench_1" and resources["problems"] == []
 
     assert tsq(["--server", url, "stages"]) == 0
     assert "bench_1" in capsys.readouterr().out

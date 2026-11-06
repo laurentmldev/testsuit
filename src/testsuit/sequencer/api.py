@@ -119,10 +119,10 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                     steps.append({"id": fs.id, "part": part, "needs": fs.needs, "group": fs.group, "action": s.action,
                                   "do": s.do, "slot": s.slot, "for_each": s.for_each,
                                   "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else s.action)})
-            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "realms": flat.phase.realms,
+            phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": flat.phase.slots, "groups": flat.groups, "steps": steps})
-        return {"phases": phases, "realms": dp.needs.realms,
-                "slots": {c.id: {"type": c.type, "role": c.role, "realm": c.realm, "name": c.name}
+        return {"phases": phases, "stage_slots": dp.needs.stage_slots,
+                "slots": {c.id: {"type": c.type, "role": c.role, "stage_slot": c.stage_slot, "name": c.name}
                           for c in dp.needs.slots.values()}}
 
     @app.get("/runs/{run_id}/resources")

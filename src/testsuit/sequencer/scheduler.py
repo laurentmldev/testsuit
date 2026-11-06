@@ -1,8 +1,8 @@
 """Binding and scheduling (README sections 8.1 and 9).
 
-Binding maps the realms and slots a phase needs onto free resources of the lab:
-- a realm binds a lab stage of its type that has a component for each role its slots need;
-- a slot of a realm binds the lab component with its role in the lab stage bound to that realm;
+Binding maps the stage slots and slots a phase needs onto free resources of the lab:
+- a stage slot binds a lab stage of its type that has a component for each role its slots need;
+- a slot of a stage slot binds the lab component with its role in the lab stage bound to that stage slot;
 - an ad hoc slot binds a free ad hoc lab component with its role.
 
 The scheduler walks the queue by priority, then submission time. A lower-priority run may start
@@ -23,14 +23,14 @@ UNAVAILABLE_STATES = ("broken", "offline")
 
 @dataclass
 class Binding:
-    realms: dict[str, str] = field(default_factory=dict)          # realm -> lab stage
+    stage_slots: dict[str, str] = field(default_factory=dict)          # stage_slot -> lab stage
     slots: dict[str, str] = field(default_factory=dict)           # slot -> lab component
 
     def locks(self, lab: Lab) -> list[tuple[str, str, str]]:
         """(kind, resource, mode) to take for this binding: whole stages, and the components of the ad hoc slots."""
         wanted: dict[tuple[str, str], str] = {}
         inv = lab.inventory
-        for stage_id in self.realms.values():
+        for stage_id in self.stage_slots.values():
             wanted[("stage", stage_id)] = "exclusive"
             for comp_id in inv.stages[stage_id].components:
                 mode = inv.components[comp_id].lock
@@ -48,13 +48,13 @@ class Binding:
         return {(k, r) for k, r, _ in self.locks(lab)} | {("component", c) for c in self.slots.values()}
 
     def as_dict(self) -> dict:
-        return {"realms": dict(self.realms), "slots": dict(self.slots)}
+        return {"stage_slots": dict(self.stage_slots), "slots": dict(self.slots)}
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Binding:
-        """A binding as stored (a run recorded before slots were named so keeps its 'components')."""
+        """A binding as stored (a run recorded under former names keeps its 'realms' or 'stages', 'components')."""
         data = data or {}
-        return cls(realms=dict(data.get("realms") or data.get("stages") or {}),
+        return cls(stage_slots=dict(data.get("stage_slots") or data.get("realms") or data.get("stages") or {}),
                    slots=dict(data.get("slots") or data.get("components") or {}))
 
 
@@ -88,20 +88,20 @@ def phase_needs(phases: list[Phase]) -> tuple[list[str], list[str]]:
     stages: list[str] = []
     adhoc: list[str] = []
     for phase in phases:
-        stages += [s for s in phase.realms if s not in stages]
+        stages += [s for s in phase.stage_slots if s not in stages]
         adhoc += [c for c in phase.slots if c not in adhoc]
     return stages, adhoc
 
 
 def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Availability, run_id: str,
                   avoid: set[tuple[str, str]] = frozenset(), check_free: bool = True) -> str | None:
-    """Why a lab stage cannot be bound to a realm now (None when it can)."""
+    """Why a lab stage cannot be bound to a stage slot now (None when it can)."""
     inv = lab.inventory
     if ("stage", stage.id) in avail.maintenance:
         return f"{stage.id} in maintenance or held"
     if ("stage", stage.id) in avoid:
         return f"{stage.id} kept for a higher-priority run"
-    for lc in needs.in_realm(logical):
+    for lc in needs.in_stage_slot(logical):
         comp = inv.component_in(stage, lc.role)
         if comp is None:
             return f"{stage.id} has no '{lc.role}'"
@@ -145,9 +145,9 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
     reasons: list[str] = []
 
     def stage_candidates(logical: str) -> list[Stage]:
-        if logical in fixed.realms:
-            return [inv.stages[fixed.realms[logical]]]
-        stage_type = needs.realms[logical]
+        if logical in fixed.stage_slots:
+            return [inv.stages[fixed.stage_slots[logical]]]
+        stage_type = needs.stage_slots[logical]
         found = []
         stages = inv.stages_of_type(stage_type)
         if not stages:
@@ -189,10 +189,10 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
             exclusive = [c.id for c in comp_choice if c.lock == "exclusive"]
             if len(set(exclusive)) != len(exclusive):
                 continue
-            binding = Binding(realms=dict(fixed.realms), slots=dict(fixed.slots))
+            binding = Binding(stage_slots=dict(fixed.stage_slots), slots=dict(fixed.slots))
             for logical, stage in zip(logical_stages, stage_choice):
-                binding.realms[logical] = stage.id
-                for lc in needs.in_realm(logical):
+                binding.stage_slots[logical] = stage.id
+                for lc in needs.in_stage_slot(logical):
                     binding.slots[lc.id] = inv.component_in(stage, lc.role).id
             for logical, comp in zip(adhoc, comp_choice):
                 binding.slots[logical] = comp.id
@@ -207,8 +207,8 @@ def candidate_resources(lab: Lab, needs: Needs, phases: list[Phase], avail: Avai
     result: set[tuple[str, str]] = set()
     logical_stages, adhoc = phase_needs(phases)
     for logical in logical_stages:
-        for stage in inv.stages_of_type(needs.realms[logical]):
-            if all(inv.component_in(stage, lc.role) for lc in needs.in_realm(logical)):
+        for stage in inv.stages_of_type(needs.stage_slots[logical]):
+            if all(inv.component_in(stage, lc.role) for lc in needs.in_stage_slot(logical)):
                 if all(avail.component_usable(inv.components[c]) is None for c in stage.components):
                     result.add(("stage", stage.id))
                     result.update(("component", c) for c in stage.components)
@@ -222,7 +222,7 @@ def candidate_resources(lab: Lab, needs: Needs, phases: list[Phase], avail: Avai
 
 def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availability, run_id: str,
                       binding: Binding | None = None) -> dict:
-    """What a run expects of the lab against what the lab has: each realm and ad hoc slot
+    """What a run expects of the lab against what the lab has: each stage slot and ad hoc slot
     the datapack needs, the phases using it, what it is bound to, and each lab candidate with why it
     is not available now (None when it is)."""
     inv = lab.inventory
@@ -238,30 +238,30 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
                 "held_by": [h for h, _ in avail.holders.get(("component", comp.id), []) if h != run_id]}
 
     stages = []
-    for logical, stage_type in needs.realms.items():
+    for logical, stage_type in needs.stage_slots.items():
         candidates = []
         for stage in inv.stages_of_type(stage_type):
             roles = {}
-            for lc in needs.in_realm(logical):
+            for lc in needs.in_stage_slot(logical):
                 comp = inv.component_in(stage, lc.role)
                 roles[lc.id] = comp.id if comp else None
             candidates.append({
-                "id": stage.id, "bound": binding.realms.get(logical) == stage.id,
-                "why": None if binding.realms.get(logical) == stage.id
+                "id": stage.id, "bound": binding.stage_slots.get(logical) == stage.id,
+                "why": None if binding.stage_slots.get(logical) == stage.id
                 else stage_problem(lab, needs, logical, stage, avail, run_id),
                 "maintenance": ("stage", stage.id) in avail.maintenance,
                 "held_by": [h for h, _ in avail.holders.get(("stage", stage.id), []) if h != run_id],
                 "roles": roles, "components": [comp_facts(inv.components[c]) for c in stage.components]})
         stages.append({
-            "logical": logical, "type": stage_type, "phases": used_by("realms", logical),
-            "bound": binding.realms.get(logical),
+            "logical": logical, "type": stage_type, "phases": used_by("stage_slots", logical),
+            "bound": binding.stage_slots.get(logical),
             "slots": [{"logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name}
-                      for lc in needs.in_realm(logical)],
+                      for lc in needs.in_stage_slot(logical)],
             "problem": None if candidates else f"no stage of type '{stage_type}' in the lab",
             "candidates": candidates})
     slots = []
     for lc in needs.slots.values():
-        if lc.realm:
+        if lc.stage_slot:
             continue
         candidates = []
         for comp in inv.adhoc:
@@ -275,7 +275,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
             "phases": used_by("slots", lc.id), "bound": binding.slots.get(lc.id),
             "problem": None if candidates else f"no ad hoc component with role '{lc.role}' in the lab",
             "candidates": candidates})
-    return {"realms": stages, "slots": slots}
+    return {"stage_slots": stages, "slots": slots}
 
 
 def effective_priority(run: dict, aging: tuple[int, float] | None, current: float) -> int:

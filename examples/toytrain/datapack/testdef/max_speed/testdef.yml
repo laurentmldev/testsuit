@@ -39,7 +39,7 @@ pipeline:
   phases:
 
     - id: test_run
-      realms: [train]                            # CALC-Pilot, CALC-TM, AU, switch: their lab stage locked as one
+      stage_slots: [train]                            # CALC-Pilot, CALC-TM, AU, switch: their lab stage locked as one
       slots: [propulsion, piezo]                 # ad hoc slots, on the lab server
       steps:
         - {id: up, uses: bring_up}

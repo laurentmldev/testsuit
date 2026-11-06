@@ -79,7 +79,7 @@ class BoundSlot:
     logical: LogicalSlot
     concrete: Component
     stage: Stage | None
-    realm: str                                    # its realm, '' for an ad hoc slot
+    stage_slot: str                                    # its stage slot, '' for an ad hoc slot
     resolved: Resolved
     transport: Transport
     root: str = ""                                # remote root, '~' resolved
@@ -116,7 +116,7 @@ class BoundSlot:
     def keys(self) -> dict:
         """The ``slot`` key: the datapack's slot, and the lab component it is bound to."""
         return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "type": self.logical.type,
-                "role": self.logical.role, "realm": self.realm, "component": self.concrete.id,
+                "role": self.logical.role, "stage_slot": self.stage_slot, "component": self.concrete.id,
                 "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root}
 
     def component_keys(self, state: str = "unknown") -> dict:
@@ -159,7 +159,7 @@ class RunContext:
     bag: Path                                     # run folder: the unpacked datapack
     datapack: Any                                 # intake.Datapack
     bound: dict[str, BoundSlot]                   # slot id -> bound slot
-    realm_binding: dict[str, str]                 # realm -> lab stage id
+    stage_slot_binding: dict[str, str]                 # stage_slot -> lab stage id
     priority: int = 50
     notify: Callable[[str, dict], None] = lambda kind, data: None
     state_of: Callable[[str], Any] | None = None  # async (concrete id) -> probed state, from the monitor
@@ -185,7 +185,7 @@ class RunContext:
             "run": {"id": self.run_id, "dir": str(self.bag), "priority": self.priority},
             "phase": {"id": phase},
             "slots": {c.id: c.keys() for c in self.bound.values()},
-            "realms": {r: {"id": r, "stage": s} for r, s in self.realm_binding.items()},
+            "stage_slots": {r: {"id": r, "stage": s} for r, s in self.stage_slot_binding.items()},
             "params": params or {},
             "succeeded": lambda step: self.verdict_of(phase, step) == SUCCEEDED,
             "failed": lambda step: self.verdict_of(phase, step) == FAILED,

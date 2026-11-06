@@ -151,7 +151,7 @@ function ActiveCard({ run }: { run: any }) {
         <Badge value={run.state} />
       </div>
       <div className="muted small">{run.id} · priority {run.priority} · started {ago(run.activated_at)} · {duration(run.activated_at)}</div>
-      {run.binding && <div className="small">on {Object.values(run.binding.realms || run.binding.stages || {}).join(", ")} {Object.values(run.binding.slots || run.binding.components || {}).length} slots</div>}
+      {run.binding && <div className="small">on {Object.values(run.binding.stage_slots || run.binding.realms || run.binding.stages || {}).join(", ")} {Object.values(run.binding.slots || run.binding.components || {}).length} slots</div>}
       {steps.length > 0 && (
         <div className="progress" title={`${done} of ${steps.length} steps ended`}>
           <div style={{ width: `${(100 * done) / steps.length}%` }} />

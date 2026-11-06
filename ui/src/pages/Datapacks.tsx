@@ -221,11 +221,11 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
   return (
     <Section title={<>Logical configuration <span className="muted small">{td.setup_config} of {data.setup?.name || data.setup?.id}</span></>}
       actions={<FileLink path={td.setup_file} edit={edit} />}>
-      {Object.keys(data.realms).length > 0 && (
-        <p className="small">Realms: {Object.entries(data.realms).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
+      {Object.keys(data.stage_slots).length > 0 && (
+        <p className="small">Stage slots: {Object.entries(data.stage_slots).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Realm</th><th>Needs</th></tr></thead>
+        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Needs</th></tr></thead>
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>
@@ -233,7 +233,7 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
               <td><code>{c.type}</code></td>
               <td>{c.configuration}</td>
-              <td>{c.realm || <span className="muted small">ad hoc</span>}</td>
+              <td>{c.stage_slot || <span className="muted small">ad hoc</span>}</td>
               <td>{c.needs.join(", ")}</td>
             </tr>
           ))}
