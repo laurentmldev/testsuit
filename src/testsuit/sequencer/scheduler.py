@@ -101,10 +101,12 @@ def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Ava
         return f"{stage.id} in maintenance or held"
     if ("stage", stage.id) in avoid:
         return f"{stage.id} kept for a higher-priority run"
-    for lc in needs.in_stage_slot(logical):
-        comp = inv.component_in(stage, lc.role)
-        if comp is None:
-            return f"{stage.id} has no '{lc.role}'"
+    missing = [t for t in needs.stage_slot_tags.get(logical, []) if t not in stage.tags]
+    if missing:
+        return f"{stage.id} is not tagged {', '.join(missing)}"
+    slots = needs.in_stage_slot(logical)
+    if lab.stage_assignment(stage, slots) is None:
+        return lab.stage_shortfall(stage, slots)
     for comp_id in stage.components:
         comp = inv.components[comp_id]
         why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
@@ -169,9 +171,10 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
             return [inv.components[fixed.slots[logical]]]
         lc = needs.slots[logical]
         found = []
-        pool = [c for c in inv.adhoc if c.role == lc.role]
+        pool = [c for c in inv.adhoc if lab.fits(c, lc.role, lc.tags)]
         if not pool:
-            reasons.append(f"no ad hoc component with role '{lc.role}'")
+            reasons.append(f"no ad hoc component with role '{lc.role}'"
+                           + (f" tagged {', '.join(lc.tags)}" if lc.tags else ""))
         for comp in pool:
             why = adhoc_problem(comp, avail, run_id, avoid, check_free)
             if why:
@@ -192,8 +195,8 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
             binding = Binding(stage_slots=dict(fixed.stage_slots), slots=dict(fixed.slots))
             for logical, stage in zip(logical_stages, stage_choice):
                 binding.stage_slots[logical] = stage.id
-                for lc in needs.in_stage_slot(logical):
-                    binding.slots[lc.id] = inv.component_in(stage, lc.role).id
+                for slot_id, comp in lab.stage_assignment(stage, needs.in_stage_slot(logical)).items():
+                    binding.slots[slot_id] = comp.id
             for logical, comp in zip(adhoc, comp_choice):
                 binding.slots[logical] = comp.id
             return binding, []
@@ -208,14 +211,15 @@ def candidate_resources(lab: Lab, needs: Needs, phases: list[Phase], avail: Avai
     logical_stages, adhoc = phase_needs(phases)
     for logical in logical_stages:
         for stage in inv.stages_of_type(needs.stage_slots[logical]):
-            if all(inv.component_in(stage, lc.role) for lc in needs.in_stage_slot(logical)):
+            if set(needs.stage_slot_tags.get(logical, [])) <= set(stage.tags) \
+                    and lab.stage_assignment(stage, needs.in_stage_slot(logical)) is not None:
                 if all(avail.component_usable(inv.components[c]) is None for c in stage.components):
                     result.add(("stage", stage.id))
                     result.update(("component", c) for c in stage.components)
     for logical in adhoc:
         lc = needs.slots[logical]
         for comp in inv.adhoc:
-            if comp.role == lc.role and avail.component_usable(comp) is None:
+            if lab.fits(comp, lc.role, lc.tags) and avail.component_usable(comp) is None:
                 result.add(("component", comp.id))
     return result
 
@@ -232,7 +236,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
         return [p.id for p in phases if logical in getattr(p, attr)]
 
     def comp_facts(comp: Component) -> dict:
-        return {"id": comp.id, "extends": comp.extends, "role": comp.role, "lock": comp.lock,
+        return {"id": comp.id, "extends": comp.extends, "role": comp.role, "tags": comp.tags, "lock": comp.lock,
                 "state": avail.states.get(comp.id, "unknown"),
                 "maintenance": ("component", comp.id) in avail.maintenance,
                 "held_by": [h for h, _ in avail.holders.get(("component", comp.id), []) if h != run_id]}
@@ -241,12 +245,10 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
     for logical, stage_type in needs.stage_slots.items():
         candidates = []
         for stage in inv.stages_of_type(stage_type):
-            roles = {}
-            for lc in needs.in_stage_slot(logical):
-                comp = inv.component_in(stage, lc.role)
-                roles[lc.id] = comp.id if comp else None
+            assigned = lab.stage_assignment(stage, needs.in_stage_slot(logical)) or {}
+            roles = {lc.id: assigned[lc.id].id if lc.id in assigned else None for lc in needs.in_stage_slot(logical)}
             candidates.append({
-                "id": stage.id, "bound": binding.stage_slots.get(logical) == stage.id,
+                "id": stage.id, "tags": stage.tags, "bound": binding.stage_slots.get(logical) == stage.id,
                 "why": None if binding.stage_slots.get(logical) == stage.id
                 else stage_problem(lab, needs, logical, stage, avail, run_id),
                 "maintenance": ("stage", stage.id) in avail.maintenance,
@@ -255,7 +257,8 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
         stages.append({
             "logical": logical, "type": stage_type, "phases": used_by("stage_slots", logical),
             "bound": binding.stage_slots.get(logical),
-            "slots": [{"logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name}
+            "tags": needs.stage_slot_tags.get(logical, []),
+            "slots": [{"logical": lc.id, "type": lc.type, "role": lc.role, "tags": lc.tags, "name": lc.name}
                       for lc in needs.in_stage_slot(logical)],
             "problem": None if candidates else f"no stage of type '{stage_type}' in the lab",
             "candidates": candidates})
@@ -265,13 +268,13 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
             continue
         candidates = []
         for comp in inv.adhoc:
-            if comp.role != lc.role:
+            if not lab.fits(comp, lc.role, lc.tags):
                 continue
             bound = binding.slots.get(lc.id) == comp.id
             candidates.append({**comp_facts(comp), "bound": bound,
                                "why": None if bound else adhoc_problem(comp, avail, run_id)})
         slots.append({
-            "logical": lc.id, "type": lc.type, "role": lc.role, "name": lc.name,
+            "logical": lc.id, "type": lc.type, "role": lc.role, "tags": lc.tags, "name": lc.name,
             "phases": used_by("slots", lc.id), "bound": binding.slots.get(lc.id),
             "problem": None if candidates else f"no ad hoc component with role '{lc.role}' in the lab",
             "candidates": candidates})

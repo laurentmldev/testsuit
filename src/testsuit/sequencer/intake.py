@@ -103,15 +103,28 @@ def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
         if not stages:
             problems.append(f"no stage of type '{stage_type}' in the lab (stage slot '{stage_slot}')")
             continue
-        for slot in datapack.needs.in_stage_slot(stage_slot):
-            if not any(inv.component_in(s, slot.role) for s in stages):
-                problems.append(f"slot '{slot.id}': no component with role '{slot.role}' in the "
-                                f"'{stage_type}' stages ({', '.join(s.id for s in stages)})")
+        tags = datapack.needs.stage_slot_tags.get(stage_slot, [])
+        stages = [s for s in stages if set(tags) <= set(s.tags)]
+        if not stages:
+            problems.append(f"stage slot '{stage_slot}': no '{stage_type}' stage tagged {', '.join(tags)}")
+            continue
+        slots = datapack.needs.in_stage_slot(stage_slot)
+        lacking = []
+        for slot in slots:
+            if not any(lab.fits(inv.components[c], slot.role, slot.tags) for s in stages for c in s.components):
+                lacking.append(slot.id)
+                problems.append(f"slot '{slot.id}': no component with role '{slot.role}'"
+                                + (f" tagged {', '.join(slot.tags)}" if slot.tags else "")
+                                + f" in the '{stage_type}' stages ({', '.join(s.id for s in stages)})")
+        if not lacking and all(lab.stage_assignment(s, slots) is None for s in stages):
+            problems.append(f"stage slot '{stage_slot}': no '{stage_type}' stage has a distinct component for each "
+                            f"of its slots ({', '.join(lc.id for lc in slots)})")
     for slot in datapack.needs.slots.values():
         if slot.role not in lab.library.roles:
             problems.append(f"slot '{slot.id}': role '{slot.role}' is not a role of the lab")
-        if not slot.stage_slot and not [c for c in inv.adhoc if c.role == slot.role]:
-            problems.append(f"slot '{slot.id}': no ad hoc component with role '{slot.role}' in the lab")
+        if not slot.stage_slot and not [c for c in inv.adhoc if lab.fits(c, slot.role, slot.tags)]:
+            problems.append(f"slot '{slot.id}': no ad hoc component with role '{slot.role}'"
+                            + (f" tagged {', '.join(slot.tags)}" if slot.tags else "") + " in the lab")
         if slot.type and slot.type not in datapack.needs.slot_types:
             problems.append(f"slot '{slot.id}': type '{slot.type}' not in the setup's slot types")
     return problems

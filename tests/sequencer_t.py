@@ -1260,3 +1260,74 @@ def test_dead_local_run_recovered(tmp_path, no_git):
     result, locks = asyncio.run(main())
     assert result["state"] == "cancelled" and locks == []
 
+
+
+def test_same_role_and_tags(bench):
+    """Several components of a stage can have the same role, each slot getting its own; a slot binds a component
+    whose role is its role or extends it, the only one with the specific role going to the slot needing it; tags
+    (the id being one) route a slot or a stage slot to given components or stages."""
+    from types import SimpleNamespace
+
+    from testsuit.sequencer.intake import check_against_lab
+    from testsuit.sequencer.lab import load_lab
+    from testsuit.sequencer.model import Phase, needs_from_setup
+    from testsuit.sequencer.scheduler import Availability, find_binding
+
+    lab_folder = Path(bench.config.lab.folder)
+    roles = copy.deepcopy(LAB_ROLES)
+    roles["roles"]["fast_dut"] = {"extends": "dut"}
+    write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(roles))
+    components = copy.deepcopy(LAB_COMPONENTS)
+    components["components"]["counter_host"]["roles"] = ["dut", "fast_dut"]
+    write(lab_folder / "components" / "bench.yml", yaml.safe_dump(components))
+    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
+    stage_1, stage_2 = inventory["all"]["children"]["bench_1"], inventory["all"]["children"]["bench_2"]
+    # the fast one first: the slot of role dut, listed first, must still leave it to the fast_dut slot
+    stage_1["hosts"] = {"counter_0": {"tsq_extends": "counter_host", "tsq_role": "fast_dut"},
+                        "counter_1": {"tsq_extends": "counter_host", "tsq_role": "dut"},
+                        "counter_1c": {"tsq_extends": "counter_host", "tsq_role": "dut", "tsq_tags": ["calibrated"]}}
+    stage_2["hosts"]["counter_2"]["tsq_role"] = "dut"
+    stage_2["vars"]["tsq_tags"] = ["rev_b"]
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    assert lab.inventory.components["counter_1c"].tags == ["counter_1c", "calibrated"]
+    assert lab.inventory.stages["bench_2"].tags == ["bench_2", "rev_b"]
+    assert lab.lab_keys(stage=lab.inventory.stages["bench_1"])["stage"]["roles"]["dut"]["id"] == "counter_1"
+
+    def bind(slots: dict, stage_slot: dict | None = None):
+        setup = copy.deepcopy(SETUP)
+        config = setup["configurations"]["bench"]
+        config["stage_slots"]["bench"] = {"type": "counter_bench", **(stage_slot or {})}
+        config["slots"] = {k: {"type": "dut_app", "configuration": "standard", "stage_slot": "bench", **v}
+                           for k, v in slots.items()}
+        needs = needs_from_setup(setup, "bench")
+        binding, why = find_binding(lab, needs, [Phase(id="p", stage_slots=["bench"])], Availability(), "run")
+        return (binding.stage_slots["bench"], binding.slots) if binding else why, \
+            check_against_lab(SimpleNamespace(needs=needs), lab)
+
+    # two slots of role dut and one of fast_dut: bench_2 has one component only
+    assert bind({"a": {"role": "dut"}, "b": {"role": "dut"}, "f": {"role": "fast_dut"}}) == (
+        ("bench_1", {"a": "counter_1", "b": "counter_1c", "f": "counter_0"}), [])
+    # a dut slot takes a fast_dut when it is the one left (plain duts first)
+    assert bind({"a": {"role": "dut"}, "b": {"role": "dut"}, "c": {"role": "dut"}})[0] == (
+        "bench_1", {"a": "counter_1", "b": "counter_1c", "c": "counter_0"})
+    result, problems = bind({"a": {"role": "dut"}, "b": {"role": "dut"}, "c": {"role": "dut"}, "d": {"role": "dut"}})
+    assert result == ["bench_1 has too few components for the slots of role(s) dut", "bench_2 has too few "
+                      "components for the slots of role(s) dut"]
+    assert problems == ["stage slot 'bench': no 'counter_bench' stage has a distinct component for each of its "
+                        "slots (a, b, c, d)"]
+    # the slot with a single possible component first: the calibrated one goes to the slot asking for it
+    comps = lab.inventory.components
+    slots = [SimpleNamespace(id="a", role="dut", tags=[]), SimpleNamespace(id="b", role="dut", tags=["calibrated"])]
+    assigned = lab.assign(slots, [comps["counter_1c"], comps["counter_0"]])
+    assert {k: c.id for k, c in assigned.items()} == {"a": "counter_0", "b": "counter_1c"}
+    # tags: on the slot (the id is one), on the stage slot
+    assert bind({"a": {"role": "dut", "tags": ["calibrated"]}})[0] == ("bench_1", {"a": "counter_1c"})
+    assert bind({"a": {"role": "dut", "tags": ["counter_2"]}})[0] == ("bench_2", {"a": "counter_2"})
+    assert bind({"a": {"role": "dut"}}, {"tags": ["rev_b"]})[0] == ("bench_2", {"a": "counter_2"})
+    result, problems = bind({"a": {"role": "dut", "tags": ["calibrated"]}}, {"tags": ["rev_b"]})
+    assert result == ["bench_1 is not tagged rev_b", "bench_2 has no 'dut' tagged calibrated"]
+    assert problems == ["slot 'a': no component with role 'dut' tagged calibrated in the 'counter_bench' stages "
+                        "(bench_2)"]
+    assert bind({"a": {"role": "dut"}}, {"tags": ["rev_c"]})[1] == [
+        "stage slot 'bench': no 'counter_bench' stage tagged rev_c"]

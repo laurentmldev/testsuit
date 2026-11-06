@@ -322,3 +322,28 @@ export function useTestKeys(sid: string, testdef: string | null | undefined, ctx
   }, [sid, testdef, refresh]);
   return useMemo(() => [...items, ...runtimeKeyItems(ctx)], [items, ctx]);
 }
+
+/** Tags of the lab components (or stages), each with who has it: their ids are tags too. */
+export function labTagChoices(ctx: any, kind: "components" | "stages"): Choice[] {
+  const owners: Record<string, string[]> = {};
+  for (const [id, item] of Object.entries<any>(ctx.lab[kind] || {}))
+    for (const tag of item?.tags || [id]) (owners[tag] ||= []).push(id);
+  return Object.entries(owners).map(([tag, ids]) => ({ value: tag, description: ids.length === 1 && ids[0] === tag ? `the id of ${ids[0]}` : `${kind}: ${ids.join(", ")}` }));
+}
+
+/** Tags a stage slot can ask for: those of the lab stages of its type. */
+export function stageSlotTagChoices(ctx: any, stageType: string): Choice[] {
+  return labTagChoices({ lab: { stages: Object.fromEntries(Object.entries<any>(ctx.lab.stages || {}).filter(([, s]) => s?.type === stageType)) } }, "stages");
+}
+
+/** Tags a slot can ask for: those of the lab components it could be bound to, the ones whose role is its role or
+ * extends it, in the stages of its stage slot's type having the stage slot's tags (ad hoc components otherwise). */
+export function slotTagChoices(ctx: any, role: string, stageType: string | null, stageTags: string[] = []): Choice[] {
+  const stages = Object.entries<any>(ctx.lab.stages || {})
+    .filter(([, s]) => stageType && s?.type === stageType && stageTags.every((t) => (s?.tags || []).includes(t)))
+    .map(([id]) => id);
+  const fitting = Object.fromEntries(Object.entries<any>(ctx.lab.components || {}).filter(([, c]) =>
+    (!role || (c?.roles || [c?.role]).includes(role))
+    && (stageType ? (c?.stages || []).some((s: string) => stages.includes(s)) : !(c?.stages || []).length)));
+  return labTagChoices({ lab: { components: fitting } }, "components");
+}

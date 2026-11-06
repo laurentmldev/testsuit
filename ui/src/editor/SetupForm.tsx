@@ -5,7 +5,7 @@ import { post } from "../api";
 import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
 import { DictionaryDialog } from "./DictionaryDialog";
-import { clone, labRoleChoices, roleChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
+import { clone, labRoleChoices, roleChoices, slotTagChoices, stageSlotTagChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
 
 /** The inputs a lab role expects (its parents' included), each {name, type, optional, description, from}. */
 function expectedInputs(ctx: any, role?: string): any[] {
@@ -482,6 +482,14 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
   const comps: Record<string, any> = cfg.slots || {};
   const types: Record<string, any> = data.slot_types || {};
   const stageType = (s: string) => (typeof stages[s] === "object" ? stages[s]?.type : stages[s]);
+  const stageTags = (s: string): string[] => (typeof stages[s] === "object" ? stages[s]?.tags || [] : []);
+  /** The slot's tags, offering those of the lab components it could be bound to. */
+  const tagsCell = (id: string) => {
+    const c = comps[id];
+    const stage = c?.stage_slot && c.stage_slot in stages ? c.stage_slot : null;
+    const choices = slotTagChoices(ctx, c?.role || "", stage ? stageType(stage) : null, stage ? stageTags(stage) : []);
+    return <td><Tags value={c?.tags} onChange={(v) => setComp(id, "tags", v)} choices={choices} placeholder={choices.length ? "+ tag" : "no lab component fits"} /></td>;
+  };
   const setComp = (id: string, k: string, v: any) => update((d) => {
     const c = d.configurations[name].slots[id];
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete c[k];
@@ -509,7 +517,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     const st = stage ? stageType(stage) : null;
     return (
       <table className="grid compact components">
-        <thead><tr><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th><th /></tr></thead>
+        <thead><tr><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th><th>Tags</th><th /></tr></thead>
         <tbody>
           {ids.map((id) => {
             const c = comps[id];
@@ -529,6 +537,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
                 <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+                {tagsCell(id)}
                 <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].slots[id])}>×</button></td>
               </tr>
             );
@@ -537,20 +546,22 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       </table>
     );
   };
-  /** A stage_slot's slots: one row per role its lab stages offer, ticked when the test uses it. Ticking
-   * adds a slot for that role (with a slot type for its inputs), unticking
-   * removes it. Slots of the stage slot with another role follow. */
+  /** A stage_slot's slots: one row per role its lab stages offer, ticked when the test uses it, and one more
+   * row per further slot of that role (a stage can have several components of a role: each slot gets its own).
+   * Ticking adds a slot for that role (with a slot type for its inputs), unticking removes that slot. Slots of
+   * the stage slot with another role (one a lab role extends, or none of the lab) follow. */
   const stageTable = (stage: string) => {
     const st = stageType(stage);
     const labRoles: string[] = Object.keys(ctx.lab.stage_type_roles?.[st] || {});
+    const counts: Record<string, number> = ctx.lab.stage_type_role_counts?.[st] || {};
     const inStage = Object.keys(comps).filter((id) => comps[id]?.stage_slot === stage);
-    const byRole = (r: string) => inStage.find((id) => comps[id]?.role === r);
+    const ofRole = (r: string) => inStage.filter((id) => comps[id]?.role === r);
     const others = inStage.filter((id) => !labRoles.includes(comps[id]?.role));
-    const tick = (role: string, on: boolean) => update((d) => {
+    const tick = (role: string, on: boolean, slot?: string) => update((d) => {
       const c = d.configurations[name];
       c.slots ||= {};
       if (!on) {
-        for (const [id, x] of Object.entries<any>(c.slots)) if (x?.stage_slot === stage && x?.role === role) delete c.slots[id];
+        if (slot) delete c.slots[slot];
         return;
       }
       d.slot_types ||= {};
@@ -571,30 +582,43 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           </td>
           <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={Object.keys(types[c?.type]?.configurations || {}).map((x) => ({ value: x }))} strict /></td>
           <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+          {tagsCell(id)}
         </>
       );
     };
     if (!labRoles.length && !others.length) return <p className="muted small">No lab stage of this type, so no role to pick.</p>;
     return (
       <table className="grid compact components">
-        <thead><tr><th className="tick" /><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th></tr></thead>
+        <thead><tr><th className="tick" /><th>Role</th><th>Id</th><th>Name</th><th>Type</th><th>Configuration</th><th>Needs</th><th>Tags</th></tr></thead>
         <tbody>
           {labRoles.map((role) => {
-            const id = byRole(role);
-            return (
-              <tr key={role} className={id ? "" : "unused"}>
-                <td className="tick"><input type="checkbox" checked={!!id} title={id ? "the test uses it: untick to drop it" : "tick to use it"} onChange={(e) => tick(role, e.target.checked)} /></td>
+            const ids = ofRole(role);
+            const max = counts[role] || 1;
+            if (!ids.length) return (
+              <tr key={role} className="unused">
+                <td className="tick"><input type="checkbox" checked={false} title="tick to use it" onChange={() => tick(role, true)} /></td>
                 <td>{role}<RoleCommands role={role} /></td>
-                {id ? cells(id) : <td colSpan={5} className="muted small">not used by this test</td>}
+                <td colSpan={6} className="muted small">not used by this test</td>
               </tr>
             );
+            return ids.map((id, i) => (
+              <tr key={id}>
+                <td className="tick"><input type="checkbox" checked title="the test uses it: untick to drop it" onChange={() => tick(role, false, id)} /></td>
+                <td>
+                  {role}{i === 0 && <RoleCommands role={role} />}
+                  {i === ids.length - 1 && ids.length < max && <button className="link small" title={`the ${st} stages have up to ${max} components for this role`} onClick={() => tick(role, true)}>+ another {role}</button>}
+                  {i >= max && <div className="error-text small">{`the ${st} stages have at most ${max}`}</div>}
+                </td>
+                {cells(id)}
+              </tr>
+            ));
           })}
           {others.map((id) => (
             <tr key={id}>
               <td className="tick"><button className="icon" title="remove" onClick={() => update((d) => delete d.configurations[name].slots[id])}>×</button></td>
               <td>
                 <Combo value={comps[id]?.role} onChange={(v) => setComp(id, "role", v)} choices={roleChoices(ctx, { stageType: st })} />
-                <div className="error-text small">{comps[id]?.role ? "no lab stage of this type has this role" : "no role"}</div>
+                {!(comps[id]?.role && counts[comps[id].role]) && <div className="error-text small">{comps[id]?.role ? "no lab stage of this type has this role" : "no role"}</div>}
               </td>
               {cells(id)}
             </tr>
@@ -640,8 +664,19 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                 });
               }}>Remove</button>}>
               <Field label="Lab stage type" help="Bound at run time to any free lab stage of this type: its slots to the lab components of that stage.">
-                <Combo value={st} onChange={(v) => update((d) => (d.configurations[name].stage_slots[s] = { type: v }))} choices={stageTypeChoices(ctx)} />
+                <Combo value={st} onChange={(v) => update((d) => {
+                  const cur = d.configurations[name].stage_slots[s];
+                  d.configurations[name].stage_slots[s] = { ...(typeof cur === "object" && cur ? cur : {}), type: v };
+                })} choices={stageTypeChoices(ctx)} />
                 {!ctx.lab.stage_type_roles?.[st] && <div className="error-text small">no lab stage of this type</div>}
+              </Field>
+              <Field label="Tags" help="Tags the lab stage must have (`tsq_tags` of the stage, its id being one): routes the stage slot to given stages.">
+                <Tags value={stageTags(s)} placeholder="+ tag" choices={stageSlotTagChoices(ctx, st)} onChange={(v) => update((d) => {
+                  const cur = d.configurations[name].stage_slots[s];
+                  const obj = typeof cur === "object" && cur ? { ...cur } : { type: cur };
+                  if (v.length) obj.tags = v; else delete obj.tags;
+                  d.configurations[name].stage_slots[s] = obj;
+                })} />
               </Field>
               {stageTable(s)}
             </Section>
