@@ -2,10 +2,10 @@
 // and their variables, with the roles, components and stage types of the lab and the tests at hand.
 import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Text, useHelp, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice } from "../fields";
 import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
 import { CommandsEditor, summary } from "./commands";
-import { clone, componentChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
+import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
 import { ItemLink, ItemLinks, extendsKind, useItemRequest } from "./links";
 
@@ -202,7 +202,7 @@ function useInvHelp() {
 }
 
 const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
-  "tsq_label", "tsq_description", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
+  "tsq_label", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
   "tsq_library"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
@@ -348,6 +348,11 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
       <Field label="Description" help={help(["all", "children", "_", "vars", "tsq_description"])}>
         <Text multiline value={getAt(inv, varsPath)?.tsq_description} onChange={(v) => set("tsq_description", v)} placeholder={`What this ${group.stage ? "stage" : "group"} is (its own: its components have theirs)`} />
       </Field>
+      {group.stage && (
+        <Field label="Tags" help={help(["all", "children", "_", "vars", "tsq_tags"])} hint={<>its id <code>{group.name}</code> is always a tag</>}>
+          <Tags value={getAt(inv, varsPath)?.tsq_tags} onChange={(v) => set("tsq_tags", v.length ? v : undefined)} choices={labTagChoices(ctx, "stages")} placeholder="+ tag" />
+        </Field>
+      )}
       <Section title={`Components (${group.hosts.length})`} help={helpText(schemas.inventory, ["all", "children", "_", "hosts"])}
         actions={<button className="small" onClick={onAdd}>+ New component</button>}>
         <table className="grid compact">
@@ -383,7 +388,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
         value={group.vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)} />
       <Section title="Stage variables" help="Variables of every component of the group (host variables win).">
         <KeyValues value={group.vars} onChange={(v) => update((d) => setAt(d, varsPath, v))} known={knownVars(schemas, ["all", "children", "_", "vars"], ["tsq_stage_type", "tsq_commands"])}
-          exclude={["tsq_stage_type", "tsq_commands", "tsq_description"]} />
+          exclude={["tsq_stage_type", "tsq_commands", "tsq_description", "tsq_tags"]} />
       </Section>
     </div>
   );
@@ -456,6 +461,9 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       </div>
       <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v)} placeholder={name} /></Field>
       <Field label="Description" help={help(["all", "hosts", "_", "tsq_description"])}><Text multiline value={vars.tsq_description} onChange={(v) => set("tsq_description", v)} placeholder="What this component is (its own: the stage's and the lab's are not inherited)" /></Field>
+      <Field label="Tags" help={help(["all", "hosts", "_", "tsq_tags"])} hint={<>its id <code>{name}</code> is always a tag</>}>
+        <Tags value={vars.tsq_tags} onChange={(v) => set("tsq_tags", v.length ? v : undefined)} choices={labTagChoices(ctx, "components")} placeholder="+ tag" />
+      </Field>
       <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])} hint={reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}>
         <div className="with-button">
           <Text mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name} />
@@ -498,7 +506,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
-          exclude={["tsq_label", "tsq_description", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_commands", "tsq_status", "tsq_selftest"]} />
+          exclude={["tsq_label", "tsq_description", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_commands", "tsq_status", "tsq_selftest"]} />
       </Section>
     </div>
   );

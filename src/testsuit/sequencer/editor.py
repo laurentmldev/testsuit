@@ -595,12 +595,20 @@ class Editor:
         inv = lab.inventory
         stage_types: dict[str, list[str]] = {}
         stage_type_roles: dict[str, dict[str, list[str]]] = {}
+        # the most slots of a role one stage of the type can take: its components of that role or extending it
+        stage_type_role_counts: dict[str, dict[str, int]] = {}
         for s in inv.stages.values():
             stage_types.setdefault(s.type, []).append(s.id)
+            counts: dict[str, int] = {}
             for comp_id in s.components:
                 comp = inv.components[comp_id]
                 if comp.role:
                     stage_type_roles.setdefault(s.type, {}).setdefault(comp.role, []).append(comp_id)
+                for role in lab.roles_of(comp):
+                    counts[role] = counts.get(role, 0) + 1
+            best = stage_type_role_counts.setdefault(s.type, {})
+            for role, n in counts.items():
+                best[role] = max(best.get(role, 0), n)
         adhoc_roles: dict[str, list[str]] = {}
         for c in inv.adhoc:
             if c.role:
@@ -608,7 +616,7 @@ class Editor:
         library = cls.describe_library(lab)
         hosts = {}
         for c in inv.components.values():
-            info = {"role": c.role, "role_given": str(c.vars.get("tsq_role") or ""), "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
+            info = {"role": c.role, "roles": lab.roles_of(c), "tags": c.tags, "role_given": str(c.vars.get("tsq_role") or ""), "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
                     "stages": c.stages, "transport": str(c.vars.get("tsq_transport") or "")}
             try:
                 stage = inv.stages[c.stages[0]] if c.stages else None
@@ -626,8 +634,9 @@ class Editor:
             hosts[c.id] = info
         return {
             "roles": library["roles"], "library": library["components"],
-            "stage_types": stage_types, "stage_type_roles": stage_type_roles, "adhoc_roles": adhoc_roles,
-            "stages": {s.id: {"type": s.type, "components": s.components, "commands": sorted(s.commands)}
+            "stage_types": stage_types, "stage_type_roles": stage_type_roles,
+            "stage_type_role_counts": stage_type_role_counts, "adhoc_roles": adhoc_roles,
+            "stages": {s.id: {"type": s.type, "tags": s.tags, "components": s.components, "commands": sorted(s.commands)}
                        for s in inv.stages.values()},
             "components": hosts,
             "library_folders": [str(f) for f in inv.library_folders],
@@ -1118,9 +1127,12 @@ class Editor:
             # the lab components that can be bound, with how each implements the commands
             stage_type = needs.stage_slots.get(lc.stage_slot)
             if lc.stage_slot:
-                hosts = [(lab.inventory.component_in(st, lc.role), st) for st in lab.inventory.stages_of_type(stage_type)]
+                tags = set(needs.stage_slot_tags.get(lc.stage_slot, []))
+                hosts = [(lab.inventory.components[c], st) for st in lab.inventory.stages_of_type(stage_type)
+                         if tags <= set(st.tags)
+                         for c in st.components if lab.fits(lab.inventory.components[c], lc.role, lc.tags)]
             else:
-                hosts = [(c, None) for c in lab.inventory.adhoc if c.role == lc.role]
+                hosts = [(c, None) for c in lab.inventory.adhoc if lab.fits(c, lc.role, lc.tags)]
             implementations: dict[str, dict[str, Any]] = {}
             for host, stage in hosts:
                 if host is None:

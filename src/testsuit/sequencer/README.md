@@ -200,7 +200,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 | **`extends`** | the parent of a role (whose commands it offers too) or of a component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a role adds (`install`, `feed`...). Its implementation is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | the role lists it; its implementation is resolved in this order, last wins: the host's component chain, the stage `tsq_commands`, the host's own `tsq_commands`, and an inline `run:` in a step (section 7.4). The Editor shows the source of each command. |
-| **role** | the job of a component (`controller`, `logger`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role. Unique within a stage. |
+| **role** | the job of a component (`controller`, `logger`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role: a slot of a role takes a component of that role or of a role extending it. Several components of a stage can have the same role. |
 | **stage type** | the kind of a stage (`bench`, `rack`...): a datapack's stage slot asks for a stage type, and any free stage of that type can be bound to it. |
 | **lock mode** | `tsq_lock` of a component: `exclusive` (one run at a time, the default), `shared` (several runs at once) or `none` (never locked). Shared and unlocked components give each run its own input and output folders. |
 | **remote root** | `tsq_remote_root`: the folder of a component under which its inputs, outputs and pid files go. |
@@ -454,8 +454,9 @@ all:
 - A stage is defined by its components (the hosts of its group) and its overrides (`tsq_commands` and the other variables of its group).
 - Variables follow Ansible precedence: host over stage group over `all`.
 - `tsq_description` says what an item is, shown in the editor and on the Lab page. It is set at three levels, each separate and not inherited: in `all.vars` it describes the lab, on a stage group the stage, on a host the component. `tsq_label` is the component's short name.
+- `tsq_tags` lists tags, on a host or a stage group: a datapack slot or stage slot asking for `tags` only binds to a component or stage having them all (section 8.1). The id of a component or stage is always one of its tags. Tags on another group apply to its hosts.
 - `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
-- Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Roles are unique within a stage.
+- Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Several components of a stage can have the same role (two loggers): each slot of that role gets its own.
 - `tsq_shell` is the shell the commands of a component run under, on the component (`bash`, `/bin/bash`, `"bash -l"` to read the login profile). By default, steps and commands run under `/bin/sh` (dash on Debian and Ubuntu), whatever the user's login shell, while short checks (probes, self-tests) run under the login shell; with `tsq_shell`, both use it. A POSIX shell is expected: the sequencer's own helpers (pid files, kill) run under it too.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
 - `tsq_lock` is the lock mode of a component:
@@ -633,7 +634,7 @@ A datapack does not redefine commands: what a test runs that the role does not o
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
 The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
-- `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage, for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
+- `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage (the first one when the stage has several), for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);
 - `{{ stage.components.<host>.host }}`, `{{ stage.id }}`, `{{ stage.type }}`, `{{ stage.vars }}`: the stage itself and its components by inventory name;
 - `{{ lab.components.<host>.vars.ansible_host }}`: any host of the inventory; `{{ lab.stages.<stage>.components }}`: the hosts of a stage.
 
@@ -713,8 +714,13 @@ A component in maintenance (or in a stage in maintenance) can have its commands 
 
 The setup configuration (datapack side) lists the **slots** the test needs, each with a **role**, and the **stage slots** that group slots which must be bound in one lab stage, each asking for a stage type. A slot in no stage slot is an **ad hoc slot**. At activation:
 - each stage slot is bound to a free lab stage of its type;
-- each slot of a stage slot is bound to the lab component with the same role in that stage;
-- each ad hoc slot is bound to a free ad hoc lab component with that role.
+- each slot of a stage slot is bound to its own lab component of that stage, whose role is the slot's role or extends it;
+- each ad hoc slot is bound to a free ad hoc lab component whose role is the slot's role or extends it;
+- `tags` on a stage slot or a slot keep only the lab stages or components having all of them (`tsq_tags`, the id being one): they route a test to given hardware, or to a subset of it.
+
+**How slots get their components.** A stage can have several components of a role. Within a stage, the slots with the fewest possible components are assigned first, so the only component of a specific role (one extending the slot's role) or with a required tag goes to the slot that needs it; the slots with several options are assigned next. Each slot takes, in inventory order, a component of its very role before one of a role extending it. When a choice leaves a later slot without a component, the sequencer takes another one. A stage is bound only when each of its slots gets a distinct component; `tsq check` and the run's resources page say what is missing. To pin a slot to a given component, give it that component's id as a tag; for components tied to given wiring, a derived role (`fast_logger: {extends: logger}`) is clearer than tags.
+
+In the Editor, a stage slot lists one row per slot of each role, with **+ another <role>** while its lab stages have more components for that role. The **Tags** of a slot propose the tags of the lab components it could be bound to (its role or one extending it, in the stages its stage slot can take); those of a stage slot propose the tags of the lab stages of its type. The inventory form sets `tsq_tags` on a component or a stage.
 
 A datapack has slots and stage slots; the lab has components and stages. The former datapack names (`component_types`, a configuration's `components`, `stages` and `realms`, a slot's `stage` and `realm`, a step's `component`, a phase's `components`, `stages` and `realms`, `for_each: components`) are refused, with the current one.
 
@@ -731,6 +737,12 @@ configurations:
       actuator:    {type: actuator_sim, configuration: standard, role: actuator_sim}   # ad hoc
       sensor:      {type: sensor_sim, configuration: standard, role: sensor_sim}       # ad hoc
       analysis:    {type: exploit, configuration: standard, role: sequencer}           # ad hoc: lab_srv
+  calibrated:
+    stage_slots:
+      bench: {type: bench, tags: [rev_b]}  # only a bench stage tagged rev_b
+    slots:
+      logger:      {type: logger_app, configuration: standard, stage_slot: bench, role: logger, tags: [calibrated]}
+      logger_2:    {type: logger_app, configuration: standard, stage_slot: bench, role: logger}  # another logger
 ```
 
 A datapack can therefore lock several lab stages (one per stage slot) and ad hoc components. Here the analysis runs on the sequencer host (`role: sequencer`); a separate exploitation server would be an ad hoc component with its own role.

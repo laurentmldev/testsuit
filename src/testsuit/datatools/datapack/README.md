@@ -101,7 +101,7 @@ configurations:                        # what a test uses: its slots, of these t
                   needs: [pilot]}      # generated after pilot, can read its inputs
 ```
 
-`stage_slots`, `stage_slot`, `role` and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a stage slot groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
+`stage_slots`, `stage_slot`, `role`, `tags` (on a slot or a stage slot: the lab component or stage must have them all) and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a stage slot groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
 
 The former names are refused, with the current one: `component_types` (now `slot_types`), a configuration's `components` (now `slots`), `stages` and `realms` (now `stage_slots`), a slot's `stage` and `realm` (now `stage_slot`).
 

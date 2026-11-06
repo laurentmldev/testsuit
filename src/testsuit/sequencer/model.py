@@ -166,6 +166,7 @@ class LogicalSlot:
     name: str = ""
     stage_slot: str = ""                              # its stage slot, '' for an ad hoc slot
     role: str = ""                               # a type of the lab: binds to a lab component, which gives the commands
+    tags: list[str] = field(default_factory=list)  # tags the lab component must have
 
 
 @dataclass
@@ -173,6 +174,7 @@ class Needs:
     stage_slots: dict[str, str]                       # stage_slot -> lab stage type
     slots: dict[str, LogicalSlot]
     slot_types: dict[str, dict]                  # slot types (setup file)
+    stage_slot_tags: dict[str, list[str]] = field(default_factory=dict)   # tags its lab stage must have
 
     def in_stage_slot(self, stage_slot: str) -> list[LogicalSlot]:
         return [c for c in self.slots.values() if c.stage_slot == stage_slot]
@@ -202,11 +204,14 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
         raise SequencerError(f"setup has no configuration '{configuration}'")
     config = configurations[configuration] or {}
     stage_slots = {}
+    stage_slot_tags = {}
     for stage_slot_id, stage_slot in (config.get("stage_slots") or {}).items():
         stage_type = stage_slot.get("type") if isinstance(stage_slot, dict) else stage_slot
         if not stage_type:
             raise SequencerError(f"setup configuration '{configuration}': stage slot '{stage_slot_id}' has no type")
         stage_slots[stage_slot_id] = str(stage_type)
+        stage_slot_tags[stage_slot_id] = tag_list(stage_slot.get("tags") if isinstance(stage_slot, dict) else None,
+                                                  f"setup configuration '{configuration}': stage slot '{stage_slot_id}'")
     slots = {}
     for slot_id, slot in (config.get("slots") or {}).items():
         stage_slot = slot.get("stage_slot") or ""
@@ -216,8 +221,18 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
             raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' has no role "
                                  "(needed to bind it to a lab component)")
         slots[slot_id] = LogicalSlot(id=slot_id, type=slot.get("type", ""), name=slot.get("name", ""),
-                                     stage_slot=stage_slot, role=slot["role"])
-    return Needs(stage_slots=stage_slots, slots=slots, slot_types=setup.get("slot_types") or {})
+                                     stage_slot=stage_slot, role=slot["role"],
+                                     tags=tag_list(slot.get("tags"), f"setup configuration '{configuration}': slot '{slot_id}'"))
+    return Needs(stage_slots=stage_slots, slots=slots, slot_types=setup.get("slot_types") or {},
+                 stage_slot_tags=stage_slot_tags)
+
+
+def tag_list(value, where: str) -> list[str]:
+    if not value:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, (str, int)) for v in value):
+        raise SequencerError(f"{where}: 'tags' must be a list of tags")
+    return [str(v) for v in value]
 
 
 # ── pipeline loading, sub-pipelines, validation ────────────────────────────

@@ -176,6 +176,8 @@ class Slot(_Model):
     # for the test sequencer: stage_slot and role it is bound by (the lab role gives its commands)
     stage_slot: str = ""
     role: str = ""
+    # for the test sequencer: tags the lab component must have (its id is one of its tags)
+    tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -187,7 +189,7 @@ class Slot(_Model):
 
 class SetupConfiguration(_Model):
     slots: dict[str, Slot]
-    # for the test sequencer: stage_slots (slots bound in one lab stage of a type), by id
+    # for the test sequencer: stage_slots (slots bound in one lab stage of a type, with the tags it must have), by id
     stage_slots: dict[str, Any] = Field(default_factory=dict)
 
 

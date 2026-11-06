@@ -57,6 +57,11 @@ class Component:
     def adhoc(self) -> bool:
         return not self.stages
 
+    @property
+    def tags(self) -> list[str]:
+        """Its id and its ``tsq_tags``: what a slot's ``tags`` select it by."""
+        return [self.id, *_tags(self.vars.get("tsq_tags"))]
+
     def vars_in(self, stage: "Stage | None") -> dict[str, Any]:
         """Variables of the component as seen in a stage: all < stage group < host."""
         if stage is None:
@@ -78,6 +83,17 @@ class Stage:
     @property
     def commands(self) -> dict[str, Any]:
         return dict(self.vars.get("tsq_commands") or {})
+
+    @property
+    def tags(self) -> list[str]:
+        """Its id and its ``tsq_tags``: what a stage slot's ``tags`` select it by."""
+        return [self.id, *_tags(self.vars.get("tsq_tags"))]
+
+
+def _tags(value: Any) -> list[str]:
+    if not value:
+        return []
+    return [str(value)] if isinstance(value, str) else [str(v) for v in value]
 
 
 @dataclass
@@ -108,12 +124,6 @@ class Inventory:
 
     def stages_of_type(self, stage_type: str) -> list[Stage]:
         return [s for s in self.stages.values() if s.type == stage_type]
-
-    def component_in(self, stage: Stage, role: str) -> Component | None:
-        for comp_id in stage.components:
-            if self.components[comp_id].role == role:
-                return self.components[comp_id]
-        return None
 
 
 def _mapping(value: Any, where: str) -> dict:

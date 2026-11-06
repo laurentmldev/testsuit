@@ -314,12 +314,16 @@ VARS = {
     "tsq_role": h("Role of the component, a role of the lab library (section 7.1): the commands it must implement. "
                   "Not needed when the component it extends supports one role (it has that one); one of them when "
                   "it supports several; any role when it lists none. Datapacks bind their slots by "
-                  "role (`role: pilot` binds the host with role pilot in the stage). Unique within a stage.",
+                  "role (`role: pilot` binds a host with role pilot, or a role extending it, in the stage). Several "
+                  "components of a stage can have the same role: each slot gets its own.",
                   type="string"),
     "tsq_extends": h("The lab component this host is (section 7.2): a component of the library, or another host. "
                      "It gives the implementations of the commands, the status probe and the self-test "
                      "(default `linux_system`).", type="string"),
     "tsq_lock": LOCK,
+    "tsq_tags": h("Tags, on a host (the component) or a stage group (the stage): a datapack slot or stage slot "
+                  "listing `tags` only binds to a component or stage having them all. The id is always a tag.",
+                  type="array", items={"type": "string"}, examples=[["calibrated", "rev_b"]]),
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
     "tsq_description": h("What it is, shown in the editor and on the Lab page: in `all.vars`, the lab; on a stage "
                          "group, the stage; on a host, the component. Not inherited: each level has its own.",
@@ -440,8 +444,10 @@ SLOT = h(
                 "stage_slot": h("Stage slot it belongs to (`stage_slots` of this configuration): the slots of a stage slot are bound in "
                            "one lab stage. Leave out for an ad hoc "
                            "slot.", type="string"),
-                "role": h("Role it binds to in the lab (`tsq_role`): a lab role, which gives its commands.",
-                          type="string"),
+                "role": h("Role it binds to in the lab (`tsq_role`): a lab role, which gives its commands. A "
+                          "component whose role extends it fits too.", type="string"),
+                "tags": h("Tags the lab component must have (`tsq_tags`, its id being one): routes the slot to "
+                          "given hardware or a subset of it.", type="array", items={"type": "string"}),
                 "needs": h("Slots whose inputs are generated first, readable with `read_input('<id>/<file>')` "
                            "and `slots.<id>.input_dir` (section 5.2).", type="array", items={"type": "string"}),
                 })
@@ -452,9 +458,12 @@ SETUP_CONFIGURATION = h(
     properties={
         "stage_slots": h("Stage slots, by id, with the lab stage type they ask for: each is bound to any free lab stage of that "
                     "type, and its slots to the lab components of that lab stage.", type="object",
-                    additionalProperties=h("`{type: <stage type>}`.", type=["object", "string"],
+                    additionalProperties=h("`{type: <stage type>, tags: [...]}`.", type=["object", "string"],
                                            properties={"type": h("Stage type (`tsq_stage_type` in the lab).",
-                                                                 type="string")})),
+                                                                 type="string"),
+                                                       "tags": h("Tags the lab stage must have (`tsq_tags` of the "
+                                                                 "stage group, its id being one).", type="array",
+                                                                 items={"type": "string"})})),
         "slots": h("Slots, by id (the id used by the pipeline steps).", type="object", additionalProperties=SLOT),
     })
 
@@ -646,6 +655,14 @@ def schemas(context: dict) -> dict:
     components = {name: text(name, c, c.get("commands") or {}) for name, c in (lab.get("library") or {}).items()}
     hosts = {name: f"host **{name}** (role {c.get('role')})" for name, c in (lab.get("components") or {}).items()}
     stage_types = {t: f"stages: {', '.join(s)}" for t, s in (lab.get("stage_types") or {}).items()}
+    component_tags: dict[str, str] = {}
+    for name, c in (lab.get("components") or {}).items():
+        for tag in c.get("tags") or []:
+            component_tags[tag] = (component_tags.get(tag, "components:") + " " + name)
+    stage_tags: dict[str, str] = {}
+    for name, s in (lab.get("stages") or {}).items():
+        for tag in s.get("tags") or []:
+            stage_tags[tag] = (stage_tags.get(tag, "stages:") + " " + name)
     transports = {t: t for t in context.get("transports") or ["local", "ssh"]}
     commands: dict[str, str] = {}
     for name, r in lab_roles.items():
@@ -694,6 +711,8 @@ def schemas(context: dict) -> dict:
         props = node.get("properties") or {}
         if "role" in props and "configuration" in props and roles:
             props["role"].update(_choices(roles, False))
+        if "role" in props and "configuration" in props and component_tags:
+            props["tags"]["items"] = {"type": "string", **_choices(component_tags, False)}
         if "role" in props and "configuration" in props and dp_types:
             props["type"].update(_choices(dp_types, False))
         if "role" in props and "configurations" in props and roles:          # a slot type
@@ -702,8 +721,11 @@ def schemas(context: dict) -> dict:
             props["importer"].update(_choices(importers, False))
         if "generator" in props and generators:
             props["generator"].update(_choices(generators, False))
-        if set(props) == {"type"} and stage_types:
-            props["type"].update(_choices(stage_types, False))
+        if set(props) == {"type", "tags"}:
+            if stage_types:
+                props["type"].update(_choices(stage_types, False))
+            if stage_tags:
+                props["tags"]["items"] = {"type": "string", **_choices(stage_tags, False)}
 
     _walk(result["setup"], setup_fields)
 

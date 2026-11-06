@@ -89,10 +89,66 @@ class Lab:
         if stage is not None:
             members = {cid: info(inv.components[cid], stage) for cid in stage.components}
             keys["stage"] = {"id": stage.id, "type": stage.type, "vars": dict(stage.vars), "components": members,
-                             "roles": {m["role"]: m for m in members.values() if m["role"]}}
+                             "roles": {}}
+            for m in members.values():                  # several components of a role: the first one
+                if m["role"]:
+                    keys["stage"]["roles"].setdefault(m["role"], m)
         else:
             keys["stage"] = {"id": "", "type": "", "vars": {}, "components": {}, "roles": {}}
         return keys
+
+    def roles_of(self, component: Component) -> list[str]:
+        """The roles a component can take a slot of: its own and the roles it extends, its own first."""
+        if not component.role:
+            return []
+        try:
+            return [r.name for r in reversed(self.library.role_chain(component.role))]
+        except SequencerError:
+            return [component.role]
+
+    def fits(self, component: Component, role: str, tags: list[str] = ()) -> bool:
+        """True when the component can be bound to a slot of that role and tags: its role is that role or extends
+        it, and it has every tag (its id is one)."""
+        return role in self.roles_of(component) and set(tags) <= set(component.tags)
+
+    def assign(self, slots: list, components: list[Component]) -> dict[str, Component] | None:
+        """Bind each slot to a distinct component of a fitting role (None when no assignment exists).
+
+        Slots with the fewest fitting components go first, so the only component with a specific role goes
+        to the slot needing it; ties follow the slots' order. Each slot tries the components of its very role
+        first, then those of a role extending it, each in their order. A choice that leaves a later slot without
+        a component is undone (backtracking)."""
+        options = {lc.id: sorted((c for c in components if self.fits(c, lc.role, lc.tags)),
+                                 key=lambda c, role=lc.role: self.roles_of(c).index(role)) for lc in slots}
+        order = sorted((lc.id for lc in slots), key=lambda i: len(options[i]))
+        result: dict[str, Component] = {}
+
+        def place(k: int) -> bool:
+            if k == len(order):
+                return True
+            for comp in options[order[k]]:
+                if all(comp.id != c.id for c in result.values()):
+                    result[order[k]] = comp
+                    if place(k + 1):
+                        return True
+                    del result[order[k]]
+            return False
+        return {lc.id: result[lc.id] for lc in slots} if place(0) else None
+
+    def stage_assignment(self, stage: Stage, slots: list) -> dict[str, Component] | None:
+        """The stage's components for the slots of a stage slot (see assign), in the stage's order."""
+        return self.assign(slots, [self.inventory.components[c] for c in stage.components])
+
+    def stage_shortfall(self, stage: Stage, slots: list) -> str:
+        """Why the stage's components cannot take these slots."""
+        comps = [self.inventory.components[c] for c in stage.components]
+        for lc in slots:
+            if not any(self.fits(c, lc.role) for c in comps):
+                return f"{stage.id} has no '{lc.role}'"
+            if not any(self.fits(c, lc.role, lc.tags) for c in comps):
+                return f"{stage.id} has no '{lc.role}' tagged {', '.join(lc.tags)}"
+        roles = sorted({lc.role for lc in slots})
+        return f"{stage.id} has too few components for the slots of role(s) {', '.join(roles)}"
 
     def via(self, component: Component, stage: Stage | None = None, status: dict | None = None) -> Component | None:
         """The component a status probe (and its self-test) runs on when the component cannot be reached itself,
@@ -166,12 +222,6 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
         except SequencerError as e:
             if strict:
                 raise SequencerError(f"inventory '{inventory_file}': component '{component.id}': {e}") from e
-    for stage in inventory.stages.values() if strict else []:
-        roles = [inventory.components[c].role for c in stage.components if inventory.components[c].role]
-        duplicates = sorted({r for r in roles if roles.count(r) > 1})
-        if duplicates:
-            raise SequencerError(f"inventory '{inventory_file}': stage '{stage.id}' has several components with "
-                                 f"role(s) {duplicates}")
     for component in inventory.components.values():
         for stage in [inventory.stages[s] for s in component.stages] or [None]:
             try:
