@@ -454,7 +454,7 @@ class Sequencer:
 
     async def manual_commands(self, comp_id: str) -> dict:
         """The commands of a component (as the lab resolves them), whether each can be run by hand, and each
-        run command as it would run (``segments``: its text, with the key behind each value)."""
+        run or http command as it would run (``segments``: its text, with the key behind each value)."""
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
@@ -472,14 +472,20 @@ class Sequencer:
             kind = ("run" if "run" in spec else "http" if "http" in spec else "signal" if "signal" in spec
                     else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(spec), "?"))
             entry = {"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS}
-            if kind == "run":
+            if kind in ("run", "http"):
                 via = None
                 if spec.get("via"):
                     try:
                         via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
                     except SequencerError:
                         pass
-                entry["segments"] = self._segments(str(spec["run"]), self._manual_keys(comp, stage, root, via),
+                if kind == "run":
+                    template = str(spec["run"])
+                else:                                   # the request line: method and URL
+                    http = spec["http"] if isinstance(spec["http"], dict) else {"url": spec["http"]}
+                    method = str(http.get("method") or "GET")
+                    template = f"{method if '{{' in method else method.upper()} {http.get('url', '')}"
+                entry["segments"] = self._segments(template, self._manual_keys(comp, stage, root, via),
                                                    f"{comp_id}.{name}")
             commands.append(entry)
         return {"component": comp_id, "maintenance": self._in_maintenance(comp_id),

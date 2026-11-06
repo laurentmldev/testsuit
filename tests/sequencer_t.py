@@ -1493,16 +1493,21 @@ def test_http_manual_command(tmp_path, no_git, api):
     """In maintenance, an http command can be run by hand from the Lab page: its answer comes back."""
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"].setdefault("vars", {})["api"] = api.url           # a lab default (all.vars)
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {
-        "version": {"http": {"url": f"{api.url}/status", "expect": {"json": {"version": "1.2"}}}}}
+        "version": {"http": {"url": "{{ component.vars.api }}/status", "expect": {"json": {"version": "1.2"}}}}}
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
 
     async def main():
         seq = bench.sequencer()
         seq.set_flag("counter_1", "maintenance", True)
+        info = await seq.manual_commands("counter_1")
         result = await seq.manual_command("counter_1", "version")
         await seq.close()
-        return result
-    result = asyncio.run(main())
+        return info, result
+    info, result = asyncio.run(main())
     assert result["ok"] and result["exit"] == 200 and '"version": "1.2"' in result["output"]
     assert result["run"] == f"GET {api.url}/status"
+    shown = next(c for c in info["commands"] if c["name"] == "version")["segments"]   # the Lab page shows it rendered
+    assert "".join(s["text"] for s in shown) == f"GET {api.url}/status"
+    assert {"text": api.url, "key": "component.vars.api"} in shown
