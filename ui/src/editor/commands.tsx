@@ -178,15 +178,13 @@ export function HttpEditor({ value, onChange, help, withSave }: {
   const statuses: string[] = (Array.isArray(expect.status) ? expect.status : expect.status !== undefined ? [expect.status] : []).map(String);
   return (
     <>
-      <div className="inline-fields">
-        <Field label="Method" help={help("method")}>
-          <Combo value={v.method} onChange={(x) => set("method", x ? x.toUpperCase() : undefined)} placeholder="GET"
-            choices={["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map((m) => ({ value: m }))} />
-        </Field>
-        <Field label="URL" help={help("url")} wide>
-          <Text keys mono value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
-        </Field>
-      </div>
+      <Field label="Method" help={help("method")}>
+        <Combo value={v.method} onChange={(x) => set("method", x ? x.toUpperCase() : undefined)} placeholder="GET"
+          choices={["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map((m) => ({ value: m }))} />
+      </Field>
+      <Field label="URL" help={help("url")}>
+        <Text keys mono value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
+      </Field>
       <Field label="Headers" help={help("headers")}><KeyValues value={v.headers} onChange={(x) => set("headers", x)} /></Field>
       <Field label="Query parameters" help={help("params")}><KeyValues value={v.params} onChange={(x) => set("params", x)} /></Field>
       <Field label="Body" help={help("json")}>
