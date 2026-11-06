@@ -196,14 +196,17 @@ export function HttpEditor({ value, onChange, help, withSave }: {
       </Field>
       {bodyKind === "json" && <Field label="JSON body" help={help("json")} wide><JsonField value={v.json} onChange={(x) => onChange({ ...v, json: x ?? {} })} placeholder='{"mode": "run"}' /></Field>}
       {bodyKind === "body" && <Field label="Raw body" help={help("body")} wide><Text keys mono multiline value={v.body} onChange={(x) => onChange({ ...v, body: x })} /></Field>}
+      <Field label="Extract (jq path)" help={help("extract")}>
+        <Text keys mono value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
+      </Field>
       <Section title="Expected answer" help={help("expect")}>
         <div className="inline-fields">
           <Field label="Status" help={help("expect")}>
             <Tags value={statuses} onChange={(l) => setExpect("status", l.length === 1 ? Number(l[0]) : l.map(Number).filter((n) => !Number.isNaN(n)))} placeholder="below 400" />
           </Field>
-          <Field label="Body matches" help="A regular expression the body must match."><Text mono value={expect.regex} onChange={(x) => setExpect("regex", x)} /></Field>
+          <Field label="Body matches" help="A regular expression the body (or the extracted part) must match."><Text mono value={expect.regex} onChange={(x) => setExpect("regex", x)} /></Field>
         </div>
-        <Field label="JSON contains" help="Values the JSON answer must contain; other fields are ignored." wide>
+        <Field label="JSON contains" help="Values the JSON answer (or the extracted part) must contain; other fields are ignored." wide>
           <JsonField value={expect.json} onChange={(x) => setExpect("json", x)} placeholder='{"state": "started"}' />
         </Field>
       </Section>

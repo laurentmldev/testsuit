@@ -1405,6 +1405,9 @@ def test_http_steps(bench, api):
             "url": f"{api.url}/jobs", "method": "POST", "params": {"run": "{{ run.id }}"},
             "headers": {"Authorization": "Bearer s3cret"}, "json": {"min": "{{ min_count }}"},
             "expect": {"status": [201], "json": {"min": "3"}}, "save": "job.json"}},
+        {"id": "job", "slot": "analysis", "needs": ["post"], "http": {
+            "url": f"{api.url}/jobs", "method": "POST", "json": {"min": 4}, "extract": ".job",
+            "expect": {"regex": "^7$"}, "save": "job2.json"}},
         {"id": "ready", "needs": ["post"], "wait_for": {"http": {"url": f"{api.url}/status",
                                                                  "expect": {"json": {"state": "ready"}}}}},
         {"id": "get", "needs": ["ready"], "http": f"{api.url}/status"},
@@ -1416,7 +1419,8 @@ def test_http_steps(bench, api):
     run = run_one(bench, bench.build("http", pipeline=pipeline))
     record = yaml.safe_load(read_member(run, "run.yml"))
     states = {s["id"]: s["state"] for s in record["steps"] if s["phase"] == "exploit"}
-    assert states == {"deploy": "succeeded", "collect": "succeeded", "post": "succeeded", "ready": "succeeded", "get": "succeeded",
+    assert states == {"deploy": "succeeded", "collect": "succeeded", "post": "succeeded", "job": "succeeded",
+                      "ready": "succeeded", "get": "succeeded",
                       "wrong": "failed", "boom": "failed", "down": "error"}
     method, path, headers, body = api.requests[0]
     assert (method, path, headers["Authorization"], body) == ("POST", f"/jobs?run={run['id']}", "Bearer s3cret",
@@ -1425,6 +1429,8 @@ def test_http_steps(bench, api):
     log = read_member(run, "logs/exploit/post[analysis].log")
     assert "POST " in log and "Authorization: ***" in log and "s3cret" not in log
     assert "status 500" in read_member(run, "logs/exploit/boom.log")
+    assert yaml.safe_load(read_member(run, "data/analysis/http/job2.json")) == {"job": 7, "min": 4}   # the whole answer
+    assert "extract .job\n7\n" in read_member(run, "logs/exploit/job[analysis].log").replace("\r", "")
 
 
 def test_http_checked():
@@ -1445,6 +1451,31 @@ def test_http_checked():
     assert judge({"expect": {"status": 404}}, Answer(404, ""))[0]
     assert judge({"expect": {"json": {"a": [1, 2]}}}, Answer(200, '{"a": [1, 2], "b": 0}'))[0]
     assert not judge({"expect": {"json": {"a": 1}}}, Answer(200, "<html>"))[0]
+
+
+def test_http_extract():
+    """'extract' takes a part of the JSON answer with a jq-style path; the expectations see that part."""
+    from testsuit.sequencer.httpcall import Answer, apply_extract, extract, judge, normalize
+    from testsuit.sequencer.util import SequencerError
+    data = {"jobs": [{"id": 1, "state": "run"}, {"id": 2, "state": "idle"}], "a b": {"x": 3}}
+    assert extract(data, ".jobs[0].state") == "run" and extract(data, ".jobs[-1].id") == 2
+    assert extract(data, ".jobs[].state") == ["run", "idle"] and extract(data, ".") == data
+    assert extract(data, '."a b".x') == 3 == extract(data, '.["a b"].x')
+    assert extract(data, ".missing.x") is None and extract(data, ".jobs[9]") is None
+    with pytest.raises(ValueError, match="cannot take"):
+        extract(data, ".jobs.state")
+    for bad in ("jobs", ".jobs[", ".a..b"):
+        with pytest.raises(SequencerError, match="is not a path"):
+            normalize({"url": "x", "extract": bad}, "here")
+    normalize({"url": "x", "extract": "{{ component.vars.path }}"}, "here")       # rendered first
+    body = '{"jobs": [{"id": 1, "state": "run"}]}'
+    spec = {"extract": ".jobs[0].state", "expect": {"regex": "^run$", "json": "run"}}
+    answer = apply_extract(spec, Answer(200, body))
+    assert answer.body == "run" and answer.raw == body and judge(spec, answer) == (True, "status 200")
+    assert apply_extract({"extract": ".jobs[0]"}, Answer(200, body)).body == '{"id": 1, "state": "run"}'
+    wrong = apply_extract(spec, Answer(200, "<html>"))
+    assert judge(spec, wrong) == (False, "cannot extract '.jobs[0].state': the answer is not JSON")
+    assert judge(spec, apply_extract(spec, Answer(500, "<html>"))) == (False, "status 500")
 
 
 def test_http_probe(tmp_path, no_git, api):
@@ -1469,6 +1500,30 @@ def test_http_probe(tmp_path, no_git, api):
     states, report = asyncio.run(main())
     assert states == ["idle", "running", "offline"]
     assert report["kind"] == "http" and report["steps"][-1]["command"] == f"GET {api.url}/status"
+
+
+def test_http_probe_extract(tmp_path, no_git, api):
+    """A probe's states can match a part of the JSON answer ('extract')."""
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["status"] = {
+        "probe": {"http": {"url": f"{api.url}/status", "extract": ".state"}},
+        "states": {"idle": {"regex": "^ready$"}, "running": {"regex": "^busy$"}, "offline": {"regex": "^odd$"}}}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        states = []
+        for state in ("ready", "busy", "odd"):
+            api.state = state
+            states.append(await seq.monitor.probe("counter_1"))
+        report = seq.monitor.reports["counter_1"]
+        await seq.close()
+        return states, report
+    states, report = asyncio.run(main())
+    assert states == ["idle", "running", "offline"]            # the regexes see the state alone, not the JSON
+    assert report["steps"][-1]["output"] == "odd"
 
 
 def test_http_command_via(tmp_path, no_git, api):
