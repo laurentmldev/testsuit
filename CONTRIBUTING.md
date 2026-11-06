@@ -19,6 +19,27 @@ Both commands must pass before a pull request is merged; CI runs them on Python 
 - New runtime dependencies go in `[project].dependencies` of `pyproject.toml`; dependencies only needed by one feature go in an extra under `[project.optional-dependencies]`.
 - Versions come from git tags (setuptools-scm): tag a release as `vX.Y.Z` on `main`.
 
+## License notice
+
+testsuit is licensed under the GNU AGPL, version 3 or later (see [LICENSE](LICENSE)). Every source file (`.py`, `.sh`, `.ts`, `.tsx`, `.js`, `.mjs`, `.css`, `.html`), new ones included, starts with this notice, in the file's comment syntax and after a `#!` or `<!doctype>` line if there is one:
+
+```
+Copyright (C) 2026 Laurent Millet-Lacombe
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This file is part of testsuit.
+testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+General Public License as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+Public License for more details.
+You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+see <https://www.gnu.org/licenses/>.
+```
+
+Copy it from any existing file. `tests/license_t.py` fails for a tracked source file without it. Vendored third-party files (`src/testsuit/exploit/runner/report_libs/`) keep their own license and are skipped.
+
 ## Adding a data file format
 
 1. Create `src/testsuit/datatools/DataFileMgrs/<Format>FileMgr.py` with a class deriving from `AFileMgr` (see `CsvFileMgr.py` or `MdfFileMgr.py` for complete examples).

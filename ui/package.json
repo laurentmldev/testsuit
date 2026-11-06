@@ -1,6 +1,7 @@
 {
   "name": "testsuit-sequencer-ui",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "version": "1.0.0",
   "description": "Web UI of the testsuit sequencer (tsqd): monitoring and Editor mode",
   "type": "module",

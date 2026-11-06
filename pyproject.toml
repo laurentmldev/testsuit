@@ -7,7 +7,7 @@ name = "testsuit"
 description = "This toolbox helps preparing and analysing tests data, based on Pandas mainly."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Laurent ML" }]
 keywords = ["test data", "hdf5", "tdms", "mdf", "csv", "data analysis", "test campaign"]
