@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Example test environment of a toy train, built on testsuit: data file formats, mexploit criteria, a datapack importer, a report logo, and a sequencer configuration"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 dependencies = [
     # outside this repo: "testsuit @ git+https://github.com/laurentmldev/testsuit"
     "testsuit",
