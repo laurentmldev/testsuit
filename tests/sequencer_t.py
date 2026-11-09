@@ -1218,6 +1218,69 @@ def test_ssh_transport(tmp_path, ssh_server):
     asyncio.run(main())
 
 
+def test_ssh_host_key_pinned(tmp_path, ssh_server):
+    """tsq_ssh_host_key: the declared key or fingerprint is trusted without any known_hosts file, another key is
+    refused, and a host without one keeps checking known_hosts."""
+    asyncssh = pytest.importorskip("asyncssh")
+    from testsuit.sequencer.inventory import Component
+    from testsuit.sequencer.transports import create_transport
+    start, key_file = ssh_server
+    other = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
+
+    async def main():
+        server = await start()
+        port = server.sockets[0].getsockname()[1]
+        conn_key = await asyncssh.get_server_host_key("127.0.0.1", port)      # what the server presents
+        public = conn_key.export_public_key().decode().strip()
+        fingerprint = conn_key.get_fingerprint("sha256")
+        base = {"ansible_host": "127.0.0.1", "ansible_port": port, "ansible_user": "tsq",
+                "ansible_ssh_private_key_file": str(key_file)}
+        outcome = {}
+        try:
+            for name, extra in (("key", {"tsq_ssh_host_key": public}),
+                                ("fingerprint", {"tsq_ssh_host_key": fingerprint}),
+                                ("list", {"tsq_ssh_host_key": [other, public + " root@box"]}),
+                                ("wrong", {"tsq_ssh_host_key": other}),
+                                ("wrong over options", {"tsq_ssh_host_key": other, "tsq_ssh_options": {"known_hosts": None}}),
+                                ("unpinned", {"tsq_ssh_options": {"known_hosts": str(tmp_path / "empty_known_hosts")}})):
+                (tmp_path / "empty_known_hosts").write_text("")
+                transport = create_transport("ssh", Component("box", {**base, **extra}), str(tmp_path / "r"))
+                result = await transport.shell("echo pinned")
+                outcome[name] = result.output.strip() if result.completed else result.error
+                await transport.close()
+        finally:
+            server.close()
+        return outcome
+    outcome = asyncio.run(main())
+    assert outcome["key"] == outcome["fingerprint"] == outcome["list"] == "pinned", outcome
+    for name in ("wrong", "wrong over options"):
+        assert "not the one declared in tsq_ssh_host_key" in outcome[name], outcome
+    assert "declare it in tsq_ssh_host_key" in outcome["unpinned"], outcome
+
+
+@pytest.mark.parametrize("value, problem", [
+    ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ1w", None),
+    (["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ1w root@box", "SHA256:" + "a" * 43], None),
+    ("box.lab ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ1w", "starts with a host name"),
+    ("SHA256:short", "not a SHA256 fingerprint"),
+    ("hello", "neither a public key"),
+    ("ssh-ed25519 not*base64", "not base64"),
+])
+def test_ssh_host_key_checked_at_load(tmp_path, value, problem):
+    """A malformed tsq_ssh_host_key stops the inventory from loading, with what is wrong."""
+    import yaml
+    from testsuit.sequencer.inventory import load_inventory
+    from testsuit.sequencer.util import SequencerError
+    inventory = tmp_path / "lab.yml"
+    inventory.write_text(yaml.safe_dump({"all": {"hosts": {"box": {"ansible_host": "10.0.0.1",
+                                                                     "tsq_ssh_host_key": value}}}}))
+    if problem is None:
+        assert load_inventory(inventory).components["box"].vars["tsq_ssh_host_key"] == value
+    else:
+        with pytest.raises(SequencerError, match=problem):
+            load_inventory(inventory)
+
+
 def test_tsq_shell(tmp_path, ssh_server):
     """tsq_shell: steps (pid file) and short checks run under the shell named, not /bin/sh."""
     from testsuit.sequencer.inventory import Component

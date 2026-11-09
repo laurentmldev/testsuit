@@ -215,7 +215,7 @@ function useInvHelp() {
 }
 
 const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
-  "tsq_label", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
+  "tsq_label", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
   "tsq_library"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
@@ -509,6 +509,13 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <Field label="Shell" help={help(["all", "hosts", "_", "tsq_shell"])}>
         <Text mono value={vars.tsq_shell} onChange={(v) => set("tsq_shell", v)} placeholder={effective("tsq_shell") ? `${effective("tsq_shell")} (inherited)` : "default: sh, bash, bash -l…"} />
       </Field>
+      {(effective("tsq_transport") || base?.transport || "ssh") === "ssh" && (
+        <Field label="SSH host key" help={help(["all", "hosts", "_", "tsq_ssh_host_key"])}
+          hint={<>one per line; on the server: <code>cat /etc/ssh/ssh_host_ed25519_key.pub</code>, or <code>ssh-keygen -F {effective("ansible_host") || name}</code> where it is known</>}>
+          <HostKeys value={vars.tsq_ssh_host_key} onChange={(v) => set("tsq_ssh_host_key", v)}
+            inherited={vars.tsq_ssh_host_key == null ? effective("tsq_ssh_host_key") : undefined} />
+        </Field>
+      )}
       <Section title="Its commands, as the lab resolves them" collapsed={false}>
         <HostCard name={name} />
       </Section>
@@ -519,9 +526,40 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
-          exclude={["tsq_label", "tsq_description", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_commands", "tsq_status", "tsq_selftest"]} />
+          exclude={["tsq_label", "tsq_description", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_commands", "tsq_status", "tsq_selftest"]} />
       </Section>
     </div>
+  );
+}
+
+/** Why an entry of tsq_ssh_host_key is not a public key or a SHA256 fingerprint ("" when it is), as the lab
+ * loader checks it. */
+export function hostKeyProblem(entry: string): string {
+  const e = entry.trim();
+  if (e.startsWith("SHA256:")) return /^SHA256:[A-Za-z0-9+/]{43}=?$/.test(e) ? "" : "not a SHA256 fingerprint, as ssh-keygen -lf prints it";
+  const parts = e.split(/\s+/);
+  const keyType = /^(ssh-|ecdsa-|sk-)[a-z0-9@.-]+$/;
+  if (parts.length >= 3 && keyType.test(parts[1])) return `starts with a host name, as in known_hosts: keep from ${parts[1]} on`;
+  if (parts.length < 2 || !keyType.test(parts[0])) return "neither a public key (ssh-ed25519 AAAA…) nor a SHA256: fingerprint";
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(parts[1])) return "the key data is not base64";
+  return "";
+}
+
+/** The host keys (tsq_ssh_host_key) of a component: one per line, a string for one, a list for several. Saved
+ * when the field loses focus, so new lines can be typed. */
+function HostKeys({ value, onChange, inherited }: { value: any; onChange: (v: string | string[] | undefined) => void; inherited?: any }) {
+  const text = (v: any) => (Array.isArray(v) ? v.join("\n") : v ?? "");
+  const [draft, setDraft] = useState(text(value));
+  useEffect(() => setDraft(text(value)), [JSON.stringify(value)]);
+  const lines = draft.split("\n").map((l: string) => l.trim()).filter(Boolean);
+  const problems = lines.map(hostKeyProblem).map((p: string, i: number) => (p ? `line ${i + 1}: ${p}` : "")).filter(Boolean);
+  const commit = () => onChange(lines.length === 0 ? undefined : lines.length === 1 ? lines[0] : lines);
+  return (
+    <>
+      <Text mono multiline value={draft} onChange={setDraft} onBlur={commit}
+        placeholder={inherited ? `${text(inherited)} (inherited)` : "not pinned: the sequencer's known_hosts is checked"} />
+      {problems.map((p: string) => <div key={p} className="error-text">{p}</div>)}
+    </>
   );
 }
 
