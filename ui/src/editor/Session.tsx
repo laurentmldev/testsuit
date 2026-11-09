@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { del, post, put } from "../api";
 import { HelpPanel, HelpProvider, KeysProvider } from "../fields";
-import { CodeEditor } from "../monaco";
+import { CodeEditor, yamlSections } from "../monaco";
 import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
 import { runtimeKeyItems, SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
 import { InventoryForm } from "./InventoryForm";
@@ -43,6 +43,18 @@ const KIND_LABELS: [string, string, string][] = [
 
 const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "library", setup: "setup", testdef: "testdef", subpipelines: "subpipelines" };
 
+// what one file of a kind is called, shown on the header of the open file
+const KIND_NAME: Record<string, string> = {
+  inventory: "Lab inventory", library: "Roles and components", testdef: "Test definition", setup: "Setup",
+  subpipelines: "Sub-pipelines", dictionary: "Key file", template: "Template", yaml: "YAML", other: "File",
+};
+
+/** The folder (with its trailing slash) and the name of a path. */
+function splitPath(path: string): [string, string] {
+  const i = path.lastIndexOf("/");
+  return [path.slice(0, i + 1), path.slice(i + 1)];
+}
+
 function FileTree({ files, current, problems, onNew }: { files: FileInfo[]; current: string | null; problems: Problem[]; onNew: () => void }) {
   const { open } = useSession();
   const [showOther, setShowOther] = useState(false);
@@ -57,23 +69,30 @@ function FileTree({ files, current, problems, onNew }: { files: FileInfo[]; curr
   }, [problems]);
   return (
     <div className="file-tree">
-      <button className="primary small wide" onClick={onNew}>+ New…</button>
+      <div className="file-tree-new"><button className="primary small wide" onClick={onNew}>+ New…</button></div>
       {KIND_LABELS.map(([kind, label, help]) => {
         const list = files.filter((f) => f.kind === kind);
-        if (!list.length || (kind === "other" && !showOther)) {
+        const hasCurrent = list.some((f) => f.path === current);
+        if (!list.length || (kind === "other" && !showOther && !hasCurrent)) {
           return kind === "other" && list.length ? (
-            <div key={kind} className="tree-group"><button className="link small" onClick={() => setShowOther(true)}>{list.length} other files…</button></div>
+            <div key={kind} className={`tree-group kind-${kind}`}><button className="link small tree-more" onClick={() => setShowOther(true)}>{list.length} other files…</button></div>
           ) : null;
         }
         return (
-          <div key={kind} className="tree-group">
-            <div className="tree-group-title" title={help}>{label}</div>
-            {list.map((f) => (
-              <div key={f.path} className={classes("tree-row", current === f.path && "selected")} onClick={() => open(f.path)} title={f.path}>
-                <span className="tree-name">{f.path}</span>
-                {counts[f.path]?.e ? <span className="count bad">{counts[f.path].e}</span> : counts[f.path]?.w ? <span className="count warn">{counts[f.path].w}</span> : null}
-              </div>
-            ))}
+          <div key={kind} className={classes(`tree-group kind-${kind}`, hasCurrent && "has-current")}>
+            <div className="tree-group-title" title={help}>
+              <span className="kind-dot" aria-hidden="true" />{label}<span className="tree-group-count">{list.length}</span>
+            </div>
+            {list.map((f) => {
+              const [dir, base] = splitPath(f.path);
+              const selected = current === f.path;
+              return (
+                <div key={f.path} className={classes("tree-row", selected && "selected")} onClick={() => open(f.path)} title={f.path} aria-current={selected ? "page" : undefined}>
+                  <span className="tree-name">{dir && <span className="tree-dir">{dir}</span>}<span className="tree-base">{base}</span></span>
+                  {counts[f.path]?.e ? <span className="count bad">{counts[f.path].e}</span> : counts[f.path]?.w ? <span className="count warn">{counts[f.path].w}</span> : null}
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -108,11 +127,18 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   ];
   const current = views.some(([v]) => v === view) ? view : views[0][0];
   const parsed = doc.data !== undefined && doc.data !== null;
+  // the YAML view of a YAML file lists its top-level sections, to jump to one
+  const [jump, setJump] = useState<{ line: number } | null>(null);
+  useEffect(() => setJump(null), [doc.path, current]);
+  const isYaml = /\.ya?ml$/.test(doc.path) && doc.kind !== "template";
+  const sections = useMemo(() => (isYaml ? yamlSections(doc.content) : []), [isYaml, doc.content]);
+  const showYaml = current === "yaml" || (!parsed && current !== "template");
+  const [dir, base] = splitPath(doc.path);
   let body;
-  if (current === "yaml" || (!parsed && current !== "template")) {
+  if (showYaml) {
     body = (
       <CodeEditor uri={`file:///session/${session.sid}/${doc.path}`} value={doc.content} onChange={api.setText} schema={schema}
-        markers={doc.problems.filter((p) => p.file === doc.path)} onSave={api.flush} revealLine={revealLine} />
+        markers={doc.problems.filter((p) => p.file === doc.path)} onSave={api.flush} revealLine={revealLine} reveal={jump} sections={isYaml} />
     );
   } else if (current === "template") body = <TemplateEditor doc={doc} api={api} />;
   else if (current === "pipeline") body = <PipelineEditor doc={doc} api={api} />;
@@ -121,9 +147,10 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   else if (doc.kind === "setup") body = <SetupForm doc={doc} api={api} />;
   else if (doc.kind === "testdef") body = <TestdefForm doc={doc} api={api} />;
   return (
-    <div className="doc-view">
+    <div className={`doc-view kind-${doc.kind}`}>
       <div className="doc-head">
-        <code className="doc-path">{doc.path}</code>
+        <span className="kind-chip" title={KIND_LABELS.find(([k]) => k === doc.kind)?.[2] || undefined}>{KIND_NAME[doc.kind] || doc.kind}</span>
+        <span className="doc-path" title={doc.path}>{dir && <span className="doc-dir">{dir}</span>}<span className="doc-base">{base}</span></span>
         <div className="segmented">
           {views.map(([v, label]) => <button key={v} className={current === v ? "selected" : ""} onClick={() => setView(v)}>{label}</button>)}
         </div>
@@ -136,6 +163,12 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
         <span className={classes("save-state", api.state)}>{{ saved: "saved in the session", pending: "editing…", saving: "saving…", error: "not saved" }[api.state]}</span>
         {doc.aliases && current !== "yaml" && <span className="badge info" title="This file uses YAML aliases (*name). A form change to an aliased part gives that place a copy of its own.">aliases</span>}
       </div>
+      {showYaml && sections.length > 1 && (
+        <nav className="section-bar" aria-label="Sections of the file">
+          <span className="section-bar-title">Sections</span>
+          {sections.map((sec) => <button key={sec.line} className="section-chip" onClick={() => setJump({ line: sec.line })} title={`Go to line ${sec.line}`}>{sec.key}</button>)}
+        </nav>
+      )}
       {api.error && <div className="error-box">{api.error}</div>}
       {!parsed && current !== "yaml" && current !== "template" && <div className="banner warn">The file does not parse as YAML: fix it in the YAML view first.</div>}
       <div className="doc-body">{body}</div>

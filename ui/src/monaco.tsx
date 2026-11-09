@@ -91,12 +91,46 @@ export function languageOf(path: string): string {
   return "plaintext";
 }
 
+const TOP_KEY = /^(?!-|#|\s)("[^"]+"|'[^']+'|[^:#\s][^:#]*?)\s*:(\s|$)/;
+
+/** The top-level keys of a YAML text with their line: the sections of a key file or a setup. */
+export function yamlSections(text: string): { key: string; line: number }[] {
+  const out: { key: string; line: number }[] = [];
+  text.split("\n").forEach((l, i) => {
+    const m = l.match(TOP_KEY);
+    if (m) out.push({ key: m[1].replace(/^["']|["']$/g, ""), line: i + 1 });
+  });
+  return out;
+}
+
+/**
+ * The lines where a rule separates two top-level YAML sections: the first line of each section after
+ * the first one, or of the comment lines just above it, which describe it. A one-line key that follows
+ * another one directly (a list of scalar settings) stays with it.
+ */
+export function sectionStarts(text: string): number[] {
+  const lines = text.split("\n");
+  const starts: number[] = [];
+  yamlSections(text).slice(1).forEach(({ line }) => {
+    let first = line - 1;
+    while (first > 0 && lines[first - 1].startsWith("#")) first--;
+    const block = /:\s*(#.*)?$/.test(lines[line - 1]);
+    const apart = first > 0 && !lines[first - 1].trim();
+    if (block || apart) starts.push(first + 1);
+  });
+  return starts;
+}
+
 export function CodeEditor({
-  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine,
+  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine, reveal, sections,
 }: {
   uri: string; value: string; onChange?: (v: string) => void; language?: string; readOnly?: boolean; markers?: Marker[];
   height?: number | string; onSave?: () => void; schema?: any; keys?: { label: string; detail?: string; doc?: string }[];
   revealLine?: number | null;
+  /** a line to show at the top of the editor (a new object each time, to go there again) */
+  reveal?: { line: number } | null;
+  /** draw a rule above each top-level YAML section */
+  sections?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -162,6 +196,30 @@ export function CodeEditor({
       };
     }));
   }, [markers, value]);
+
+  // a rule above each top-level section (and the comments that introduce it)
+  const ruleDecorations = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  useEffect(() => {
+    const instance = editor.current;
+    if (!instance) return;
+    try {
+      ruleDecorations.current?.clear();
+    } catch {
+      // the collection of an editor already disposed (another file opened)
+    }
+    ruleDecorations.current = instance.createDecorationsCollection(sections ? sectionStarts(value).map((line) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: { isWholeLine: true, className: "yaml-section-rule", linesDecorationsClassName: "yaml-section-gutter" },
+    })) : []);
+  }, [uri, value, sections]);
+
+  useEffect(() => {
+    if (reveal && editor.current) {
+      editor.current.revealLineNearTop(reveal.line);
+      editor.current.setPosition({ lineNumber: reveal.line, column: 1 });
+      editor.current.focus();
+    }
+  }, [reveal]);
 
   useEffect(() => {
     if (revealLine && editor.current) {
