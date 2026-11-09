@@ -12,7 +12,8 @@
 # see <https://www.gnu.org/licenses/>.
 
 # The toy-train test environment in Docker: the sequencer of the emulated mode, its UI and Editor.
-#   cp .env.sample .env          # optional: proxies, port, testsuit version
+#   cp .env.sample .env          # optional: host folders and user, proxies, port, testsuit version
+#   mkdir -p .work               # before the first run: a missing mounted folder would be created by root
 #   docker compose up --build    # then open http://localhost:8640
 # Any other command runs in the same image, for example:
 #   docker compose run --rm --entrypoint datapack toytrain datapack/testdef/max_speed/testdef.yml --nocheck
@@ -30,16 +31,18 @@ services:
         TESTSUIT_SPEC: ${TESTSUIT_SPEC:-testsuit[sequencer]>=0.4.6}
     image: toytrain:${TOYTRAIN_TAG:-latest}
     container_name: toytrain
+    # the host user, so that what the container writes in the mounted folders belongs to it
+    user: "${TOYTRAIN_UID:-1000}:${TOYTRAIN_GID:-1000}"
     ports:
       - "${TSQ_PORT:-8640}:8640"
     volumes:
-      # the test definitions and the lab, edited from the host or from the Editor
-      - ./datapack:/app/datapack
-      - ./lab:/app/lab
+      # the test definitions and the lab, host folders (git working copies) edited from the host or the Editor
+      - ${TOYTRAIN_DATAPACK_DIR:-./datapack}:/app/datapack
+      - ${TOYTRAIN_LAB_DIR:-./lab}:/app/lab
       # outputs of the datapack tool and of exploit_runner
       - ./.work:/app/.work
       # the sequencer's storage (tsq.dev.yml: storage.root) and the emulated components' folders
-      - toytrain-emu:/root/.toytrain-emu
+      - toytrain-emu:/home/toytrain/.toytrain-emu
     restart: unless-stopped
 
 volumes:

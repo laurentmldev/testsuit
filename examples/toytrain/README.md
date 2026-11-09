@@ -208,17 +208,20 @@ A run in emulated mode is flagged non-conform against `baseline_expected.yml`, s
 The example ships a Docker image of this environment: Debian 12 slim, Miniconda, testsuit with its sequencer, and the `toytrain` package. By default the container runs the sequencer of the emulated mode (`tsq.dev.yml`), with its UI and Editor on port 8640.
 
 ```bash
-cp .env.sample .env            # optional: proxies, host port, Miniconda and testsuit versions
+cp .env.sample .env            # optional: host folders and user, proxies, host port, Miniconda and testsuit versions
+mkdir -p .work                 # before the first run, so that it belongs to you rather than to root
 docker compose up --build      # then open http://localhost:8640
 ```
 
 | File | Content |
 |---|---|
 | `Dockerfile` | the image: system packages, Miniconda, `testsuit[sequencer]` from PyPI, then this package (`pip install -e`) and the example's files in `/app` |
-| `docker-compose.yml` | the `toytrain` service: build arguments taken from `.env`, port 8640, `datapack/`, `lab/` and `.work/` mounted from this folder, the sequencer storage (`~/.toytrain-emu`) in a named volume |
+| `docker-compose.yml` | the `toytrain` service: build arguments taken from `.env`, port 8640, the datapack, lab and `.work/` folders mounted from the host, the sequencer storage (`~/.toytrain-emu`) in a named volume |
 | `.env.sample` | every setting of the compose file, to copy to `.env` (which Git ignores) |
 
-The datapack and lab folders are mounted from the host, so what the Editor changes lands in your working copy, and the reverse. Any other command runs in the same image:
+The datapack and lab folders are mounted from host paths, so what the Editor changes lands directly in your working copies, ready to be reviewed, committed and pushed from the host, and the reverse. By default they are this example's `datapack/` and `lab/`; point `TOYTRAIN_DATAPACK_DIR` and `TOYTRAIN_LAB_DIR` in `.env` to your own clones of the tests and lab repositories instead. The container runs as `TOYTRAIN_UID:TOYTRAIN_GID` (default `1000:1000`; set them to the output of `id -u` and `id -g`), so the files it writes there belong to you, not to root.
+
+Any other command runs in the same image:
 
 ```bash
 docker compose run --rm --entrypoint datapack toytrain datapack/testdef/max_speed/testdef.yml --nocheck
