@@ -181,6 +181,14 @@ function DataRepos({ doc, data, update }: { doc: Doc; data: any; update: (fn: (d
             <Field label="Download folder" help={help(["datarepositories", 0, "path"]) || "Where the datasets of this repository are downloaded (relative to the setup file)."}>
               <Text keys mono value={repo.path} onChange={(v) => update((d) => (d.datarepositories[i].path = v))} />
             </Field>
+            <Field label="Purge unused after (days)" help={help(["datarepositories", 0, "purge_after_days"]) || "Days after which a downloaded dataset that no datapack used is deleted (downloaded again when needed). 90 by default, 0 keeps them all."}>
+              <input type="number" min={0} placeholder="90" value={repo.purge_after_days ?? ""}
+                onChange={(e) => update((d) => {
+                  const v = e.target.value === "" ? NaN : Math.max(0, Math.floor(Number(e.target.value)));
+                  if (Number.isNaN(v)) delete d.datarepositories[i].purge_after_days;
+                  else d.datarepositories[i].purge_after_days = v;
+                })} />
+            </Field>
           </div>
           {repoPath(i) && <div className="resolved small">resolved: <code>{repoPath(i)}</code></div>}
           {(repo.datasources || []).map((src: any, j: number) => {

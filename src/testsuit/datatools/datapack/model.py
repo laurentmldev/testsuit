@@ -33,6 +33,7 @@ Setup::
     datarepositories:
       - id: toytrain
         path: "{{ setup.path }}/../../.work/datarepo"   # where datasets are imported
+        purge_after_days: 90              # datasets unused that long are deleted (default 90, 0: never)
         datasources:
           - id: software
             importer: toytrain-release
@@ -137,6 +138,8 @@ class DataRepository(_Model):
     name: str = ""
     path: str
     datasources: list[Datasource] = Field(default_factory=list)
+    # days after which a dataset folder no datapack used is deleted from path (0: never)
+    purge_after_days: int = Field(default=90, ge=0)
 
 
 class InputFile(_Model):

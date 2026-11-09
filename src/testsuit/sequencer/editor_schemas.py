@@ -534,6 +534,10 @@ SETUP = {
             "type": "object", "required": ["id", "path"], "additionalProperties": False,
             "properties": {"id": {"type": "string"}, "name": {"type": "string"},
                            "path": h("Local folder the datasets are imported into.", type="string"),
+                           "purge_after_days": h("Days after which a dataset folder of `path` that no datapack "
+                                                 "used is deleted (it is downloaded again when needed): 90 by "
+                                                 "default, 0 to keep them all.", type="integer", minimum=0,
+                                                 default=90),
                            "datasources": {"type": "array", "items": {
                                "type": "object", "required": ["id", "importer", "source"], "additionalProperties": False,
                                "properties": {"id": {"type": "string"}, "name": {"type": "string"},

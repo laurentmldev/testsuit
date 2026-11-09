@@ -49,6 +49,7 @@ Keys always available (they override dictionary keys of the same name):
 """
 from __future__ import annotations
 
+import contextlib
 import getpass
 import glob
 import graphlib
@@ -130,6 +131,64 @@ def normalize_dataset_path(version: str) -> str:
     return version.replace("/", ".").replace("@", "_").replace(" ", "_").strip(".")
 
 
+LAST_USED_SUFFIX = ".last_used"
+
+
+def usage_marker(local_path: Path) -> Path:
+    """File whose modification time is when a dataset folder was last used: next to the folder, not in it
+    (a file in it would make a git dataset look modified)."""
+    return local_path.parent / f".{local_path.name}{LAST_USED_SUFFIX}"
+
+
+def mark_dataset_used(local_path: Path) -> None:
+    marker = usage_marker(local_path)
+    marker.touch()
+    os.utime(marker)
+
+
+def purge_unused_datasets(repo_path: Path, days: int, declared: set[str] = frozenset(),
+                          keep: set[Path] = frozenset(), now: float | None = None) -> list[Path]:
+    """Delete the dataset folders of a data repository that no datapack used for `days` days.
+
+    Only folders ``<repo_path>/<dataset id>/<version>`` are considered. A folder without a usage marker
+    (imported before markers existed) gets one now when its dataset id is in `declared`, which starts its
+    clock; otherwise it is left alone, not being known as a dataset. Folders in `keep` are never deleted.
+    A folder that cannot be deleted is reported and left.
+
+    :param days: 0 or less: nothing is purged
+    :return: the folders deleted
+    """
+    if days <= 0 or not repo_path.is_dir():
+        return []
+    limit = (time.time() if now is None else now) - days * 86400
+    keep = {k.resolve() for k in keep}
+    removed = []
+    for id_dir in sorted(repo_path.iterdir()):
+        if not id_dir.is_dir() or id_dir.name.startswith("."):
+            continue
+        for folder in sorted(id_dir.iterdir()):
+            if not folder.is_dir() or folder.name.startswith(".") or folder.resolve() in keep:
+                continue
+            marker = usage_marker(folder)
+            if not marker.is_file():
+                if id_dir.name in declared:
+                    mark_dataset_used(folder)
+                continue
+            if marker.stat().st_mtime >= limit:
+                continue
+            try:
+                shutil.rmtree(folder, onerror=_on_rm_error)
+            except OSError as e:
+                _warn(f"could not purge unused dataset '{folder}': {e}")
+                continue
+            marker.unlink(missing_ok=True)
+            removed.append(folder)
+        with contextlib.suppress(OSError):              # its last version gone
+            if not any(id_dir.iterdir()):
+                id_dir.rmdir()
+    return removed
+
+
 def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, nocheck: bool = False) -> dict | None:
     """Import a dataset of a datasource into repo_path (or check its version if already there).
 
@@ -169,6 +228,7 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
             except ProcessorError as e:
                 raise DatapackError(str(e)) from e
 
+    mark_dataset_used(local_path)
     return {"id": dataset.id, "datasource": datasource.id, "importer": datasource.importer,
             "source": datasource.source, "version": dataset.version, "path": local_path.as_posix(),
             "confirmed": confirmed}
@@ -450,6 +510,11 @@ class _Builder:
                         self.dataset_keys.append((load_yaml_mapping(keys_file), keys_file.as_posix()))
                         self.dictionaries.append(("datasets", keys_file))
                     self.dataset_keys.append(({dataset.id: {"path": record["path"], "version": dataset.version}}, "<datapack>"))
+            used = {Path(r["path"]) for r in self.datasets}
+            declared = {ds.id for source in repository.datasources for ds in source.datasets}
+            for folder in purge_unused_datasets(repo_path, repository.purge_after_days, declared, used):
+                _info(Fore.LIGHTBLACK_EX + "     [PURGED] " + folder.relative_to(repo_path).as_posix()
+                      + f" (unused for {repository.purge_after_days} days)")
 
         keys = self.keys()
         former = former_names(raw)                                                    # before rendering: a clear error

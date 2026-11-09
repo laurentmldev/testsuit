@@ -239,3 +239,95 @@ def test_former_names_refused():
     assert "configuration 'c', slot 's': 'realm' is now 'stage_slot'" in found
     with pytest.raises(ValueError, match="'realms' is now 'stage_slots'"):
         Phase(id="p", realms=["r"], steps=[])
+
+
+################### purge of unused datasets ###################
+
+class _DirImporter:
+    """An importer writing a VERSION file (registered as 'dir' by the tests below)."""
+
+    def __init__(self, targetDir, remotePath, versionId):
+        self.target, self.version = Path(targetDir), versionId
+
+    def retrieve(self):
+        self.target.mkdir(parents=True)
+        (self.target / "VERSION").write_text(self.version)
+        return True
+
+    def checkVersion(self, expected):
+        return (self.target / "VERSION").read_text() == expected
+
+    def getChanges(self, testClean=False):
+        return True if testClean else []
+
+
+def _old(path: Path, days: float) -> None:
+    import os
+    import time
+    stamp = time.time() - days * 86400
+    os.utime(path, (stamp, stamp))
+
+
+def test_purge_unused_datasets(tmp_path):
+    from testsuit.datatools.datapack.datapack_tools import mark_dataset_used, purge_unused_datasets, usage_marker
+    repo = tmp_path / "repo"
+    for rel in ("sw/v1", "sw/v2", "sw/v3", "model/m1", "other/x"):
+        (repo / rel).mkdir(parents=True)
+    for rel in ("sw/v1", "sw/v2", "model/m1"):
+        mark_dataset_used(repo / rel)
+    _old(usage_marker(repo / "sw/v1"), 100)          # stale
+    _old(usage_marker(repo / "sw/v2"), 30)           # recent enough
+    _old(usage_marker(repo / "model/m1"), 100)       # stale, but its only version: sw/model folder goes too
+    (repo / "sw" / "v1" / "f").write_text("x")
+    (repo / "sw" / "v1" / "f").chmod(0o444)          # read-only, as 'finalize' leaves datasets
+
+    assert purge_unused_datasets(repo, 0, {"sw"}) == []                       # 0: never
+    removed = purge_unused_datasets(repo, 90, declared={"sw"})
+    assert removed == [repo / "model" / "m1", repo / "sw" / "v1"]
+    assert not (repo / "model").exists() and not usage_marker(repo / "sw/v1").exists()
+    assert (repo / "sw" / "v2").is_dir()
+    # no marker: a declared dataset starts counting now, anything else is not touched
+    assert usage_marker(repo / "sw/v3").is_file() and not usage_marker(repo / "other/x").exists()
+    _old(usage_marker(repo / "sw/v3"), 100)
+    assert purge_unused_datasets(repo, 90, keep={repo / "sw" / "v3"}) == []   # in use by this build
+    assert purge_unused_datasets(repo, 90) == [repo / "sw" / "v3"]
+    assert (repo / "other" / "x").is_dir()
+
+
+def test_datapack_purges_unused_datasets(tmp_path, no_git):
+    from testsuit.datatools.datapack import importers
+    from testsuit.datatools.datapack.datapack_tools import mark_dataset_used, usage_marker
+    root = tmp_path / "dp"
+    (root / "setup").mkdir(parents=True)
+    (root / "testdef").mkdir()
+    repo = tmp_path / "datarepo"
+    for version in ("v0", "v1"):                    # a former version, and the one used, both stale
+        (repo / "sw" / version).mkdir(parents=True)
+        (repo / "sw" / version / "VERSION").write_text(version)
+        mark_dataset_used(repo / "sw" / version)
+        _old(usage_marker(repo / "sw" / version), 200)
+    setup = {"id": "s", "datarepositories": [{"id": "r", "path": str(repo), "purge_after_days": 180, "datasources": [
+                 {"id": "src", "importer": "dir", "source": "nowhere", "datasets": [{"id": "sw", "version": "v1"}]}]}],
+             "slot_types": {"t": {"configurations": {"std": {"inputs": []}}}},
+             "configurations": {"c": {"slots": {"a": {"type": "t", "configuration": "std"}}}}}
+    (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
+    (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
+                                                            "setup_config": "c"}))
+    importers.register_data_importer("dir", _DirImporter)
+    try:
+        datapack(root / "testdef" / "t.yml", nocheck=True, output_dir=tmp_path / "out")
+    finally:
+        importers.unregister_data_importer("dir")
+    assert not (repo / "sw" / "v0").exists()
+    assert (repo / "sw" / "v1").is_dir()
+    import time
+    assert time.time() - usage_marker(repo / "sw" / "v1").stat().st_mtime < 60
+
+
+def test_purge_after_days_validated():
+    from pydantic import ValidationError
+    from testsuit.datatools.datapack.model import DataRepository
+    assert DataRepository(id="r", path="p").purge_after_days == 90
+    assert DataRepository(id="r", path="p", purge_after_days="0").purge_after_days == 0   # rendered from a key
+    with pytest.raises(ValidationError):
+        DataRepository(id="r", path="p", purge_after_days=-1)
