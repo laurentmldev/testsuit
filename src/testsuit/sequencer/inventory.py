@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from testsuit.sequencer.util import SequencerError, deep_merge, load_yaml
+from testsuit.sequencer.transports.ssh import pinned_host_keys
 
 LOCK_MODES = ("exclusive", "shared", "none")
 
@@ -208,6 +209,10 @@ def load_inventory(path: Path) -> Inventory:
         if component.lock not in LOCK_MODES:
             raise SequencerError(f"inventory '{path}': component '{host}': tsq_lock '{component.lock}' "
                                  f"is not one of {', '.join(LOCK_MODES)}")
+        try:
+            pinned_host_keys(merged.get("tsq_ssh_host_key"))
+        except SequencerError as e:
+            raise SequencerError(f"inventory '{path}': component '{host}': {e}") from None
         components[host] = component
 
     stages = {name: Stage(id=name, type=str(d["vars"]["tsq_stage_type"]), components=d["hosts"], vars=d["vars"],

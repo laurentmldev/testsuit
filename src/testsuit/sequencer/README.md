@@ -458,6 +458,23 @@ all:
 - `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
 - Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Several components of a stage can have the same role (two loggers): each slot of that role gets its own.
 - `tsq_shell` is the shell the commands of a component run under, on the component (`bash`, `/bin/bash`, `"bash -l"` to read the login profile). By default, steps and commands run under `/bin/sh` (dash on Debian and Ubuntu), whatever the user's login shell, while short checks (probes, self-tests) run under the login shell; with `tsq_shell`, both use it. A POSIX shell is expected: the sequencer's own helpers (pid files, kill) run under it too.
+- `tsq_ssh_host_key` pins the SSH key of a component: its public key (`ssh-ed25519 AAAA...`) or its `SHA256:` fingerprint, or a list of them. The server must then present one of them, and no `known_hosts` file is read for that host, so a changed or spoofed key fails the login loudly. Without it, the `known_hosts` of the user running the sequencer is checked: in a container it is usually empty, and every login fails with *Host key is not trusted*. Declaring the keys in the inventory needs no `known_hosts` mounted in the container, and keeps the lab definition the one source of truth. The sequencer never trusts a key just because the server sent it. To get a key:
+  - on the server itself (the most trustworthy): `cat /etc/ssh/ssh_host_ed25519_key.pub`, the whole line; the other types are in the other `/etc/ssh/ssh_host_*_key.pub` files;
+  - from a machine that already logs in to it, such as the docker host: `ssh-keygen -F <address> -f ~/.ssh/known_hosts` (`-F '[<address>]:<port>'` for a port other than 22) prints `<address> ssh-ed25519 AAAA...` lines: copy them from `ssh-ed25519` on, without the address;
+  - a fingerprint instead: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server, the `SHA256:...` part.
+
+  ```yaml
+  controller_1:
+    ansible_host: 10.42.1.10
+    tsq_ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+  logger_1:
+    ansible_host: 10.42.1.11
+    tsq_ssh_host_key:                          # several: any of them is accepted
+      - SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8
+      - ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+  ```
+
+  A malformed value stops the lab from loading. A value in a stage group or `all.vars` applies to all its hosts, for hosts cloned from one image.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;

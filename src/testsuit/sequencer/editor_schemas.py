@@ -363,6 +363,25 @@ VARS = {
     "ansible_port": h("SSH port (default 22).", type="integer"),
     "ansible_ssh_private_key_file": h("Private key used to log in (no password prompt).", type="string",
                                       examples=["~/.ssh/id_lab"]),
+    "tsq_ssh_host_key": h(
+        "Pins the host's SSH key: its public key (`ssh-ed25519 AAAA...`) or its `SHA256:` fingerprint, or a list of "
+        "them, one per line in the editor. When given, the server must present one of them, and no `known_hosts` "
+        "file is read for that host: a changed or spoofed key fails the login. Without it, the `known_hosts` of the "
+        "user running the sequencer is checked (in a container, often empty: the login then fails with `Host key "
+        "is not trusted`).\n\n"
+        "How to get it, best first:\n"
+        "- **On the server itself** (the most trustworthy): `cat /etc/ssh/ssh_host_ed25519_key.pub`, and copy the "
+        "line (the trailing comment, such as `root@server`, can stay). Other key types are in the other "
+        "`/etc/ssh/ssh_host_*_key.pub` files.\n"
+        "- **From a machine that already logs in to it** (for example the docker host): `ssh-keygen -F <address> "
+        "-f ~/.ssh/known_hosts` (`-F '[<address>]:<port>'` for a port other than 22) prints lines "
+        "`<address> ssh-ed25519 AAAA...`: copy them from `ssh-ed25519` on, without the address.\n"
+        "- **A fingerprint instead**: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server prints "
+        "`256 SHA256:... root@server (ED25519)`: copy the `SHA256:...` part.\n\n"
+        "Avoid `ssh-keyscan` from the sequencer's network alone: it trusts whatever answers. If you use it, "
+        "compare its fingerprint with the one the server's console shows.",
+        type=["string", "array"], items={"type": "string"},
+        examples=["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...", "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"]),
     "tsq_role": h("Role of the component, a role of the lab library (section 7.1): the commands it must implement. "
                   "Not needed when the component it extends supports one role (it has that one); one of them when "
                   "it supports several; any role when it lists none. Datapacks bind their slots by "
