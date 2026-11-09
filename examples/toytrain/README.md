@@ -73,6 +73,8 @@ sample/
   exploit_<test>.yml                   exploit_runner session: the test's criteria on its recording
   make_runs.py                         how the recordings were made
 tests/                                 pytest suite, runs everything end to end
+Dockerfile, docker-compose.yml         the environment in Docker (emulated mode), see "In Docker"
+.env.sample                            settings of docker-compose.yml, to copy to .env
 ```
 
 ## What the package adds to testsuit
@@ -200,6 +202,33 @@ What changes, and what does not:
 - **Exploitation** is the same, with `exploit_runner` on the dev host.
 
 A run in emulated mode is flagged non-conform against `baseline_expected.yml`, since its lab is not a tagged lab repository. Its results can therefore never be taken for a lab run.
+
+## In Docker
+
+The example ships a Docker image of this environment: Debian 12 slim, Miniconda, testsuit with its sequencer, and the `toytrain` package. By default the container runs the sequencer of the emulated mode (`tsq.dev.yml`), with its UI and Editor on port 8640.
+
+```bash
+cp .env.sample .env            # optional: proxies, host port, Miniconda and testsuit versions
+docker compose up --build      # then open http://localhost:8640
+```
+
+| File | Content |
+|---|---|
+| `Dockerfile` | the image: system packages, Miniconda, `testsuit[sequencer]` from PyPI, then this package (`pip install -e`) and the example's files in `/app` |
+| `docker-compose.yml` | the `toytrain` service: build arguments taken from `.env`, port 8640, `datapack/`, `lab/` and `.work/` mounted from this folder, the sequencer storage (`~/.toytrain-emu`) in a named volume |
+| `.env.sample` | every setting of the compose file, to copy to `.env` (which Git ignores) |
+
+The datapack and lab folders are mounted from the host, so what the Editor changes lands in your working copy, and the reverse. Any other command runs in the same image:
+
+```bash
+docker compose run --rm --entrypoint datapack toytrain datapack/testdef/max_speed/testdef.yml --nocheck
+docker compose run --rm --entrypoint exploit_runner toytrain sample/exploit_max_speed.yml
+docker compose run --rm --entrypoint pytest toytrain
+```
+
+Behind a proxy, set `CI_HTTPS_PROXY` (and `CI_HTTP_PROXY` if apt needs another one) in `.env`: they are used by apt, wget and pip during the build only. To build with a branch of testsuit instead of its PyPI release, set `TESTSUIT_SPEC=testsuit[sequencer] @ git+https://github.com/laurentmldev/testsuit@<branch>`.
+
+As on a dev host, the release store only holds placeholders, so a run ends in `error` at the self-test and the simulations show as broken on the Lab page.
 
 ## Assumptions
 

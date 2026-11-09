@@ -3,3 +3,5 @@
 datapack/testdef/*/.current_datapack/
 src/*.egg-info/
 __pycache__/
+# settings of docker-compose.yml (copied from .env.sample)
+.env
