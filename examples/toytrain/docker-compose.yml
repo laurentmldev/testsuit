@@ -1,0 +1,46 @@
+# Copyright (C) 2026 Laurent Millet-Lacombe
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of testsuit.
+# testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+# General Public License as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+# Public License for more details.
+# You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+# see <https://www.gnu.org/licenses/>.
+
+# The toy-train test environment in Docker: the sequencer of the emulated mode, its UI and Editor.
+#   cp .env.sample .env          # optional: proxies, port, testsuit version
+#   docker compose up --build    # then open http://localhost:8640
+# Any other command runs in the same image, for example:
+#   docker compose run --rm --entrypoint datapack toytrain datapack/testdef/max_speed/testdef.yml --nocheck
+#   docker compose run --rm --entrypoint pytest toytrain
+
+services:
+  toytrain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CI_HTTP_PROXY: ${CI_HTTP_PROXY:-}
+        CI_HTTPS_PROXY: ${CI_HTTPS_PROXY:-}
+        CONDA_VERSION: ${CONDA_VERSION:-Miniconda3-py313_26.3.2-2}
+        TESTSUIT_SPEC: ${TESTSUIT_SPEC:-testsuit[sequencer]>=0.4.6}
+    image: toytrain:${TOYTRAIN_TAG:-latest}
+    container_name: toytrain
+    ports:
+      - "${TSQ_PORT:-8640}:8640"
+    volumes:
+      # the test definitions and the lab, edited from the host or from the Editor
+      - ./datapack:/app/datapack
+      - ./lab:/app/lab
+      # outputs of the datapack tool and of exploit_runner
+      - ./.work:/app/.work
+      # the sequencer's storage (tsq.dev.yml: storage.root) and the emulated components' folders
+      - toytrain-emu:/root/.toytrain-emu
+    restart: unless-stopped
+
+volumes:
+  toytrain-emu:
