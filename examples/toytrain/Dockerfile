@@ -55,9 +55,9 @@ RUN http_proxy=${CI_HTTP_PROXY:-$CI_HTTPS_PROXY} https_proxy=${CI_HTTPS_PROXY} a
         zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Miniconda, for the build host's architecture (x86_64 or aarch64)
+# Miniconda (x86_64: the sequencer host)
 RUN https_proxy=${CI_HTTPS_PROXY} wget --progress=bar:force:noscroll \
-        https://repo.anaconda.com/miniconda/${CONDA_VERSION}-Linux-$(uname -m).sh -O /tmp/conda.sh \
+        https://repo.anaconda.com/miniconda/${CONDA_VERSION}-Linux-x86_64.sh -O /tmp/conda.sh \
     && bash /tmp/conda.sh -b -p $ANACONDA3_PATH \
     && rm /tmp/conda.sh
 
