@@ -71,6 +71,12 @@ RUN python -m pip install --no-cache-dir --proxy="${CI_HTTPS_PROXY}" "setuptools
     && python -m pip install --no-cache-dir --proxy="${CI_HTTPS_PROXY}" -e /app
 COPY . /app
 
+# the container runs as the host user (docker-compose.yml: user), unknown to the image: give it a name (getpass,
+# git) and a home writable by any uid, holding the sequencer's storage (tsq.dev.yml: ~/.toytrain-emu)
+ENV HOME=/home/toytrain USER=toytrain LOGNAME=toytrain
+RUN mkdir -p $HOME/.toytrain-emu && chmod -R 1777 $HOME \
+    && git config --system --add safe.directory '*'
+
 # the sequencer's UI and REST API (tsq.dev.yml: server.listen, opened to the host by --listen below)
 EXPOSE 8640
 
