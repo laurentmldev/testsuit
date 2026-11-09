@@ -492,3 +492,50 @@ button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }
 .gen-checks .problems .mark, .gen-checks .error .mark { color: var(--warn); }
 .pipeline-preview .graph-box { height: 380px; }
 .pipeline-preview .step-node { cursor: default; }
+
+/* editor session: each kind of file has its colour, used by its group in the file list, the header of the
+   open file and its rows; the open file stands out in the list and in its header */
+.kind-inventory, .kind-library { --kind: var(--idle); }
+.kind-testdef, .kind-subpipelines { --kind: var(--accent); }
+.kind-setup { --kind: var(--wait); }
+.kind-dictionary { --kind: var(--warn); }
+.kind-template { --kind: var(--ok); }
+.kind-yaml, .kind-other { --kind: var(--muted); }
+.file-tree { padding: 0 0 8px; }
+.file-tree-new { padding: 8px 10px; position: sticky; top: 0; background: var(--panel); z-index: 1; border-bottom: 1px solid var(--border); }
+.tree-group { border-top: 1px solid var(--border); padding-bottom: 4px; }
+.file-tree-new + .tree-group { border-top: none; }
+.tree-group + .tree-group { margin-top: 2px; }
+.file-tree .tree-group-title { justify-content: flex-start; gap: 7px; padding: 10px 10px 4px; color: var(--text); }
+.file-tree .tree-group.has-current .tree-group-title { color: var(--kind); }
+.kind-dot { width: 9px; height: 9px; border-radius: 2px; background: var(--kind); flex-shrink: 0; }
+.tree-group-count { margin-left: auto; font-weight: 600; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 0 6px; font-size: 10.5px; letter-spacing: 0; }
+.file-tree .tree-row { padding: 3px 10px 3px 13px; border-left: 3px solid transparent; margin-left: 4px; }
+.file-tree .tree-row:hover { border-left-color: color-mix(in srgb, var(--kind) 45%, transparent); }
+.file-tree .tree-row.selected { background: color-mix(in srgb, var(--kind) 22%, var(--panel)); color: var(--text); border-left-color: var(--kind); font-weight: 600; }
+.file-tree .tree-row.selected .tree-dir { color: var(--text); opacity: 0.7; }
+.tree-name { display: flex; min-width: 0; }
+.tree-dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 1.2em; }
+.tree-base { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 100%; }
+button.tree-more { padding: 8px 14px; }
+.doc-head { border-top: 3px solid var(--kind); background: color-mix(in srgb, var(--kind) 7%, var(--panel)); padding: 8px 12px; }
+.kind-chip { background: var(--kind); color: var(--panel); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.doc-path { font-family: var(--mono); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-dir { color: var(--muted); font-weight: 400; }
+.doc-base { font-weight: 700; font-size: 14.5px; color: var(--text); }
+
+/* sections of a file: a bar to jump to the top-level sections of a YAML file, a rule between them in the
+   editor, and form sections and navigation groups set apart from each other */
+.section-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.section-bar-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-right: 4px; }
+.section-chip { font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 10px; border-color: color-mix(in srgb, var(--kind) 40%, var(--border)); }
+.section-chip:hover { background: color-mix(in srgb, var(--kind) 14%, var(--panel)); }
+.monaco-editor .yaml-section-rule { border-top: 1px solid color-mix(in srgb, var(--kind, var(--accent)) 55%, transparent); }
+.monaco-editor .yaml-section-gutter { border-top: 1px solid color-mix(in srgb, var(--kind, var(--accent)) 55%, transparent); }
+.form-section > header { background: var(--panel-2); border-radius: 8px 8px 0 0; }
+.form-section > header h3 { font-size: 14.5px; }
+.form-body .form-section { border-left: 3px solid color-mix(in srgb, var(--kind, var(--accent)) 55%, var(--border)); }
+.form-body .form-section > header { background: color-mix(in srgb, var(--kind, var(--accent)) 6%, var(--panel)); }
+.form-nav .nav-title { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px; color: var(--text); }
+.form-nav > .nav-title:first-child { border-top: none; margin-top: 0; padding-top: 6px; }
+.form-nav .nav-item.selected { box-shadow: inset 3px 0 0 var(--kind, var(--accent)); }
