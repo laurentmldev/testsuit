@@ -67,6 +67,7 @@ dictionaries: [globals.yml]            # shared keys, relative to this file
 datarepositories:                      # datasets imported before generating, by an importer
   - id: toytrain
     path: "{{ setup.path }}/../.work/datarepo"
+    purge_after_days: 90                # datasets no datapack used for 90 days are deleted (default; 0: never)
     datasources:
       - id: software
         importer: toytrain-release      # registered by a plugin; built in: git
@@ -184,7 +185,7 @@ flowchart LR
 A build runs in four steps, in `_Builder.build`:
 
 1. **Test definition.** The test definition's dictionaries are loaded, then the file is rendered with them and validated. Its `pipeline` is kept as written.
-2. **Setup.** The setup's dictionaries are loaded. Each dataset of its data repositories is imported into `<repository path>/<dataset id>/<version>/`. When that folder already exists, its version is checked instead, and a version that cannot be confirmed is an error unless `--nocheck` is given. The setup is then rendered and validated.
+2. **Setup.** The setup's dictionaries are loaded. Each dataset of its data repositories is imported into `<repository path>/<dataset id>/<version>/`. When that folder already exists, its version is checked instead, and a version that cannot be confirmed is an error unless `--nocheck` is given. Each dataset used is marked as such (a `.<version>.last_used` file next to its folder); then the dataset folders of the repository that no build used for `purge_after_days` days (90 by default, `0` to keep them all) are deleted, and downloaded again if a later build needs them. A folder downloaded before these marks existed starts counting at the first build that sees it. The setup is then rendered and validated.
 3. **Slots.** The slots of the configuration are generated in the order of their `needs` (a cycle is an error). For each slot, its inputs are rendered, copied or generated into `data/<slot>/input/`, and the keys each file read are recorded.
 4. **Packaging.** `datapack.yml`, `context.yml` and `baseline.yml` are written, the BagIt manifests are computed, and the folder is zipped into `datapack.output_dir`.
 
