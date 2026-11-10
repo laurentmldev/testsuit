@@ -228,6 +228,24 @@ def test_inventory_descriptions(tmp_path):
     assert inv.components["b"].vars_in(inv.stages["st"])["x"] == 1
 
 
+def test_inventory_stage_settings(tmp_path):
+    """An address or a login given on a stage group applies to its hosts, unless a host gives its own; a shared
+    component takes only what its stage groups agree on."""
+    from testsuit.sequencer.transports import create_transport
+    path = tmp_path / "inv.yml"
+    path.write_text(yaml.safe_dump({"all": {"children": {
+        "st1": {"vars": {"tsq_stage_type": "t", "ansible_host": "10.0.0.5", "ansible_user": "lab", "ansible_port": 2222},
+                "hosts": {"a": {}, "b": {}, "c": {"ansible_host": "10.0.0.9"}, "shared": {}}},
+        "st2": {"vars": {"tsq_stage_type": "t", "ansible_host": "10.0.0.6", "ansible_user": "lab"},
+                "hosts": {"shared": {}}}}}}))
+    inv = load_inventory(path)
+    hosts = {c: inv.components[c].host for c in ("a", "b", "c", "shared")}
+    assert hosts == {"a": "10.0.0.5", "b": "10.0.0.5", "c": "10.0.0.9", "shared": "shared"}
+    transport = create_transport("ssh", inv.components["a"])
+    assert (transport.host, transport.vars["ansible_user"], transport.vars["ansible_port"]) == ("10.0.0.5", "lab", 2222)
+    assert inv.components["shared"].settings["ansible_user"] == "lab" and "ansible_port" not in inv.components["shared"].settings
+
+
 def test_role_inputs(tmp_path):
     """A role lists the inputs it expects; a role extending it adds to them or redefines one by name."""
     from testsuit.sequencer.library import Library

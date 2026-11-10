@@ -45,8 +45,15 @@ class Component:
     stages: list[str] = field(default_factory=list)
 
     @property
+    def settings(self) -> dict[str, Any]:
+        """Its variables whatever the stage, as its transport and the Lab view use them (``ansible_host``,
+        ``ansible_user``...): all < its stage groups (the values they agree on) < host."""
+        return {**self.vars, **{k: v for k, v in self._stage_vars.items() if k not in self._host_vars}}
+
+    @property
     def host(self) -> str:
-        return str(self.vars.get("ansible_host", self.id))
+        """Its address: ``ansible_host``, on the host, its stage group or above; else its name."""
+        return str(self.settings.get("ansible_host", self.id))
 
     @property
     def role(self) -> str:
@@ -100,6 +107,7 @@ class Component:
         return {**self.vars, **{k: v for k, v in _own(stage.vars).items() if k not in self._host_vars}}
 
     _host_vars: set = field(default_factory=set, repr=False)
+    _stage_vars: dict = field(default_factory=dict, repr=False)   # the variables of its stage groups that agree
     _role: str = field(default="", repr=False)
 
 
@@ -243,6 +251,9 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
+        if stages:                     # a shared component: only the values all its stage groups give
+            first, *others = [_own(stage_defs[s]["vars"]) for s in stages]
+            component._stage_vars = {k: v for k, v in first.items() if all(o.get(k, object()) == v for o in others)}
         if "tsq_type" in merged:
             raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone: give 'tsq_role' (a lab "
                                  f"role: its commands) and 'tsq_extends' (the component implementing them, "

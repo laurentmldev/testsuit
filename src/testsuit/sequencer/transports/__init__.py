@@ -86,8 +86,8 @@ class Transport:
     def __init__(self, component, remote_root: str | None = None) -> None:
         self.component = component              # inventory.Component
         self.host = component.host
-        self.vars = component.vars
-        self._root = remote_root if remote_root is not None else str(component.vars.get("tsq_remote_root", "/tmp/tsq"))
+        self.vars = getattr(component, "settings", component.vars)   # its stage group's ansible_user... too
+        self._root = remote_root if remote_root is not None else str(self.vars.get("tsq_remote_root", "/tmp/tsq"))
         self.shell_command = shell_of(component)
 
     def in_shell(self, script: str) -> str:
@@ -172,7 +172,7 @@ def create_transport(name: str, component, remote_root: str | None = None) -> Tr
 
 def shell_of(component) -> str:
     """The shell commands run under on a component (tsq_shell: bash, "bash -l"...), '' for /bin/sh."""
-    value = str(component.vars.get("tsq_shell") or "").strip()
+    value = str(getattr(component, "settings", component.vars).get("tsq_shell") or "").strip()
     if value and not re.fullmatch(r"[\w./+-]+( +-[\w-]+)*", value):
         raise SequencerError(f"component '{component.id}': tsq_shell '{value}' is not a shell, with options "
                              "if any (bash, /bin/bash, \"bash -l\")")

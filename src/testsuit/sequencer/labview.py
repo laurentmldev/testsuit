@@ -165,7 +165,7 @@ def rendered_links(seq, links: list[dict]) -> list[dict]:
                 try:
                     root = seq.transport_for(cid)._root
                 except Exception:
-                    root = str(comp.vars.get("tsq_remote_root", "/tmp/tsq"))
+                    root = str(comp.settings.get("tsq_remote_root", "/tmp/tsq"))
                 keys_of[(cid, sid, vid)] = seq._manual_keys(comp, stage, root, via)
             keys = keys_of[(cid, sid, vid)]
             details.append({"title": d["title"], "commands": [seq._segments(t, keys, f"{cid} {d['title']}")
