@@ -781,7 +781,7 @@ def test_lab_view(tmp_path, no_git):
     from fastapi import HTTPException
 
     from testsuit.sequencer.api import create_app
-    from testsuit.sequencer.labview import lab_activity, lab_links, one_line
+    from testsuit.sequencer.labview import lab_activity, lab_links, templates
     from testsuit.sequencer.util import SequencerError
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
@@ -798,16 +798,16 @@ def test_lab_view(tmp_path, no_git):
     links = {(lk["source"], lk["target"], lk["kind"]): lk for lk in lab_links(seq.lab)}
     assert set(links) == {("seq_host", "counter_1", "probe"), ("counter_1", "obc_1", "probe"),
                           ("seq_host", "obc_1", "cmd"), ("obc_1", "counter_1", "link"), ("seq_host", "counter_1", "link")}
-    assert links[("seq_host", "counter_1", "probe")]["details"] == [
-        {"title": "command start", "command": one_line(start)}]
+    def details(link):
+        return [(d["title"], d["commands"]) for d in links[link]["details"]]
+    assert details(("seq_host", "counter_1", "probe")) == [("command start", [start["run"]])]
     assert links[("counter_1", "obc_1", "probe")]["stages"] == ["bench_1"]
-    assert links[("counter_1", "obc_1", "probe")]["details"] == [
-        {"title": "status probe", "command": "echo {{ lab.components.seq_host.host }}"}]
-    assert links[("seq_host", "obc_1", "cmd")]["details"] == [
-        {"title": "status probe", "command": "echo {{ lab.components.seq_host.host }}"}]
-    assert links[("obc_1", "counter_1", "link")]["details"] == [{"title": "tsq_links", "command": "CAN bus"}]
-    assert one_line({"run": "a\n  b " + "x" * 200}, 20) == "a b " + "x" * 15 + "…"
-    assert one_line({"http": {"method": "POST", "url": "http://h/x"}}) == "POST http://h/x"
+    assert details(("counter_1", "obc_1", "probe")) == [("status probe", ["echo {{ lab.components.seq_host.host }}"])]
+    assert details(("seq_host", "obc_1", "cmd")) == [("status probe", ["echo {{ lab.components.seq_host.host }}"])]
+    assert details(("obc_1", "counter_1", "link")) == [("tsq_links", ["CAN bus"])]
+    assert templates({"run": ["a {{ x }}", "b"]}) == ["a {{ x }}", "b"]
+    assert templates({"http": {"method": "post", "url": "http://h/x"}}) == ["POST http://h/x"]
+    assert templates([{"id": "s", "builtin": "status"}]) == ["builtin status"]
     assert links[("obc_1", "counter_1", "link")]["label"] == "CAN bus"
 
     routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
@@ -817,6 +817,13 @@ def test_lab_view(tmp_path, no_git):
 
     async def main():
         view = await routes["/lab/view"]()
+        shown = {(lk["source"], lk["target"], lk["kind"]): lk["details"] for lk in view["links"]}
+        probe = shown[("seq_host", "obc_1", "cmd")][0]["commands"][0]        # as it runs, the key behind each value
+        host = seq.lab.inventory.components["seq_host"].host
+        assert probe == [{"text": "echo ", "key": None}, {"text": host, "key": "lab.components.seq_host.host"}]
+        start_line = shown[("seq_host", "counter_1", "probe")][0]["commands"][0]
+        assert "{{" not in "".join(seg["text"] for seg in start_line)
+        assert all("_render" not in d for lk in view["links"] for d in lk["details"])
         assert view["icons"] == {"counter_1": {"builtin": "embedded"}, "seq_host": {"builtin": "server"},
                                  "obc_1": {"file": "icons/obc.svg"}}
         icon = await routes["/lab/icons/{name}"]("obc_1")
