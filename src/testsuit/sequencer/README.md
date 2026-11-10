@@ -650,6 +650,8 @@ The commands of a component come from the lab only: its role lists them (with it
 
 A datapack does not redefine commands: what a test runs that the role does not offer is a `run:` step of its pipeline (the exploitation in section 8.3). A stage with a special way of deploying overrides the generic command for every datapack.
 
+**A `run` command is one shell script.** Its lines run in the same shell, so a `cd` or an `export` on one line still holds on the next, and it **stops at the first line that fails** (the sequencer runs it with `set -e`): its exit status is then that line's. This holds for every `run` written in the lab or a pipeline (commands, steps, status probes, self-tests, `wait_for` commands, commands run by hand), locally and over ssh, under `/bin/sh` or `tsq_shell`. To go on after a line that may fail, say so: `cmd || true`, an `if`, or `set +e` for the rest of the script. A probe with a list of checks (`run: [...]`, section 7.5) runs each check in a shell of its own.
+
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
 **REST API commands.** A command (or a pipeline step, or a status probe, or a `wait_for`) can be an HTTP request rather than a shell command, for an instrument or a service driven through a REST API:

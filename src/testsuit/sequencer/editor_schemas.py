@@ -37,6 +37,9 @@ def h(text: str, **extra: Any) -> dict:
 DURATION = h("A duration: `30s`, `2m`, `1h30m`, or a number of seconds.",
              type=["string", "number"], examples=["30s", "2m", "15m"])
 
+STRICT_NOTE = ("Its lines run in one shell (a `cd` or `export` holds for the next lines) and it stops at the first "
+               "line that fails (`set -e`); `|| true` lets a line fail.")
+
 TEMPLATE_NOTE = ("Jinja2 templates are rendered at run time: `{{ component.input_dir }}`, `{{ component.output_dir }}`, "
                  "`{{ component.role }}`, `{{ component.host }}`, `{{ component.vars.<variable> }}`, `{{ remote_root }}`, "
                  "`{{ run.id }}`, and every key of the datapack (`{{ scenario.duration_s }}`).")
@@ -151,7 +154,7 @@ COMMAND = h(
     "- a plugin step type, given by its name.\n\n" + TEMPLATE_NOTE,
     type="object",
     properties={
-        "run": h("Shell command run on the component. " + TEMPLATE_NOTE, type="string"),
+        "run": h("Shell command run on the component. " + STRICT_NOTE + " " + TEMPLATE_NOTE, type="string"),
         "python": PYTHON,
         "http": HTTP,
         "detach": h("Start the command and go on without waiting for it to end (a server, a simulation). "
@@ -224,7 +227,8 @@ STATUS = h(
                                                        "A list of commands: several checks, each run whatever the "
                                                        "others gave and OK when it exits with 0; the rules match "
                                                        "their outputs one after the other, `exit` rules the first "
-                                                       "non-zero exit status.",
+                                                       "non-zero exit status, each check in a shell of its own. "
+                                                       + STRICT_NOTE,
                                                        type=["string", "array"], items={"type": "string"}),
                                               "http": HTTP, "timeout": DURATION}),
         "states": h("Rules giving a state from the probe result, first match wins: `{regex: ...}` on the output, "
@@ -262,7 +266,7 @@ SELFTEST = h(
     type="array",
     items={"type": "object", "required": ["id"],
            "properties": {"id": h("Name of the check, unique in the component chain.", type="string"),
-                          "run": h("Shell command run on the component: exit 0 passes.", type="string"),
+                          "run": h("Shell command run on the component: exit 0 passes. " + STRICT_NOTE, type="string"),
                           "timeout": DURATION, "expect": EXPECT,
                           "builtin": h("A built-in check: `status`, `login`, `remote_root`, `disk`, `clock`.",
                                        type="string", enum=["status", "login", "remote_root", "disk", "clock"])},

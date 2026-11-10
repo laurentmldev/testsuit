@@ -42,7 +42,7 @@ from testsuit.sequencer.model import FlatStep, Step
 from testsuit.sequencer.monitor import Monitor, component_keys, selftest_component
 from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resources, find_binding, order_queue)
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
-from testsuit.sequencer.transports import Transport, create_transport
+from testsuit.sequencer.transports import Transport, create_transport, strict
 from testsuit.sequencer.results import pack_results
 from testsuit.sequencer.util import SequencerError, dump_yaml, now, parse_duration, render, wait_event
 
@@ -562,7 +562,7 @@ class Sequencer:
             pidfile = f"{manual_dir}/{name}.pid"
             result.update(run=text, via=via.id if via else None, on=via.host if via else comp.host)
             if spec.get("detach"):
-                process = await transport.start(text, env=env, pidfile=pidfile)
+                process = await transport.start(strict(text), env=env, pidfile=pidfile)
                 try:
                     done = await process.wait(2.0)
                     result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
@@ -570,7 +570,7 @@ class Sequencer:
                     result.update(ok=True, detached=True, output=process.text(),
                                   detail="started, still running (stop it with a signal command or kill)")
             else:
-                done = await transport.run(text, env=env, timeout=timeout or 300, pidfile=pidfile)
+                done = await transport.run(strict(text), env=env, timeout=timeout or 300, pidfile=pidfile)
                 result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
         result["duration"] = round(time.monotonic() - started, 3)
         self.notify("manual_command", {"component": comp_id, "command": name, "ok": result["ok"],
@@ -763,7 +763,7 @@ class RunExecution:
                 return
             keys = self.ctx.keys("", None, bound)
             try:
-                result = await bound.transport.run(str(render(spec["run"], keys)), timeout=30)
+                result = await bound.transport.run(strict(str(render(spec["run"], keys))), timeout=30)
                 text = result.output.strip() if result.completed and result.exit_status == 0 else None
             except Exception:
                 text = None
