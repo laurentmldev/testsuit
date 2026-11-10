@@ -334,6 +334,20 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         from testsuit.sequencer.labview import lab_view as view
         return view(seq)
 
+    @app.get("/lab/layout")
+    async def lab_layout():
+        """The arrangement of the Lab view saved for everyone (positions and opacities); empty: automatic."""
+        from testsuit.sequencer.labview import read_layout
+        return read_layout(seq)
+
+    @app.put("/lab/layout")
+    async def save_lab_layout(body: dict):
+        """Save the arrangement of the Lab view for everyone (``{"components": {}}``: back to automatic)."""
+        from testsuit.sequencer.labview import save_layout
+        layout = save_layout(seq, body)
+        seq.notify("lab_layout", {"components": len(layout["components"])})
+        return layout
+
     @app.get("/lab/icons/{name}")
     async def lab_icon(name: str):
         """The image file of a component's tsq_icon (in the lab folder)."""

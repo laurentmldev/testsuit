@@ -190,3 +190,54 @@ def lab_view(seq) -> dict:
         lab._view_links = lab_links(lab)
     icons = {c.id: icon for c in lab.inventory.components.values() if (icon := icon_of(lab, c)) is not None}
     return {"links": lab._view_links, "icons": icons, **lab_activity(seq)}
+
+
+# ── the arrangement of the Lab view, saved by a user for everyone ─────────────────
+
+def layout_file(seq) -> Path:
+    return seq.config.root / "lab_layout.json"
+
+
+def read_layout(seq) -> dict:
+    """The saved arrangement of the Lab view: ``{"components": {id: {"x", "y", "opacity"}}, "saved_at"}``, or
+    ``{"components": {}}`` when it is automatic."""
+    import json
+    try:
+        data = json.loads(layout_file(seq).read_text(encoding="utf-8"))
+        return data if isinstance(data.get("components"), dict) else {"components": {}}
+    except (OSError, ValueError, AttributeError):
+        return {"components": {}}
+
+
+def save_layout(seq, body: dict) -> dict:
+    """Save the arrangement (positions and opacities of the components), checked: numbers only, known components.
+    An empty one goes back to the automatic layout."""
+    import json
+
+    from testsuit.sequencer.util import now
+    components = body.get("components")
+    if not isinstance(components, dict):
+        raise SequencerError("layout: 'components' must be a mapping component -> {x, y, opacity}")
+    known = seq.lab.inventory.components
+    clean: dict[str, dict] = {}
+    for cid, item in components.items():
+        if cid not in known or not isinstance(item, dict):
+            continue
+        entry = {}
+        for key in ("x", "y"):
+            if isinstance(item.get(key), (int, float)) and abs(item[key]) < 1e6:
+                entry[key] = round(float(item[key]), 1)
+        if isinstance(item.get("opacity"), (int, float)):
+            entry["opacity"] = min(1.0, max(0.05, round(float(item["opacity"]), 2)))
+        if entry:
+            clean[cid] = entry
+    path = layout_file(seq)
+    if not clean:
+        path.unlink(missing_ok=True)
+        return {"components": {}}
+    layout = {"components": clean, "saved_at": now()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(layout, indent=1), encoding="utf-8")
+    tmp.replace(path)
+    return layout

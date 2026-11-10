@@ -827,6 +827,24 @@ def test_lab_view(tmp_path, no_git):
         return run, seen
     run, seen = asyncio.run(main())
     assert seen["runs"][run["id"]]["name"] and seen["runs"][run["id"]]["stages"] == {"bench": "bench_1"}
+
+    # the arrangement a user saves is everyone's: positions and opacities, checked; empty: the automatic layout
+    seq = bench.sequencer()
+    by_method = {(r.path, m): r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint") for m in r.methods}
+    get_layout, put_layout = by_method[("/lab/layout", "GET")], by_method[("/lab/layout", "PUT")]
+
+    async def arrange():
+        assert await get_layout() == {"components": {}}
+        saved = await put_layout({"components": {
+            "counter_1": {"x": 10, "y": 20.04, "opacity": 0.3}, "seq_host": {"x": "left", "opacity": 7}, "ghost": {"x": 1}}})
+        assert saved["components"] == {"counter_1": {"x": 10.0, "y": 20.0, "opacity": 0.3}, "seq_host": {"opacity": 1.0}}
+        assert (await get_layout())["components"] == saved["components"]
+        with pytest.raises(SequencerError):
+            await put_layout({"components": []})
+        assert (await put_layout({"components": {}})) == {"components": {}}
+        assert not (tmp_path / "storage" / "lab_layout.json").exists()
+        await seq.close()
+    asyncio.run(arrange())
     [step] = seen["components"]["counter_1"]
     assert step["run"] == run["id"] and step["step"] == "soak" and step["command"] == "run sleep 1"
 
