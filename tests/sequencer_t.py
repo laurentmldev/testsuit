@@ -884,6 +884,7 @@ def test_manual_command(tmp_path, no_git):
     types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
     types["components"]["counter_host"]["commands"]["start"] = {"run": "sleep 30", "detach": True}
     types["components"]["counter_host"]["commands"]["check"] = {"run": "echo host={{ component.host }}; exit 3"}
+    types["components"]["counter_host"]["commands"]["lines"] = {"run": "cd /\nexport X=kept\necho \"$PWD $X\"\nfalse\necho after"}
     write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
@@ -900,6 +901,7 @@ def test_manual_command(tmp_path, no_git):
         out["segments"] = next(c["segments"] for c in listed["commands"] if c["name"] == "check")
         out["version"] = await seq.manual_command("counter_1", "version")
         out["check"] = await seq.manual_command("counter_1", "check")
+        out["lines"] = await seq.manual_command("counter_1", "lines")
         out["start"] = await seq.manual_command("counter_1", "start")
         out["stop"] = await seq.manual_command("counter_1", "stop")
         try:
@@ -913,6 +915,9 @@ def test_manual_command(tmp_path, no_git):
     assert out["manual"]["version"] and out["manual"]["stop"] and not out["manual"]["ready"]
     assert out["version"]["ok"] and "counter-1.2.0" in out["version"]["output"]
     assert out["check"]["ok"] is False and out["check"]["exit"] == 3 and "host=" in out["check"]["output"]
+    # the lines of a command share one shell, and it stops at the first one that fails
+    assert out["lines"]["ok"] is False and out["lines"]["exit"] == 1
+    assert "/ kept" in out["lines"]["output"] and "after" not in out["lines"]["output"]
     assert out["start"]["ok"] and out["start"]["detached"]
     assert out["stop"]["ok"] and "start.pid" in out["stop"]["output"]
     assert "can be run by hand" in out["ready"]
@@ -1414,6 +1419,37 @@ def test_tsq_shell(tmp_path, ssh_server):
         assert seen[(kind, "bash")] == seen[(kind, "/bin/bash -l")] == ("[bash]", "[bash]")
     with pytest.raises(SequencerError, match="is not a shell"):
         create_transport("local", Component("box", {"ansible_host": "localhost", "tsq_shell": "bash; rm -rf /"}))
+
+
+def test_strict_commands(tmp_path, ssh_server):
+    """A user's command stops at its first failing line, locally and over ssh, under sh and tsq_shell; the
+    lines share one shell (cd, export)."""
+    from testsuit.sequencer.inventory import Component
+    from testsuit.sequencer.transports import create_transport, strict
+    start, key_file = ssh_server
+    script = strict('cd /\nexport X=kept\necho "$PWD $X"\nfalse\necho after')
+
+    async def main():
+        server = await start()
+        port = server.sockets[0].getsockname()[1]
+        ssh = {"ansible_host": "127.0.0.1", "ansible_port": port, "ansible_user": "tsq",
+               "ansible_ssh_private_key_file": str(key_file), "tsq_ssh_options": {"known_hosts": None}}
+        seen = {}
+        try:
+            for kind, base in (("local", {"ansible_host": "localhost"}), ("ssh", ssh)):
+                for shell in ("", "bash"):
+                    transport = create_transport(kind, Component("box", {**base, "tsq_shell": shell}), str(tmp_path / "r"))
+                    step = await transport.run(script, env={"Y": "1"},
+                                               pidfile=f"{tmp_path}/r/.tsq/r1/box/{kind}{len(shell)}.pid")
+                    check = await transport.shell(script)
+                    seen[(kind, shell)] = [(r.exit_status, r.output) for r in (step, check)]
+                    await transport.close()
+        finally:
+            server.close()
+        return seen
+    for results in asyncio.run(main()).values():
+        for exit_status, output in results:
+            assert exit_status == 1 and "/ kept" in output and "after" not in output
 
 
 def test_dead_local_run_recovered(tmp_path, no_git):

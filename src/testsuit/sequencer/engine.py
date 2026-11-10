@@ -36,7 +36,7 @@ from typing import Any, Callable
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
-from testsuit.sequencer.transports import Result, Transport
+from testsuit.sequencer.transports import Result, Transport, strict
 from testsuit.sequencer.library import Resolved
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
@@ -467,7 +467,7 @@ class StepRunner:
         self.note(f"{'start (detached)' if detach else 'run'} on {transport.host}: {command}")
         if detach:
             try:
-                process = await transport.start(command, env=env, log=self.write, pidfile=pidfile)
+                process = await transport.start(strict(command), env=env, log=self.write, pidfile=pidfile)
             except Exception as e:
                 return ERROR, f"transport: {e}"
             try:
@@ -476,7 +476,7 @@ class StepRunner:
                 self.ctx.detached.append(process)
                 return SUCCEEDED, "started"
             return self.judge(result, expect)
-        result = await transport.run(command, env=env, timeout=timeout, log=self.write, pidfile=pidfile)
+        result = await transport.run(strict(command), env=env, timeout=timeout, log=self.write, pidfile=pidfile)
         return self.judge(result, expect)
 
     def judge(self, result: Result, expect: dict | None) -> tuple[str, str]:
@@ -698,7 +698,7 @@ class StepRunner:
 
             async def check():
                 comp = need_target()
-                result = await comp.transport.shell(command, timeout=10)
+                result = await comp.transport.shell(strict(command), timeout=10)
                 if not result.completed:
                     return False, result.error or ""
                 return result.exit_status == 0, ""

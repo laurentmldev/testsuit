@@ -31,7 +31,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component
 from testsuit.sequencer.lab import Lab
 from testsuit.sequencer.library import Resolved
-from testsuit.sequencer.transports import Transport
+from testsuit.sequencer.transports import Transport, strict
 from testsuit.sequencer.util import SequencerError, evaluate, now, parse_duration, parse_size, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
@@ -104,7 +104,7 @@ async def _probe_commands(report: dict, status: dict, probe: dict, keys: dict, t
         step = {"action": f"check {i + 1} of {len(probe['run'])} on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
                 + f" (timeout {timeout:g} s)", "command": command}
         report["steps"].append(step)
-        result = await transport.shell(command, timeout=timeout)
+        result = await transport.shell(strict(command), timeout=timeout)
         step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
                     ok=result.completed and result.exit_status == 0)
         if result.completed:
@@ -198,7 +198,7 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
         step = {"action": f"run the status command on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
                 + f" (timeout {timeout:g} s)", "command": command}
         steps.append(step)
-        result = await transport.shell(command, timeout=timeout)
+        result = await transport.shell(strict(command), timeout=timeout)
         step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
                     ok=result.completed and result.exit_status == 0)      # OK / FAILED, as each of several checks
         if not result.completed:
@@ -445,7 +445,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                     ok, detail = False, r.error or r.output.strip()
             elif "run" in check:
                 command = render(check["run"], keys, f"selftest {cid}")
-                r = await shell(str(command), parse_duration(check.get("timeout")))
+                r = await shell(strict(str(command)), parse_duration(check.get("timeout")))
                 codes = (check.get("expect") or {}).get("exit", [0])
                 ok = r.completed and r.exit_status in (codes if isinstance(codes, list) else [codes])
                 detail = r.error or r.output.strip()[-300:]
