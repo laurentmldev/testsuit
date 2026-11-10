@@ -282,24 +282,45 @@ export interface Choice {
   group?: string;
 }
 
-/** Radio-like choice with a description per option, for small fixed sets (lock mode, method). */
-export function Choices({ value, onChange, choices, allowNone }: {
-  value?: string | null; onChange: (v: string | null) => void; choices: Choice[]; allowNone?: string;
+/** What a choice falls back to when none is set: the value it inherits (or its default), and where it comes from. */
+export interface Inherit {
+  value: string;
+  from: string;        // shown on the card: "inherited from stage rack1", "default"…
+}
+
+/** Radio-like choice with a description per option, for small fixed sets (lock mode, method).
+ * With `inherit`, no value means the inherited one: its own card shows selected, marked as inherited (dashed
+ * border, a tag saying where it comes from), and a link goes back to inheriting once another value is set. */
+export function Choices({ value, onChange, choices, allowNone, inherit }: {
+  value?: string | null; onChange: (v: string | null) => void; choices: Choice[]; allowNone?: string; inherit?: Inherit;
 }) {
+  // an inherited value the choices do not list (a plugin transport gone…) still shows, as its own card
+  const all = inherit && !choices.some((c) => c.value === inherit.value) ? [{ value: inherit.value }, ...choices] : choices;
+  const inheriting = !!inherit && !value;
   return (
-    <div className={classes("choices", choices.some((c) => c.description) && "described")}>
-      {allowNone && (
-        <button type="button" className={classes("choice", !value && "selected")} onClick={() => onChange(null)}>
-          <strong>{allowNone}</strong>
+    <div className="choices-field">
+      <div className={classes("choices", all.some((c) => c.description) && "described")}>
+        {allowNone && !inherit && (
+          <button type="button" className={classes("choice", !value && "selected")} onClick={() => onChange(null)}>
+            <strong>{allowNone}</strong>
+          </button>
+        )}
+        {all.map((c) => {
+          const inherited = inheriting && c.value === inherit!.value;
+          return (
+            <button type="button" key={c.value} className={classes("choice", (value === c.value || inherited) && "selected", inherited && "inherited")}
+              onClick={() => onChange(c.value)} title={inherited ? `${inherit!.from}: click to set it here` : c.description}>
+              <strong>{c.label || c.value}{inherited && <em className="inherited-tag">{inherit!.from}</em>}</strong>
+              {c.description && <span><Markdown text={c.description} /></span>}
+            </button>
+          );
+        })}
+      </div>
+      {inherit && value && (
+        <button type="button" className="link small inherit-reset" onClick={() => onChange(null)}>
+          ↺ back to {inherit.from.startsWith("default") ? "the default" : "inheriting"} ({inherit.value})
         </button>
       )}
-      {choices.map((c) => (
-        <button type="button" key={c.value} className={classes("choice", value === c.value && "selected")}
-          onClick={() => onChange(c.value)} title={c.description}>
-          <strong>{c.label || c.value}</strong>
-          {c.description && <span><Markdown text={c.description} /></span>}
-        </button>
-      ))}
     </div>
   );
 }

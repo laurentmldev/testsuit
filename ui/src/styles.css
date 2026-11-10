@@ -227,6 +227,10 @@ tr.finally-row td { color: var(--muted); }
 .choice span { font-size: 11.5px; color: var(--muted); }
 .choice span p { margin: 0; }
 .choice.selected { border-color: var(--accent); background: var(--accent-soft); }
+/* selected because inherited (or the default), not set here: dashed border, no fill, a tag saying where from */
+.choice.selected.inherited { border-style: dashed; background: transparent; }
+.choice .inherited-tag { font-style: italic; font-weight: normal; font-size: 11px; color: var(--accent); margin-left: 6px; }
+.choices-field .inherit-reset { font-size: 12px; margin-top: 4px; }
 /* cards with a description: as many per line as the width allows, all the same width */
 .choices.described { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
 .choices.described .choice { max-width: none; justify-content: flex-start; }
