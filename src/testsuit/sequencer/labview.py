@@ -47,25 +47,61 @@ def _role_member(lab, stage: Stage | None, role: str, me: str) -> Component | No
     return None
 
 
-def lab_links(lab) -> list[dict]:
-    """The links between components, deduced from the lab configuration, each
-    ``{source, target, kind, label, why: [...], stages: [...]}``:
+def one_line(spec: Any, limit: int = 120) -> str:
+    """A command, a probe or a variable on one line: its shell command, its http call, its python script..."""
+    if isinstance(spec, dict):
+        for key in ("probe", "check"):                      # a status probe: what it runs
+            if isinstance(spec.get(key), (dict, str)):
+                return one_line(spec[key], limit)
+        if spec.get("run") is not None:
+            text = f"{spec['run']}"
+        elif spec.get("http") is not None:
+            http = spec["http"]
+            text = (f"{str(http.get('method') or 'GET').upper()} {http.get('url', '')}" if isinstance(http, dict)
+                    else f"GET {http}")
+        elif spec.get("python") is not None:
+            py = spec["python"]
+            text = f"python {py.get('script', '') if isinstance(py, dict) else py}"
+        elif spec.get("signal") is not None:
+            text = f"signal {spec['signal']}"
+        elif spec.get("builtin") is not None:
+            text = f"builtin {spec['builtin']}"
+        elif spec.get("plugin") is not None or spec.get("uses") is not None:
+            text = f"{spec.get('plugin') or spec.get('uses')}"
+        else:
+            text = " ".join(f"{k}: {v}" for k, v in spec.items() if k != "via")
+    elif isinstance(spec, (list, tuple)):
+        text = " ; ".join(one_line(v, limit) for v in spec)
+    else:
+        text = "" if spec is None else f"{spec}"
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
-    - ``via``: the component's status probe or some of its commands run on the target (``via``);
-    - ``uses``: its commands, probe, self-test or variables name the target (``stage.roles.<role>``,
+
+def lab_links(lab) -> list[dict]:
+    """The links between components, deduced from the lab configuration, each ``{source, target, kind, label,
+    details: [{title, command}], stages: [...]}``, the arrow going from the source to the target:
+
+    - ``probe``: the target's status probe or some of its commands run through the source (``via``);
+    - ``cmd``: the target's commands, probe, self-test or variables name the source (``stage.roles.<role>``,
       ``stage.components.<id>``, ``lab.components.<id>``);
-    - ``link``: ``tsq_links``, a wiring its commands do not show.
+    - ``link``: ``tsq_links`` of the source, a wiring the commands do not show.
+
+    ``details`` has one line per probe, command or variable behind the link: its title (``status probe``,
+    ``command start``...) and what it runs, on one line.
     """
     inv = lab.inventory
     found: dict[tuple[str, str, str], dict] = {}
 
-    def add(source: Component, target: Component | None, kind: str, why: str, stage: Stage | None, label: str = ""):
-        if target is None or target.id == source.id:
+    def add(source: Component | None, target: Component, kind: str, title: str, command: str, stage: Stage | None,
+            label: str = ""):
+        if source is None or target.id == source.id:
             return
         link = found.setdefault((source.id, target.id, kind), {"source": source.id, "target": target.id, "kind": kind,
-                                                               "label": label, "why": [], "stages": []})
-        if why not in link["why"]:
-            link["why"].append(why)
+                                                               "label": label, "details": [], "stages": []})
+        detail = {"title": title, "command": command}
+        if detail not in link["details"]:
+            link["details"].append(detail)
         if stage is not None and stage.id not in link["stages"]:
             link["stages"].append(stage.id)
         if label and not link["label"]:
@@ -73,23 +109,25 @@ def lab_links(lab) -> list[dict]:
 
     for comp in inv.components.values():
         for link in comp.links:
-            add(comp, inv.components.get(link["to"]), "link",
-                f"tsq_links of {comp.id}" + (f": {link['label']}" if link["label"] else ""), None, link["label"])
+            target = inv.components.get(link["to"])
+            if target is not None:
+                add(comp, target, "link", "tsq_links", link["label"], None, link["label"])
         for stage in [inv.stages[s] for s in comp.stages] or [None]:
             try:
                 resolved = lab.resolve(comp, stage)
             except SequencerError:
                 continue
             try:
-                add(comp, lab.via(comp, stage, resolved.status), "via", "its status probe runs through it", stage)
+                add(lab.via(comp, stage, resolved.status), comp, "probe", "status probe", one_line(resolved.status),
+                    stage)
             except SequencerError:
                 pass
             try:
                 for name, via in lab.command_vias(comp, stage, resolved).items():
-                    add(comp, via, "via", f"its command '{name}' runs through it", stage)
+                    add(via, comp, "probe", f"command {name}", one_line(resolved.commands[name]), stage)
             except SequencerError:
                 pass
-            parts = [(f"command '{n}'", spec) for n, spec in resolved.commands.items()]
+            parts = [(f"command {n}", spec) for n, spec in resolved.commands.items()]
             parts += [("status probe", resolved.status), ("self-test", resolved.selftest), ("collect", resolved.collect)]
             parts += [(f"variable {k}", v) for k, v in comp.vars_in(stage).items()
                       if k not in ("tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_links")]
@@ -98,12 +136,12 @@ def lab_links(lab) -> list[dict]:
                     for m in _REFERENCE.finditer(text):
                         kind, name = m.group(1), m.group(2) or m.group(3)
                         if kind == "stage.roles":
-                            target = _role_member(lab, stage, name, comp.id)
+                            source = _role_member(lab, stage, name, comp.id)
                         elif kind == "stage.components":
-                            target = inv.components.get(name) if stage and name in stage.components else None
+                            source = inv.components.get(name) if stage and name in stage.components else None
                         else:
-                            target = inv.components.get(name)
-                        add(comp, target, "uses", f"its {what} uses {{{{ {m.group(0)} }}}}", stage)
+                            source = inv.components.get(name)
+                        add(source, comp, "cmd", what, one_line(value), stage)
     return list(found.values())
 
 

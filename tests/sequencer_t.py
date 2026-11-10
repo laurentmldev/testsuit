@@ -781,7 +781,7 @@ def test_lab_view(tmp_path, no_git):
     from fastapi import HTTPException
 
     from testsuit.sequencer.api import create_app
-    from testsuit.sequencer.labview import lab_activity, lab_links
+    from testsuit.sequencer.labview import lab_activity, lab_links, one_line
     from testsuit.sequencer.util import SequencerError
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
@@ -796,11 +796,18 @@ def test_lab_view(tmp_path, no_git):
     write(tmp_path / "lab" / "icons" / "obc.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
     seq = bench.sequencer()
     links = {(lk["source"], lk["target"], lk["kind"]): lk for lk in lab_links(seq.lab)}
-    assert set(links) == {("counter_1", "seq_host", "via"), ("obc_1", "counter_1", "via"),
-                          ("obc_1", "seq_host", "uses"), ("obc_1", "counter_1", "link"), ("seq_host", "counter_1", "link")}
-    assert links[("counter_1", "seq_host", "via")]["why"] == ["its command 'start' runs through it"]
-    assert links[("obc_1", "counter_1", "via")]["stages"] == ["bench_1"]
-    assert "lab.components.seq_host" in links[("obc_1", "seq_host", "uses")]["why"][0]
+    assert set(links) == {("seq_host", "counter_1", "probe"), ("counter_1", "obc_1", "probe"),
+                          ("seq_host", "obc_1", "cmd"), ("obc_1", "counter_1", "link"), ("seq_host", "counter_1", "link")}
+    assert links[("seq_host", "counter_1", "probe")]["details"] == [
+        {"title": "command start", "command": one_line(start)}]
+    assert links[("counter_1", "obc_1", "probe")]["stages"] == ["bench_1"]
+    assert links[("counter_1", "obc_1", "probe")]["details"] == [
+        {"title": "status probe", "command": "echo {{ lab.components.seq_host.host }}"}]
+    assert links[("seq_host", "obc_1", "cmd")]["details"] == [
+        {"title": "status probe", "command": "echo {{ lab.components.seq_host.host }}"}]
+    assert links[("obc_1", "counter_1", "link")]["details"] == [{"title": "tsq_links", "command": "CAN bus"}]
+    assert one_line({"run": "a\n  b " + "x" * 200}, 20) == "a b " + "x" * 15 + "…"
+    assert one_line({"http": {"method": "POST", "url": "http://h/x"}}) == "POST http://h/x"
     assert links[("obc_1", "counter_1", "link")]["label"] == "CAN bus"
 
     routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
