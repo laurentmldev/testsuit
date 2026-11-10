@@ -348,7 +348,8 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
       {parent && <div className="hint-box small">Inherits from {parent.chain.map((c: string, i: number) => <span key={c}>{i > 0 && " → "}<ItemLink kind="component" name={c} /></span>)}: {Object.keys(parent.commands).map((c) => <code key={c}>{c}</code>)}{parent.status && <>, status from {parent.status.from}</>}{parent.selftest.length > 0 && <>, self-test {parent.selftest.map((c: any) => c.spec.id).join(", ")}</>}</div>}
       <Field label="Description" help={help(["description"])}><Text multiline value={t.description} onChange={(v) => set("description", v)} placeholder="What kind of component this is" /></Field>
       <Field label="Transport" help={help(["transport"])}>
-        <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone={`inherited (${parent?.transport || "ssh"})`} />
+        <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} 
+          inherit={parent?.transport ? { value: parent.transport, from: `inherited from ${t.extends}` } : { value: "ssh", from: "default" }} />
       </Field>
       <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} />
       <StatusEditor value={t.status} onChange={(v) => set("status", v)} inherited={parent?.status} />

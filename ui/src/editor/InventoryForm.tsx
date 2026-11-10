@@ -15,7 +15,7 @@
 // and their variables, with the roles, components and stage types of the lab and the tests at hand.
 import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
-import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice, type Inherit } from "../fields";
 import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
@@ -236,7 +236,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
         <Text multiline value={vars.tsq_description} onChange={(v) => set("tsq_description", v)} placeholder="What this lab is (its own: stages and components have theirs)" />
       </Field>
       <Field label="Transport" help={help(["all", "vars", "tsq_transport"])}>
-        <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone="default (ssh)" />
+        <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)} inherit={{ value: "ssh", from: "default" }} />
       </Field>
       <Field label="Remote root" help={help(["all", "vars", "tsq_remote_root"])}><Text mono value={vars.tsq_remote_root} onChange={(v) => set("tsq_remote_root", v)} placeholder="/opt/testrun" /></Field>
       <Field label="Shell" help={help(["all", "vars", "tsq_shell"])}><Text mono value={vars.tsq_shell} onChange={(v) => set("tsq_shell", v)} placeholder="default: sh, bash, bash -l…" /></Field>
@@ -425,6 +425,10 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
   const vars = getAt(inv, path) || {};
   const stagesOf = groups(inv).filter((g) => g.stage && g.hosts.includes(name));
   const effective = (k: string) => vars[k] ?? stagesOf[0]?.vars?.[k] ?? inv?.all?.vars?.[k];
+  // what a variable is when the host does not set it, and where that comes from
+  const inheritOf = (k: string, fallback: Inherit): Inherit => stagesOf[0]?.vars?.[k] != null
+    ? { value: String(stagesOf[0].vars[k]), from: `inherited from stage ${stagesOf[0].name}` }
+    : inv?.all?.vars?.[k] != null ? { value: String(inv.all.vars[k]), from: "inherited from the lab defaults" } : fallback;
   const [reach, setReach] = useState<any>(null);
   const set = (k: string, v: any) => update((d) => {
     const current = getAt(d, path);
@@ -495,13 +499,15 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
-        <Choices value={vars.tsq_lock} onChange={(v) => set("tsq_lock", v ?? undefined)} allowNone="exclusive (default)" choices={[
+        <Choices value={vars.tsq_lock} onChange={(v) => set("tsq_lock", v ?? undefined)} inherit={inheritOf("tsq_lock", { value: "exclusive", from: "default" })} choices={[
+          { value: "exclusive", description: "one datapack at a time (the default)" },
           { value: "shared", description: "several datapacks at once: a passive switch" },
           { value: "none", description: "never locked: the sequencer host" },
         ]} />
       </Field>
       <Field label="Transport" help={help(["all", "hosts", "_", "tsq_transport"])}>
-        <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)} allowNone={`inherited (${effective("tsq_transport") || base?.transport || "ssh"})`} />
+        <Choices value={vars.tsq_transport} onChange={(v) => set("tsq_transport", v ?? undefined)} choices={transportChoices(ctx)}
+          inherit={inheritOf("tsq_transport", base?.transport ? { value: base.transport, from: `inherited from ${ext || "linux_system"}` } : { value: "ssh", from: "default" })} />
       </Field>
       <Field label="Remote root" help={help(["all", "hosts", "_", "tsq_remote_root"])}>
         <Text mono value={vars.tsq_remote_root} onChange={(v) => set("tsq_remote_root", v)} placeholder={effective("tsq_remote_root") || "home folder"} />
@@ -646,6 +652,11 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
   const [host, setHost] = useState("");
   const [transport, setTransport] = useState<string | null>(null);
   const taken = allHosts(inv);
+  // the transport the new host gets when it sets none: its stage's, the lab's, its component's, or ssh
+  const extTransport = (ctx.lab.library?.[ext || "linux_system"] || ctx.lab.components?.[ext])?.transport;
+  const newHostTransport: Inherit = group?.vars.tsq_transport != null ? { value: String(group.vars.tsq_transport), from: `inherited from stage ${group.name}` }
+    : inv?.all?.vars?.tsq_transport != null ? { value: String(inv.all.vars.tsq_transport), from: "inherited from the lab defaults" }
+    : extTransport ? { value: extTransport, from: `inherited from ${ext || "linux_system"}` } : { value: "ssh", from: "default" };
   const create = () => {
     const draft = clone(inv);
     const vars: any = {};
@@ -674,7 +685,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Text value={name} onChange={(v) => setName(labIdInput(v))} placeholder={`for example ${freeName(labId(role || "component"), taken)}`} />
       </Field>
       <Field label="Address" help="IP address or host name (leave empty for localhost with the local transport)."><Text mono value={host} onChange={setHost} /></Field>
-      <Field label="Transport"><Choices value={transport} onChange={setTransport} choices={transportChoices(ctx)} allowNone="inherited" /></Field>
+      <Field label="Transport"><Choices value={transport} onChange={setTransport} choices={transportChoices(ctx)} inherit={newHostTransport} /></Field>
     </Dialog>
   );
 }
