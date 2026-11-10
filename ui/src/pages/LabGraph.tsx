@@ -12,8 +12,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 // The Lab page's diagram (sequencer README, section 13.1): each stage an area holding its components, the ad hoc
-// components in their own, the links between components deduced from the lab configuration (via, keys naming
-// another component, tsq_links), and live: states, holds, the run holding each stage and the command each
+// components in their own, the links between components deduced from the lab configuration (probe: via; cmd: keys
+// naming another component; link: tsq_links), and live: states, holds, the run holding each stage and the command each
 // component runs now. A click on a box, an area, a link or a run gives its details or opens its page.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReactFlowInstance } from "@xyflow/react";
@@ -34,16 +34,18 @@ export interface LabView {
   components: Record<string, Activity[]>;
 }
 
-export interface LabLink { source: string; target: string; kind: "via" | "uses" | "link"; label: string; why: string[]; stages: string[] }
+export interface LabLink { source: string; target: string; kind: "probe" | "cmd" | "link"; label: string; details: LinkDetail[]; stages: string[] }
+export interface LinkDetail { title: string; command: string }
 interface RunInfo { id: string; name?: string; testdef?: string; state: string; phase?: string; waiting_for?: string; stages: Record<string, string>; slots: Record<string, string> }
 interface Activity { run: string; phase: string; step: string; slot: string; state: string; started?: string; command: string }
 
 // card sizes: compact (picture, name, status), and expanded (everything)
 const COMPACT = { width: 164, height: 132 };
 const EXPANDED_W = 250;
+const SHOWN_KEY = "tsq.lab.linktypes";     // the link types shown, in the browser
 const KIND_HELP: Record<string, string> = {
-  via: "runs through it: its probe or some of its commands run on the other component (via)",
-  uses: "names it: its commands, probe or variables use the other component (stage.roles…, lab.components…)",
+  probe: "the other component's probe or some of its commands run through this one (via)",
+  cmd: "the other component's commands, probe or variables name this one (stage.roles…, lab.components…)",
   link: "wired to it (tsq_links)",
 };
 
@@ -291,19 +293,19 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   const [saving, setSaving] = useState(false);
   const [shownKinds, setShownKinds] = useState<Set<string>>(() => {     // this viewer's choice, kept in the browser
     try {
-      const kept = JSON.parse(window.localStorage.getItem("tsq.lab.links") || "null");
+      const kept = JSON.parse(window.localStorage.getItem(SHOWN_KEY) || "null");
       if (Array.isArray(kept)) return new Set(kept);
     } catch {
       /* no storage: all shown */
     }
-    return new Set(["link", "via", "uses"]);
+    return new Set(["link", "probe", "cmd"]);
   });
   const showKind = (kind: string, on: boolean) => setShownKinds((all) => {
     const next = new Set(all);
     if (on) next.add(kind);
     else next.delete(kind);
     try {
-      window.localStorage.setItem("tsq.lab.links", JSON.stringify([...next]));
+      window.localStorage.setItem(SHOWN_KEY, JSON.stringify([...next]));
     } catch {
       /* not kept */
     }
@@ -349,7 +351,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     if (comps.some((c) => !c.stages?.length)) nodes.push({ id: "adhoc", width: AREA_MIN_W, height: 120, padding: "[top=58,left=18,bottom=18,right=18]", minWidth: AREA_MIN_W });
     for (const c of comps) nodes.push({ id: `c:${c.id}`, ...size(c), parent: parentOf(c) });
     const edges = groups.map((group, i) => {
-      const directed = group.find((l) => l.kind === "via") || group.find((l) => l.kind === "uses") || group[0];
+      const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd") || group[0];
       return { id: `e${i}`, source: `c:${directed.source}`, target: `c:${directed.target}` };
     });
     layoutWithRoutes(nodes, edges, "DOWN", {
@@ -471,7 +473,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   for (const n of nodes) if (measured[n.id]) n.measured = measured[n.id];
   const nodesById = Object.fromEntries(nodes.map((n) => [n.id, n]));
   const routeOf = (i: number, group: LabLink[]): Point[] | null => {
-    const directed = group.find((l) => l.kind === "via") || group.find((l) => l.kind === "uses") || group[0];
+    const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd") || group[0];
     if (!manual) return routes[`e${i}`] ?? null;
     const s = rects[directed.source];
     const t = rects[directed.target];
@@ -486,13 +488,13 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     const group = visible[i];
     if (!group.length) return [];
     const kinds = new Set(group.map((l) => l.kind));
-    const directed = group.find((l) => l.kind === "via") || group.find((l) => l.kind === "uses");
+    const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd");
     const physical = kinds.has("link");
     const text = [...new Set(group.map((l) => l.kind === "link" ? l.label : l.kind))].filter(Boolean).join(" · ");
-    const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target}: ${l.why.join("; ")}`).join("\n") + "\nClick: why this link";
+    const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}: ${d.command}`).join("\n")}`).join("\n") + "\nClick: details";
     const main = physical ? "link" : directed!.kind;
-    const color = main === "via" ? "var(--accent)" : main === "uses" ? "var(--muted)" : "var(--text)";
-    const ends = all.find((l) => l.kind === "via") || all.find((l) => l.kind === "uses") || all[0];
+    const color = main === "probe" ? "var(--accent)" : main === "cmd" ? "var(--muted)" : "var(--text)";
+    const ends = all.find((l) => l.kind === "probe") || all.find((l) => l.kind === "cmd") || all[0];
     const route = paths[i];
     const faded = Math.min(opacity(ends.source), opacity(ends.target));
     return [{
@@ -500,7 +502,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
       data: { text, title, kind: main, links: group, open: () => onLinks(group), opacity: faded,
         path: route ? bridged(`e${i}`, route, verticals) : null, at: route ? labelPoint(route) : null },
       markerEnd: directed ? { type: "arrowclosed" as any, width: 14, height: 14, color } : undefined,
-      style: { stroke: color, strokeWidth: physical ? 2.2 : 1.5, strokeDasharray: physical ? undefined : main === "via" ? "6 4" : "2 4", opacity: (physical ? 0.75 : 1) * faded },
+      style: { stroke: color, strokeWidth: physical ? 2.2 : 1.5, strokeDasharray: physical ? undefined : main === "probe" ? "6 4" : "2 4", opacity: (physical ? 0.75 : 1) * faded },
     }];
   });
   const pickedOpacity = picked ? (draft?.[picked]?.opacity ?? 1) : 1;
@@ -555,8 +557,8 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
         <span className="lab-legend-title" title="Click a link type to hide or show it">Links:</span>
         {([
           ["link", "wired (tsq_links)", <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--text)" strokeWidth="2.2" opacity=".75" /></svg>],
-          ["via", "runs through (via)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg>],
-          ["uses", "uses (its commands name it)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="2 4" /><path d="M27 0l7 4-7 4z" fill="var(--muted)" /></svg>],
+          ["probe", "probe (via)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg>],
+          ["cmd", "cmd (named by a command)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="2 4" /><path d="M27 0l7 4-7 4z" fill="var(--muted)" /></svg>],
         ] as [string, string, ReactNode][]).map(([kind, label, sample]) => (
           <button key={kind} type="button" className={classes("lab-legend-kind", !shownKinds.has(kind) && "hidden")} aria-pressed={shownKinds.has(kind)}
             title={`${shownKinds.has(kind) ? "Hide" : "Show"} the links of this type: ${KIND_HELP[kind]}`} onClick={() => showKind(kind, !shownKinds.has(kind))}>
@@ -591,8 +593,13 @@ function LinkList({ links, labelOf, onComponent, me }: { links: LabLink[]; label
         {links.map((l) => (
           <tr key={`${l.source}:${l.target}:${l.kind}`}>
             <td style={{ whiteSpace: "nowrap" }}>{name(l.source)} → {name(l.target)}</td>
-            <td><span className={classes("chip", l.kind === "via" ? "run" : l.kind === "link" ? "ok" : "")} title={KIND_HELP[l.kind]}>{l.kind}{l.label ? `: ${l.label}` : ""}</span></td>
-            <td className="small">{l.why.join("; ")}{l.stages.length > 0 && <span className="muted"> (in {l.stages.join(", ")})</span>}</td>
+            <td><span className={classes("chip", l.kind === "probe" ? "run" : l.kind === "link" ? "ok" : "")} title={KIND_HELP[l.kind]}>{l.kind}{l.label ? `: ${l.label}` : ""}</span></td>
+            <td className="small">
+              {(l.details || []).map((d) => (
+                <div key={d.title} className="lab-link-detail"><strong>{d.title}</strong>{d.command && <code title={d.command}>{d.command}</code>}</div>
+              ))}
+              {l.stages.length > 0 && <div className="muted">in {l.stages.join(", ")}</div>}
+            </td>
           </tr>
         ))}
       </tbody>
