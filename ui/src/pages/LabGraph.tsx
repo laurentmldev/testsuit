@@ -149,7 +149,14 @@ function ComponentNode({ data }: NodeProps) {
 }
 
 function AreaNode({ data }: NodeProps) {
-  const { stage, runs, adhoc } = data as any;
+  const { stage, runs, adhoc, host, members } = data as any;
+  if (host) {
+    return (
+      <div className="lab-area host" title={`${members.length} components at the address ${host}: ${members.join(", ")}`}>
+        <div className="lab-host-head"><code>{host}</code><span className="muted small">{members.length} components</span></div>
+      </div>
+    );
+  }
   if (adhoc) {
     return (
       <div className="lab-area adhoc">
@@ -293,6 +300,8 @@ function squareRoute(s: Rect, t: Rect): Point[] {
 
 const AREA_PAD = { left: 18, right: 18, bottom: 18 };
 const AREA_MIN_W = 200;
+const HOST_HEAD = 30;                                 // a box around the components that share an address
+const HOST_PAD = 10;
 
 export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }: {
   comps: any[]; stages: any[]; view: LabView | null;
@@ -348,6 +357,21 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   const groups = useMemo(() => mergeLinks(links), [links]);
   const parentOf = (c: any) => (c.stages?.length === 1 ? `stage:${c.stages[0]}` : c.stages?.length ? undefined : "adhoc");
   const headOf = (s: any) => ((s.holders || []).length ? 84 : 58);
+  // the components of an area that share an address, in a box of their own
+  const hostGroups: Record<string, string[]> = {};
+  for (const c of comps) {
+    if (!c.host) continue;
+    const id = `host:${parentOf(c) ?? ""}:${c.host}`;
+    (hostGroups[id] ||= []).push(c.id);
+  }
+  for (const id of Object.keys(hostGroups)) if (hostGroups[id].length < 2) delete hostGroups[id];
+  const hostOf: Record<string, string> = Object.fromEntries(Object.entries(hostGroups).flatMap(([h, ids]) => ids.map((c) => [c, h])));
+  const hostParent = (h: string) => parentOf(byId[hostGroups[h][0]]);
+  /** What holds a node in the layout: a component in its address box or its area, an address box in its area. */
+  const holderOf = (id: string): string | undefined => id.startsWith("c:") ? (hostOf[id.slice(2)] ?? parentOf(byId[id.slice(2)]))
+    : id.startsWith("host:") ? hostParent(id) : undefined;
+  /** The components inside an area or an address box: they move with it. */
+  const membersOf = (id: string) => id.startsWith("host:") ? (hostGroups[id] || []).map((c) => byId[c]) : comps.filter((c) => parentOf(c) === id);
   const size = (c: any) => {
     if (!expanded.has(c.id)) return COMPACT;
     const busy = (activity[c.id] || []).length;
@@ -357,13 +381,14 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   };
   // the automatic layout changes with what is drawn and the sizes, not with the states
   const structure = JSON.stringify([stages.map((s) => [s.id, s.components, headOf(s)]),
-    comps.map((c) => [c.id, c.stages, size(c)]), links.map((l) => [l.source, l.target])]);
+    comps.map((c) => [c.id, c.stages, size(c), hostOf[c.id]]), links.map((l) => [l.source, l.target])]);
   useEffect(() => {
     let cancelled = false;
     const nodes: any[] = [];
     for (const s of stages) nodes.push({ id: `stage:${s.id}`, width: AREA_MIN_W, height: 120, padding: `[top=${headOf(s)},left=18,bottom=18,right=18]`, minWidth: AREA_MIN_W });
     if (comps.some((c) => !c.stages?.length)) nodes.push({ id: "adhoc", width: AREA_MIN_W, height: 120, padding: "[top=58,left=18,bottom=18,right=18]", minWidth: AREA_MIN_W });
-    for (const c of comps) nodes.push({ id: `c:${c.id}`, ...size(c), parent: parentOf(c) });
+    for (const h of Object.keys(hostGroups)) nodes.push({ id: h, width: 160, height: 80, padding: `[top=${HOST_HEAD},left=${HOST_PAD},bottom=${HOST_PAD},right=${HOST_PAD}]`, parent: hostParent(h) });
+    for (const c of comps) nodes.push({ id: `c:${c.id}`, ...size(c), parent: holderOf(`c:${c.id}`) });
     const edges = groups.map((group, i) => {
       const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd") || group[0];
       return { id: `e${i}`, source: `c:${directed.source}`, target: `c:${directed.target}` };
@@ -391,13 +416,15 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   // where each card is: where a user placed it (saved for everyone, or being arranged), else where ELK put it
   const arrangement: Arrangement = draft ?? saved.data?.components ?? {};
   const manual = Object.values(arrangement).some((a) => a.x !== undefined);
-  const autoRect = (c: any): Rect | null => {
-    const p = placed?.[`c:${c.id}`];
+  /** Where ELK put a node, on the whole diagram (it gives each node relative to what holds it). */
+  const absolute = (id: string): Rect | null => {
+    const p = placed?.[id];
     if (!p) return null;
-    const parent = parentOf(c);
-    const q = parent ? placed?.[parent] : undefined;
+    const holder = holderOf(id);
+    const q = holder ? absolute(holder) : null;
     return { ...p, x: p.x + (q?.x || 0), y: p.y + (q?.y || 0) };
   };
+  const autoRect = (c: any): Rect | null => absolute(`c:${c.id}`);
   const rects: Record<string, Rect> = {};
   for (const c of comps) {
     const auto = autoRect(c);
@@ -406,15 +433,25 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     rects[c.id] = a?.x !== undefined && a?.y !== undefined ? { ...size(c), x: a.x, y: a.y } : auto;
   }
   const opacity = (id: string) => arrangement[id]?.opacity ?? 1;
-  const areaRect = (id: string, head: number): Rect | null => {
-    if (!manual) return placed?.[id] ?? null;
-    const members = comps.filter((c) => parentOf(c) === id && rects[c.id]).map((c) => rects[c.id]);
-    if (!members.length) return placed?.[id] ?? null;
-    const x0 = Math.min(...members.map((r) => r.x)) - AREA_PAD.left;
+  const around = (members: Rect[], head: number, pad: { left: number; right: number; bottom: number }, minWidth: number): Rect => {
+    const x0 = Math.min(...members.map((r) => r.x)) - pad.left;
     const y0 = Math.min(...members.map((r) => r.y)) - head;
-    const x1 = Math.max(...members.map((r) => r.x + r.width)) + AREA_PAD.right;
-    const y1 = Math.max(...members.map((r) => r.y + r.height)) + AREA_PAD.bottom;
-    return { x: x0, y: y0, width: Math.max(x1 - x0, AREA_MIN_W), height: y1 - y0 };
+    const x1 = Math.max(...members.map((r) => r.x + r.width)) + pad.right;
+    const y1 = Math.max(...members.map((r) => r.y + r.height)) + pad.bottom;
+    return { x: x0, y: y0, width: Math.max(x1 - x0, minWidth), height: y1 - y0 };
+  };
+  const hostRects: Record<string, Rect> = {};
+  for (const h of Object.keys(hostGroups)) {
+    const members = hostGroups[h].map((c) => rects[c]).filter(Boolean);
+    const r = !manual ? absolute(h) : members.length ? around(members, HOST_HEAD, { left: HOST_PAD, right: HOST_PAD, bottom: HOST_PAD }, 0) : null;
+    if (r) hostRects[h] = r;
+  }
+  const areaRect = (id: string, head: number): Rect | null => {
+    if (!manual) return absolute(id);
+    const members = [...comps.filter((c) => parentOf(c) === id && !hostOf[c.id] && rects[c.id]).map((c) => rects[c.id]),
+      ...Object.keys(hostRects).filter((h) => hostParent(h) === id).map((h) => hostRects[h])];
+    if (!members.length) return absolute(id);
+    return around(members, head, AREA_PAD, AREA_MIN_W);
   };
 
   const startArranging = () => {
@@ -451,12 +488,12 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
         if (ch.id.startsWith("c:")) {
           const id = ch.id.slice(2);
           next[id] = { ...next[id], x: ch.position.x, y: ch.position.y };
-        } else {                                  // a stage area: its components move with it
+        } else {                                  // a stage area or an address box: its components move with it
           const area = nodesById[ch.id];
           if (!area) continue;
           const dx = ch.position.x - area.position.x;
           const dy = ch.position.y - area.position.y;
-          for (const c of comps.filter((c) => parentOf(c) === ch.id && rects[c.id])) {
+          for (const c of membersOf(ch.id).filter((c) => rects[c.id])) {
             next[c.id] = { ...next[c.id], x: rects[c.id].x + dx, y: rects[c.id].y + dy };
           }
         }
@@ -473,6 +510,10 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     };
     for (const s of stages) area(`stage:${s.id}`, headOf(s), { stage: s, runs });
     if (comps.some((c) => !c.stages?.length)) area("adhoc", 58, { adhoc: true, runs });
+    for (const [h, r] of Object.entries(hostRects)) {
+      nodes.push({ id: h, type: "area", position: { x: r.x, y: r.y }, data: { host: byId[hostGroups[h][0]].host, members: hostGroups[h].map((c) => byId[c].label || c) },
+        style: { width: r.width, height: r.height }, draggable: !!draft, selectable: false, zIndex: 0 });
+    }
     for (const c of comps) {
       const r = rects[c.id];
       if (!r) continue;
