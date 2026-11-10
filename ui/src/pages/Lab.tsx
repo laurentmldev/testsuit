@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
-import { ComponentDialog, LabGraph, LinksDialog, StageDialog, type LabLink, type LabView } from "./LabGraph";
+import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
 const ACTION_HELP: Record<string, string> = {
@@ -52,16 +52,6 @@ function Actions({ kind, item, onDone, onSelftest, onCommands }: { kind: "stages
       <button className="small" title={ACTION_HELP.selftest} onClick={() => onSelftest(item.id)}>Self-test</button>
       {onCommands && <button className="small" title={ACTION_HELP.commands} onClick={onCommands}>Commands…</button>}
     </div>
-  );
-}
-
-/** A command as it will run: each value from a key shows that key (and its template) when pointed at. */
-function Rendered({ segments }: { segments: any[] }) {
-  return (
-    <span className="rendered">
-      {segments.map((seg, i) => seg.key === null && !seg.error ? <span key={i}>{seg.text}</span>
-        : <span key={i} className={seg.error ? "key-value error-text" : "key-value"} title={seg.error ? `{{ ${seg.key ?? ""} }}: ${seg.error}` : `{{ ${seg.key} }}`}>{seg.text}</span>)}
-    </span>
   );
 }
 

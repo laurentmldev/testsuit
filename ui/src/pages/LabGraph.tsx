@@ -35,7 +35,9 @@ export interface LabView {
 }
 
 export interface LabLink { source: string; target: string; kind: "probe" | "cmd" | "link"; label: string; details: LinkDetail[]; stages: string[] }
-export interface LinkDetail { title: string; command: string }
+export interface LinkDetail { title: string; commands: CmdSegment[][] }
+/** A piece of a command as it runs: literal text, or the value of a key (``key``), or why it has none. */
+export interface CmdSegment { text: string; key: string | null; error?: string }
 interface RunInfo { id: string; name?: string; testdef?: string; state: string; phase?: string; waiting_for?: string; stages: Record<string, string>; slots: Record<string, string> }
 interface Activity { run: string; phase: string; step: string; slot: string; state: string; started?: string; command: string }
 
@@ -48,6 +50,18 @@ const KIND_HELP: Record<string, string> = {
   cmd: "the other component's commands, probe or variables name this one (stage.roles…, lab.components…)",
   link: "wired to it (tsq_links)",
 };
+
+const textOf = (segments: CmdSegment[]) => segments.map((s) => s.text).join("");
+
+/** A command as it will run: each value from a key shows that key (and its template) when pointed at. */
+export function Rendered({ segments }: { segments: CmdSegment[] }) {
+  return (
+    <span className="rendered">
+      {segments.map((seg, i) => seg.key === null && !seg.error ? <span key={i}>{seg.text}</span>
+        : <span key={i} className={seg.error ? "key-value error-text" : "key-value"} title={seg.error ? `{{ ${seg.key ?? ""} }}: ${seg.error}` : `{{ ${seg.key} }}`}>{seg.text}</span>)}
+    </span>
+  );
+}
 
 export const runName = (run?: RunInfo | null, id?: string) => run?.name || run?.testdef || id || "";
 
@@ -491,7 +505,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd");
     const physical = kinds.has("link");
     const text = [...new Set(group.map((l) => l.kind === "link" ? l.label : l.kind))].filter(Boolean).join(" · ");
-    const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}: ${d.command}`).join("\n")}`).join("\n") + "\nClick: details";
+    const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}${d.commands.length ? ": " + d.commands.map(textOf).join(" ; ") : ""}`).join("\n")}`).join("\n") + "\nClick: details";
     const main = physical ? "link" : directed!.kind;
     const color = main === "probe" ? "var(--accent)" : main === "cmd" ? "var(--muted)" : "var(--text)";
     const ends = all.find((l) => l.kind === "probe") || all.find((l) => l.kind === "cmd") || all[0];
@@ -579,7 +593,7 @@ export function LinksDialog({ links, labelOf, onClose, onComponent }: { links: L
   const ends = [...new Set(links.flatMap((l) => [l.source, l.target]))];
   return (
     <Dialog title={`Link ${ends.map(labelOf).join(" – ")}`} onClose={onClose} wide>
-      <div className="lab-links-full"><LinkList links={links} labelOf={labelOf} onComponent={onComponent} /></div>
+      <LinkList links={links} labelOf={labelOf} onComponent={onComponent} />
     </Dialog>
   );
 }
@@ -596,7 +610,10 @@ function LinkList({ links, labelOf, onComponent, me }: { links: LabLink[]; label
             <td><span className={classes("chip", l.kind === "probe" ? "run" : l.kind === "link" ? "ok" : "")} title={KIND_HELP[l.kind]}>{l.kind}{l.label ? `: ${l.label}` : ""}</span></td>
             <td className="small">
               {(l.details || []).map((d) => (
-                <div key={d.title} className="lab-link-detail"><strong>{d.title}</strong>{d.command && <code title={d.command}>{d.command}</code>}</div>
+                <div key={d.title} className="lab-link-detail">
+                  <strong>{d.title}</strong>
+                  {d.commands.map((c, i) => <div key={i} className="lab-link-command"><Rendered segments={c} /></div>)}
+                </div>
               ))}
               {l.stages.length > 0 && <div className="muted">in {l.stages.join(", ")}</div>}
             </td>

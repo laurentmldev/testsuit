@@ -592,12 +592,10 @@ button.tree-more { padding: 8px 14px; }
 .lab-edge-label { position: absolute; pointer-events: all; cursor: pointer; font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
 .lab-edge-label.probe { color: var(--accent); border-color: var(--accent-soft); }
 .lab-edge-label.link { color: var(--text); }
-.lab-link-detail { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
-.lab-link-detail strong { white-space: nowrap; font-weight: 600; }
-.lab-link-detail code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 36ch; color: var(--muted); }
-.lab-links-full { overflow-x: auto; }
-.lab-links-full table { width: max-content; min-width: 100%; }
-.lab-links-full .lab-link-detail code { max-width: none; overflow: visible; }
+.lab-link-detail + .lab-link-detail { margin-top: 6px; }
+.lab-link-detail strong { font-weight: 600; }
+.lab-link-command { font-family: var(--mono); font-size: 12px; margin: 2px 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lab-link-command .key-value { white-space: pre-wrap; overflow: visible; }
 .lab-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; margin: 8px 2px; }
 .lab-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .lab-dialog-head { display: flex; gap: 14px; align-items: flex-start; }
