@@ -61,7 +61,7 @@ class Lab:
     git: dict | None
     require_tag: bool = True
     loaded_at: str = field(default_factory=now)
-    extra_commands: dict[str, list[str]] = field(default_factory=dict)   # host -> commands its role does not list
+    extra_commands: dict[str, list[str]] = field(default_factory=dict)   # host -> commands none of its roles lists
 
     @property
     def warnings(self) -> list[str]:

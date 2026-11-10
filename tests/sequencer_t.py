@@ -302,6 +302,7 @@ def test_roles_and_components(bench):
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
     lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     assert (lab.inventory.components["counter_1"].role, lab.inventory.components["counter_2"].role) == ("dut", "spare")
+    assert lab.extra_commands == {}            # what counter_host implements for 'dut' is no extra on a 'spare'
     inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "sequencer"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
     with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its component 'counter_host' "
