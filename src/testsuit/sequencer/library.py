@@ -389,7 +389,7 @@ class Library:
             collect = {**collect, **own.collect}
         for check in own.selftest:
             selftest[:] = [x for x in selftest if x["id"] != check["id"]] + [dict(check)]
-        transport = str(component.vars.get("tsq_transport") or transport or "ssh")
+        transport = str(component.settings.get("tsq_transport") or transport or "ssh")
         return Resolved(role=component.role, chain=[c.name for c in chain], transport=transport, commands=commands,
                         command_sources=sources, status=status, selftest=selftest, collect=collect)
 
