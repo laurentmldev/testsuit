@@ -624,3 +624,7 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .lab-picked .lab-node { outline: 3px solid var(--accent); }
 .lab-opacity { display: inline-flex; align-items: center; gap: 8px; }
 .lab-opacity input { width: 140px; }
+.lab-legend-kind { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 1px 4px; font-size: 12px; color: var(--muted); }
+.lab-legend-kind:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+.lab-legend-kind.hidden { opacity: 0.4; text-decoration: line-through; }
+.lab-legend-title { font-weight: 600; }

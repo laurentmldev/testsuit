@@ -289,6 +289,26 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
   const [draft, setDraft] = useState<Arrangement | null>(null);      // while arranging
   const [picked, setPicked] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [shownKinds, setShownKinds] = useState<Set<string>>(() => {     // this viewer's choice, kept in the browser
+    try {
+      const kept = JSON.parse(window.localStorage.getItem("tsq.lab.links") || "null");
+      if (Array.isArray(kept)) return new Set(kept);
+    } catch {
+      /* no storage: all shown */
+    }
+    return new Set(["link", "via", "uses"]);
+  });
+  const showKind = (kind: string, on: boolean) => setShownKinds((all) => {
+    const next = new Set(all);
+    if (on) next.add(kind);
+    else next.delete(kind);
+    try {
+      window.localStorage.setItem("tsq.lab.links", JSON.stringify([...next]));
+    } catch {
+      /* not kept */
+    }
+    return next;
+  });
   const toggle = (id: string) => setExpanded((all) => {
     const next = new Set(all);
     if (next.has(id)) next.delete(id);
@@ -457,10 +477,14 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     const t = rects[directed.target];
     return s && t ? squareRoute(s, t) : null;
   };
-  const paths = groups.map((group, i) => routeOf(i, group));
+  // the link types shown: hiding some keeps the layout as it is (the links still place the cards)
+  const visible = groups.map((group) => group.filter((l) => shownKinds.has(l.kind)));
+  const paths = groups.map((group, i) => (visible[i].length ? routeOf(i, group) : null));
   const verticals: Segment[] = paths.flatMap((r, i) => (r ? r.slice(1).map((b, k) => ({ a: r[k], b, edge: `e${i}` })) : []))
     .filter((sg) => Math.abs(sg.a.x - sg.b.x) < 0.5);
-  const edges: Edge[] = groups.map((group, i) => {
+  const edges: Edge[] = groups.flatMap((all, i) => {
+    const group = visible[i];
+    if (!group.length) return [];
     const kinds = new Set(group.map((l) => l.kind));
     const directed = group.find((l) => l.kind === "via") || group.find((l) => l.kind === "uses");
     const physical = kinds.has("link");
@@ -468,16 +492,16 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target}: ${l.why.join("; ")}`).join("\n") + "\nClick: why this link";
     const main = physical ? "link" : directed!.kind;
     const color = main === "via" ? "var(--accent)" : main === "uses" ? "var(--muted)" : "var(--text)";
-    const ends = directed || group[0];
+    const ends = all.find((l) => l.kind === "via") || all.find((l) => l.kind === "uses") || all[0];
     const route = paths[i];
     const faded = Math.min(opacity(ends.source), opacity(ends.target));
-    return {
+    return [{
       id: `e${i}`, type: "link", source: `c:${ends.source}`, target: `c:${ends.target}`, zIndex: 1,
       data: { text, title, kind: main, links: group, open: () => onLinks(group), opacity: faded,
         path: route ? bridged(`e${i}`, route, verticals) : null, at: route ? labelPoint(route) : null },
       markerEnd: directed ? { type: "arrowclosed" as any, width: 14, height: 14, color } : undefined,
       style: { stroke: color, strokeWidth: physical ? 2.2 : 1.5, strokeDasharray: physical ? undefined : main === "via" ? "6 4" : "2 4", opacity: (physical ? 0.75 : 1) * faded },
-    };
+    }];
   });
   const pickedOpacity = picked ? (draft?.[picked]?.opacity ?? 1) : 1;
 
@@ -528,9 +552,17 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
         </ReactFlow>
       </div>
       <div className="lab-legend muted small">
-        <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--text)" strokeWidth="2.2" opacity=".75" /></svg> wired (tsq_links)</span>
-        <span><svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg> runs through (via)</span>
-        <span><svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="2 4" /><path d="M27 0l7 4-7 4z" fill="var(--muted)" /></svg> uses (its commands name it)</span>
+        <span className="lab-legend-title" title="Click a link type to hide or show it">Links:</span>
+        {([
+          ["link", "wired (tsq_links)", <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--text)" strokeWidth="2.2" opacity=".75" /></svg>],
+          ["via", "runs through (via)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg>],
+          ["uses", "uses (its commands name it)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="2 4" /><path d="M27 0l7 4-7 4z" fill="var(--muted)" /></svg>],
+        ] as [string, string, ReactNode][]).map(([kind, label, sample]) => (
+          <button key={kind} type="button" className={classes("lab-legend-kind", !shownKinds.has(kind) && "hidden")} aria-pressed={shownKinds.has(kind)}
+            title={`${shownKinds.has(kind) ? "Hide" : "Show"} the links of this type: ${KIND_HELP[kind]}`} onClick={() => showKind(kind, !shownKinds.has(kind))}>
+            {sample} {label} <span className="muted">({links.filter((l) => l.kind === kind).length})</span>
+          </button>
+        ))}
         <span><span className="pulse run" /> runs a command now</span>
         <span>Click a card to expand it, a stage title, a link or a run for details.</span>
       </div>
