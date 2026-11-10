@@ -578,8 +578,8 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
 export function LinksDialog({ links, labelOf, onClose, onComponent }: { links: LabLink[]; labelOf: (id: string) => string; onClose: () => void; onComponent: (id: string) => void }) {
   const ends = [...new Set(links.flatMap((l) => [l.source, l.target]))];
   return (
-    <Dialog title={`Link ${ends.map(labelOf).join(" – ")}`} onClose={onClose}>
-      <LinkList links={links} labelOf={labelOf} onComponent={onComponent} />
+    <Dialog title={`Link ${ends.map(labelOf).join(" – ")}`} onClose={onClose} wide>
+      <div className="lab-links-full"><LinkList links={links} labelOf={labelOf} onComponent={onComponent} /></div>
     </Dialog>
   );
 }

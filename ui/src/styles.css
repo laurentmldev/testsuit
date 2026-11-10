@@ -595,6 +595,9 @@ button.tree-more { padding: 8px 14px; }
 .lab-link-detail { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .lab-link-detail strong { white-space: nowrap; font-weight: 600; }
 .lab-link-detail code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 36ch; color: var(--muted); }
+.lab-links-full { overflow-x: auto; }
+.lab-links-full table { width: max-content; min-width: 100%; }
+.lab-links-full .lab-link-detail code { max-width: none; overflow: visible; }
 .lab-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; margin: 8px 2px; }
 .lab-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .lab-dialog-head { display: flex; gap: 14px; align-items: flex-start; }
