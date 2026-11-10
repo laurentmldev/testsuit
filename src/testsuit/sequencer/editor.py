@@ -662,7 +662,7 @@ class Editor:
                                       for k, v in resolved.commands.items()},
                             status=resolved.status, selftest=[x["id"] for x in resolved.selftest],
                             missing=sorted(set(offered) - set(resolved.commands)),
-                            extra=sorted(set(resolved.commands) - set(offered)))
+                            extra=lab.library.extra_commands(c, resolved, lab.hosts))
             except SequencerError as e:
                 info["error"] = str(e)
             hosts[c.id] = info
