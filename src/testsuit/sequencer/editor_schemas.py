@@ -405,7 +405,8 @@ VARS = {
     "tsq_links": h("The components it is wired to that its configuration does not show, drawn as links on the Lab view "
                    "(a tap between a switch and a board, a serial cable). Links its commands and probe give "
                    "(`via`, `{{ stage.roles.<role> }}`, `{{ lab.components.<host> }}`) are drawn without it. A list "
-                   "of hosts, or a mapping host: label.",
+                   "of hosts, or a mapping host: label. For the diagram only: the sequencer does nothing with "
+                   "these links (no command, probe, lock or binding uses them).",
                    type=["array", "object", "string"], items={"type": "string"},
                    additionalProperties={"type": "string"}, examples=[["switch_1"], {"au": "USB GPIO adapter"}]),
     "tsq_description": h("What it is, shown in the editor and on the Lab page: in `all.vars`, the lab; on a stage "

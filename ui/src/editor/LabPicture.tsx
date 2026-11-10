@@ -118,7 +118,10 @@ export function LinksEditor({ value, onChange, hosts }: { value: any; onChange: 
           <button type="button" className="icon" title="Remove this link" onClick={() => set(rows.filter((_, j) => j !== i))}>×</button>
         </div>
       ))}
-      <button type="button" className="small" onClick={() => set([...rows, { to: "", label: "" }])}>+ link</button>
+      <div className="links-foot">
+        <button type="button" className="small" onClick={() => set([...rows, { to: "", label: "" }])}>+ link</button>
+        <span className="muted small">For the Lab diagram only: these links change nothing when the sequencer runs.</span>
+      </div>
     </div>
   );
 }

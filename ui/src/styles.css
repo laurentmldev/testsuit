@@ -612,6 +612,7 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .icon-path { margin-top: 6px; max-width: 520px; }
 .links-editor { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .links-row { display: grid; grid-template-columns: minmax(140px, 220px) minmax(160px, 1fr) auto; gap: 6px; width: 100%; max-width: 640px; }
+.links-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .lab-node.compact { align-items: center; justify-content: center; text-align: center; gap: 4px; padding: 8px 8px; border-left-width: 1.5px; border-top-width: 4px; cursor: pointer; }
 .lab-node.compact.ok, .lab-node.compact.idle { border-top-color: var(--idle); }
 .lab-node.compact.info { border-top-color: var(--accent); }
