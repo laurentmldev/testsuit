@@ -179,6 +179,13 @@ def shell_of(component) -> str:
     return value
 
 
+def strict(command: str) -> str:
+    """A command written by the user (a step, a component's command, probe or self-test), as it runs: it
+    stops at the first line that fails (``set -e``), its exit status then that line's. To go on after a
+    failure, the command says so (``|| true``, ``if``, ``set +e``)."""
+    return "set -e\n" + command
+
+
 def env_prefix(env: dict[str, Any] | None) -> str:
     if not env:
         return ""
