@@ -775,6 +775,94 @@ def test_commands_via(tmp_path, no_git):
         bench.sequencer()
 
 
+def test_lab_view(tmp_path, no_git):
+    """The Lab view: links deduced from the lab configuration (via, keys naming another component, tsq_links), the
+    pictures of the components (tsq_icon), and the command each component runs now, with its run."""
+    from fastapi import HTTPException
+
+    from testsuit.sequencer.api import create_app
+    from testsuit.sequencer.labview import lab_activity, lab_links
+    from testsuit.sequencer.util import SequencerError
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    hosts = inventory["all"]["children"]["bench_1"]["hosts"]
+    start = dict(LAB_COMPONENTS["components"]["counter_host"]["commands"]["start"], via="seq_host")
+    hosts["counter_1"].update(tsq_commands={"start": start}, tsq_icon="embedded")
+    hosts["obc_1"] = {"tsq_transport": "local", "tsq_role": "sequencer", "tsq_lock": "none", "tsq_icon": "icons/obc.svg",
+                      "tsq_status": {"via": "dut", "probe": {"run": "echo {{ lab.components.seq_host.host }}"}},
+                      "tsq_links": {"counter_1": "CAN bus"}}
+    inventory["all"]["hosts"]["seq_host"].update(tsq_icon="server", tsq_links=["counter_1"])
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    write(tmp_path / "lab" / "icons" / "obc.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    seq = bench.sequencer()
+    links = {(lk["source"], lk["target"], lk["kind"]): lk for lk in lab_links(seq.lab)}
+    assert set(links) == {("counter_1", "seq_host", "via"), ("obc_1", "counter_1", "via"),
+                          ("obc_1", "seq_host", "uses"), ("obc_1", "counter_1", "link"), ("seq_host", "counter_1", "link")}
+    assert links[("counter_1", "seq_host", "via")]["why"] == ["its command 'start' runs through it"]
+    assert links[("obc_1", "counter_1", "via")]["stages"] == ["bench_1"]
+    assert "lab.components.seq_host" in links[("obc_1", "seq_host", "uses")]["why"][0]
+    assert links[("obc_1", "counter_1", "link")]["label"] == "CAN bus"
+
+    routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
+    pipeline = {"timeout": "1m", "phases": [{"id": "test_run", "stage_slots": ["bench"], "steps": [
+        {"id": "deploy", "slot": "dut", "do": "deploy"},
+        {"id": "soak", "slot": "dut", "run": "sleep 1", "needs": ["deploy"]}]}]}
+
+    async def main():
+        view = await routes["/lab/view"]()
+        assert view["icons"] == {"counter_1": {"builtin": "embedded"}, "seq_host": {"builtin": "server"},
+                                 "obc_1": {"file": "icons/obc.svg"}}
+        icon = await routes["/lab/icons/{name}"]("obc_1")
+        assert Path(icon.path) == tmp_path / "lab" / "icons" / "obc.svg" and "default-src 'none'" in icon.headers["content-security-policy"]
+        with pytest.raises(HTTPException):
+            await routes["/lab/icons/{name}"]("seq_host")
+        run = seq.submit(bench.build("soak", pipeline=pipeline))
+        seen = {}
+
+        async def during(seq):
+            await running_step(seq, run["id"], "test_run:soak[dut]")
+            seen.update(lab_activity(seq))
+        await run_until_done(seq, [run["id"]], during=during)
+        await seq.close()
+        return run, seen
+    run, seen = asyncio.run(main())
+    assert seen["runs"][run["id"]]["name"] and seen["runs"][run["id"]]["stages"] == {"bench": "bench_1"}
+
+    # the arrangement a user saves is everyone's: positions and opacities, checked; empty: the automatic layout
+    seq = bench.sequencer()
+    by_method = {(r.path, m): r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint") for m in r.methods}
+    get_layout, put_layout = by_method[("/lab/layout", "GET")], by_method[("/lab/layout", "PUT")]
+
+    async def arrange():
+        assert await get_layout() == {"components": {}}
+        saved = await put_layout({"components": {
+            "counter_1": {"x": 10, "y": 20.04, "opacity": 0.3}, "seq_host": {"x": "left", "opacity": 7}, "ghost": {"x": 1}}})
+        assert saved["components"] == {"counter_1": {"x": 10.0, "y": 20.0, "opacity": 0.3}, "seq_host": {"opacity": 1.0}}
+        assert (await get_layout())["components"] == saved["components"]
+        with pytest.raises(SequencerError):
+            await put_layout({"components": []})
+        assert (await put_layout({"components": {}})) == {"components": {}}
+        assert not (tmp_path / "storage" / "lab_layout.json").exists()
+        await seq.close()
+    asyncio.run(arrange())
+    [step] = seen["components"]["counter_1"]
+    assert step["run"] == run["id"] and step["step"] == "soak" and step["command"] == "run sleep 1"
+
+    inventory["all"]["hosts"]["seq_host"]["tsq_links"] = ["nobody"]
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="tsq_links: 'nobody' is not another host"):
+        bench.sequencer()
+
+
+def test_lab_view_icons_match_the_ui():
+    """The built-in pictures of tsq_icon are the drawings of the UI, in the same order."""
+    import re
+
+    from testsuit.sequencer.inventory import ICONS
+    drawings = (Path(__file__).parent.parent / "ui" / "src" / "labicons.tsx").read_text()
+    assert re.findall(r"^  (\w+): \{ label:", drawings, re.M) == list(ICONS)
+
+
 def test_manual_command(tmp_path, no_git):
     """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
     from testsuit.sequencer.util import SequencerError

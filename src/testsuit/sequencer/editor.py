@@ -449,6 +449,27 @@ class Editor:
         result["problems"] = self.check_file(session, rel)
         return result
 
+    MAX_UPLOAD = 2 << 20
+
+    def upload(self, session: EditSession, rel: str, data: bytes) -> dict:
+        """Write an image of the session (a component's ``tsq_icon``), as it was uploaded."""
+        from testsuit.sequencer.inventory import ICON_EXTENSIONS
+        if Path(rel).suffix.lower() not in ICON_EXTENSIONS:
+            raise SequencerError(f"'{rel}': only images can be uploaded ({', '.join(ICON_EXTENSIONS)})")
+        if len(data) > self.MAX_UPLOAD:
+            raise SequencerError(f"'{rel}': {len(data)} bytes, more than {self.MAX_UPLOAD >> 20} MB")
+        path = self.path(session, rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return {"path": self.rel(session, path), "size": len(data)}
+
+    def raw(self, session: EditSession, rel: str) -> Path:
+        """A file of the session as it is (an image to show)."""
+        path = self.path(session, rel)
+        if not path.is_file():
+            raise SequencerError(f"no file '{rel}'")
+        return path
+
     def delete(self, session: EditSession, rel: str) -> None:
         path = self.path(session, rel)
         if path.is_dir():
@@ -820,6 +841,13 @@ class Editor:
             problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
                              "message": f"component '{host}' implements {', '.join(extra)}, which its role '{role}' "
                                         "does not list: datapacks cannot use them (add them to the role?)"})
+        from testsuit.sequencer.labview import icon_of
+        for host, component in lab.inventory.components.items():
+            icon = icon_of(lab, component)
+            if icon and icon.get("error"):
+                line, column = _find_line(text, component.icon)
+                problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
+                                 "message": f"component '{host}': {icon['error']} (the Lab view draws a plain box)"})
         for folder in self.seq.config.workspaces:
             for setup in self.scan_workspace(folder, folder)["setups"]:
                 for cfg_name, cfg in setup["configurations"].items():

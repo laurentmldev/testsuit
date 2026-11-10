@@ -327,6 +327,39 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             described["published"] = {**published, "newer": published["commit"] != current}
         return described
 
+    @app.get("/lab/view")
+    async def lab_view():
+        """The Lab view: links between components deduced from the lab configuration, their pictures, the active
+        runs and the steps each component runs now."""
+        from testsuit.sequencer.labview import lab_view as view
+        return view(seq)
+
+    @app.get("/lab/layout")
+    async def lab_layout():
+        """The arrangement of the Lab view saved for everyone (positions and opacities); empty: automatic."""
+        from testsuit.sequencer.labview import read_layout
+        return read_layout(seq)
+
+    @app.put("/lab/layout")
+    async def save_lab_layout(body: dict):
+        """Save the arrangement of the Lab view for everyone (``{"components": {}}``: back to automatic)."""
+        from testsuit.sequencer.labview import save_layout
+        layout = save_layout(seq, body)
+        seq.notify("lab_layout", {"components": len(layout["components"])})
+        return layout
+
+    @app.get("/lab/icons/{name}")
+    async def lab_icon(name: str):
+        """The image file of a component's tsq_icon (in the lab folder)."""
+        from testsuit.sequencer.labview import icon_path
+        component = seq.lab.inventory.components.get(name)
+        path = icon_path(seq.lab, component) if component is not None else None
+        if path is None:
+            raise HTTPException(404, f"no icon file for '{name}'")
+        # an SVG opened on its own runs no script of the lab repository
+        return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+                            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
     @app.get("/logs")
     async def get_logs(since: int = 0, level: str | None = None, limit: int = 1000, probes: bool = True):
         """The last log lines of tsqd (events, warnings, errors, and the probes of the lab), after line since."""

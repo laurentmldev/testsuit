@@ -25,6 +25,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from testsuit.sequencer.inventory import ICON_EXTENSIONS, ICONS
+
 
 def h(text: str, **extra: Any) -> dict:
     """A schema fragment with its help, in plain text and Markdown."""
@@ -396,6 +398,16 @@ VARS = {
                   "listing `tags` only binds to a component or stage having them all. The id is always a tag.",
                   type="array", items={"type": "string"}, examples=[["calibrated", "rev_b"]]),
     "tsq_label": h("Name shown in the UI and the CLI (default: the host name).", type="string"),
+    "tsq_icon": h("How the Lab view draws the component: one of the pictures it has ("
+                  + ", ".join(f"`{i}`" for i in ICONS) + "), or an image file of the lab repository ("
+                  + ", ".join(ICON_EXTENSIONS) + "), relative to the inventory. Default: a plain box. Set on a group, "
+                  "it applies to its hosts.", type="string", examples=["switch", "icons/front_board.png"]),
+    "tsq_links": h("The components it is wired to that its configuration does not show, drawn as links on the Lab view "
+                   "(a tap between a switch and a board, a serial cable). Links its commands and probe give "
+                   "(`via`, `{{ stage.roles.<role> }}`, `{{ lab.components.<host> }}`) are drawn without it. A list "
+                   "of hosts, or a mapping host: label.",
+                   type=["array", "object", "string"], items={"type": "string"},
+                   additionalProperties={"type": "string"}, examples=[["switch_1"], {"au": "USB GPIO adapter"}]),
     "tsq_description": h("What it is, shown in the editor and on the Lab page: in `all.vars`, the lab; on a stage "
                          "group, the stage; on a host, the component. Not inherited: each level has its own.",
                          type="string"),

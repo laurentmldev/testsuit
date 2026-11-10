@@ -26,14 +26,18 @@ all:
       tsq_role: sequencer
       tsq_lock: none
       tsq_label: dev host (sequencer, exploitation)
+      tsq_icon: workstation                        # how the Lab view draws it (README section 13.1)
     sim_propulsion:
       tsq_extends: propulsion_sim
       tsq_remote_root: ~/.toytrain-emu/sim         # with venv/: pip install of the simulation release
       tsq_label: Simulated propulsion controller
+      tsq_icon: simulator
     sim_piezo:
       tsq_extends: piezo_sim
       tsq_remote_root: ~/.toytrain-emu/sim
       tsq_label: Simulated piezo sensors
+      tsq_icon: simulator
+      tsq_links: {au: GPIO over UDP}               # wiring its commands do not show: drawn on the Lab view
       tsq_gpio_adapter: udp://127.0.0.12:5017      # in place of the USB GPIO adapter: AU's emulated inputs
 
   children:
@@ -45,14 +49,17 @@ all:
         calc_pilot:
           tsq_extends: arduino_unoq
           tsq_label: CALC-Pilot (emulated)
+          tsq_icon: embedded
           tsq_description: Drives the train; its microcontroller is replaced by the host stub.
           tsq_start_args: --mcu host               # microcontroller replaced by its host stub
         calc_tm:
           tsq_role: telemetry
           tsq_extends: rpi5
           tsq_label: CALC-TM (emulated)
+          tsq_icon: board
         au:
           tsq_role: acquisition
           tsq_extends: rpi5
           tsq_label: AU (emulated)
+          tsq_icon: board
           tsq_start_args: --gpio-backend udp://127.0.0.12:5017   # GPIO 17 / 27 edges sent by the piezo simulation

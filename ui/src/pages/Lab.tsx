@@ -11,12 +11,14 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Components and stages (sequencer README, section 13.1): monitored state, lock state and holder,
-// self-test results; hold, release, maintenance, resume and self-test.
+// Components and stages (sequencer README, section 13.1): a diagram of the lab (stage areas, components and their
+// links, live states and runs), and a table; monitored state, lock state and holder, self-test results; hold,
+// release, maintenance, resume and self-test.
 import { useEffect, useState } from "react";
 import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
-import { ago, attempt, Badge, navigate, time } from "../util";
+import { ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
+import { ComponentDialog, LabGraph, LinksDialog, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
 const ACTION_HELP: Record<string, string> = {
@@ -269,7 +271,13 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 export function LabPage({ editor }: { editor?: boolean }) {
+  const route = useRoute();
+  const tab = route.query.get("view") === "table" ? "table" : "diagram";
+  const focus = route.query.get("focus");
+  const labelOf = useLabels();
   const lab = useResource<any>("lab", ["lab"]);
+  const view = useResource<LabView>("lab/view", ["lab", "run", "step", "resource", "release"]);
+  const [picked, setPicked] = useState<{ kind: "component" | "stage"; id: string } | { kind: "links"; links: LabLink[] } | null>(null);
   const comps = useResource<any[]>("components", ["component", "probe", "resource", "release", "run", "lab", "selftest"]);
   const stages = useResource<any[]>("stages", ["resource", "release", "run", "lab"]);
   const [selftest, setSelftest] = useState<string | null | undefined>(undefined);
@@ -297,7 +305,15 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const refresh = () => {
     comps.refresh();
     stages.refresh();
+    view.refresh();
   };
+  useEffect(() => {                          // "Show in the table": scrolled to, and marked a moment
+    if (tab !== "table" || !focus || !comps.data) return;
+    const row = document.getElementById(`lab-row-${focus}`);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = window.setTimeout(() => setQuery("focus", null), 2500);
+    return () => window.clearTimeout(t);
+  }, [tab, focus, comps.data]);
   const byId: Record<string, any> = Object.fromEntries((comps.data || []).map((c) => [c.id, c]));
   const reload = async (pull: boolean) => {
     const revision = pull ? window.prompt("Revision to check out (tag or commit; empty: the latest commit of the branch):", "") : null;
@@ -308,13 +324,16 @@ export function LabPage({ editor }: { editor?: boolean }) {
     lab.refresh();
     refresh();
   };
-  const editLab = async () => {
+  const editLab = async (host?: string) => {
     const s = await attempt(() => post("edit/sessions", { repo: "lab", local: true }));
-    if (s) navigate(`edit/${s.id}`);
+    if (!s) return;
+    const ctx = host ? await get<any>(`edit/sessions/${s.id}/context`).catch(() => null) : null;
+    navigate(`edit/${s.id}`, ctx?.inventory ? { file: ctx.inventory, item: `host:${host}` } : {});
   };
+  const commandsOf = (c: any) => c.maintenance || (c.stages || []).some((st: string) => stageById[st]?.maintenance) ? () => setCommands(c.id) : undefined;
   const git = lab.data?.git;
   const row = (c: any) => (
-    <tr key={c.id} className={c.hold || c.maintenance ? "off" : ""}>
+    <tr key={c.id} id={`lab-row-${c.id}`} className={classes((c.hold || c.maintenance) && "off", focus === c.id && "focused")}>
       <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div>{c.description && <div className="small description">{c.description}</div>}</td>
       <td>{c.role}</td>
       <td><code>{c.extends}</code></td>
@@ -323,8 +342,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <div className="muted small" title={time(c.probed_at)}>{c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>
       <td><Holders item={c} /></td>
-      <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest}
-        onCommands={c.maintenance || (c.stages || []).some((st: string) => stageById[st]?.maintenance) ? () => setCommands(c.id) : undefined} /></td>
+      <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest} onCommands={commandsOf(c)} /></td>
     </tr>
   );
   const head = <thead><tr><th>Component</th><th>Role</th><th>Extends</th><th>Host</th><th>State</th><th>Lock</th><th>Held by</th><th /></tr></thead>;
@@ -339,12 +357,37 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
         <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
-        {editor && <button onClick={editLab} title="Open the lab inventory, roles and components in the Editor, in place">Edit lab config</button>}
+        {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and components in the Editor, in place">Edit lab config</button>}
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}
       {lab.data?.description && <p className="description lab-description">{lab.data.description}</p>}
-      {(stages.data || []).map((s) => (
+      <div className="tabs">
+        <button className={tab === "diagram" ? "selected" : ""} onClick={() => setQuery("view", null)} title="Stages, components and their links, with what runs on them now">Diagram</button>
+        <button className={tab === "table" ? "selected" : ""} onClick={() => setQuery("view", "table")} title="Every stage and component, one row each, with its actions">Table</button>
+      </div>
+      {tab === "diagram" && (comps.data && stages.data
+        ? <LabGraph comps={comps.data} stages={stages.data} view={view.data}
+          onComponent={(id) => setPicked({ kind: "component", id })} onStage={(id) => setPicked({ kind: "stage", id })}
+          onLinks={(links) => setPicked({ kind: "links", links })} />
+        : <p className="muted">Reading the lab…</p>)}
+      {view.error && tab === "diagram" && <div className="error-box">{view.error}</div>}
+      {picked?.kind === "component" && byId[picked.id] && (
+        <ComponentDialog comp={byId[picked.id]} view={view.data} labelOf={labelOf} onClose={() => setPicked(null)}
+          onProbe={() => setDetails(picked.id)} onComponent={(id) => setPicked({ kind: "component", id })}
+          onTable={() => { setPicked(null); setQuery("focus", picked.id); setQuery("view", "table"); }}
+          onEdit={editor ? () => editLab(picked.id) : undefined}
+          actions={<Actions kind="components" item={byId[picked.id]} onDone={refresh} onSelftest={setSelftest} onCommands={commandsOf(byId[picked.id])} />} />
+      )}
+      {picked?.kind === "stage" && stageById[picked.id] && (
+        <StageDialog stage={stageById[picked.id]} view={view.data} labelOf={labelOf} onClose={() => setPicked(null)}
+          onComponent={(id) => setPicked({ kind: "component", id })}
+          actions={<Actions kind="stages" item={stageById[picked.id]} onDone={refresh} onSelftest={setSelftest} />} />
+      )}
+      {picked?.kind === "links" && (
+        <LinksDialog links={picked.links} labelOf={labelOf} onClose={() => setPicked(null)} onComponent={(id) => setPicked({ kind: "component", id })} />
+      )}
+      {tab === "table" && (stages.data || []).map((s) => (
         <div key={s.id} className="card stage">
           <div className="card-head">
             <h3>Stage {s.id}</h3>
@@ -359,10 +402,10 @@ export function LabPage({ editor }: { editor?: boolean }) {
           <table className="grid">{head}<tbody>{s.components.map((id: string) => byId[id] && row(byId[id]))}</tbody></table>
         </div>
       ))}
-      <div className="card">
+      {tab === "table" && <div className="card">
         <div className="card-head"><h3>Ad hoc components</h3><span className="muted small">in no stage, bound by role on their own</span></div>
         <table className="grid">{head}<tbody>{(comps.data || []).filter((c) => c.adhoc).map(row)}</tbody></table>
-      </div>
+      </div>}
       {details && <ProbeDialog id={details} onClose={() => {
         setDetails(null);
         refresh();
