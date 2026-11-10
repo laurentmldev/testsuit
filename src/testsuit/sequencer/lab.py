@@ -83,6 +83,7 @@ class Lab:
         return self._hosts
 
     _hosts: dict | None = field(default=None, repr=False)
+    _view_links: list | None = field(default=None, repr=False)          # labview.lab_links, once per load
 
     def resolve(self, component: Component, stage: Stage | None = None) -> Resolved:
         return self.library.resolve(component, stage, self.hosts)

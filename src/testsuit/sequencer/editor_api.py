@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import socket
 import time
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from testsuit.sequencer.api import zip_entry
@@ -82,6 +84,23 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         if "content" not in body and "data" not in body:
             raise HTTPException(400, "give 'content' (text) or 'data' (merged, at the optional path 'at')")
         return await run(editor.write, session(sid), path, body.get("content"), body.get("data"), body.get("at"))
+
+    @app.post("/edit/sessions/{sid}/upload/{path:path}")
+    async def upload(sid: str, path: str, file: Annotated[UploadFile, File()]):
+        """An image for the session, at path (a component's tsq_icon), written as uploaded."""
+        data = await file.read(editor.MAX_UPLOAD + 1)
+        return await run(editor.upload, session(sid), path, data)
+
+    @app.get("/edit/sessions/{sid}/raw/{path:path}")
+    async def raw(sid: str, path: str):
+        """A file of the session as it is (an image to preview); an SVG opened on its own runs no script."""
+        try:
+            target = await run(editor.raw, session(sid), path)
+        except SequencerError as e:
+            raise HTTPException(404, str(e)) from e
+        return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+                            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+                                     "Cache-Control": "no-cache"})
 
     @app.delete("/edit/sessions/{sid}/files/{path:path}")
     async def delete(sid: str, path: str):

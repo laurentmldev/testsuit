@@ -487,6 +487,31 @@ def test_lab_session(repos):
     assert editor.published["lab"]["tag"] == "lab-2"
 
 
+def test_lab_session_icons(repos):
+    """A component's picture on the Lab view: an image uploaded to the lab repository, named by tsq_icon; an icon
+    neither built in nor a file of the lab is a warning."""
+    editor = repos.editor
+    session = editor.open("lab")
+    svg = b"<svg xmlns='http://www.w3.org/2000/svg'/>"
+    assert editor.upload(session, "icons/counter.svg", svg) == {"path": "icons/counter.svg", "size": len(svg)}
+    assert editor.raw(session, "icons/counter.svg").read_bytes() == svg
+    with pytest.raises(SequencerError, match="only images"):
+        editor.upload(session, "icons/run.sh", b"rm -rf /")
+    with pytest.raises(SequencerError, match="outside the repository"):
+        editor.upload(session, "../../evil.png", b"x")
+    inventory = editor.read(session, "inventory.yml")["data"]
+    hosts = inventory["all"]["children"]["bench_1"]["hosts"]
+    hosts["counter_1"]["tsq_icon"] = "icons/counter.svg"
+    hosts["counter_1"]["tsq_links"] = {"seq_host": "serial"}
+    inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_icon"] = "rocket"
+    problems = editor.write(session, "inventory.yml", data=inventory)["problems"]
+    assert [p["message"] for p in problems if "tsq_icon" in p["message"]] == [
+        "component 'counter_2': tsq_icon 'rocket' is neither one of server, workstation, switch, router, tap, embedded, "
+        "board, sensor, instrument, power, simulator, storage, network, camera, generic nor an image file (.png, .jpg, "
+        ".jpeg, .gif, .svg, .webp) (the Lab view draws a plain box)"]
+    assert not [p for p in problems if p["severity"] == "error"]
+
+
 def test_renaming_roles_and_components(repos):
     """While the inventory still names a renamed role, the helpers list the session's roles (not the running
     lab's); rename_references then makes the inventory and the deriving roles follow. Same for a component."""

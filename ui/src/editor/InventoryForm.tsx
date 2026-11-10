@@ -21,6 +21,7 @@ import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
 import { ItemLink, ItemLinks, extendsKind, useItemRequest } from "./links";
+import { IconPicker, LinksEditor } from "./LabPicture";
 
 type Inv = any;
 type Path = (string | number)[];
@@ -215,7 +216,7 @@ function useInvHelp() {
 }
 
 const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
-  "tsq_label", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
+  "tsq_label", "tsq_icon", "tsq_links", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
   "tsq_library"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
@@ -478,6 +479,14 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       </div>
       <Field label="Label" help={help(["all", "hosts", "_", "tsq_label"])}><Text value={vars.tsq_label} onChange={(v) => set("tsq_label", v)} placeholder={name} /></Field>
       <Field label="Description" help={help(["all", "hosts", "_", "tsq_description"])}><Text multiline value={vars.tsq_description} onChange={(v) => set("tsq_description", v)} placeholder="What this component is (its own: the stage's and the lab's are not inherited)" /></Field>
+      <Field label="Picture" help={help(["all", "hosts", "_", "tsq_icon"])} hint="how the Lab diagram draws it">
+        <IconPicker host={name} value={vars.tsq_icon} inherited={vars.tsq_icon == null ? effective("tsq_icon") : undefined} onChange={(v) => set("tsq_icon", v)} />
+      </Field>
+      <Field label="Wired to" help={help(["all", "hosts", "_", "tsq_links"])}
+        hint="links drawn on the Lab diagram; those its commands and probe give (via, keys naming another component) are drawn without it">
+        <LinksEditor value={vars.tsq_links} onChange={(v) => set("tsq_links", v)}
+          hosts={allHosts(inv).filter((h) => h !== name).map((h) => ({ value: h, description: [hostVars(inv, h).tsq_label, hostRole(ctx, inv, h)].filter(Boolean).join(" · ") }))} />
+      </Field>
       <Field label="Tags" help={help(["all", "hosts", "_", "tsq_tags"])} hint={<>its id <code>{name}</code> is always a tag</>}>
         <Tags value={vars.tsq_tags} onChange={(v) => set("tsq_tags", v.length ? v : undefined)} choices={labTagChoices(ctx, "components")} placeholder="+ tag" />
       </Field>
@@ -532,7 +541,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
         <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
-          exclude={["tsq_label", "tsq_description", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_commands", "tsq_status", "tsq_selftest"]} />
+          exclude={["tsq_label", "tsq_description", "tsq_icon", "tsq_links", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_commands", "tsq_status", "tsq_selftest"]} />
       </Section>
     </div>
   );

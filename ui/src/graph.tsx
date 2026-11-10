@@ -21,6 +21,7 @@ export interface LayoutNode {
   width: number;
   height: number;
   parent?: string;          // a group node (a phase, a sub-pipeline) holding this one
+  padding?: string;         // a group's own padding, as ELK writes it ("[top=36,left=16,bottom=16,right=16]")
 }
 
 export interface LayoutEdge {
@@ -37,15 +38,16 @@ export interface Placed {
 }
 
 /** Positions of the nodes (relative to their parent group), left to right in dependency order. */
-export async function layout(nodes: LayoutNode[], edges: LayoutEdge[], direction: "RIGHT" | "DOWN" = "RIGHT"): Promise<Record<string, Placed>> {
+export async function layout(nodes: LayoutNode[], edges: LayoutEdge[], direction: "RIGHT" | "DOWN" = "RIGHT",
+  extra: Record<string, string> = {}): Promise<Record<string, Placed>> {
   const options = {
     "elk.algorithm": "layered", "elk.direction": direction, "elk.layered.spacing.nodeNodeBetweenLayers": "50",
     "elk.spacing.nodeNode": "22", "elk.padding": "[top=36,left=16,bottom=16,right=16]",
-    "elk.hierarchyHandling": "INCLUDE_CHILDREN", "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN", "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF", ...extra,
   };
   const byId: Record<string, any> = {};
   const roots: any[] = [];
-  for (const n of nodes) byId[n.id] = { id: n.id, width: n.width, height: n.height, children: [], layoutOptions: options };
+  for (const n of nodes) byId[n.id] = { id: n.id, width: n.width, height: n.height, children: [], layoutOptions: n.padding ? { ...options, "elk.padding": n.padding } : options };
   for (const n of nodes) {
     if (n.parent && byId[n.parent]) byId[n.parent].children.push(byId[n.id]);
     else roots.push(byId[n.id]);

@@ -32,6 +32,11 @@ from testsuit.sequencer.transports.ssh import pinned_host_keys
 
 LOCK_MODES = ("exclusive", "shared", "none")
 
+# The pictures the Lab view has for a component (``tsq_icon``); any other value is an image file of the lab folder.
+ICONS = ("server", "workstation", "switch", "router", "tap", "embedded", "board", "sensor", "instrument", "power",
+         "simulator", "storage", "network", "camera", "generic")
+ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
+
 
 @dataclass
 class Component:
@@ -68,6 +73,18 @@ class Component:
         return str(self.vars.get("tsq_description") or "")
 
     @property
+    def icon(self) -> str:
+        """``tsq_icon``: how the Lab view draws it, one of ``ICONS`` or an image file relative to the inventory
+        (empty: a plain box)."""
+        return str(self.vars.get("tsq_icon") or "")
+
+    @property
+    def links(self) -> list[dict]:
+        """``tsq_links``: the components it is wired to that its commands do not show (a tap between a switch and a
+        board), each ``{"to": <host>, "label": <text>}``."""
+        return _links(self.vars.get("tsq_links"))
+
+    @property
     def adhoc(self) -> bool:
         return not self.stages
 
@@ -102,6 +119,30 @@ class Stage:
     def tags(self) -> list[str]:
         """Its id and its ``tsq_tags``: what a stage slot's ``tags`` select it by."""
         return [self.id, *_tags(self.vars.get("tsq_tags"))]
+
+
+def _links(value: Any) -> list[dict]:
+    """``tsq_links`` as a list of ``{to, label}``: a host, a list of hosts or of ``{to, label}``, or a mapping
+    host -> label."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if isinstance(value, dict):
+        value = [{"to": k, "label": v} for k, v in value.items()]
+    if not isinstance(value, list):
+        raise SequencerError("tsq_links must be a host, a list of hosts or of {to, label}, or a mapping host: label")
+    links = []
+    for item in value:
+        if isinstance(item, dict):
+            if not item.get("to") or set(item) - {"to", "label"}:
+                raise SequencerError(f"tsq_links: {item} must have 'to' (a host) and an optional 'label'")
+            links.append({"to": str(item["to"]), "label": str(item.get("label") or "")})
+        elif isinstance(item, (str, int)) and str(item):
+            links.append({"to": str(item), "label": ""})
+        else:
+            raise SequencerError(f"tsq_links: {item!r} is not a host")
+    return links
 
 
 def _tags(value: Any) -> list[str]:
@@ -211,11 +252,20 @@ def load_inventory(path: Path) -> Inventory:
                                  f"is not one of {', '.join(LOCK_MODES)}")
         try:
             pinned_host_keys(merged.get("tsq_ssh_host_key"))
+            component.links
         except SequencerError as e:
             raise SequencerError(f"inventory '{path}': component '{host}': {e}") from None
+        if not isinstance(merged.get("tsq_icon") or "", str):
+            raise SequencerError(f"inventory '{path}': component '{host}': tsq_icon must be one of {', '.join(ICONS)} "
+                                 "or an image file")
         components[host] = component
 
     stages = {name: Stage(id=name, type=str(d["vars"]["tsq_stage_type"]), components=d["hosts"], vars=d["vars"],
                           description=d["description"])
               for name, d in stage_defs.items()}
+    for component in components.values():
+        for link in component.links:
+            if link["to"] not in components or link["to"] == component.id:
+                raise SequencerError(f"inventory '{path}': component '{component.id}': tsq_links: '{link['to']}' is "
+                                     "not another host of the inventory")
     return Inventory(file=path.resolve(), vars=root_vars, components=components, stages=stages)
