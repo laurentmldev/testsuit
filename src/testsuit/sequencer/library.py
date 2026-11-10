@@ -395,7 +395,7 @@ class Library:
 
     def check_host(self, component: Component, stage: Stage | None, hosts: dict[str, ComponentDef]) -> tuple[Resolved, list[str], list[str]]:
         """A host against its role: (resolved, commands of the role it does not implement, commands it
-        implements that its role does not list)."""
+        implements that no role of it lists, ``extra_commands``)."""
         resolved = self.resolve(component, stage, hosts)
         if not resolved.role:
             raise SequencerError(f"component '{component.id}' has no role (tsq_role)")
@@ -405,5 +405,21 @@ class Library:
                 normalize(spec["http"], f"command '{name}' (from {resolved.command_sources.get(name, '?')})")
         offered = self.role_commands(resolved.role)
         missing = sorted(set(offered) - set(resolved.commands))
-        extra = sorted(set(resolved.commands) - set(offered))
-        return resolved, missing, extra
+        return resolved, missing, self.extra_commands(component, resolved, hosts)
+
+    def extra_commands(self, component: Component, resolved: Resolved,
+                       hosts: dict[str, ComponentDef] | None = None) -> list[str]:
+        """The commands a host implements that no role of it lists: neither its role, nor any other role its
+        component supports (a component with several roles implements the commands of each, whichever its
+        hosts pick)."""
+        hosts = dict(hosts or {})
+        hosts.setdefault(component.id, ComponentDef.from_host(component, "<inventory>"))
+        try:
+            roles = self.component_roles(component.id, hosts)
+        except SequencerError:
+            roles = []
+        listed = set()
+        for role in dict.fromkeys([resolved.role, *roles]):
+            if role in self.roles:
+                listed |= set(self.role_commands(role))
+        return sorted(set(resolved.commands) - listed)
