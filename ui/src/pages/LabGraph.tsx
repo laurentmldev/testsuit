@@ -659,6 +659,8 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
   return (
     <Dialog title={comp.label || comp.id} onClose={onClose} wide
       footer={<>
+        {actions}
+        <span className="spacer" />
         <button onClick={onTable} title="The Table tab, on this component">Show in the table</button>
         {onEdit && <button onClick={onEdit} title="Open the lab inventory in the Editor, on this component">Edit in the Editor</button>}
       </>}>
@@ -700,8 +702,6 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
       )}
       <h4>Links</h4>
       {links.length ? <LinkList links={links} labelOf={labelOf} onComponent={onComponent} me={comp.id} /> : <p className="muted">None found in the lab configuration (tsq_links, via, keys naming another component).</p>}
-      <h4>Actions</h4>
-      {actions}
     </Dialog>
   );
 }
@@ -712,7 +712,7 @@ export function StageDialog({ stage, view, labelOf, actions, onClose, onComponen
 }) {
   const runs = view?.runs || {};
   return (
-    <Dialog title={`Stage ${stage.id}`} onClose={onClose} wide>
+    <Dialog title={`Stage ${stage.id}`} onClose={onClose} wide footer={<>{actions}<span className="spacer" /></>}>
       <p>type <code>{stage.type}</code>{stage.hold && <> <Badge value="hold" /></>}{stage.maintenance && <> <Badge value="maintenance" /></>}{stage.note && <span className="muted"> “{stage.note}”</span>}</p>
       {stage.description && <p className="description">{stage.description}</p>}
       <h4>Components</h4>
@@ -734,8 +734,6 @@ export function StageDialog({ stage, view, labelOf, actions, onClose, onComponen
           </tbody>
         </table>
       )}
-      <h4>Actions</h4>
-      {actions}
     </Dialog>
   );
 }
