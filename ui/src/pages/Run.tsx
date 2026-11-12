@@ -18,7 +18,7 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edg
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, Badge, classes, duration, setQuery, STATE_COLORS, time } from "../util";
+import { ago, Badge, classes, duration, setQuery, STATE_COLORS, time, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -37,12 +37,15 @@ export const slotOf = (record: any): string => record?.slot ?? record?.component
 
 function StepNode({ data }: NodeProps) {
   const d = data as any;
+  // its command runs through another component (a command's via): said on the step itself
+  const vias = [...new Set<string>((d.items || []).map((i: any) => i.via).filter(Boolean))];
   return (
     <div className={classes("step-node", STATE_COLORS[d.state] || "muted", d.selected && "selected", d.part === "finally" && "finally")}
       title={d.title}>
       <Handle type="target" position={Position.Left} />
       <div className="step-id">{d.label}</div>
       <div className="step-action">{d.action}</div>
+      {vias.length > 0 && <div className="step-via">{vias.map((v) => <ViaTag key={v} via={v} title={`its command runs on ${v}, which reaches the component of its slot`} />)}</div>}
       {d.items?.length > 1 && (
         <div className="step-items">
           {d.items.map((i: any) => <span key={slotOf(i)} className={classes("chip", STATE_COLORS[i.state] || "muted")} title={`${slotOf(i)}: ${i.state}`}>{slotOf(i)}</span>)}
@@ -287,7 +290,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                   const key = stepKey(s.phase, s.id, slotOf(s));
                   return (
                     <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => setSelected(key)}>
-                      <td><code>{key}</code></td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
+                      <td><code>{key}</code>{s.via && <> <ViaTag via={s.via} title={`its command ran on ${s.via}, which reaches the component of slot ${slotOf(s)}`} /></>}</td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
                       <td>{s.started ? duration(s.started, s.ended || null) : ""}</td><td>{s.exit_status ?? ""}</td><td>{s.attempts || ""}</td>
                       <td className="reason">{s.reason}</td>
                     </tr>
@@ -328,6 +331,12 @@ function StepFacts({ record, records, onPick }: { record: any; records: any[]; o
           {record.exit_status !== null && record.exit_status !== undefined && <> · exit {record.exit_status}</>}
           {record.attempts > 1 && <> · {record.attempts} tries</>}
           {record.started && <> · {duration(record.started, record.ended || null)}</>}
+          {record.via && (
+            <div className="step-via-note">
+              <ViaTag via={record.via} title={`its command ran on ${record.via}, not on the component of its slot`}>run on</ViaTag>{" "}
+              <span className="muted">its command runs on {record.via}, which reaches the component of {slotOf(record) ? <>slot <code>{slotOf(record)}</code></> : "the step"}: not on that component itself</span>
+            </div>
+          )}
         </div>
       )}
     </div>

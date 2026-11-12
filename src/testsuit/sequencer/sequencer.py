@@ -531,8 +531,10 @@ class Sequencer:
                 if spec.get("via"):
                     try:
                         via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
-                    except SequencerError:
-                        pass
+                    except SequencerError as e:
+                        entry["via_error"] = str(e)
+                if via is not None:                     # shown with the command: it does not run on the component
+                    entry["via"] = {"id": via.id, "host": via.host, "host_alias": via.host_alias, "label": via.label}
                 if kind == "run":
                     template = str(spec["run"])
                 else:                                   # the request line: method and URL

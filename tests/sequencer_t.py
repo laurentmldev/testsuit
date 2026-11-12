@@ -881,12 +881,19 @@ def test_commands_via(tmp_path, no_git):
         seq = bench.sequencer()
         run = seq.submit(bench.build())
         [done] = await run_until_done(seq, [run["id"]])
+        info = await seq.manual_commands("counter_1")
         await seq.close()
-        return done
-    done = asyncio.run(main())
+        return done, info
+    done, info = asyncio.run(main())
     assert done["verdict"] == "succeeded", done["reason"]
     logs = "\n".join(p.read_text() for p in (tmp_path / "storage").rglob("*.log") if "start" in p.name)
     assert "through seq_host" in logs
+    # the steps whose command ran through seq_host say so (the UI shows it with the step), the others not
+    vias = {s["id"]: s.get("via") for s in done["steps"]}
+    assert "seq_host" in vias.values() and "" in vias.values(), vias
+    # so do the commands run by hand from the Lab page
+    shown = {c["name"]: c for c in info["commands"]}
+    assert shown["start"]["via"]["id"] == "seq_host" and "via" not in shown["stop"]
     assert not list((tmp_path / "remote" / "seq_host" / ".tsq").glob(f"{done['id']}/counter_1/*.pid"))
 
     start["via"] = "nobody"

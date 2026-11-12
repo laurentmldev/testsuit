@@ -662,3 +662,23 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .host-names input { width: 100%; }
 .host-names td { vertical-align: middle; }
 .host-alias { border-bottom: 1px dotted var(--muted); cursor: help; }
+
+/* a probe or command run through another component (via): the component it runs on stands out */
+.via-tag { display: inline-flex; align-items: baseline; gap: 4px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 0 7px; font-size: 12px; font-family: system-ui, sans-serif; white-space: nowrap; vertical-align: baseline; }
+.via-tag strong { font-family: var(--mono); font-weight: 600; }
+.via-tag .via-host, .via-route .via-host { opacity: 0.75; font-family: var(--mono); font-size: 11px; }
+.via-arrow { font-weight: 700; }
+.via-route { border: 1px solid var(--accent); border-left-width: 4px; background: var(--accent-soft); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.via-route-path { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 3px; }
+.via-node { border: 1px solid var(--border); background: var(--panel); border-radius: 5px; padding: 1px 7px; font-size: 12.5px; }
+.via-node strong { font-family: var(--mono); }
+.via-node.via-hop { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.via-link { color: var(--accent); font-weight: 700; }
+.via-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; }
+.lab-hover .via-list { margin: 4px 0 0; }
+.lab-node-via { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 3px; max-width: 100%; }
+.lab-node-via .via-tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.step-via { margin-top: 3px; }
+.step-via .via-tag { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.step-via-note { margin-top: 4px; }

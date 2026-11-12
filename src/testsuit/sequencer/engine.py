@@ -152,6 +152,7 @@ class StepRecord:
     exit_status: int | None = None
     attempts: int = 0
     log: str = ""
+    via: str = ""                                 # the component its command ran through (a command's via)
 
     @property
     def key(self) -> str:
@@ -444,6 +445,7 @@ class StepRunner:
         if via.id not in comp.vias:
             raise SequencerError(f"step '{self.fs.id}': {via.id} is not bound for {comp.concrete.id}: 'via' is for "
                                  "the commands of lab components")
+        self.record.via = via.id                   # shown with the step: it does not run on its component
         return comp.vias[via.id]
 
     def transport(self) -> Transport:

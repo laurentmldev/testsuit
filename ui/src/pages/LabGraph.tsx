@@ -25,7 +25,7 @@ import { put, url, useResource } from "../api";
 import { Dialog } from "../fields";
 import { layoutWithRoutes, type Point } from "../graph";
 import { ComponentIcon } from "../labicons";
-import { ago, attempt, Badge, classes, navigate, STATE_COLORS, time } from "../util";
+import { ago, attempt, Badge, classes, navigate, STATE_COLORS, time, ViaTag } from "../util";
 
 export interface LabView {
   links: LabLink[];
@@ -39,7 +39,45 @@ export interface LinkDetail { title: string; commands: CmdSegment[][] }
 /** A piece of a command as it runs: literal text, or the value of a key (``key``), or why it has none. */
 export interface CmdSegment { text: string; key: string | null; error?: string }
 interface RunInfo { id: string; name?: string; testdef?: string; state: string; phase?: string; waiting_for?: string; stages: Record<string, string>; slots: Record<string, string> }
-interface Activity { run: string; phase: string; step: string; slot: string; state: string; started?: string; command: string }
+// via: the component its command runs through; for: on that component, the component the step is for
+interface Activity { run: string; phase: string; step: string; slot: string; state: string; started?: string; command: string; via?: string; for?: string }
+
+/** What a component's probe and commands run through (``through``: on another component, its ``via``), and what
+ *  the probes and commands of others run through it (``relays``), from the ``probe`` links of the lab. */
+export function viasOf(links: LabLink[] | undefined, id: string) {
+  const probe = (links || []).filter((l) => l.kind === "probe");
+  return {
+    through: probe.filter((l) => l.target === id).map((l) => ({ other: l.source, what: l.details.map((d) => d.title) })),
+    relays: probe.filter((l) => l.source === id).map((l) => ({ other: l.target, what: l.details.map((d) => d.title) })),
+  };
+}
+
+/** The probes and commands that do not run on their own component: run through this one, or this one's run
+ *  through another. */
+export function ViaList({ vias, labelOf, onComponent }: { vias: ReturnType<typeof viasOf>; labelOf: (id: string) => string; onComponent?: (id: string) => void }) {
+  if (!vias.through.length && !vias.relays.length) return null;
+  const name = (id: string) => onComponent
+    ? <button type="button" className="link" onClick={(e) => { e.stopPropagation(); onComponent(id); }}>{labelOf(id)}</button> : <strong>{labelOf(id)}</strong>;
+  return (
+    <div className="via-list small">
+      {vias.through.map((v) => (
+        <div key={`t:${v.other}`}><ViaTag via={v.other} label={labelOf(v.other)} title={`${v.what.join(", ")}: run on ${v.other}, which reaches this component`}>runs via</ViaTag>{" "}
+          <span className="muted">{v.what.join(", ")}</span></div>
+      ))}
+      {vias.relays.map((v) => (
+        <div key={`r:${v.other}`}><span className="via-tag" title={`${v.what.join(", ")} of ${v.other} run on this component, which reaches ${v.other}`}><span className="via-arrow">↪</span>runs for</span>{" "}
+          {name(v.other)} <span className="muted">{v.what.join(", ")}</span></div>
+      ))}
+    </div>
+  );
+}
+
+/** A step a component runs now: through another component (via), or on this one for another (for). */
+function ActivityWhere({ a, labelOf }: { a: Activity; labelOf: (id: string) => string }) {
+  if (a.for) return <ViaTag via={a.for} label={labelOf(a.for)} title={`this step is for ${a.for}: its command runs here, which reaches ${a.for}`}>for</ViaTag>;
+  if (a.via) return <ViaTag via={a.via} label={labelOf(a.via)} title={`its command runs on ${a.via}, which reaches this component`} />;
+  return null;
+}
 
 // a card: picture, name and status; the rest floats beside it when it is pointed at
 const COMPACT = { width: 164, height: 132 };
@@ -76,7 +114,7 @@ function RunChip({ run, id, children }: { run?: RunInfo; id: string; children?: 
 // ── nodes ──────────────────────────────────────────────────────────────────
 
 function ComponentNode({ data }: NodeProps) {
-  const { comp, icon, activity, runs, shared, held, arranging, onProbe } = data as any;
+  const { comp, icon, activity, runs, shared, held, arranging, onProbe, vias, labelOf } = data as any;
   const [hovered, setHovered] = useState(false);
   // the run holding its stage shows on the stage's title: not again on each of its components
   const stageRuns = new Set<string>(Object.values(runs as Record<string, RunInfo>).filter((r) => (comp.stages || []).some((s: string) => Object.values(r.stages).includes(s))).map((r) => r.id));
@@ -88,7 +126,7 @@ function ComponentNode({ data }: NodeProps) {
     <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <Handle type="target" position={Position.Top} className="lab-handle" /><Handle type="source" position={Position.Bottom} className="lab-handle" />
-      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
+      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={vias.through.length ? 40 : 52} /></span>
       <strong className="lab-name">{comp.label || comp.id}</strong>
       <div className="lab-node-tags">
         {arranging ? <Badge value={comp.state} />
@@ -98,6 +136,12 @@ function ComponentNode({ data }: NodeProps) {
         {comp.hold && <Badge value="hold" title={comp.note || ""} />}
         {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
       </div>
+      {vias.through.length > 0 && (            // its probe or commands do not run on it: said on the card itself
+        <div className="lab-node-via">
+          {vias.through.map((v: any) => <ViaTag key={v.other} via={v.other} label={labelOf(v.other)}
+            title={`${v.what.join(", ")}: run on ${v.other}, which reaches ${comp.id}`} />)}
+        </div>
+      )}
       {/* the detailed card, floating beside it while it is pointed at (not scaled with the diagram) */}
       <NodeToolbar isVisible={hovered && !arranging} position={Position.Right} offset={10} className="lab-hover">
         <div className="lab-node-head">
@@ -121,10 +165,12 @@ function ComponentNode({ data }: NodeProps) {
           <div className="muted small lab-hover-text">{comp.detail}{comp.detail && comp.probed_at ? " · " : ""}{comp.probed_at ? `probed ${ago(comp.probed_at)}` : ""}</div>
         )}
         {(comp.hold || comp.maintenance) && comp.note && <div className="muted small lab-hover-text">{comp.note}</div>}
+        <ViaList vias={vias} labelOf={labelOf} />
         {activity.slice(0, 3).map((a: Activity) => (
-          <div key={`${a.run}:${a.phase}:${a.step}`} className="lab-activity">
+          <div key={`${a.run}:${a.phase}:${a.step}:${a.for || ""}`} className="lab-activity">
             <span className={classes("pulse", a.state === "running" ? "run" : "wait")} />
             <code>{a.command || a.step}</code>
+            <ActivityWhere a={a} labelOf={labelOf} />
             <span className="muted small">{a.phase}:{a.step} · {runName(runs[a.run], a.run)}</span>
           </div>
         ))}
@@ -361,7 +407,8 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     : id.startsWith("host:") ? hostParent(id) : undefined;
   /** The components inside an area or an address box: they move with it. */
   const membersOf = (id: string) => id.startsWith("host:") ? (hostGroups[id] || []).map((c) => byId[c]) : comps.filter((c) => parentOf(c) === id);
-  const size = (_c: any) => COMPACT;
+  // a card whose probe or commands run through another component says so on itself: a little taller
+  const size = (c: any) => links.some((l) => l.kind === "probe" && l.target === c.id) ? { ...COMPACT, height: COMPACT.height + 20 } : COMPACT;
   // the automatic layout changes with what is drawn and the sizes, not with the states
   const structure = JSON.stringify([stages.map((s) => [s.id, s.components, headOf(s)]),
     comps.map((c) => [c.id, c.stages, size(c), hostOf[c.id]]), links.map((l) => [l.source, l.target])]);
@@ -504,7 +551,7 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
         id: `c:${c.id}`, type: "component", position: { x: r.x, y: r.y }, style: { width: r.width, height: r.height, opacity: opacity(c.id) },
         draggable: !!draft, selectable: false, zIndex: 2, className: picked === c.id ? "lab-picked" : undefined,
         data: { comp: c, icon: view?.icons?.[c.id], activity: activity[c.id] || [], runs, shared: (c.stages?.length || 0) > 1 ? c.stages : null, held: c.holders || [],
-          arranging: !!draft, onProbe: () => onProbe(c.id) },
+          arranging: !!draft, onProbe: () => onProbe(c.id), vias: viasOf(view?.links, c.id), labelOf: (id: string) => byId[id]?.label || id },
       });
     }
   }
@@ -528,7 +575,8 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     const kinds = new Set(group.map((l) => l.kind));
     const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd");
     const physical = kinds.has("link");
-    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label : l.kind))].filter(Boolean).join(" · ");
+    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label
+      : l.kind === "probe" ? `via: ${l.details.map((d) => d.title.replace(/^command /, "").replace("status probe", "probe")).join(", ")}` : l.kind))].filter(Boolean).join(" · ");
     const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}${d.commands.length ? ": " + d.commands.map(textOf).join(" ; ") : ""}`).join("\n")}`).join("\n") + "\nClick: details";
     const main = physical ? "link" : directed!.kind;
     const color = main === "probe" ? "var(--accent)" : main === "cmd" ? "var(--muted)" : "var(--text)";
@@ -593,7 +641,7 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
         <span className="lab-legend-title" title="Click a link type to hide or show it">Links:</span>
         {([
           ["link", "wired (tsq_links)", <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="var(--text)" strokeWidth="2.2" opacity=".75" /></svg>],
-          ["probe", "probe (via)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg>],
+          ["probe", "via (probe or command run through it)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="6 4" /><path d="M27 0l7 4-7 4z" fill="var(--accent)" /></svg>],
           ["cmd", "cmd (named by a command)", <svg width="34" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="2 4" /><path d="M27 0l7 4-7 4z" fill="var(--muted)" /></svg>],
         ] as [string, string, ReactNode][]).map(([kind, label, sample]) => (
           <button key={kind} type="button" className={classes("lab-legend-kind", !shownKinds.has(kind) && "hidden")} aria-pressed={shownKinds.has(kind)}
@@ -629,7 +677,7 @@ function LinkList({ links, labelOf, onComponent, me }: { links: LabLink[]; label
         {links.map((l) => (
           <tr key={`${l.source}:${l.target}:${l.kind}`}>
             <td style={{ whiteSpace: "nowrap" }}>{name(l.source)} → {name(l.target)}</td>
-            <td><span className={classes("chip", l.kind === "probe" ? "run" : l.kind === "link" ? "ok" : "")} title={KIND_HELP[l.kind]}>{l.kind}{l.label ? `: ${l.label}` : ""}</span></td>
+            <td><span className={classes("chip", l.kind === "probe" ? "run" : l.kind === "link" ? "ok" : "")} title={KIND_HELP[l.kind]}>{l.kind === "probe" ? "via" : l.kind}{l.label ? `: ${l.label}` : ""}</span></td>
             <td className="small">
               {(l.details || []).map((d) => (
                 <div key={d.title} className="lab-link-detail">
@@ -656,6 +704,7 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
   const runs = view?.runs || {};
   const activity = view?.components?.[comp.id] || [];
   const links = (view?.links || []).filter((l) => l.source === comp.id || l.target === comp.id);
+  const vias = viasOf(view?.links, comp.id);
   return (
     <Dialog title={comp.label || comp.id} onClose={onClose} wide
       footer={<>
@@ -682,6 +731,12 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
         <span className="muted small" title={time(comp.probed_at)}> {comp.probed_at ? `probed ${ago(comp.probed_at)}` : "not probed yet"}</span>
         {comp.detail && <span className="muted small"> · {comp.detail}</span>}
       </p>
+      {(vias.through.length > 0 || vias.relays.length > 0) && (
+        <>
+          <h4>Run through another component</h4>
+          <ViaList vias={vias} labelOf={labelOf} onComponent={onComponent} />
+        </>
+      )}
       <h4>Runs</h4>
       {!(comp.holders?.length) && !activity.length ? <p className="muted">Free: no run holds it.</p> : (
         <table className="grid compact">
@@ -690,12 +745,12 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
               <tr key={h.run}>
                 <td><RunChip run={runs[h.run]} id={h.run} /></td>
                 <td className="small">{h.run} · lock {h.mode}{runs[h.run] && <> · {runs[h.run].state}{runs[h.run].phase ? `, phase ${runs[h.run].phase}` : ""}</>}</td>
-                <td className="small">{activity.filter((a) => a.run === h.run).map((a) => <div key={a.step}><span className={classes("pulse", a.state === "running" ? "run" : "wait")} /> <code>{a.command || a.step}</code> <span className="muted">step {a.phase}:{a.step}, slot {a.slot}{a.started ? `, since ${ago(a.started)}` : ""}</span></div>)}</td>
+                <td className="small">{activity.filter((a) => a.run === h.run).map((a) => <div key={`${a.step}:${a.slot}:${a.for || ""}`}><span className={classes("pulse", a.state === "running" ? "run" : "wait")} /> <code>{a.command || a.step}</code> <ActivityWhere a={a} labelOf={labelOf} /> <span className="muted">step {a.phase}:{a.step}, slot {a.slot}{a.started ? `, since ${ago(a.started)}` : ""}</span></div>)}</td>
               </tr>
             ))}
             {activity.filter((a) => !(comp.holders || []).some((h: any) => h.run === a.run)).map((a) => (
-              <tr key={`${a.run}:${a.step}`}><td><RunChip run={runs[a.run]} id={a.run} /></td><td className="small">{a.run}</td>
-                <td className="small"><span className={classes("pulse", a.state === "running" ? "run" : "wait")} /> <code>{a.command || a.step}</code> <span className="muted">step {a.phase}:{a.step}, slot {a.slot}</span></td></tr>
+              <tr key={`${a.run}:${a.step}:${a.slot}:${a.for || ""}`}><td><RunChip run={runs[a.run]} id={a.run} /></td><td className="small">{a.run}</td>
+                <td className="small"><span className={classes("pulse", a.state === "running" ? "run" : "wait")} /> <code>{a.command || a.step}</code> <ActivityWhere a={a} labelOf={labelOf} /> <span className="muted">step {a.phase}:{a.step}, slot {a.slot}</span></td></tr>
             ))}
           </tbody>
         </table>

@@ -221,7 +221,8 @@ def _step_label(step) -> str:
 
 def lab_activity(seq) -> dict:
     """The active runs (``runs``: id, datapack name, test definition, state, phase, bound stages and components),
-    and what each component runs now (``components``: its running steps, with their command)."""
+    and what each component runs now (``components``: its running steps, with their command; ``via``: the
+    component a step's command runs through, where the step shows too, with ``for``: the component it is for)."""
     from testsuit.sequencer.scheduler import Binding
     from testsuit.sequencer.store import ACTIVE_STATES
     runs: dict[str, dict] = {}
@@ -244,9 +245,12 @@ def lab_activity(seq) -> dict:
             slot = rec.get("slot") or rec.get("component") or ""
             if rec.get("state") not in _ACTIVE_STEP or slot not in binding.slots:
                 continue
-            activity.setdefault(binding.slots[slot], []).append({
-                "run": run["id"], "phase": rec["phase"], "step": rec["id"], "slot": slot, "state": rec["state"],
-                "started": rec.get("started"), "command": _step_label(steps.get((rec["phase"], rec["id"])))})
+            entry = {"run": run["id"], "phase": rec["phase"], "step": rec["id"], "slot": slot, "state": rec["state"],
+                     "started": rec.get("started"), "command": _step_label(steps.get((rec["phase"], rec["id"])))}
+            if rec.get("via"):                 # it runs through another component: on that one, for this one
+                entry["via"] = rec["via"]
+                activity.setdefault(rec["via"], []).append({**entry, "for": binding.slots[slot]})
+            activity.setdefault(binding.slots[slot], []).append(entry)
     return {"runs": runs, "components": activity}
 
 
