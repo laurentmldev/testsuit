@@ -363,8 +363,11 @@ LOCK = h("Lock mode: `exclusive` (default): one datapack at a time; `shared`: se
          type="string", enum=["exclusive", "shared", "none"])
 
 VARS = {
-    "ansible_host": h("Address or host name the sequencer connects to (default: the host's name in the inventory).",
-                      type="string", examples=["10.42.1.10", "localhost"]),
+    "ansible_host": h("Address the sequencer connects to: an IP address, a DNS name, or a name of the lab's host "
+                      "names (`tsq_hosts` in `all.vars`), which the sequencer translates to its address (default: "
+                      "the host's name in the inventory). Commands get the address as `{{ component.host }}`, and "
+                      "the name as `{{ component.host_alias }}`.",
+                      type="string", examples=["10.42.1.10", "localhost", "bench-pi"]),
     "ansible_user": h("SSH user (key-based authentication only).", type="string", examples=["tsq"]),
     "ansible_port": h("SSH port (default 22).", type="integer"),
     "ansible_ssh_private_key_file": h("Private key used to log in (no password prompt).", type="string",
@@ -473,7 +476,18 @@ INVENTORY = {
                                          properties={**VARS, "tsq_library": h(
                                              "Folders of the lab library (roles and components), relative to "
                                              "this file.", type=["array", "string"], items={"type": "string"},
-                                             examples=[["roles/", "components/"]])}),
+                                             examples=[["roles/", "components/"]]),
+                                             "tsq_hosts": h(
+                                             "The lab's host names: a table `name: address` (an IP address or a "
+                                             "DNS name). A component's address (`ansible_host`) can be one of "
+                                             "these names: the sequencer translates it itself wherever it uses "
+                                             "the address (SSH, HTTP calls, `{{ component.host }}` in commands, "
+                                             "so a command run from another machine still gets the real address). "
+                                             "Nothing is written to `/etc/hosts`, and other programs on the "
+                                             "sequencer host do not know these names. A command can read any of "
+                                             "them: `{{ lab.hosts.<name> }}`.",
+                                             type=["object", "null"], additionalProperties={"type": "string"},
+                                             examples=[{"bench-pi": "10.0.1.20", "psu-a": "10.0.1.31"}])}),
                                "hosts": h("Ad hoc components: in no stage, bound by role on their own "
                                           "(`role: sequencer` for the analysis on the sequencer host, simulations...).",
                                           type=["object", "null"], additionalProperties=HOST_VARS)}}},

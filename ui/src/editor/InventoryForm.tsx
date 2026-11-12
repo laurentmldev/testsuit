@@ -16,7 +16,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice, type Inherit } from "../fields";
-import { attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
+import { Address, attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
@@ -217,11 +217,69 @@ function useInvHelp() {
 
 const VAR_KEYS = ["ansible_host", "ansible_user", "ansible_port", "ansible_ssh_private_key_file", "tsq_role", "tsq_lock",
   "tsq_label", "tsq_icon", "tsq_links", "tsq_description", "tsq_tags", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_extends", "tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_stage_type",
-  "tsq_library"];
+  "tsq_library", "tsq_hosts"];
 
 function knownVars(schemas: any, path: Path, exclude: string[] = []): Choice[] {
   const node = path.reduce((n: any, k) => n?.properties?.[k] ?? n?.additionalProperties, schemas.inventory);
   return Object.entries<any>(node?.properties || {}).filter(([k]) => !exclude.includes(k)).map(([k, v]) => ({ value: k, description: v.markdownDescription }));
+}
+
+/** The lab's host names (all.vars.tsq_hosts), as {name: address}. */
+function hostNames(inv: Inv): Record<string, string> {
+  const table = inv?.all?.vars?.tsq_hosts;
+  return table && typeof table === "object" && !Array.isArray(table) ? table : {};
+}
+
+/** The address a host gives (its own, its first stage's, the lab's, else its name), before the host names apply. */
+function addressOf(inv: Inv, host: string): string {
+  const stage = groups(inv).find((g) => g.stage && g.hosts.includes(host));
+  return String(hostVars(inv, host).ansible_host ?? stage?.vars?.ansible_host ?? inv?.all?.vars?.ansible_host ?? host);
+}
+
+/** The table of the lab's host names: a name, and the address (IP or DNS name) it stands for. */
+function HostNames({ value, onChange, usedBy }: {
+  value: any; onChange: (v: Record<string, string> | undefined) => void; usedBy: (name: string) => string[];
+}) {
+  const table: Record<string, any> = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const put = (entries: [string, any][]) => onChange(entries.length ? Object.fromEntries(entries) : undefined);
+  const taken = name.trim() in table;
+  const add = () => {
+    if (!name.trim() || !address.trim() || taken) return;
+    put([...Object.entries(table), [name.trim(), address.trim()]]);
+    setName("");
+    setAddress("");
+  };
+  return (
+    <table className="grid compact host-names">
+      <thead><tr><th>Name</th><th>Address</th><th>Used by</th><th /></tr></thead>
+      <tbody>
+        {Object.entries(table).map(([k, v]) => {
+          const users = usedBy(k);
+          return (
+            <tr key={k}>
+              <td><input className="mono" defaultValue={k} onBlur={(e) => {
+                const to = e.target.value.trim();
+                if (!to || to === k || to in table) return void (e.target.value = k);
+                put(Object.entries(table).map(([n, a]) => [n === k ? to : n, a]));
+              }} title={users.length ? `Renaming it leaves ${users.join(", ")} with the old name as address` : undefined} /></td>
+              <td><input className={classes("mono", !String(v ?? "").trim() && "invalid")} value={v == null ? "" : String(v)} placeholder="10.0.1.20 or a DNS name"
+                onChange={(e) => put(Object.entries(table).map(([n, a]) => [n, n === k ? e.target.value.trim() : a]))} /></td>
+              <td className="small">{users.length ? <ItemLinks kind="host" names={users} /> : <span className="muted">no component</span>}</td>
+              <td><button type="button" className="icon" title={users.length ? `Remove (${users.join(", ")} keep it as address: it is then looked up by DNS)` : "Remove"}
+                onClick={() => put(Object.entries(table).filter(([n]) => n !== k))}>×</button></td>
+            </tr>
+          );
+        })}
+        <tr>
+          <td><input className={classes("mono", taken && "invalid")} value={name} onChange={(e) => setName(e.target.value)} placeholder="new name…" title={taken ? "This name is already in the table" : undefined} /></td>
+          <td><input className="mono" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="its address" onKeyDown={(e) => e.key === "Enter" && add()} /></td>
+          <td /><td><button type="button" className="small" disabled={!name.trim() || !address.trim() || taken} onClick={add}>add</button></td>
+        </tr>
+      </tbody>
+    </table>
+  );
 }
 
 function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void) => void }) {
@@ -247,9 +305,13 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
         <Text mono value={(Array.isArray(vars.tsq_library) ? vars.tsq_library : vars.tsq_library ? [vars.tsq_library] : []).join(", ")}
           onChange={(v) => set("tsq_library", v ? v.split(/\s*,\s*/).filter(Boolean) : undefined)} placeholder="roles/, components/" />
       </Field>
+      <Field label="Host names" help={help(["all", "vars", "tsq_hosts"])} wide
+        hint="names a component's Address field can use: the sequencer translates them itself">
+        <HostNames value={vars.tsq_hosts} onChange={(v) => set("tsq_hosts", v)} usedBy={(n) => allHosts(inv).filter((h) => addressOf(inv, h) === n)} />
+      </Field>
       <Field label="Other variables" help="Any other variable is kept, and reachable in templates as `{{ component.vars.<name> }}`." wide>
-        <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"])}
-          exclude={["tsq_transport", "tsq_remote_root", "tsq_shell", "ansible_user", "ansible_ssh_private_key_file", "tsq_library", "tsq_description"]} />
+        <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"], ["tsq_hosts"])}
+          exclude={["tsq_transport", "tsq_remote_root", "tsq_shell", "ansible_user", "ansible_ssh_private_key_file", "tsq_library", "tsq_description", "tsq_hosts"]} />
       </Field>
     </div>
   );
@@ -380,7 +442,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
                   <td><strong title={h}>{v.tsq_label || h}</strong>{v.tsq_label && <span className="muted small"> {h}</span>}{shared && <span className="badge info" title="listed in several groups: a shared component">shared</span>}</td>
                   <td>{(v.tsq_role || ctx.lab.components?.[h]?.role) ? <ItemLink kind="role" name={v.tsq_role || ctx.lab.components[h].role} /> : <span className="error-text">no role</span>}{v.tsq_role && !ctx.lab.roles?.[v.tsq_role] && <span className="error-text small"> not a lab role</span>}{ctx.lab.components?.[h]?.missing?.length > 0 && <span className="error-text small"> missing {ctx.lab.components[h].missing.join(", ")}</span>}</td>
                   <td><ExtendsLink name={v.tsq_extends || ctx.lab.components?.[h]?.extends || "linux_system"} /></td>
-                  <td>{v.ansible_host || h}</td><td>{v.tsq_lock || "exclusive"}</td>
+                  <td><Address host={hostNames(inv)[addressOf(inv, h)] ?? addressOf(inv, h)} alias={addressOf(inv, h) in hostNames(inv) ? addressOf(inv, h) : ""} /></td><td>{v.tsq_lock || "exclusive"}</td>
                   <td><button className="small" onClick={(e) => {
                     e.stopPropagation();
                     update((d) => setAt(d, [...hostsPath, h], undefined));
@@ -431,6 +493,10 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
     ? { value: String(stagesOf[0].vars[k]), from: `inherited from stage ${stagesOf[0].name}` }
     : inv?.all?.vars?.[k] != null ? { value: String(inv.all.vars[k]), from: "inherited from the lab defaults" } : fallback;
   const [reach, setReach] = useState<any>(null);
+  // its address: the one it gives, a name of the lab's host names standing for its address
+  const names = hostNames(inv);
+  const given = String(effective("ansible_host") ?? name);
+  const address = names[given] ?? given;
   const set = (k: string, v: any) => update((d) => {
     const current = getAt(d, path);
     if (current == null || typeof current !== "object") setAt(d, path, {});
@@ -457,7 +523,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
   const check = async () => {
     setReach({ detail: "checking…" });
     const transport = effective("tsq_transport") || "ssh";
-    const r = await attempt(() => post("edit/reachability", { host: effective("ansible_host") || name, port: effective("ansible_port") || 22, transport }));
+    const r = await attempt(() => post("edit/reachability", { host: address, port: effective("ansible_port") || 22, transport }));
     setReach(r || null);
   };
   const ext = effective("tsq_extends") || "";
@@ -490,9 +556,12 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       <Field label="Tags" help={help(["all", "hosts", "_", "tsq_tags"])} hint={<>its id <code>{name}</code> is always a tag</>}>
         <Tags value={vars.tsq_tags} onChange={(v) => set("tsq_tags", v.length ? v : undefined)} choices={labTagChoices(ctx, "components")} placeholder="+ tag" />
       </Field>
-      <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])} hint={reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}>
+      <Field label="Address" help={help(["all", "hosts", "_", "ansible_host"])}
+        hint={<>{given in names && <span className="muted"><code>{given}</code> is <code>{address}</code> (the lab's host names){reach && " · "}</span>}
+          {reach && <span className={reach.ok ? "ok-text" : reach.ok === false ? "error-text" : "muted"}>{reach.detail}</span>}</>}>
         <div className="with-button">
-          <Text mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name} />
+          <Combo mono value={vars.ansible_host} onChange={(v) => set("ansible_host", v)} placeholder={effective("ansible_host") || name}
+            choices={Object.entries(names).map(([n, a]) => ({ value: n, description: String(a) }))} />
           <button className="small" onClick={check} title="Whether the host answers on its SSH port (or is local)">Check reachability</button>
         </div>
       </Field>

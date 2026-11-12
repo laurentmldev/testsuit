@@ -90,13 +90,15 @@ class Lab:
 
     def lab_keys(self, component: Component | None = None, stage: Stage | None = None) -> dict:
         """The keys giving the other components to commands, probes and self-tests: ``lab.components.<host>``
-        (every host of the inventory) and ``stage`` (the component's stage: ``stage.components.<host>``,
+        (every host of the inventory), ``lab.hosts.<name>`` (the address of a name of ``tsq_hosts``) and ``stage`` (the component's stage: ``stage.components.<host>``,
         ``stage.roles.<role>``, ``stage.vars``), each component with its id, host, role, label and variables
         as seen in that stage (``{{ stage.roles.stage_server.host }}``, ``{{ stage.components.srv_1.vars.ip }}``)."""
         def info(c: Component, where: Stage | None) -> dict:
-            return {"id": c.id, "host": c.host, "role": c.role, "label": c.label, "vars": c.vars_in(where)}
+            return {"id": c.id, "host": c.host, "host_alias": c.host_alias, "role": c.role, "label": c.label,
+                    "vars": c.vars_in(where)}
         inv = self.inventory
-        keys: dict = {"lab": {"components": {c.id: info(c, inv.stages[c.stages[0]] if c.stages else None)
+        keys: dict = {"lab": {"hosts": dict(inv.hosts),
+                              "components": {c.id: info(c, inv.stages[c.stages[0]] if c.stages else None)
                                              for c in inv.components.values()},
                               "stages": {s.id: {"id": s.id, "type": s.type, "components": list(s.components)}
                                          for s in inv.stages.values()}}}
@@ -208,11 +210,12 @@ class Lab:
 
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
-                "description": self.inventory.description,
+                "description": self.inventory.description, "hosts": self.inventory.hosts,
                 "warnings": self.warnings, "loaded_at": self.loaded_at,
                 "stages": {s.id: {"type": s.type, "components": s.components, "description": s.description}
                            for s in self.inventory.stages.values()},
-                "components": {c.id: {"role": c.role, "extends": c.extends, "host": c.host, "lock": c.lock,
+                "components": {c.id: {"role": c.role, "extends": c.extends, "host": c.host,
+                                      "host_alias": c.host_alias, "lock": c.lock,
                                       "stages": c.stages, "label": c.label, "description": c.description}
                                for c in self.inventory.components.values()},
                 "roles": {r.name: {"extends": r.extends, "source": r.source, "commands": sorted(r.commands)}

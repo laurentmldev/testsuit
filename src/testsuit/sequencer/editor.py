@@ -75,7 +75,8 @@ RUNTIME_KEYS = {
     "slot.remote_root": "the remote root of its lab component (tsq_remote_root)",
     "slots.<id>": "the same keys for any slot of the run (slots.pilot.component)",
     "component.id": "the lab component the step's slot is bound to (inventory name)",
-    "component.host": "its address (ansible_host)",
+    "component.host": "its address (ansible_host, a name of tsq_hosts translated to its address)",
+    "component.host_alias": "the tsq_hosts name its address is given by ( when it gives the address itself)",
     "component.label": "its label",
     "component.role": "its role",
     "component.extends": "the library component it extends (its implementation)",
@@ -94,6 +95,7 @@ RUNTIME_KEYS = {
                           "label, vars (stage.roles.stage_server.host)",
     "stage.components.<host>": "a lab component of that lab stage by inventory name (also stage.id, "
                                "stage.type, stage.vars)",
+    "lab.hosts.<name>": "the address of a name of the lab's tsq_hosts table (lab.hosts.bench-pi)",
     "lab.components.<host>": "any host of the lab inventory: id, host, role, label, vars "
                              "(lab.components.psu_1.vars.ansible_host)",
     "via.host": "in a status probe with 'via': the component it runs on (also via.id, via.vars)",
@@ -650,7 +652,7 @@ class Editor:
         library = cls.describe_library(lab)
         hosts = {}
         for c in inv.components.values():
-            info = {"role": c.role, "roles": lab.roles_of(c), "tags": c.tags, "role_given": str(c.vars.get("tsq_role") or ""), "extends": c.extends, "host": c.host, "lock": c.lock, "label": c.label,
+            info = {"role": c.role, "roles": lab.roles_of(c), "tags": c.tags, "role_given": str(c.vars.get("tsq_role") or ""), "extends": c.extends, "host": c.host, "host_alias": c.host_alias, "lock": c.lock, "label": c.label,
                     "stages": c.stages, "transport": str(c.vars.get("tsq_transport") or "")}
             try:
                 stage = inv.stages[c.stages[0]] if c.stages else None
@@ -672,7 +674,7 @@ class Editor:
             "stage_type_role_counts": stage_type_role_counts, "adhoc_roles": adhoc_roles,
             "stages": {s.id: {"type": s.type, "tags": s.tags, "components": s.components, "commands": sorted(s.commands)}
                        for s in inv.stages.values()},
-            "components": hosts,
+            "components": hosts, "hosts": inv.hosts,
             "library_folders": [str(f) for f in inv.library_folders],
         }
 

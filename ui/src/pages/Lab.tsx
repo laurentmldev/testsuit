@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
-import { ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
+import { Address, ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -343,7 +343,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div>{c.description && <div className="small description">{c.description}</div>}</td>
       <td>{c.role}</td>
       <td><code>{c.extends}</code></td>
-      <td>{c.host}</td>
+      <td><Address host={c.host} alias={c.host_alias} /></td>
       <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
         <div className="muted small" title={time(c.probed_at)}>{c.probing ? <><span className="pulse run" /> probing…</> : c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>

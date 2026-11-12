@@ -204,6 +204,13 @@ export const STATE_COLORS: Record<string, string> = {
   idle: "idle", configured: "info", unknown: "muted", done: "ok", OK: "ok", FAILED: "bad",
 };
 
+/** A component's address: its name of the lab's host names (tsq_hosts) when it has one, the address it stands for
+ *  shown when pointed at; else the address. */
+export function Address({ host, alias }: { host?: string | null; alias?: string | null }) {
+  if (!alias) return <>{host}</>;
+  return <span className="host-alias" title={`${alias} is ${host} (the lab's host names)`}>{alias}</span>;
+}
+
 export function Badge({ value, title }: { value?: string | null; title?: string }) {
   if (!value) return null;
   return (

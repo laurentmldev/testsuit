@@ -105,7 +105,7 @@ function ComponentNode({ data }: NodeProps) {
           <div className="lab-node-names">
             <strong>{comp.label || comp.id}</strong>
             <span className="muted small">{[comp.label && comp.label !== comp.id ? comp.id : null, comp.role].filter(Boolean).join(" · ")}</span>
-            <span className="muted small">{comp.host}</span>
+            <span className="muted small">{comp.host_alias ? `${comp.host_alias} (${comp.host})` : comp.host}</span>
           </div>
         </div>
         {comp.description && <div className="lab-hover-text">{comp.description}</div>}
@@ -138,12 +138,18 @@ function ComponentNode({ data }: NodeProps) {
   );
 }
 
+/** The host name (tsq_hosts) the components of an address all give, if they do. */
+function sharedAlias(members: any[]): string {
+  const alias = members[0]?.host_alias || "";
+  return members.every((c) => (c?.host_alias || "") === alias) ? alias : "";
+}
+
 function AreaNode({ data }: NodeProps) {
-  const { stage, runs, adhoc, host, members } = data as any;
+  const { stage, runs, adhoc, host, alias, members } = data as any;
   if (host) {
     return (
-      <div className="lab-area host" title={`${members.length} components at the address ${host}: ${members.join(", ")}`}>
-        <div className="lab-host-head"><code>{host}</code><span className="muted small">{members.length} components</span></div>
+      <div className="lab-area host" title={`${members.length} components at the address ${alias ? `${alias} (${host})` : host}: ${members.join(", ")}`}>
+        <div className="lab-host-head"><code>{alias || host}</code><span className="muted small">{members.length} components</span></div>
       </div>
     );
   }
@@ -488,7 +494,7 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     for (const s of stages) area(`stage:${s.id}`, headOf(s), { stage: s, runs });
     if (comps.some((c) => !c.stages?.length)) area("adhoc", 58, { adhoc: true, runs });
     for (const [h, r] of Object.entries(hostRects)) {
-      nodes.push({ id: h, type: "area", position: { x: r.x, y: r.y }, data: { host: byId[hostGroups[h][0]].host, members: hostGroups[h].map((c) => byId[c].label || c) },
+      nodes.push({ id: h, type: "area", position: { x: r.x, y: r.y }, data: { host: byId[hostGroups[h][0]].host, alias: sharedAlias(hostGroups[h].map((c) => byId[c])), members: hostGroups[h].map((c) => byId[c].label || c) },
         style: { width: r.width, height: r.height }, draggable: !!draft, selectable: false, zIndex: 0 });
     }
     for (const c of comps) {
@@ -659,7 +665,7 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
       <div className="lab-dialog-head">
         <span className={classes("lab-icon big", STATE_COLORS[comp.state] || "muted")}><ComponentIcon icon={icon} src={src} size={44} /></span>
         <div>
-          <div><code>{comp.id}</code> · role <code>{comp.role}</code> · extends <code>{comp.extends}</code> · host <code>{comp.host}</code> · lock {comp.lock}</div>
+          <div><code>{comp.id}</code> · role <code>{comp.role}</code> · extends <code>{comp.extends}</code> · host <code>{comp.host_alias ? `${comp.host_alias} (${comp.host})` : comp.host}</code> · lock {comp.lock}</div>
           <div className="muted small">{comp.stages?.length ? <>in stage{comp.stages.length > 1 ? "s" : ""} {comp.stages.join(", ")}</> : "ad hoc component (in no stage)"}</div>
           {comp.description && <p className="description">{comp.description}</p>}
           {icon?.error && <div className="warning-text">{icon.error}</div>}
