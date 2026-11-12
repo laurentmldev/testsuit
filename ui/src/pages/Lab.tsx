@@ -374,7 +374,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       </div>
       {tab === "diagram" && (comps.data && stages.data
         ? <LabGraph comps={comps.data} stages={stages.data} view={view.data}
-          onComponent={(id) => setPicked({ kind: "component", id })} onStage={(id) => setPicked({ kind: "stage", id })}
+          onComponent={(id) => setPicked({ kind: "component", id })} onProbe={setDetails} onStage={(id) => setPicked({ kind: "stage", id })}
           onLinks={(links) => setPicked({ kind: "links", links })} />
         : <p className="muted">Reading the lab…</p>)}
       {view.error && tab === "diagram" && <div className="error-box">{view.error}</div>}
