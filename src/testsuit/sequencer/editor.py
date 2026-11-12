@@ -82,7 +82,7 @@ RUNTIME_KEYS = {
     "component.extends": "the library component it extends (its implementation)",
     "component.slot": "the slot it is bound to",
     "component.stage": "its lab stage",
-    "component.vars": "every inventory variable of it (component.vars.tsq_start_args...)",
+    "component.vars": "every inventory variable of it (component.vars.tsq_start_args, component.vars.custom_grp.keyA...)",
     "component.input_dir": "same as slot.input_dir",
     "component.output_dir": "same as slot.output_dir",
     "component.remote_root": "its remote root (tsq_remote_root)",

@@ -436,7 +436,8 @@ VARS = {
 }
 
 HOST_VARS = h("Variables of a host. `tsq_` variables are the sequencer's; any other variable is kept and reachable "
-              "in templates as `{{ component.vars.<name> }}`.", type=["object", "null"], properties=VARS,
+              "in templates as `{{ component.vars.<name> }}`. A variable can hold keys of its own (`custom_grp: {keyA: v}`, "
+              "or `custom_grp.keyA: v`), read as `{{ component.vars.custom_grp.keyA }}`.", type=["object", "null"], properties=VARS,
               defaultSnippets=[{"label": "SSH host", "body": {"ansible_host": "${1:10.0.0.10}",
                                                               "tsq_role": "${2:role}"}},
                                {"label": "local process", "body": {"ansible_host": "localhost", "tsq_transport": "local",

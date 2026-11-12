@@ -15,7 +15,7 @@
 // focused or hovered, and its choices come with a description (component types with their commands,
 // roles with the components that have them...).
 import { createContext, CSSProperties, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { classes, idInput, idProblem, Markdown } from "./util";
+import { classes, idInput, idProblem, Markdown, notify } from "./util";
 
 // ── help panel ──────────────────────────────────────────────────────────
 
@@ -473,59 +473,132 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
   );
 }
 
-/** Variables as a key/value table; known keys are proposed with their help; values are YAML scalars. */
-export function KeyValues({ value, onChange, known, exclude, valueChoices }: {
+/** Variables as a key/value table; known keys are proposed with their help; values are YAML scalars.
+ *  `nested`: a variable holding keys of its own shows one row per key, named by its dotted path (`custom_grp.keyA`),
+ *  and a dotted name typed in the table writes nested keys. `tsq_` variables are kept whole. */
+export function KeyValues({ value, onChange, known, exclude, valueChoices, nested }: {
   value?: Record<string, any> | null; onChange: (v: Record<string, any>) => void; known?: Choice[]; exclude?: string[];
-  valueChoices?: (key: string) => Choice[] | undefined;
+  valueChoices?: (key: string) => Choice[] | undefined; nested?: boolean;
 }) {
-  const entries = Object.entries(value || {}).filter(([k]) => !(exclude || []).includes(k));
+  const data = value || {};
+  const entries = keyRows(data, nested).filter(([path]) => !(exclude || []).includes(path[0]));
   const [newKey, setNewKey] = useState("");
   const setHelp = useHelp();
-  const set = (k: string, v: any) => onChange({ ...(value || {}), [k]: v });
-  const remove = (k: string) => {
-    const copy = { ...(value || {}) };
-    delete copy[k];
-    onChange(copy);
+  const pathOf = (name: string): string[] | null => {
+    const parts = nested && !name.startsWith("tsq_") ? name.split(".") : [name];
+    return parts.every(Boolean) ? parts : null;
   };
-  const rename = (k: string, to: string) => {
-    if (!to || to === k) return;
-    const copy: Record<string, any> = {};
-    for (const [key, v] of Object.entries(value || {})) copy[key === k ? to : key] = v;
-    onChange(copy);
+  const set = (path: string[], v: any) => onChange(setKey(data, path, v));
+  const add = (name: string) => {
+    const path = pathOf(name.trim());
+    if (!path) return notifyKey(`'${name}' is not a variable name`);
+    if (!canHold(data, path)) return notifyKey(`'${name}': ${path.slice(0, -1).join(".") || name} already holds a value`);
+    set(path, "");
+    setNewKey("");
+  };
+  const rename = (from: string[], text: string, input: HTMLInputElement) => {
+    const to = pathOf(text);
+    if (!to || to.join(".") === from.join(".")) {
+      input.value = from.join(".");
+      return;
+    }
+    const without = removeKey(data, from);
+    if (!canHold(without, to)) {
+      input.value = from.join(".");
+      return notifyKey(`'${text}': ${to.slice(0, -1).join(".") || text} already holds a value`);
+    }
+    onChange(sameParent(from, to) ? renameKey(data, from, to[to.length - 1]) : setKey(without, to, getKey(data, from)));
   };
   return (
     <div className="kv">
-      {entries.map(([k, v]) => {
+      {entries.map(([path, v]) => {
+        const k = path.join(".");
         const info = known?.find((c) => c.value === k);
         return (
           <div key={k} className="kv-row" onMouseEnter={() => info?.description && setHelp({ title: k, text: info.description })}>
-            <input className="mono kv-key" defaultValue={k} onBlur={(e) => rename(k, e.target.value.trim())} />
+            <input className="mono kv-key" defaultValue={k} onBlur={(e) => rename(path, e.target.value.trim(), e.target)} />
             {typeof v === "object" && v !== null ? (
               <span className="muted mono kv-value">{JSON.stringify(v)}</span>
             ) : valueChoices?.(k) ? (
-              <div className="kv-value"><Combo value={v === null ? "" : String(v)} onChange={(x) => set(k, scalar(x))} choices={valueChoices(k)!} mono /></div>
+              <div className="kv-value"><Combo value={v === null ? "" : String(v)} onChange={(x) => set(path, scalar(x))} choices={valueChoices(k)!} mono /></div>
             ) : (
-              <input className="mono kv-value" value={v === null ? "" : String(v)} onChange={(e) => set(k, scalar(e.target.value))} />
+              <input className="mono kv-value" value={v === null ? "" : String(v)} onChange={(e) => set(path, scalar(e.target.value))} />
             )}
-            <button type="button" className="icon" onClick={() => remove(k)} title="Remove">×</button>
+            <button type="button" className="icon" onClick={() => onChange(removeKey(data, path))} title="Remove">×</button>
           </div>
         );
       })}
       <div className="kv-row">
         <div className="kv-key">
-          <Combo value={newKey} onChange={setNewKey} choices={(known || []).filter((c) => !(c.value in (value || {})) && !(exclude || []).includes(c.value))}
-            placeholder="new variable…" mono onPick={(k) => {
-              set(k, "");
-              setNewKey("");
-            }} />
+          <Combo value={newKey} onChange={setNewKey} choices={(known || []).filter((c) => !(c.value in data) && !(exclude || []).includes(c.value))}
+            placeholder={nested ? "new variable, group.key…" : "new variable…"} mono onPick={add} />
         </div>
-        {newKey && <button type="button" className="small" onClick={() => {
-          set(newKey.trim(), "");
-          setNewKey("");
-        }}>add</button>}
+        {newKey && <button type="button" className="small" onClick={() => add(newKey)}>add</button>}
       </div>
     </div>
   );
+}
+
+function notifyKey(text: string) {
+  notify(text, "error");
+}
+
+const isGroup = (v: any) => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** The rows of a variable table: each variable, or with `nested` each key of a variable holding keys, by path. */
+export function keyRows(data: Record<string, any>, nested?: boolean, prefix: string[] = []): [string[], any][] {
+  return Object.entries(data).flatMap(([k, v]): [string[], any][] =>
+    nested && isGroup(v) && Object.keys(v).length && !(prefix.length === 0 && k.startsWith("tsq_"))
+      ? keyRows(v, nested, [...prefix, k]) : [[[...prefix, k], v]]);
+}
+
+function getKey(data: any, path: string[]): any {
+  return path.reduce((node, k) => (isGroup(node) ? node[k] : undefined), data);
+}
+
+/** True if path can be written: no key on its way holds a value, and it is not itself a group of keys. */
+function canHold(data: any, path: string[]): boolean {
+  let node = data;
+  for (const k of path.slice(0, -1)) {
+    if (!(k in node)) return true;
+    if (!isGroup(node[k])) return false;
+    node = node[k];
+  }
+  const last = node[path[path.length - 1]];
+  return !(isGroup(last) && Object.keys(last).length);
+}
+
+/** A copy of data with the key at path set (the groups on its way created, the key keeping its place). */
+export function setKey(data: Record<string, any>, path: string[], v: any): Record<string, any> {
+  const [k, ...rest] = path;
+  return { ...data, [k]: rest.length ? setKey(isGroup(data[k]) ? data[k] : {}, rest, v) : v };
+}
+
+/** A copy of data without the key at path, a group left empty removed with it. */
+export function removeKey(data: Record<string, any>, path: string[]): Record<string, any> {
+  const [k, ...rest] = path;
+  const copy = { ...data };
+  if (!rest.length || !isGroup(copy[k])) {
+    if (!rest.length) delete copy[k];
+    return copy;
+  }
+  const sub = removeKey(copy[k], rest);
+  if (Object.keys(sub).length) copy[k] = sub;
+  else delete copy[k];
+  return copy;
+}
+
+function sameParent(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.slice(0, -1).every((k, i) => k === b[i]);
+}
+
+/** A copy of data with the key at path renamed, in its place among its siblings. */
+function renameKey(data: Record<string, any>, path: string[], to: string): Record<string, any> {
+  const [k, ...rest] = path;
+  if (rest.length) return { ...data, [k]: renameKey(data[k], rest, to) };
+  const copy: Record<string, any> = {};
+  for (const [key, v] of Object.entries(data)) if (key !== to || key === k) copy[key === k ? to : key] = v;
+  return copy;
 }
 
 /** A YAML scalar typed in a form: numbers and booleans as such, the rest as text. */
