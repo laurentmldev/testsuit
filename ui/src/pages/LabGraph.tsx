@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReactFlowInstance } from "@xyflow/react";
 import {
-  Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow,
+  Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, NodeToolbar, Position, ReactFlow,
   type Edge, type EdgeProps, type Node, type NodeChange, type NodeProps,
 } from "@xyflow/react";
 import { put, url, useResource } from "../api";
@@ -41,9 +41,8 @@ export interface CmdSegment { text: string; key: string | null; error?: string }
 interface RunInfo { id: string; name?: string; testdef?: string; state: string; phase?: string; waiting_for?: string; stages: Record<string, string>; slots: Record<string, string> }
 interface Activity { run: string; phase: string; step: string; slot: string; state: string; started?: string; command: string }
 
-// card sizes: compact (picture, name, status), and expanded (everything)
+// a card: picture, name and status; the rest floats beside it when it is pointed at
 const COMPACT = { width: 164, height: 132 };
-const EXPANDED_W = 250;
 const SHOWN_KEY = "tsq.lab.linktypes";     // the link types shown, in the browser
 const KIND_HELP: Record<string, string> = {
   probe: "the other component's probe or some of its commands run through this one (via)",
@@ -76,74 +75,65 @@ function RunChip({ run, id, children }: { run?: RunInfo; id: string; children?: 
 
 // ── nodes ──────────────────────────────────────────────────────────────────
 
-/** Height of an expanded card: its head, then a line per step it runs (two at most) or per run holding it. */
-function expandedHeight(activity: number, held: boolean) {
-  return 150 + 26 * Math.min(activity, 2) + (activity > 2 ? 18 : 0) + (held ? 26 : 0);
-}
-
 function ComponentNode({ data }: NodeProps) {
-  const { comp, icon, activity, runs, shared, held, expanded, onToggle, onDetails } = data as any;
+  const { comp, icon, activity, runs, shared, held, arranging, onProbe } = data as any;
+  const [hovered, setHovered] = useState(false);
   // the run holding its stage shows on the stage's title: not again on each of its components
   const stageRuns = new Set<string>(Object.values(runs as Record<string, RunInfo>).filter((r) => (comp.stages || []).some((s: string) => Object.values(r.stages).includes(s))).map((r) => r.id));
   const color = STATE_COLORS[comp.state] || "muted";
   const src = icon?.file ? url(`lab/icons/${encodeURIComponent(comp.id)}`) : null;
   const running = (activity as Activity[]).find((a) => a.state === "running") || activity[0];
-  const status = (
-    <div className="lab-node-tags">
-      <Badge value={comp.state} title={comp.detail || ""} />
-      {running && <span className={classes("pulse", running.state === "running" ? "run" : "wait")} title={`runs ${running.command || running.step} (${running.phase}:${running.step})`} />}
-      {comp.hold && <Badge value="hold" title={comp.note || ""} />}
-      {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
-    </div>
-  );
-  const handles = <><Handle type="target" position={Position.Top} className="lab-handle" /><Handle type="source" position={Position.Bottom} className="lab-handle" /></>;
-  if (!expanded) {
-    return (
-      <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
-        title={`${comp.label || comp.id} (${comp.id})${comp.description ? "\n" + comp.description : ""}${running ? `\nruns ${running.command || running.step}` : ""}\nClick: expand`}>
-        {handles}
-        <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
-        <strong className="lab-name">{comp.label || comp.id}</strong>
-        {status}
-      </div>
-    );
-  }
   const otherRuns = (held as any[]).filter((h) => !stageRuns.has(h.run));
   return (
-    <div className={classes("lab-node expanded", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
-      title={`${comp.label || comp.id} (${comp.id})${comp.description ? "\n" + comp.description : ""}\nClick: collapse`}>
-      {handles}
-      <div className="lab-node-head">
-        <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
-        <div className="lab-node-names">
-          <strong>{comp.label || comp.id}</strong>
-          <span className="muted small">{[comp.label && comp.label !== comp.id ? comp.id : null, comp.role].filter(Boolean).join(" · ")}</span>
-          <span className="muted small">{comp.host}</span>
-        </div>
-      </div>
+    <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <Handle type="target" position={Position.Top} className="lab-handle" /><Handle type="source" position={Position.Bottom} className="lab-handle" />
+      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
+      <strong className="lab-name">{comp.label || comp.id}</strong>
       <div className="lab-node-tags">
-        <Badge value={comp.state} title={comp.detail || ""} />
-        {comp.expected && comp.expected !== comp.state && <span className="warning-text" title={`the run holding it expects it ${comp.expected}`}>expected {comp.expected}</span>}
+        {arranging ? <Badge value={comp.state} />
+          : <button type="button" className="link state-button" title="Its probe: what was tested, the answer, and why this state"
+            onClick={(e) => { e.stopPropagation(); onProbe(); }}><Badge value={comp.state} /></button>}
+        {running && <span className={classes("pulse", running.state === "running" ? "run" : "wait")} />}
         {comp.hold && <Badge value="hold" title={comp.note || ""} />}
         {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
-        {comp.lock !== "exclusive" && <span className="chip" title={comp.lock === "none" ? "never locked" : "several runs can hold it at once"}>lock {comp.lock}</span>}
-        {shared && <span className="chip" title={`in the stages ${shared.join(", ")}`}>in {shared.length} stages</span>}
       </div>
-      {activity.slice(0, 2).map((a: Activity) => (
-        <div key={`${a.run}:${a.phase}:${a.step}`} className="lab-activity" title={`${a.phase}:${a.step} for slot ${a.slot} (${a.state})${a.started ? `, since ${time(a.started)}` : ""}`}>
-          <span className={classes("pulse", a.state === "running" ? "run" : "wait")} />
-          <code>{a.command || a.step}</code>
-          {!stageRuns.has(a.run) && <RunChip run={runs[a.run]} id={a.run}>{runName(runs[a.run], a.run)}</RunChip>}
+      {/* the detailed card, floating beside it while it is pointed at (not scaled with the diagram) */}
+      <NodeToolbar isVisible={hovered && !arranging} position={Position.Right} offset={10} className="lab-hover">
+        <div className="lab-node-head">
+          <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={44} /></span>
+          <div className="lab-node-names">
+            <strong>{comp.label || comp.id}</strong>
+            <span className="muted small">{[comp.label && comp.label !== comp.id ? comp.id : null, comp.role].filter(Boolean).join(" · ")}</span>
+            <span className="muted small">{comp.host}</span>
+          </div>
         </div>
-      ))}
-      {activity.length > 2 && <div className="muted small">and {activity.length - 2} more steps</div>}
-      {otherRuns.length > 0 && activity.length === 0 && (
-        <div className="lab-activity">{otherRuns.map((h: any) => <RunChip key={h.run} run={runs[h.run]} id={h.run} />)}</div>
-      )}
-      <div className="lab-node-foot">
-        <button type="button" className="small" onClick={(e) => { e.stopPropagation(); onDetails(); }} title="State, probe report, runs, links and actions">Details…</button>
-        <button type="button" className="small link" onClick={(e) => { e.stopPropagation(); onToggle(); }}>collapse</button>
-      </div>
+        {comp.description && <div className="lab-hover-text">{comp.description}</div>}
+        <div className="lab-node-tags wrap">
+          <Badge value={comp.state} />
+          {comp.expected && comp.expected !== comp.state && <span className="warning-text">expected {comp.expected}</span>}
+          {comp.hold && <Badge value="hold" />}
+          {comp.maintenance && <Badge value="maintenance" />}
+          {comp.lock !== "exclusive" && <span className="chip">lock {comp.lock}</span>}
+          {shared && <span className="chip">in {shared.length} stages</span>}
+        </div>
+        {(comp.detail || comp.probed_at) && (
+          <div className="muted small lab-hover-text">{comp.detail}{comp.detail && comp.probed_at ? " · " : ""}{comp.probed_at ? `probed ${ago(comp.probed_at)}` : ""}</div>
+        )}
+        {(comp.hold || comp.maintenance) && comp.note && <div className="muted small lab-hover-text">{comp.note}</div>}
+        {activity.slice(0, 3).map((a: Activity) => (
+          <div key={`${a.run}:${a.phase}:${a.step}`} className="lab-activity">
+            <span className={classes("pulse", a.state === "running" ? "run" : "wait")} />
+            <code>{a.command || a.step}</code>
+            <span className="muted small">{a.phase}:{a.step} · {runName(runs[a.run], a.run)}</span>
+          </div>
+        ))}
+        {activity.length > 3 && <div className="muted small">and {activity.length - 3} more steps</div>}
+        {otherRuns.length > 0 && activity.length === 0 && (
+          <div className="lab-activity"><span className="muted small">held by</span> {otherRuns.map((h: any) => <span key={h.run} className="chip run">{runName(runs[h.run], h.run)}</span>)}</div>
+        )}
+        <div className="muted small lab-hover-foot">Click the card for its details and actions, its state for its probe.</div>
+      </NodeToolbar>
     </div>
   );
 }
@@ -303,13 +293,12 @@ const AREA_MIN_W = 200;
 const HOST_HEAD = 30;                                 // a box around the components that share an address
 const HOST_PAD = 10;
 
-export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }: {
+export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, onLinks }: {
   comps: any[]; stages: any[]; view: LabView | null;
-  onComponent: (id: string) => void; onStage: (id: string) => void; onLinks: (links: LabLink[]) => void;
+  onComponent: (id: string) => void; onProbe: (id: string) => void; onStage: (id: string) => void; onLinks: (links: LabLink[]) => void;
 }) {
   const [placed, setPlaced] = useState<Record<string, Rect> | null>(null);
   const [routes, setRoutes] = useState<Record<string, Point[]>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const saved = useResource<{ components: Arrangement; saved_at?: string }>("lab/layout", ["lab_layout"]);
   const [draft, setDraft] = useState<Arrangement | null>(null);      // while arranging
   const [picked, setPicked] = useState<string | null>(null);
@@ -334,15 +323,9 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     }
     return next;
   });
-  const toggle = (id: string) => setExpanded((all) => {
-    const next = new Set(all);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
-  });
   const [flow, setFlow] = useState<ReactFlowInstance<any, any> | null>(null);
   const [fitted, setFitted] = useState(false);
-  useEffect(() => {                // the whole lab in view once placed; not again when a card is expanded
+  useEffect(() => {                // the whole lab in view once placed
     if (!flow || !placed || fitted || !saved.data) return;
     const t = window.setTimeout(() => {
       flow.fitView({ padding: 0.06, maxZoom: 1.1 });
@@ -372,13 +355,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
     : id.startsWith("host:") ? hostParent(id) : undefined;
   /** The components inside an area or an address box: they move with it. */
   const membersOf = (id: string) => id.startsWith("host:") ? (hostGroups[id] || []).map((c) => byId[c]) : comps.filter((c) => parentOf(c) === id);
-  const size = (c: any) => {
-    if (!expanded.has(c.id)) return COMPACT;
-    const busy = (activity[c.id] || []).length;
-    const ofStages = (run: string) => (c.stages || []).some((s: string) => Object.values(runs[run]?.stages || {}).includes(s));
-    const held = !busy && (c.holders || []).some((h: any) => !ofStages(h.run));
-    return { width: EXPANDED_W, height: expandedHeight(busy, held) };
-  };
+  const size = (_c: any) => COMPACT;
   // the automatic layout changes with what is drawn and the sizes, not with the states
   const structure = JSON.stringify([stages.map((s) => [s.id, s.components, headOf(s)]),
     comps.map((c) => [c.id, c.stages, size(c), hostOf[c.id]]), links.map((l) => [l.source, l.target])]);
@@ -519,9 +496,9 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
       if (!r) continue;
       nodes.push({
         id: `c:${c.id}`, type: "component", position: { x: r.x, y: r.y }, style: { width: r.width, height: r.height, opacity: opacity(c.id) },
-        draggable: !!draft, selectable: false, zIndex: expanded.has(c.id) ? 3 : 2, className: picked === c.id ? "lab-picked" : undefined,
+        draggable: !!draft, selectable: false, zIndex: 2, className: picked === c.id ? "lab-picked" : undefined,
         data: { comp: c, icon: view?.icons?.[c.id], activity: activity[c.id] || [], runs, shared: (c.stages?.length || 0) > 1 ? c.stages : null, held: c.holders || [],
-          expanded: expanded.has(c.id), onToggle: () => toggle(c.id), onDetails: () => onComponent(c.id) },
+          arranging: !!draft, onProbe: () => onProbe(c.id) },
       });
     }
   }
@@ -584,8 +561,6 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
           <>
             {manual && <span className="muted small" title={saved.data?.saved_at ? `saved ${time(saved.data.saved_at)}` : ""}>arranged by hand{saved.data?.saved_at ? `, ${ago(saved.data.saved_at)}` : ""}</span>}
             <span className="spacer" />
-            <button className="small" onClick={() => setExpanded(new Set(comps.map((c) => c.id)))} title="Every card with its role, host, lock and current command">Expand all</button>
-            <button className="small" disabled={!expanded.size} onClick={() => setExpanded(new Set())} title="Every card as picture, name and status">Collapse all</button>
             <button className="small" disabled={!placed} onClick={startArranging} title="Move cards and stages, set opacities, and save the arrangement for every user">Arrange…</button>
             {manual && <button className="small" onClick={resetArrangement} title="Forget the arrangement made by hand, for everyone">Automatic layout</button>}
           </>
@@ -600,7 +575,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
               if (n.type === "component") setPicked((n.data as any).comp.id);
               return;
             }
-            if (n.type === "component") toggle((n.data as any).comp.id);
+            if (n.type === "component") onComponent((n.data as any).comp.id);
             else if ((n.data as any).stage && (e.target as HTMLElement).closest(".lab-area-head")) onStage((n.data as any).stage.id);
           }}
           onEdgeClick={(_, e) => !draft && onLinks((e.data as any).links)}>
@@ -621,7 +596,7 @@ export function LabGraph({ comps, stages, view, onComponent, onStage, onLinks }:
           </button>
         ))}
         <span><span className="pulse run" /> runs a command now</span>
-        <span>Click a card to expand it, a stage title, a link or a run for details.</span>
+        <span>Point at a card for more; click it, a stage title, a link or a run for details, a state for its probe.</span>
       </div>
     </>
   );

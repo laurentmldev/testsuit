@@ -152,7 +152,7 @@ function NewRole({ taken, onClose, onCreate }: { taken: string[]; onClose: () =>
   const [name, setName] = useState(freeName("my_role", taken));
   return (
     <Dialog title="New lab role" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, { extends: base, description: "", commands: {} })}>Create</button>}>
-      <Field label="Extends" help="Its commands are offered too: `linux_system` (deploy, collect, kill) for anything reachable over SSH, `component` (no command) otherwise, or another role.">
+      <Field name="extends" label="Extends" help="Its commands are offered too: `linux_system` (deploy, collect, kill) for anything reachable over SSH, `component` (no command) otherwise, or another role.">
         <Combo value={base} onChange={setBase} choices={labRoleChoices(ctx)} strict />
       </Field>
       <Field label="Name" help="What components with this role are for (`tsq_role: pilot`): datapacks bind their logical components by role." error={labIdProblem(name, taken)}>
@@ -355,8 +355,8 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
       <StatusEditor value={t.status} onChange={(v) => set("status", v)} inherited={parent?.status} />
       <SelftestEditor value={t.selftest} onChange={(v) => set("selftest", v)} inherited={parent?.selftest || []} />
       <Section title="Collect filters" help={help(["collect"])} collapsed={!t.collect}>
-        <Field label="Only" help="Glob patterns of the output files to keep (relative to the output folder)."><Tags value={t.collect?.include} onChange={(v) => set("collect", { ...t.collect, include: v.length ? v : undefined })} placeholder="*.csv" /></Field>
-        <Field label="Except" help="Glob patterns of the output files to drop."><Tags value={t.collect?.exclude} onChange={(v) => set("collect", { ...t.collect, exclude: v.length ? v : undefined })} placeholder="*.tmp" /></Field>
+        <Field name="collect.include" label="Only" help="Glob patterns of the output files to keep (relative to the output folder)."><Tags value={t.collect?.include} onChange={(v) => set("collect", { ...t.collect, include: v.length ? v : undefined })} placeholder="*.csv" /></Field>
+        <Field name="collect.exclude" label="Except" help="Glob patterns of the output files to drop."><Tags value={t.collect?.exclude} onChange={(v) => set("collect", { ...t.collect, exclude: v.length ? v : undefined })} placeholder="*.tmp" /></Field>
       </Section>
       {described?.used_by?.length > 0 && <div className="hint-box small">Extended by <ItemLinks kind="host" names={described.used_by} />: the inventory shows, for each host, the commands of its role it does not implement.</div>}
     </div>

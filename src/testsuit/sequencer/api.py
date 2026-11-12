@@ -243,7 +243,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 row.update(role=item.role, extends=item.extends, host=item.host, lock=item.lock, stages=item.stages,
                            label=item.label, description=item.description, adhoc=item.adhoc, state=res.get("state") or "unknown",
                            expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"),
-                           selftest_failed=res.get("selftest_failed"))
+                           selftest_failed=res.get("selftest_failed"), probing=item.id in seq.monitor.running)
             rows.append(row)
         return rows
 
@@ -256,10 +256,14 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return resources("component")
 
     def probe_report(name: str) -> dict:
+        """The probe going on now when there is one (``running``, its steps so far, the last one being run),
+        else the last one."""
         res = seq.store.resources("component").get(("component", name)) or {}
+        probe = seq.monitor.running.get(name) or seq.monitor.reports.get(name)
         return {"component": name, "state": res.get("state") or "unknown", "detail": res.get("detail"),
                 "expected": res.get("expected"), "probed_at": res.get("probed_at"),
-                "probe": seq.monitor.reports.get(name), "selftest": seq.monitor.selftests.get(name),
+                "probe": probe and {**probe, "steps": [dict(st) for st in probe.get("steps") or []]},
+                "selftest": seq.monitor.selftests.get(name),
                 "selftest_failed": res.get("selftest_failed")}
 
     @app.get("/components/{name}/probe")

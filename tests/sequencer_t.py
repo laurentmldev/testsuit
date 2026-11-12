@@ -653,6 +653,45 @@ def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
     assert detail.startswith("self-test failed") and "healthy" in detail, detail
 
 
+def test_probe_report_while_running(tmp_path, no_git):
+    """A probe is shown while it runs: its report so far (GET /components/{id}/probe), the last step being the
+    one that runs, without an answer yet; the components list says it is being probed."""
+    from testsuit.sequencer.api import create_app
+    bench = Bench(tmp_path, stages=1)
+    gate = tmp_path / "gate"
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["status"] = {
+        "probe": {"run": ["echo first", f"while [ ! -e {gate} ]; do sleep 0.05; done; echo second"]},
+        "states": {"idle": {"regex": "second"}}}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        routes = {(r.path, tuple(r.methods)[0]): r.endpoint for r in create_app(seq).routes if hasattr(r, "methods")}
+        events = []
+        seq.monitor.notify = lambda event, data: events.append(event)
+        task = asyncio.ensure_future(seq.monitor.probe("counter_1"))
+        for _ in range(200):                                       # until its second command runs
+            await asyncio.sleep(0.02)
+            if len((seq.monitor.running.get("counter_1") or {}).get("steps", [])) == 3:
+                break
+        during = await routes[("/components/{name}/probe", "GET")]("counter_1")
+        listed = {c["id"]: c["probing"] for c in await routes[("/components", "GET")]()}
+        gate.write_text("")
+        await task
+        after = await routes[("/components/{name}/probe", "GET")]("counter_1")
+        await seq.close()
+        return during, listed, after, events
+    during, listed, after, events = asyncio.run(main())
+    steps = during["probe"]["steps"]
+    assert during["probe"]["running"] and len(steps) == 3 and steps[1]["output"] == "first\n" and steps[1]["ok"]
+    assert "second" in steps[2]["command"] and "output" not in steps[2] and "exit" not in steps[2]
+    assert listed["counter_1"] is True and events[0] == "probing" and "probe" in events
+    assert "running" not in after["probe"] and after["probe"]["steps"][2]["output"] == "second\n" and after["state"] == "idle"
+    assert after["probe"]["duration"] >= 0
+
+
 def test_probe_report(tmp_path, no_git):
     """Each probe leaves a report for the Lab page: what was tested, the answer, the rule that gave the state
     (or that none did), and why; a component kept broken says so, with its failed self-test checks."""

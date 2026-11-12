@@ -258,6 +258,7 @@ class Monitor:
         self._testing: set[str] = set()
         self._last: dict[str, float] = {}
         self.reports: dict[str, dict] = {}            # the last probe of each component: what was tested, its answer, why
+        self.running: dict[str, dict] = {}            # the probe of a component going on now: its report so far
         self.selftests: dict[str, dict] = {}          # the last self-test of each component, with its checks
         self._wake = asyncio.Event()
 
@@ -277,9 +278,12 @@ class Monitor:
         resolved = self.lab.resolve(comp, stage)
         res = self.store.resources("component").get(("component", comp_id)) or {}
         report: dict = {"component": comp_id, "at": now(), "expected": res.get("expected"), "chain": resolved.chain,
-                        "status": resolved.status, "steps": []}
+                        "status": resolved.status, "steps": [], "running": True}
         started = time.monotonic()
         failed = False
+        self.running[comp_id] = report                    # shown step by step while it runs (its last step: running)
+        if not selftest:
+            self.notify("probing", {"component": comp_id})
         try:
             via = self.lab.via(comp, stage, resolved.status)
             state, detail = await asyncio.wait_for(
@@ -291,6 +295,10 @@ class Monitor:
         except Exception as e:
             state, detail, failed = "unknown", f"probe failed: {type(e).__name__}: {e}", True
             report["why"] = f"the probe itself failed: {type(e).__name__}: {e}"
+        finally:
+            report.pop("running", None)
+            if self.running.get(comp_id) is report:
+                del self.running[comp_id]
         report.update(duration=round(time.monotonic() - started, 3), probed=state)
         # every probe in the log of the Lab page (logger testsuit.probe, not on the console); errors as warnings
         tested = ", ".join(st.get("command") or st["action"] for st in report["steps"][-1:]) or "no probe"
