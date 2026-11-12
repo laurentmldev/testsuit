@@ -278,3 +278,34 @@ export function joinPath(fromFile: string, rel: string): string {
   }
   return parts.join("/");
 }
+
+/** A probe or command that does not run on its own component but through another one (``via``: a jump host, a
+ *  stage server…): the component it runs on, in the accent colour, so it is not taken for the component itself. */
+export function ViaTag({ via, host, label, children, title }: {
+  via: string; host?: string | null; label?: string | null; children?: ReactNode; title?: string;
+}) {
+  return (
+    <span className="via-tag" title={title ?? `Runs on ${via}${host ? ` (${host})` : ""}, not on the component itself: ${via} reaches it`}>
+      <span className="via-arrow" aria-hidden="true">↪</span>{children ?? "via"} <strong>{label || via}</strong>{host && <span className="via-host"> {host}</span>}
+    </span>
+  );
+}
+
+/** Where a probe or command goes when it runs through another component: from the sequencer to the component it
+ *  runs on, which reaches the target. */
+export function ViaRoute({ via, viaHost, target, targetHost, what }: {
+  via: string; viaHost?: string | null; target: string; targetHost?: string | null; what: string;
+}) {
+  return (
+    <div className="via-route">
+      <div className="via-route-path">
+        <span className="via-node muted">sequencer</span>
+        <span className="via-link" aria-hidden="true">→</span>
+        <span className="via-node via-hop"><strong>{via}</strong>{viaHost && <span className="via-host"> {viaHost}</span>}</span>
+        <span className="via-link" aria-hidden="true">→</span>
+        <span className="via-node"><strong>{target}</strong>{targetHost && <span className="via-host"> {targetHost}</span>}</span>
+      </div>
+      <div className="small">{what} runs on <strong>{via}</strong>, which reaches {target}: not on {target} itself.</div>
+    </div>
+  );
+}

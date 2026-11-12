@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
+import { Address, ago, attempt, Badge, classes, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -119,12 +119,18 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
             {keysError && <div className="error-box">{keysError}</div>}
           </details>
+          {info.commands.some((c: any) => c.spec.via) && (
+            <p className="small">Commands marked <span className="via-tag">↪ via <strong>…</strong></span> do not run on {labelOf(id)}: they run on the component named, which reaches it (a jump host, a stage server…).</p>
+          )}
           <table className="grid compact">
             <tbody>
               {info.commands.map((c: any) => (
-                <tr key={c.name}>
-                  <td><code>{c.name}</code></td>
-                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.via && <span className="muted"> (through {c.spec.via})</span>}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
+                <tr key={c.name} className={c.spec.via ? "via-row" : undefined}>
+                  <td><code>{c.name}</code>{c.spec.via && <div>{c.via
+                    ? <ViaTag via={c.via.id} label={labelOf(c.via.id)} host={c.via.host_alias || c.via.host}
+                      title={`${c.name} runs on ${c.via.id} (${c.via.host}), which reaches ${id}: not on ${id} itself`} />
+                    : <span className="via-tag" title={c.via_error || ""}>↪ via <strong>{c.spec.via}</strong> <span className="bad-text">(not found)</span></span>}</div>}</td>
+                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
                   <td>{c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
                     : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>
@@ -134,7 +140,9 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
           </table>
           {results.map((r, i) => (
             <div key={i} className="manual-result">
-              <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> on {r.on || labelOf(id)}{r.via && <> (through {r.via})</>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
+              <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> {r.via
+                ? <ViaTag via={r.via} label={labelOf(r.via)} host={r.on} title={`${r.command} ran on ${r.via} (${r.on}), for ${id}`}>ran on</ViaTag>
+                : <>on {r.on || labelOf(id)}</>}{r.via && <span className="muted"> for {labelOf(id)}</span>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
               {r.keys?.length > 0 && <div className="small muted">keys set by hand: {r.keys.map((k: any, j: number) => <span key={k.key}>{j > 0 && ", "}<code>{k.key}={typeof k.value === "string" ? k.value : JSON.stringify(k.value)}</code>{k.overrides && <span className="warn-text"> (overrides <code>{typeof k.was === "string" ? k.was : JSON.stringify(k.was)}</code>)</span>}</span>)}</div>}
               {r.run && <pre className="small">$ {r.run}</pre>}
               {(r.output || r.error || r.detail) && <pre className="small">{[r.output, r.error && `error: ${r.error}`, r.detail].filter(Boolean).join("\n")}</pre>}
@@ -275,11 +283,12 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
                   {p.kind ? <>status probe <code>{p.kind}</code></> : live ? "status probe" : "no status probe"}
                   {p.chain?.length > 1 && <> of the lab component <code>{p.chain[p.chain.length - 2]}</code></>}
                   {p.via
-                    ? <>{" "}for <code>{p.host}</code>, run on <code>{p.via.id}</code> ({p.via.host}, {p.transport}) which it is reached through</>
+                    ? <>{" "}for <code>{p.host}</code>, run through <code>{p.via.id}</code> ({p.transport})</>
                     : <>{" "}on <code>{p.host}</code> ({p.transport})</>}
                   {!live && <>, {time(p.at)}, {p.duration} s</>}
                 </p>
               )}
+              {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} what="Its status probe" />}
               {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} running={live && i === p.steps.length - 1} />)}
               {live && !(p.steps || []).length && <p className="muted small"><span className="pulse run" /> starting…</p>}
               {!live && p.rules && Object.keys(p.rules).length > 0 && (
