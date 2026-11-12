@@ -151,6 +151,10 @@ def test_keys_set_by_hand(tmp_path, monkeypatch, capsys):
     from testsuit.datatools.datapack.templating import keys_set_by_hand
     assert [k["overrides"] for k in keys_set_by_hand({"a": {"b": 1}, "c": 2}, {"a": 0, "c.d": 1, "a.z": 1, "n": 1})] == \
         [True, True, False, False]
+    nested = {"component": {"vars": {"custom_grp": {"keyA": 1}}}}      # nested custom keys, by their dotted name
+    assert [(k["overrides"], k.get("was")) for k in keys_set_by_hand(nested, {
+        "component.vars.custom_grp.keyA": 2, "component.vars.custom_grp.keyB": 2, "component.vars.custom_grp": 0})] == \
+        [(True, 1), (False, None), (True, {"keyA": 1})]
 
     for name in ("testdef.id", "datapack", "setup.name.x"):
         with pytest.raises(DatapackError, match="is a built-in key"):
