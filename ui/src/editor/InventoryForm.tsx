@@ -309,8 +309,8 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
         hint="names a component's Address field can use: the sequencer translates them itself">
         <HostNames value={vars.tsq_hosts} onChange={(v) => set("tsq_hosts", v)} usedBy={(n) => allHosts(inv).filter((h) => addressOf(inv, h) === n)} />
       </Field>
-      <Field label="Other variables" help="Any other variable is kept, and reachable in templates as `{{ component.vars.<name> }}`." wide>
-        <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"], ["tsq_hosts"])}
+      <Field label="Other variables" help="Any other variable is kept, and reachable in templates as `{{ component.vars.<name> }}`. A name like `custom_grp.keyA` is a key of a group of variables, written nested in the YAML and read as `{{ component.vars.custom_grp.keyA }}`." wide>
+        <KeyValues nested value={vars} onChange={(v) => update((d) => setAt(d, ["all", "vars"], v))} known={knownVars(schemas, ["all", "vars"], ["tsq_hosts"])}
           exclude={["tsq_transport", "tsq_remote_root", "tsq_shell", "ansible_user", "ansible_ssh_private_key_file", "tsq_library", "tsq_description", "tsq_hosts"]} />
       </Field>
     </div>
@@ -462,8 +462,8 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
       </Section>
       <CommandsEditor title="Command overrides for the whole stage (tsq_commands)" help={help(["all", "vars", "tsq_commands"])}
         value={group.vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)} />
-      <Section title="Stage variables" help="Variables of every component of the group (host variables win).">
-        <KeyValues value={group.vars} onChange={(v) => update((d) => setAt(d, varsPath, v))} known={knownVars(schemas, ["all", "children", "_", "vars"], ["tsq_stage_type", "tsq_commands"])}
+      <Section title="Stage variables" help="Variables of every component of the group (host variables win, key by key for a group of variables like `custom_grp.keyA`).">
+        <KeyValues nested value={group.vars} onChange={(v) => update((d) => setAt(d, varsPath, v))} known={knownVars(schemas, ["all", "children", "_", "vars"], ["tsq_stage_type", "tsq_commands"])}
           exclude={["tsq_stage_type", "tsq_commands", "tsq_description", "tsq_tags"]} />
       </Section>
     </div>
@@ -608,8 +608,8 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         inherited={inherited} required={role ? required : undefined} />
       <StatusEditor value={vars.tsq_status} onChange={(v) => set("tsq_status", v)} inherited={base?.status ? { spec: base.status.spec ?? base.status, from: base.status.from ?? baseName } : undefined} />
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
-      <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands.">
-        <KeyValues value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
+      <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands. A name like `custom_grp.keyA` is a key of a group of variables, written nested in the YAML and read as `{{ component.vars.custom_grp.keyA }}`.">
+        <KeyValues nested value={vars} onChange={(v) => update((d) => setAt(d, path, v))} known={knownVars(schemas, ["all", "hosts", "_"])}
           exclude={["tsq_label", "tsq_description", "tsq_icon", "tsq_links", "tsq_tags", "ansible_host", "tsq_role", "tsq_extends", "tsq_lock", "tsq_transport", "tsq_remote_root", "tsq_shell", "tsq_ssh_host_key", "tsq_commands", "tsq_status", "tsq_selftest"]} />
       </Section>
     </div>

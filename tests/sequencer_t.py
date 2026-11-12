@@ -246,6 +246,33 @@ def test_inventory_stage_settings(tmp_path):
     assert inv.components["shared"].settings["ansible_user"] == "lab" and "ansible_port" not in inv.components["shared"].settings
 
 
+def test_inventory_nested_vars(tmp_path):
+    """A variable can hold nested keys, written nested or as a dotted name; the lab, its groups, a stage and the
+    host merge them key by key (the host winning), and templates read them as component.vars.<group>.<key>."""
+    from testsuit.sequencer.util import SequencerError, render
+    path = tmp_path / "inv.yml"
+    path.write_text(yaml.safe_dump({"all": {
+        "vars": {"custom_grp.keyD": "lab", "tsq_hosts": {"bench.pi": "10.0.0.7"}},
+        "children": {
+            "plain": {"vars": {"custom_grp": {"keyC": "group"}}, "hosts": {"MY_COMP": {}}},
+            "st1": {"vars": {"tsq_stage_type": "t", "custom_grp": {"keyA": "stage", "keyB": "stage"}},
+                    "hosts": {"MY_COMP": {"custom_grp.keyA": "some value", "deep.a.b": 1}, "shared": {}}},
+            "st2": {"vars": {"tsq_stage_type": "t", "custom_grp": {"keyA": "stage", "keyB": "other"}},
+                    "hosts": {"shared": {}}}}}}))
+    inv = load_inventory(path)
+    comp = inv.components["MY_COMP"]
+    seen = comp.vars_in(inv.stages["st1"])
+    assert seen["custom_grp"] == {"keyA": "some value", "keyB": "stage", "keyC": "group", "keyD": "lab"}
+    assert seen["deep"] == {"a": {"b": 1}} and comp.settings["custom_grp"] == seen["custom_grp"]
+    assert render("{{ component.vars.custom_grp.keyA }}", {"component": {"vars": seen}}) == "some value"
+    assert inv.hosts == {"bench.pi": "10.0.0.7"}                    # tsq_ variables keep their dotted names
+    assert inv.components["shared"].settings["custom_grp"] == {"keyA": "stage", "keyD": "lab"}  # what st1, st2 agree on
+    for bad in ({"tsq_lock.x": 1}, {"a": 1, "a.b": 2}, {"a..b": 1}):
+        path.write_text(yaml.safe_dump({"all": {"hosts": {"h": bad}}}))
+        with pytest.raises(SequencerError):
+            load_inventory(path)
+
+
 def test_inventory_host_names(tmp_path):
     """all.vars.tsq_hosts names addresses: a component's ansible_host (or its id) can be one of the names, which the
     sequencer translates wherever it uses the address; the name stays available."""

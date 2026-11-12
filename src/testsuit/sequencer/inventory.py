@@ -22,6 +22,8 @@
   several roles or none (section 7); the lab resolves it;
 - ``all.vars.tsq_hosts`` is the lab's host names: a table ``name: address`` a host's ``ansible_host`` can use. The
   sequencer translates the name itself wherever it uses the address (nothing is written to ``/etc/hosts``).
+- a variable can hold nested keys (``custom_grp: {keyA: v}``), also written as a dotted name (``custom_grp.keyA: v``);
+  groups, stages and the host merge them key by key, and templates read them as ``component.vars.custom_grp.keyA``.
 """
 from __future__ import annotations
 
@@ -50,7 +52,7 @@ class Component:
     def settings(self) -> dict[str, Any]:
         """Its variables whatever the stage, as its transport and the Lab view use them (``ansible_host``,
         ``ansible_user``...): all < its stage groups (the values they agree on) < host."""
-        return {**self.vars, **{k: v for k, v in self._stage_vars.items() if k not in self._host_vars}}
+        return deep_merge(deep_merge(self.vars, self._stage_vars), self._host_tree)
 
     @property
     def host(self) -> str:
@@ -114,12 +116,13 @@ class Component:
         return [self.id, *_tags(self.vars.get("tsq_tags"))]
 
     def vars_in(self, stage: "Stage | None") -> dict[str, Any]:
-        """Variables of the component as seen in a stage: all < stage group < host."""
+        """Variables of the component as seen in a stage: all < stage group < host, nested keys merged key by key."""
         if stage is None:
             return dict(self.vars)
-        return {**self.vars, **{k: v for k, v in _own(stage.vars).items() if k not in self._host_vars}}
+        return deep_merge(deep_merge(self.vars, _own(stage.vars)), self._host_tree)
 
-    _host_vars: set = field(default_factory=set, repr=False)
+    _host_vars: set = field(default_factory=set, repr=False)      # the names of the variables the host itself gives
+    _host_tree: dict = field(default_factory=dict, repr=False)    # the variables the host itself gives
     _stage_vars: dict = field(default_factory=dict, repr=False)   # the variables of its stage groups that agree
     _role: str = field(default="", repr=False)
     _hosts: dict = field(default_factory=dict, repr=False)        # the lab's tsq_hosts: name -> address
@@ -216,6 +219,47 @@ def _mapping(value: Any, where: str) -> dict:
     return value
 
 
+def nested_vars(variables: dict, where: str) -> dict:
+    """Variables with their dotted names read as nested keys: ``custom_grp.keyA: v`` is ``custom_grp: {keyA: v}``,
+    in the variable's own sub-keys too. The ``tsq_`` variables keep their content as given (a ``tsq_hosts`` or
+    ``tsq_links`` name may hold dots) and cannot be dotted themselves."""
+    result: dict = {}
+    for key, value in variables.items():
+        parts = str(key).split(".")
+        if any(not p for p in parts):
+            raise SequencerError(f"inventory: {where}: '{key}' is not a variable name (an empty part between dots)")
+        if parts[0].startswith("tsq_"):
+            if len(parts) > 1:
+                raise SequencerError(f"inventory: {where}: '{key}': a tsq_ variable is given whole, not by a dotted name")
+        elif isinstance(value, dict):
+            value = nested_vars(value, f"{where}: {parts[0]}")
+        node = result
+        for i, part in enumerate(parts[:-1]):
+            node = node.setdefault(part, {})
+            if not isinstance(node, dict):
+                raise SequencerError(f"inventory: {where}: '{key}': '{'.'.join(parts[:i + 1])}' is a value, "
+                                     "it cannot hold keys")
+        last = parts[-1]
+        if last in node and (isinstance(node[last], dict) != isinstance(value, dict)):
+            raise SequencerError(f"inventory: {where}: '{key}' is given both as a value and as keys")
+        node[last] = deep_merge(node[last], value) if isinstance(value, dict) and last in node else value
+    return result
+
+
+def _common(trees: list[dict]) -> dict:
+    """The variables all the trees give the same value, nested keys compared one by one."""
+    first, *others = trees
+    result: dict = {}
+    for key, value in first.items():
+        if isinstance(value, dict) and value and all(isinstance(o.get(key), dict) for o in others):
+            common = _common([value, *[o[key] for o in others]])
+            if common:
+                result[key] = common
+        elif all(o.get(key, object()) == value for o in others):
+            result[key] = value
+    return result
+
+
 def _own(variables: dict) -> dict:
     """Variables as inherited by a sub-group or a host: without the ``tsq_description`` of the level above,
     each level (the lab, a stage, a component) having its own."""
@@ -257,7 +301,8 @@ def load_inventory(path: Path) -> Inventory:
         unknown = set(group) - {"vars", "hosts", "children"}
         if unknown:
             raise SequencerError(f"inventory '{path}': unknown keys {sorted(unknown)} in group '{name}'")
-        group_vars = deep_merge(_own(inherited), _mapping(group.get("vars"), f"vars of group '{name}'")) if depth else {}
+        own_vars = nested_vars(_mapping(group.get("vars"), f"vars of group '{name}'"), f"vars of group '{name}'")
+        group_vars = deep_merge(_own(inherited), own_vars) if depth else {}
         hosts = _mapping(group.get("hosts"), f"hosts of group '{name}'")
         is_stage = depth > 0 and "tsq_stage_type" in _mapping(group.get("vars"), name)
         if depth and "tsq_hosts" in _mapping(group.get("vars"), name):
@@ -269,7 +314,7 @@ def load_inventory(path: Path) -> Inventory:
             stage_defs[name] = {"vars": group_vars, "hosts": [], "description": str(own or "")}
         for host, hvars in hosts.items():
             host = str(host)
-            host_vars[host] = deep_merge(host_vars.get(host, {}), _mapping(hvars, f"host '{host}'"))
+            host_vars[host] = deep_merge(host_vars.get(host, {}), nested_vars(_mapping(hvars, f"host '{host}'"), f"host '{host}'"))
             host_groups.setdefault(host, [])
             if depth:
                 host_groups[host].append((name, group_vars))
@@ -278,7 +323,7 @@ def load_inventory(path: Path) -> Inventory:
         for child, sub in _mapping(group.get("children"), f"children of group '{name}'").items():
             visit(str(child), sub, group_vars, depth + 1)
 
-    root_vars = _mapping(root.get("vars"), "all.vars")
+    root_vars = nested_vars(_mapping(root.get("vars"), "all.vars"), "all.vars")
     try:
         names = host_names(root_vars.get("tsq_hosts"))
     except SequencerError as e:
@@ -298,10 +343,10 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
+        component._host_tree = hvars
         component._hosts = names
         if stages:                     # a shared component: only the values all its stage groups give
-            first, *others = [_own(stage_defs[s]["vars"]) for s in stages]
-            component._stage_vars = {k: v for k, v in first.items() if all(o.get(k, object()) == v for o in others)}
+            component._stage_vars = _common([_own(stage_defs[s]["vars"]) for s in stages])
         if "tsq_type" in merged:
             raise SequencerError(f"inventory '{path}': component '{host}': 'tsq_type' is gone: give 'tsq_role' (a lab "
                                  f"role: its commands) and 'tsq_extends' (the component implementing them, "
