@@ -1043,6 +1043,41 @@ def test_manual_command_keys_set_by_hand(tmp_path, no_git):
     assert out["events"][1]["keys"][1]["was"] == host
 
 
+def test_manual_commands_do_not_wait_for_a_component_that_does_not_answer(tmp_path, no_git):
+    """The Commands dialog lists the commands within a few seconds even when the component's remote root cannot
+    be resolved (an ssh login that hangs): the root as configured is used, with a note, and the next call reuses
+    the same lookup; an expression that fails (1 + 'a') is shown as an error of its segment, not a failure."""
+    import time as clock
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["commands"]["add"] = {"run": "echo {{ 1 + params.speed }}"}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        seq.MANUAL_ROOT_WAIT = 0.2
+        transport = seq.transport_for("counter_1")
+        lookups = []
+
+        async def hangs():
+            lookups.append(1)
+            await asyncio.sleep(60)
+        transport.resolve_root = hangs
+        started = clock.monotonic()
+        out = {"first": await seq.manual_commands("counter_1", {"params.speed": "a"}),
+               "second": await seq.manual_commands("counter_1")}
+        out["took"] = clock.monotonic() - started
+        out["lookups"] = len(lookups)
+        await seq.close()
+        return out
+    out = asyncio.run(main())
+    assert out["took"] < 2 and out["lookups"] == 1
+    assert "does not answer yet" in out["first"]["root_note"]
+    add = next(c for c in out["first"]["commands"] if c["name"] == "add")
+    assert "error" in add["segments"][1]
+
+
 def test_manual_command(tmp_path, no_git):
     """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
     from testsuit.sequencer.util import SequencerError

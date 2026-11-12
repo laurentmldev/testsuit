@@ -762,6 +762,7 @@ A component in maintenance (or in a stage in maintenance) can have its commands 
 - **`signal` commands and the built-in `kill`** stop the processes started by hand there.
 - **`http` commands** send their request with the keys of the lab, from the sequencer host or through their `via`; the Lab page shows the status and the answer.
 - **Other commands** (`deploy`, `collect`, `wait_for`, `python`) need a run, and are not offered.
+- **A component that does not answer.** The commands are shown with its remote root, which can need an ssh login (a root under `~`). The dialog waits for it 3 seconds at most: past that, or when the login fails, the commands are shown with the root as configured, and a note says so (`root_note` in the answer). If the sequencer itself does not answer within 30 seconds, the dialog says so, with a **Retry** button.
 - **Each command run by hand** is recorded as a `manual_command` event, which is kept for audit, with the keys set by hand it ran with and, for each one that overrides a key of the lab, the value it replaced.
 
 ## 8. Datapack side: resources needed and pipeline
