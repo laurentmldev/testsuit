@@ -45,13 +45,13 @@ def component_keys(comp: Component, root: str, via: Component | None = None, lab
     """The keys of a status probe and self-test commands; via: the component they run on (``{{ via.host }}``);
     lab: the lab, for the other components (``{{ stage.roles.<role>.host }}``, ``{{ lab.components.<host> }}``)."""
     stage = lab.inventory.stages[comp.stages[0]] if lab is not None and comp.stages else None
-    keys = {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "role": comp.role, "extends": comp.extends,
+    keys = {"component": {"id": comp.id, "concrete": comp.id, "host": comp.host, "host_alias": comp.host_alias, "role": comp.role, "extends": comp.extends,
                           "label": comp.label, "vars": comp.vars_in(stage), "remote_root": root,
                           "stage": stage.id if stage else "",
                           "input_dir": f"{root}/{comp.id}/input", "output_dir": f"{root}/{comp.id}/output"},
             "remote_root": root}
     if via is not None:
-        keys["via"] = {"id": via.id, "host": via.host, "role": via.role, "label": via.label, "vars": via.vars}
+        keys["via"] = {"id": via.id, "host": via.host, "host_alias": via.host_alias, "role": via.role, "label": via.label, "vars": via.vars}
     if lab is not None:
         keys.update(lab.lab_keys(comp, stage))
     return keys

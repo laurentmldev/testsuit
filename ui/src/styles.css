@@ -645,3 +645,8 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .lab-legend-kind:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
 .lab-legend-kind.hidden { opacity: 0.4; text-decoration: line-through; }
 .lab-legend-title { font-weight: 600; }
+
+/* the lab's host names (tsq_hosts): the table of the inventory form, and a name standing for an address */
+.host-names input { width: 100%; }
+.host-names td { vertical-align: middle; }
+.host-alias { border-bottom: 1px dotted var(--muted); cursor: help; }

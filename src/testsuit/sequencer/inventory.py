@@ -19,7 +19,9 @@
 - variables follow Ansible precedence: host over group (child over parent) over ``all``;
 - a host is a lab component: ``tsq_extends`` is the library component (or the other host) it inherits its
   implementation from, ``tsq_role`` its role (the commands datapacks can use) when that component supports
-  several roles or none (section 7); the lab resolves it.
+  several roles or none (section 7); the lab resolves it;
+- ``all.vars.tsq_hosts`` is the lab's host names: a table ``name: address`` a host's ``ansible_host`` can use. The
+  sequencer translates the name itself wherever it uses the address (nothing is written to ``/etc/hosts``).
 """
 from __future__ import annotations
 
@@ -52,7 +54,18 @@ class Component:
 
     @property
     def host(self) -> str:
-        """Its address: ``ansible_host``, on the host, its stage group or above; else its name."""
+        """Its address: ``ansible_host``, on the host, its stage group or above; else its name. A name of the lab's
+        ``tsq_hosts`` table is translated to the address it stands for."""
+        return self._hosts.get(self._address, self._address)
+
+    @property
+    def host_alias(self) -> str:
+        """The name of the lab's ``tsq_hosts`` table its address is given by ('' when it gives the address
+        itself)."""
+        return self._address if self._address in self._hosts else ""
+
+    @property
+    def _address(self) -> str:
         return str(self.settings.get("ansible_host", self.id))
 
     @property
@@ -109,6 +122,7 @@ class Component:
     _host_vars: set = field(default_factory=set, repr=False)
     _stage_vars: dict = field(default_factory=dict, repr=False)   # the variables of its stage groups that agree
     _role: str = field(default="", repr=False)
+    _hosts: dict = field(default_factory=dict, repr=False)        # the lab's tsq_hosts: name -> address
 
 
 @dataclass
@@ -172,6 +186,11 @@ class Inventory:
         return str(self.vars.get("tsq_description") or "")
 
     @property
+    def hosts(self) -> dict[str, str]:
+        """``all.vars.tsq_hosts``: the lab's host names, each with the address it stands for."""
+        return host_names(self.vars.get("tsq_hosts"))
+
+    @property
     def library_folders(self) -> list[Path]:
         if "tsq_types" in self.vars:
             raise SequencerError(f"inventory '{self.file}': 'tsq_types' is gone: 'tsq_library' gives the folders of "
@@ -203,6 +222,25 @@ def _own(variables: dict) -> dict:
     return {k: v for k, v in variables.items() if k != "tsq_description"}
 
 
+def host_names(value: Any) -> dict[str, str]:
+    """``tsq_hosts`` as ``{name: address}``: a mapping of names to the address (IP or DNS name) each stands for."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise SequencerError("tsq_hosts must be a mapping name: address")
+    table: dict[str, str] = {}
+    for name, address in value.items():
+        if not isinstance(name, str) or not name.strip() or any(c.isspace() for c in name):
+            raise SequencerError(f"tsq_hosts: {name!r} is not a name (a text without spaces)")
+        if not isinstance(address, str) or not address.strip() or any(c.isspace() for c in address.strip()):
+            raise SequencerError(f"tsq_hosts: '{name}' must have an address (an IP address or a DNS name)")
+        table[name] = address.strip()
+    for name, address in table.items():
+        if address in table and address != name:
+            raise SequencerError(f"tsq_hosts: '{name}' gives '{address}', another name of the table: give its address")
+    return table
+
+
 def load_inventory(path: Path) -> Inventory:
     """Read an Ansible YAML inventory file."""
     data = load_yaml(path)
@@ -222,6 +260,8 @@ def load_inventory(path: Path) -> Inventory:
         group_vars = deep_merge(_own(inherited), _mapping(group.get("vars"), f"vars of group '{name}'")) if depth else {}
         hosts = _mapping(group.get("hosts"), f"hosts of group '{name}'")
         is_stage = depth > 0 and "tsq_stage_type" in _mapping(group.get("vars"), name)
+        if depth and "tsq_hosts" in _mapping(group.get("vars"), name):
+            raise SequencerError(f"inventory '{path}': group '{name}': tsq_hosts is the lab's table: it goes in all.vars")
         if is_stage:
             if name in stage_defs:
                 raise SequencerError(f"inventory '{path}': stage '{name}' defined twice")
@@ -239,11 +279,18 @@ def load_inventory(path: Path) -> Inventory:
             visit(str(child), sub, group_vars, depth + 1)
 
     root_vars = _mapping(root.get("vars"), "all.vars")
+    try:
+        names = host_names(root_vars.get("tsq_hosts"))
+    except SequencerError as e:
+        raise SequencerError(f"inventory '{path}': {e}") from None
     visit("all", root, {}, 0)
 
     components: dict[str, Component] = {}
     for host, hvars in host_vars.items():
-        merged = _own(root_vars)
+        if "tsq_hosts" in hvars:
+            raise SequencerError(f"inventory '{path}': component '{host}': tsq_hosts is the lab's table: it goes in "
+                                 "all.vars")
+        merged = {k: v for k, v in _own(root_vars).items() if k != "tsq_hosts"}
         for group, gvars in host_groups[host]:
             if group not in stage_defs:                       # plain groups: their variables apply
                 merged = deep_merge(merged, _own(gvars))
@@ -251,6 +298,7 @@ def load_inventory(path: Path) -> Inventory:
         stages = sorted({g for g, _ in host_groups[host] if g in stage_defs})
         component = Component(id=host, vars=merged, stages=stages)
         component._host_vars = set(hvars)
+        component._hosts = names
         if stages:                     # a shared component: only the values all its stage groups give
             first, *others = [_own(stage_defs[s]["vars"]) for s in stages]
             component._stage_vars = {k: v for k, v in first.items() if all(o.get(k, object()) == v for o in others)}

@@ -246,6 +246,42 @@ def test_inventory_stage_settings(tmp_path):
     assert inv.components["shared"].settings["ansible_user"] == "lab" and "ansible_port" not in inv.components["shared"].settings
 
 
+def test_inventory_host_names(tmp_path):
+    """all.vars.tsq_hosts names addresses: a component's ansible_host (or its id) can be one of the names, which the
+    sequencer translates wherever it uses the address; the name stays available."""
+    from testsuit.sequencer.transports import create_transport
+    from testsuit.sequencer.util import SequencerError
+    path = tmp_path / "inv.yml"
+
+    def inventory(names, hosts=None, **group_vars):
+        path.write_text(yaml.safe_dump({"all": {
+            "vars": {"tsq_hosts": names},
+            "hosts": hosts or {"direct": {"ansible_host": "10.0.0.9"}, "psu-a": {}, "unnamed": {}},
+            "children": {"st": {"vars": {"tsq_stage_type": "t", "ansible_host": "bench-pi", **group_vars},
+                                "hosts": {"a": {}, "b": {"ansible_host": "psu-a"}}}}}}))
+        return load_inventory(path)
+
+    inv = inventory({"bench-pi": "10.0.1.20", "psu-a": "psu.lab.example"})
+    assert inv.hosts == {"bench-pi": "10.0.1.20", "psu-a": "psu.lab.example"}
+    seen = {c.id: (c.host, c.host_alias) for c in inv.components.values()}
+    assert seen == {"a": ("10.0.1.20", "bench-pi"), "b": ("psu.lab.example", "psu-a"), "direct": ("10.0.0.9", ""),
+                    "psu-a": ("psu.lab.example", "psu-a"), "unnamed": ("unnamed", "")}
+    assert create_transport("ssh", inv.components["a"]).host == "10.0.1.20"
+    a = inv.components["a"]
+    assert a.settings["ansible_host"] == "bench-pi" and "tsq_hosts" not in a.vars      # the table is the lab's
+    assert inventory(None).components["a"].host == "bench-pi"                          # no table: as before
+
+    for names, why in (({"bench-pi": "psu-a", "psu-a": "10.0.0.1"}, "another name of the table"),
+                       ({"bench-pi": ""}, "must have an address"), ({"bench pi": "10.0.0.1"}, "is not a name"),
+                       (["bench-pi"], "must be a mapping"), ({"bench-pi": 12}, "must have an address")):
+        with pytest.raises(SequencerError, match=why):
+            inventory(names)
+    with pytest.raises(SequencerError, match="goes in all.vars"):
+        inventory({}, tsq_hosts={"x": "10.0.0.1"})
+    with pytest.raises(SequencerError, match="goes in all.vars"):
+        inventory({}, hosts={"h": {"tsq_hosts": {"x": "10.0.0.1"}}})
+
+
 def test_role_inputs(tmp_path):
     """A role lists the inputs it expects; a role extending it adds to them or redefines one by name."""
     from testsuit.sequencer.library import Library

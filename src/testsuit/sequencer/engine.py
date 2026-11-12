@@ -134,7 +134,7 @@ class BoundSlot:
 
     def component_keys(self, state: str = "unknown") -> dict:
         """The ``component`` key: the lab component the slot is bound to (its id is the lab id)."""
-        return {"id": self.concrete.id, "host": self.concrete.host, "label": self.concrete.label,
+        return {"id": self.concrete.id, "host": self.concrete.host, "host_alias": self.concrete.host_alias, "label": self.concrete.label,
                 "role": self.concrete.role, "extends": self.concrete.extends, "slot": self.logical.id,
                 "stage": self.stage.id if self.stage else "", "vars": self.concrete.vars_in(self.stage),
                 "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root, "state": state}
@@ -344,7 +344,7 @@ class StepRunner:
             if spec.get("via"):                        # on another component: one in a sub-network behind it
                 on = self.via_place(str(spec["via"]))
                 via = on[0]
-                keys = {**keys, "via": {"id": via.id, "host": via.host, "role": via.role, "label": via.label,
+                keys = {**keys, "via": {"id": via.id, "host": via.host, "host_alias": via.host_alias, "role": via.role, "label": via.label,
                                         "vars": via.vars}}
             command = render(spec["run"], keys, self.fs.id)
             env = {**render(spec.get("env") or {}, keys, self.fs.id), **render(step.env, keys, self.fs.id)}
