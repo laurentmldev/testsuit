@@ -293,8 +293,8 @@ export function ViaTag({ via, host, label, children, title }: {
 
 /** Where a probe or command goes when it runs through another component: from the sequencer to the component it
  *  runs on, which reaches the target. */
-export function ViaRoute({ via, viaHost, target, targetHost, what }: {
-  via: string; viaHost?: string | null; target: string; targetHost?: string | null; what: string;
+export function ViaRoute({ via, viaHost, target, targetHost }: {
+  via: string; viaHost?: string | null; target: string; targetHost?: string | null;
 }) {
   return (
     <div className="via-route">
@@ -305,7 +305,6 @@ export function ViaRoute({ via, viaHost, target, targetHost, what }: {
         <span className="via-link" aria-hidden="true">→</span>
         <span className="via-node"><strong>{target}</strong>{targetHost && <span className="via-host"> {targetHost}</span>}</span>
       </div>
-      <div className="small">{what} runs on <strong>{via}</strong>, which reaches {target}: not on {target} itself.</div>
     </div>
   );
 }

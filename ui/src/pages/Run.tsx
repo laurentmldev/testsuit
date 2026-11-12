@@ -333,8 +333,7 @@ function StepFacts({ record, records, onPick }: { record: any; records: any[]; o
           {record.started && <> · {duration(record.started, record.ended || null)}</>}
           {record.via && (
             <div className="step-via-note">
-              <ViaTag via={record.via} title={`its command ran on ${record.via}, not on the component of its slot`}>run on</ViaTag>{" "}
-              <span className="muted">its command runs on {record.via}, which reaches the component of {slotOf(record) ? <>slot <code>{slotOf(record)}</code></> : "the step"}: not on that component itself</span>
+              <ViaTag via={record.via} title={`its command ran on ${record.via}, not on the component of its slot`}>run on</ViaTag>
             </div>
           )}
         </div>

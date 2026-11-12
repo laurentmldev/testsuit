@@ -119,9 +119,6 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
             {keysError && <div className="error-box">{keysError}</div>}
           </details>
-          {info.commands.some((c: any) => c.spec.via) && (
-            <p className="small">Commands marked <span className="via-tag">↪ via <strong>…</strong></span> do not run on {labelOf(id)}: they run on the component named, which reaches it (a jump host, a stage server…).</p>
-          )}
           <table className="grid compact">
             <tbody>
               {info.commands.map((c: any) => (
@@ -288,7 +285,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
                   {!live && <>, {time(p.at)}, {p.duration} s</>}
                 </p>
               )}
-              {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} what="Its status probe" />}
+              {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} />}
               {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} running={live && i === p.steps.length - 1} />)}
               {live && !(p.steps || []).length && <p className="muted small"><span className="pulse run" /> starting…</p>}
               {!live && p.rules && Object.keys(p.rules).length > 0 && (
