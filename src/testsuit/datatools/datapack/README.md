@@ -18,6 +18,7 @@ datapack testdef/max_speed/testdef.yml
 | `-o, --output-dir DIR` | Where to write the zip (default: the key `datapack.output_dir`). |
 | `-c, --setup-config NAME` | Use another configuration of the setup than the test definition's `setup_config`, for example to build the same test for another platform (`--setup-config emulated`). |
 | `--lenient` | Skip, with a warning, the inputs whose source is missing or empty (implies `--nocheck`). The skipped inputs are listed in `datapack.yml`. |
+| `--set KEY=VALUE` | Set a key by hand for this build, over the dictionaries (repeatable; `a.b=value` for a nested key). Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes it non-conform (section [Keys set by hand](#keys-set-by-hand)). |
 | `--baseline EXPECTED` | Compare the new datapack with an expected baseline and report each difference (section [Baseline](#baseline)). |
 
 The contents are also left unzipped in `.current_datapack/` next to the test definition, to look at them.
@@ -115,13 +116,27 @@ Every string of these files, and every template, can use keys with Jinja2: `{{ t
 1. the setup's `dictionaries`;
 2. the imported datasets: `<dataset id>.path` and `<dataset id>.version`, plus the keys of a `dataset.yml` in the dataset folder when the importer or a processor writes one;
 3. the test definition's `dictionaries`;
-4. the built-in keys, which always win:
+4. the keys set by hand (`--set`), if any;
+5. the built-in keys, which always win:
    - `testdef.{id, name, file, path, setup_file, setup_config}`;
    - `setup.{id, name, file, path, configuration}`;
    - `datapack.{name, user, host, timestamp, nocheck}`;
    - while the files of a slot are rendered, `slot.{id, name, type, configuration, input_dir}` and, for the slots it `needs`, `slots.<id>.input_dir`.
 
 A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), resolved on first use, so a dictionary may reference one loaded after it. A value made of a single expression keeps its type, so lists and numbers can be shared too. An undefined key is an error, and so is a circular reference. A dotted name (`bench.version: v1.2`) is read as nested keys.
+
+### Keys set by hand
+
+`datapack testdef.yml --set train.speed_limit_mps=12 --set operator.name="J. Doe"` gives values for one build, without touching a dictionary (`manual_keys={...}` from Python, **Keys set by hand** in the Editor's Generate dialog). A value is read as YAML: `12` is a number, `true` a boolean, `[a, b]` a list; quote it to keep it as text. It can reference other keys, like a dictionary value.
+
+What a key set by hand does depends on whether a dictionary or a dataset already defines it:
+
+| The key is | The datapack | Why |
+|---|---|---|
+| not defined | stays **conform** | It fills a value the definition leaves open (an operator name, a serial number). Nothing that was written and tagged is replaced. |
+| defined | is **non-conform** | The value under configuration control was replaced: the datapack is no longer what its tagged sources describe. |
+
+Both are recorded in `datapack.yml` and in `baseline.yml`, under `keys_set_by_hand`: the key, its value, whether it overrides, and for an override the value it replaced and the dictionary it came from. A built-in key cannot be set by hand.
 
 ### Inputs
 
@@ -162,7 +177,7 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
 - the tools that processed them, with their versions;
 - each generated file, with its checksum and what produced it.
 
-A datapack is **conform** when it was built without `--nocheck`, from clean git tags, with every dataset version confirmed.
+A datapack is **conform** when it was built without `--nocheck`, from clean git tags, with every dataset version confirmed, and with no defined key overridden by hand. `baseline.yml` also lists the keys set by hand (`keys_set_by_hand`), and `--check-baseline` names each overridden key.
 
 An **expected baseline** has the same structure and holds only what must match. A string is a shell pattern (`v1.4.*`), and a value starting with a comparison compares versions (`>=3.2`). A mismatch never stops anything: the datapack, or a run of it, is flagged non-conform. The sequencer adds a `run` part to the baseline of the results.
 

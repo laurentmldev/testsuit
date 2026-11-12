@@ -470,6 +470,18 @@ table.datasets tr.dataset-resolved dd { margin: 0; min-width: 0; }
 .resources-tab .need table { margin-top: 6px; }
 .resources-tab td .chip { margin: 1px 4px 1px 0; }
 .bad-text { color: var(--bad); }
+.warn-text { color: var(--warn); }
+/* keys set by hand: a datapack generation, a command run in maintenance */
+.keys-by-hand { display: flex; flex-direction: column; gap: 6px; }
+.kbh-row { display: grid; grid-template-columns: minmax(160px, 34%) auto minmax(120px, 1fr) auto; gap: 4px 6px; align-items: center; }
+.kbh-row .kbh-value { min-width: 0; width: 100%; }
+.kbh-status { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.kbh-status:empty { display: none; }
+.kbh-status code { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.kbh-box { margin: 8px 0; }
+.kbh-box > summary { cursor: pointer; margin-bottom: 6px; }
+.kbh-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rendered .key-value.by-hand { background: var(--warn-soft); }
 /* the state of a component, and the dialog telling why */
 button.state-button { cursor: pointer; }
 button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }

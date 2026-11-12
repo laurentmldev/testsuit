@@ -1529,19 +1529,23 @@ class Editor:
     STOP_GRACE_S = 5          # a stopped generation is killed if it has not ended by then
 
     def generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                 nocheck: bool = True, lenient: bool = False) -> dict:
-        """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would."""
-        job_id = self.start_generate(session, testdef_rel, setup_config, nocheck, lenient)["job"]
+                 nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None) -> dict:
+        """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would;
+        manual_keys: keys set by hand (dotted name -> value, ``datapack --set``)."""
+        job_id = self.start_generate(session, testdef_rel, setup_config, nocheck, lenient, manual_keys)["job"]
         self.jobs[job_id]["thread"].join()
         return self.jobs[job_id]["result"]
 
     def start_generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                       nocheck: bool = True, lenient: bool = False) -> dict:
+                       nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None) -> dict:
         """The same as generate, in the background: its log can be read while it runs (generation_job).
 
         The datapack tool runs in a process of its own: a stopped generation ends for sure (the process and
         the commands it started are killed), whatever it was doing.
         """
+        for name in manual_keys or {}:
+            if not str(name).strip() or any(not part.strip() for part in str(name).split(".")) or "=" in str(name):
+                raise SequencerError(f"'{name}' is not a key name (name, or name.sub for a nested key)")
         job_id = uuid.uuid4().hex[:8]
         log = _LiveLog()
         job: dict[str, Any] = {"session": session.id, "log": log, "result": None, "done": False,
@@ -1554,7 +1558,7 @@ class Editor:
         def work() -> None:
             logger.info(f"editor: datapack generation of {testdef_rel} ({session.repo}) started")
             try:
-                job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job)
+                job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job, manual_keys)
             except BaseException as e:                   # never a silent end
                 job["result"] = {"ok": False, "error": _describe(e), "log": self._clean(session, log.text())}
             finally:
@@ -1612,7 +1616,7 @@ class Editor:
     _generation_lock = threading.Lock()     # one generation at a time: they may share a working folder
 
     def _generate(self, session: EditSession, testdef_rel: str, setup_config: str | None, nocheck: bool,
-                  lenient: bool, job: dict) -> dict:
+                  lenient: bool, job: dict, manual_keys: dict | None = None) -> dict:
         from testsuit.datatools.datapack.datapack_tools import read_baseline
         log: _LiveLog = job["log"]
         out_dir = Path(session.dir) / "generated"
@@ -1622,6 +1626,8 @@ class Editor:
         command += ["--nocheck"] if nocheck else []
         command += ["--lenient"] if lenient else []
         command += ["--setup-config", setup_config] if setup_config else []
+        for name, value in (manual_keys or {}).items():     # a text value is read as YAML by the tool, as typed
+            command += ["--set", f"{str(name).strip()}={value if isinstance(value, str) else json.dumps(value)}"]
         popen_args: dict[str, Any] = {"start_new_session": True} if hasattr(os, "killpg") else {}
 
         waited = False

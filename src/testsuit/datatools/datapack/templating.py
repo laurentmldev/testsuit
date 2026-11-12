@@ -56,7 +56,8 @@ from typing import Any
 import jinja2
 import yaml
 
-__all__ = ["Keys", "TemplateError", "expand_dotted_keys", "has_template", "load_yaml_mapping", "run_time_keys"]
+__all__ = ["Keys", "TemplateError", "expand_dotted_keys", "has_template", "load_yaml_mapping", "parse_key_value",
+           "run_time_keys", "keys_set_by_hand", "undefined_keys"]
 
 
 class TemplateError(Exception):
@@ -151,6 +152,101 @@ def expand_dotted_keys(mapping: Mapping) -> dict:
                 raise TemplateError(f"key '{key}': '{part}' is already a value, it cannot hold sub-keys")
         _merge_into(node, {parts[-1]: value})
     return result
+
+
+def parse_key_value(text: str) -> tuple[str, Any]:
+    """'name.sub=value' (a key set by hand, on a command line) -> ('name.sub', value). The value is read
+    as YAML: ``3`` is a number, ``true`` a boolean, ``[a, b]`` a list; quote it to keep it as text."""
+    name, sep, value = str(text).partition("=")
+    name = name.strip()
+    if not sep or not name or any(not part for part in name.split(".")):
+        raise TemplateError(f"'{text}': a key set by hand is written name=value (name.sub=value for a nested key)")
+    return name, parse_value(value)
+
+
+def parse_value(value: Any) -> Any:
+    """A value set by hand, as typed: read as YAML when it is text (an empty text stays empty text)."""
+    if not isinstance(value, str) or not value.strip():
+        return value
+    try:
+        return yaml.safe_load(value)
+    except yaml.YAMLError:
+        return value
+
+
+def keys_set_by_hand(defined: Mapping, values: Mapping[str, Any], origins: Mapping[str, str] | None = None) -> list[dict]:
+    """What each key set by hand does to the keys already defined: it **sets** a key no dictionary defines,
+    or it **overrides** one that is defined (the value it replaces, and where that one comes from).
+
+    :param defined: the keys before those set by hand (nested mappings)
+    :param values: dotted name -> value set by hand
+    :param origins: dotted name -> where the defined key comes from (Keys.origins)
+    :return: one entry per key set by hand: ``{key, value, overrides}``, and ``was``, ``origin`` for an override
+    """
+    entries = []
+    for name, value in values.items():
+        node: Any = defined
+        entry: dict[str, Any] = {"key": name, "value": value, "overrides": False}
+        parts = str(name).split(".")
+        for i, part in enumerate(parts):
+            if not isinstance(node, Mapping):               # a value where sub-keys are set: it is replaced
+                at = ".".join(parts[:i])
+                entry.update(overrides=True, was=_plain(node), origin=(origins or {}).get(at, ""))
+                break
+            if part not in node:
+                break
+            node = node[part]
+            if i == len(parts) - 1:
+                origin = (origins or {}).get(name) or next(
+                    (o for k, o in (origins or {}).items() if k.startswith(name + ".")), "")
+                entry.update(overrides=True, was=_plain(node), origin=origin)
+        entries.append(entry)
+    return entries
+
+
+def undefined_keys(template: str, keys: Mapping) -> list[str]:
+    """The keys a template reads that ``keys`` does not define, as dotted names (``params.speed``): the keys
+    to set by hand for it to render. Only plain names are seen (``a.b``, ``a['b']``), not computed ones."""
+    from jinja2 import nodes
+    try:
+        tree = _environment().parse(template if has_template(template) else "{{ " + template + " }}")
+    except jinja2.TemplateSyntaxError:
+        return []
+    local = {n.name for n in tree.find_all(nodes.Name) if n.ctx in ("store", "param")} | {"loop", "range", "namespace"}
+
+    def chain(node) -> list[str] | None:
+        if isinstance(node, nodes.Name):
+            return [node.name] if node.ctx == "load" else None
+        if isinstance(node, nodes.Getattr):
+            base = chain(node.node)
+            return base + [node.attr] if base is not None else None
+        if isinstance(node, nodes.Getitem) and isinstance(node.arg, nodes.Const) and isinstance(node.arg.value, str):
+            base = chain(node.node)
+            return base + [node.arg.value] if base is not None else None
+        return None
+
+    found: list[str] = []
+
+    def walk(node) -> None:
+        path = chain(node) if isinstance(node, (nodes.Name, nodes.Getattr, nodes.Getitem)) else None
+        if path is not None:
+            if path[0] not in local:
+                value: Any = keys
+                for part in path:
+                    if isinstance(value, Mapping) and part in value:
+                        value = value[part]
+                    elif isinstance(value, Mapping):
+                        name = ".".join(path)
+                        if name not in found:
+                            found.append(name)
+                        break
+                    else:                                       # an attribute of a value (a method...): defined
+                        break
+            return
+        for child in node.iter_child_nodes():
+            walk(child)
+    walk(tree)
+    return found
 
 
 def _merge_into(target: dict, source: Mapping) -> None:

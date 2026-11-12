@@ -281,14 +281,27 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             raise HTTPException(404, f"no component '{name}'")
         return await seq.manual_commands(name)
 
+    @app.post("/components/{name}/commands")
+    async def component_commands_with_keys(name: str, body: dict | None = None):
+        """The same, as its commands would run with keys set by hand (``keys``: dotted name -> value): what each
+        key does (it sets a key the lab does not define, or overrides one). Nothing is run."""
+        if name not in seq.lab.inventory.components:
+            raise HTTPException(404, f"no component '{name}'")
+        try:
+            return await seq.manual_commands(name, (body or {}).get("keys") or None)
+        except SequencerError as e:
+            raise HTTPException(400, str(e)) from e
+
     @app.post("/components/{name}/commands/{command}")
     async def run_component_command(name: str, command: str, body: dict | None = None):
-        """Run one command of a component in maintenance, by hand (README section 7.6)."""
+        """Run one command of a component in maintenance, by hand (README section 7.7); ``keys``: keys set by
+        hand for this run (dotted name -> value), over the keys of the lab."""
         if name not in seq.lab.inventory.components:
             raise HTTPException(404, f"no component '{name}'")
         timeout = (body or {}).get("timeout")
         try:
-            return await seq.manual_command(name, command, parse_duration(timeout) if timeout else None)
+            return await seq.manual_command(name, command, parse_duration(timeout) if timeout else None,
+                                            (body or {}).get("keys") or None)
         except SequencerError as e:
             raise HTTPException(409, str(e)) from e
 
