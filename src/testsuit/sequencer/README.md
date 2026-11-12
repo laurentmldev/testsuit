@@ -390,7 +390,7 @@ When the sequencer produces the results zip (section 10), it extends the baselin
 - the concrete stages and components the run was bound to;
 - the software version of each component, when its role offers a `version` command (for example `app-install --version` on a controller, the firmware id of an actuator controller), read before the first phase.
 
-**Conformity.** A baseline is **conform** when every source is a clean, tagged git state and every dataset version was confirmed. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
+**Conformity.** A baseline is **conform** when every source is a clean, tagged git state, every dataset version was confirmed, and no defined key was overridden by hand. This is what `--nocheck` relaxes today, and a `--nocheck` datapack is marked `conform: false`. Keys set by hand at generation (`datapack --set key=value`, or **Keys set by hand** in the Editor's Generate dialog) are listed in the baseline under `keys_set_by_hand`: one that sets a key no dictionary defines keeps the datapack conform, one that overrides a defined key makes it `conform: false`, and the run's reasons name each overridden key with the value it replaced. An **expected baseline** is a YAML file with the same structure, holding only what must match: tags, versions, tool versions, component versions, possibly with patterns (`tag: "v1.4.*"`). It is checked:
 - by `datapack --check-baseline expected.yml pack.zip`, and when building with `datapack ... --baseline expected.yml`;
 - by the sequencer at submission (`tsq submit --baseline expected.yml`, or `pipeline.baseline` in the test definition);
 - before the first phase for the `run` part (component versions).
@@ -756,12 +756,13 @@ components:
 
 A component in maintenance (or in a stage in maintenance) can have its commands run by hand, to check or fix it. Use the **Commands…** button on the Lab page, or `GET /components/<id>/commands` and `POST /components/<id>/commands/<command>`. It is refused while a run holds the component.
 
-- **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, `slot`, `slots`), so a command that needs one does not render. A command with `via` runs through that component.
+- **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, `slot`, `slots`), so a command that needs one does not render unless the key is set by hand. A command with `via` runs through that component.
+- **Keys set by hand.** The dialog's **Keys set by hand** gives values for the commands run from it (`{"keys": {"params.speed": 3}}` in the body of the `POST`; `POST /components/<id>/commands` with the same body shows the commands as they would run, without running any). A key can be one the lab does not define (the dialog proposes the undefined keys its commands read), or one it defines, which is then overridden for these commands only: the lab files are not changed. A value is read as YAML (`3` is a number). Each row says which of the two it is, with the value it replaces.
 - **A detached command** (`detach: true`, such as `start`) keeps running. Its pid file goes under `<root>/.tsq/manual/<component>/`.
 - **`signal` commands and the built-in `kill`** stop the processes started by hand there.
 - **`http` commands** send their request with the keys of the lab, from the sequencer host or through their `via`; the Lab page shows the status and the answer.
 - **Other commands** (`deploy`, `collect`, `wait_for`, `python`) need a run, and are not offered.
-- **Each command run by hand** is recorded as a `manual_command` event, which is kept for audit.
+- **Each command run by hand** is recorded as a `manual_command` event, which is kept for audit, with the keys set by hand it ran with and, for each one that overrides a key of the lab, the value it replaced.
 
 ## 8. Datapack side: resources needed and pipeline
 
@@ -1168,7 +1169,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 **Datapack definitions.**
 - Create a test definition and its setup in one of the `server.workspaces` repositories, or start from an existing one.
 - Helpers: the stage types and roles of the lab; the slot types; input files by method (template, copy, generate), with a preview of a rendered template.
-- **Generate** runs the datapack tool on the server, as `datapack <testdef>` would. The UI shows the generated contents and baseline, and can post the datapack to the queue at once.
+- **Generate** runs the datapack tool on the server, as `datapack <testdef>` would. The UI shows the generated contents and baseline, and can post the datapack to the queue at once. **Keys set by hand** gives values for this generation only (`datapack --set`): each row says whether it sets a key no dictionary defines (the datapack stays conform) or overrides a defined one (the datapack is non-conform), with the value it replaces and the dictionary it comes from.
 
 **Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
 - a graph view of phases, sub-pipelines and steps, where `needs` are the edges: add, remove and connect steps, group steps into a new sub-pipeline, or expand a `uses` step to see its steps;

@@ -181,7 +181,7 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.post("/edit/sessions/{sid}/datapack/jobs", status_code=201)
     async def start_generate(sid: str, body: dict):
         return await run(editor.start_generate, session(sid), str(body["testdef"]), body.get("setup_config"),
-                         bool(body.get("nocheck", True)), bool(body.get("lenient", False)))
+                         bool(body.get("nocheck", True)), bool(body.get("lenient", False)), body.get("keys") or None)
 
     @app.get("/edit/sessions/{sid}/datapack/jobs/{job}")
     async def generation_job(sid: str, job: str, since: int = 0):
@@ -194,7 +194,7 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.post("/edit/sessions/{sid}/datapack")
     async def generate(sid: str, body: dict):
         return await run(editor.generate, session(sid), str(body["testdef"]), body.get("setup_config"),
-                         bool(body.get("nocheck", True)))
+                         bool(body.get("nocheck", True)), False, body.get("keys") or None)
 
     @app.get("/edit/sessions/{sid}/datapack/{name}")
     async def download(sid: str, name: str):

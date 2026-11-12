@@ -998,6 +998,51 @@ def test_lab_view_icons_match_the_ui():
     assert re.findall(r"^  (\w+): \{ label:", drawings, re.M) == list(ICONS)
 
 
+def test_manual_command_keys_set_by_hand(tmp_path, no_git):
+    """A command run by hand can be given keys: one the lab does not define, or one it defines (an override)."""
+    from testsuit.sequencer.util import SequencerError
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "components" / "bench.yml").read_text())
+    types["components"]["counter_host"]["commands"]["say"] = {"run": "echo speed={{ params.speed }} host={{ component.host }}"}
+    write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        events = []
+        notify = seq.notify
+        seq.notify = lambda kind, data: (events.append((kind, data)), notify(kind, data))[1]
+        seq.set_flag("counter_1", "maintenance", True)
+        out = {"plain": await seq.manual_commands("counter_1")}
+        out["keyed"] = await seq.manual_commands("counter_1", {"params.speed": "3", "component.host": "elsewhere"})
+        out["unset"] = await seq.manual_command("counter_1", "say", keys={"params.speed": "3"})
+        out["override"] = await seq.manual_command("counter_1", "say", keys={"params.speed": 4, "component.host": "elsewhere"})
+        try:
+            await seq.manual_commands("counter_1", {"a..b": 1})
+        except SequencerError as e:
+            out["bad"] = str(e)
+        out["events"] = [d for k, d in events if k == "manual_command"]
+        await seq.close()
+        return out
+    out = asyncio.run(main())
+    say = next(c for c in out["plain"]["commands"] if c["name"] == "say")
+    assert out["plain"]["missing"] == ["params.speed"] and out["plain"]["keys"] == []
+    assert say["segments"][1]["missing"] == ["params.speed"] and "error" in say["segments"][1]
+    host = say["segments"][3]["text"]
+    say = next(c for c in out["keyed"]["commands"] if c["name"] == "say")
+    assert "".join(seg["text"] for seg in say["segments"]) == "echo speed=3 host=elsewhere"
+    assert out["keyed"]["missing"] == []
+    assert out["keyed"]["keys"] == [{"key": "params.speed", "value": 3, "overrides": False},
+                                    {"key": "component.host", "value": "elsewhere", "overrides": True, "was": host, "origin": ""}]
+    assert out["unset"]["ok"] and out["unset"]["output"].strip() == f"speed=3 host={host}"
+    assert out["unset"]["keys"] == [{"key": "params.speed", "value": 3, "overrides": False}]
+    assert out["override"]["ok"] and out["override"]["output"].strip() == "speed=4 host=elsewhere"
+    assert "not a key name" in out["bad"]
+    assert "keys" in out["events"][0] and "overriding" not in out["events"][0]["audit"]
+    assert "1 overriding the lab: component.host" in out["events"][1]["audit"]
+    assert out["events"][1]["keys"][1]["was"] == host
+
+
 def test_manual_command(tmp_path, no_git):
     """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
     from testsuit.sequencer.util import SequencerError

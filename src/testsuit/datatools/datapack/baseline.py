@@ -109,6 +109,29 @@ def check_baseline(actual: dict, expected: dict | None, parts: tuple[str, ...] =
     return problems
 
 
+NOT_CONFORM_IN_ITSELF = ("the datapack is not conform in itself (built with --nocheck, or from untagged or modified "
+                         "sources, or unconfirmed datasets)")
+
+
+def nonconform_reasons(baseline: dict | None) -> list[str]:
+    """Why a datapack is not conform in itself, one line each (empty when it is): each defined key overridden
+    by hand, and its sources when they are not clean tags (or it was built with --nocheck)."""
+    datapack = (baseline or {}).get("datapack") or {}
+    if baseline is None or datapack.get("conform"):
+        return []
+    reasons = []
+    for key in baseline.get("keys_set_by_hand") or []:
+        if key.get("overrides"):
+            reasons.append(f"key '{key.get('key')}' overridden by hand: {key.get('value')!r} instead of {key.get('was')!r}"
+                           + (f" (from {key['origin']})" if key.get("origin") else ""))
+    sources = baseline.get("sources") or []
+    sources_ok = (all(s.get("clean") and s.get("tag") for s in sources if s.get("role") != "dataset")
+                  and all(s.get("confirmed", True) for s in sources if s.get("role") == "dataset"))
+    if not reasons or not sources_ok or str(datapack.get("name", "")).endswith("_DRAFT"):
+        reasons.insert(0, NOT_CONFORM_IN_ITSELF)
+    return reasons
+
+
 def tool_versions() -> list[dict]:
     """testsuit, the installed testsuit plugins (by distribution), Jinja2 and Pydantic."""
     tools = []

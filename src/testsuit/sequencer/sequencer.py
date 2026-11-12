@@ -32,7 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from testsuit.datatools.datapack.baseline import check_baseline, tool_versions
+from testsuit.datatools.datapack.baseline import NOT_CONFORM_IN_ITSELF, check_baseline, nonconform_reasons, tool_versions
+from testsuit.datatools.datapack.templating import TemplateError, expand_dotted_keys, keys_set_by_hand, parse_value, undefined_keys
 from testsuit.sequencer.config import Config
 from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPED, SUCCEEDED, BoundSlot, PhaseRunner, RunContext,
                                        StepRecord, StepRunner, worst)
@@ -44,7 +45,7 @@ from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resou
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport, strict
 from testsuit.sequencer.results import pack_results
-from testsuit.sequencer.util import SequencerError, dump_yaml, now, parse_duration, render, wait_event
+from testsuit.sequencer.util import SequencerError, deep_merge, dump_yaml, now, parse_duration, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
 
@@ -209,8 +210,7 @@ class Sequencer:
         expected = expected_baseline if expected_baseline is not None else datapack.expected_baseline
         nonconform = []
         if not datapack.conform:
-            nonconform.append("the datapack is not conform in itself (built with --nocheck, or from untagged or "
-                              "modified sources, or unconfirmed datasets)")
+            nonconform += nonconform_reasons(datapack.baseline) or [NOT_CONFORM_IN_ITSELF]
         if datapack.baseline is not None:
             nonconform += check_baseline(datapack.baseline, expected, parts=("datapack", "sources", "tools"))
         elif expected:
@@ -425,20 +425,38 @@ class Sequencer:
         return any((resources.get(key) or {}).get("maintenance")
                    for key in [("component", comp_id), *[("stage", s) for s in comp.stages]])
 
-    def _manual_keys(self, comp, stage, root: str, via=None) -> dict:
+    def _manual_keys(self, comp, stage, root: str, via=None, by_hand: dict | None = None) -> dict:
+        """The keys of a command run by hand: those of the lab, then the keys set by hand (dotted name -> value)."""
         keys = component_keys(comp, root, via, self.lab)
         keys["component"].update(name=comp.id, type=comp.role)
+        if by_hand:
+            keys = deep_merge(keys, self._by_hand(by_hand)[0])
         return keys
+
+    @staticmethod
+    def _by_hand(values: dict | None) -> tuple[dict, dict]:
+        """Keys set by hand, as nested keys and as dotted name -> value (text values read as YAML)."""
+        flat = {}
+        for name, value in (values or {}).items():
+            name = str(name).strip()
+            if not name or any(not part for part in name.split(".")):
+                raise SequencerError(f"'{name}' is not a key name (name, or name.sub for a nested key)")
+            flat[name] = parse_value(value)
+        try:
+            return expand_dotted_keys(flat), flat
+        except TemplateError as e:
+            raise SequencerError(f"keys set by hand: {e}") from e
 
     @staticmethod
     def _segments(template: str, keys: dict, where: str) -> list[dict]:
         """A command as it will run, in pieces: the literal text, and each ``{{ expression }}`` with its value
-        (or why it cannot be rendered), for the Lab page to show the key behind each value."""
+        (or why it cannot be rendered, and the keys it lacks: ``missing``), for the Lab page to show the key
+        behind each value."""
         if "{%" in template:                            # control blocks: the whole, rendered at once
             try:
                 return [{"text": str(render(template, keys, where)), "key": None}]
             except SequencerError as e:
-                return [{"text": template, "key": None, "error": str(e)}]
+                return [{"text": template, "key": None, "error": str(e), "missing": undefined_keys(template, keys)}]
         segments = []
         for part in re.split(r"(\{\{.*?\}\})", template, flags=re.DOTALL):
             if not part:
@@ -447,14 +465,21 @@ class Sequencer:
                 try:
                     segments.append({"text": str(render(part, keys, where)), "key": part[2:-2].strip()})
                 except SequencerError as e:
-                    segments.append({"text": part, "key": part[2:-2].strip(), "error": str(e).split(": ", 1)[-1]})
+                    segments.append({"text": part, "key": part[2:-2].strip(), "error": str(e).split(": ", 1)[-1],
+                                     "missing": undefined_keys(part, keys)})
             else:
                 segments.append({"text": part, "key": None})
         return segments
 
-    async def manual_commands(self, comp_id: str) -> dict:
+    async def manual_commands(self, comp_id: str, keys: dict | None = None) -> dict:
         """The commands of a component (as the lab resolves them), whether each can be run by hand, and each
-        run or http command as it would run (``segments``: its text, with the key behind each value)."""
+        run or http command as it would run (``segments``: its text, with the key behind each value).
+
+        keys: keys set by hand (dotted name -> value), over the keys of the lab. ``keys`` of the answer says
+        what each does (it sets a key the lab does not define, or overrides one), ``missing`` the keys the
+        commands read that are still undefined."""
+        by_hand = keys
+        nested, flat = self._by_hand(by_hand)
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
@@ -485,19 +510,28 @@ class Sequencer:
                     http = spec["http"] if isinstance(spec["http"], dict) else {"url": spec["http"]}
                     method = str(http.get("method") or "GET")
                     template = f"{method if '{{' in method else method.upper()} {http.get('url', '')}"
-                entry["segments"] = self._segments(template, self._manual_keys(comp, stage, root, via),
+                entry["segments"] = self._segments(template, self._manual_keys(comp, stage, root, via, by_hand),
                                                    f"{comp_id}.{name}")
+                # the keys of the lab this command sees (those of its via included), before any set by hand
+                entry["set_by_hand"] = keys_set_by_hand(self._manual_keys(comp, stage, root, via), flat)
             commands.append(entry)
+        lab_keys = self._manual_keys(comp, stage, root)
+        missing = sorted({m for c in commands for seg in c.get("segments") or [] for m in seg.get("missing") or []})
         return {"component": comp_id, "maintenance": self._in_maintenance(comp_id),
                 "held_by": [r for r, _ in self.store.holders().get(("component", comp_id), [])],
+                "keys": keys_set_by_hand(lab_keys, flat), "missing": missing,
                 "commands": commands}
 
-    async def manual_command(self, comp_id: str, name: str, timeout: float | None = None) -> dict:
-        """Run one command of a component by hand (README section 7.6): only in maintenance, and not while a run
-        holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no slot);
+    async def manual_command(self, comp_id: str, name: str, timeout: float | None = None,
+                             keys: dict | None = None) -> dict:
+        """Run one command of a component by hand (README section 7.7): only in maintenance, and not while a run
+        holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no slot), and with
+        the keys set by hand (``keys``: dotted name -> value), which can add a key or override one of the lab:
+        both are in the answer (``keys``) and in the ``manual_command`` event kept for audit;
         a detached one is started with its pid file under ``<root>/.tsq/manual/<component>/``, where ``signal``
         commands and the built-in ``kill`` find the processes started by hand."""
-        info = await self.manual_commands(comp_id)
+        by_hand = keys
+        info = await self.manual_commands(comp_id, by_hand)
         if not info["maintenance"]:
             raise SequencerError(f"component '{comp_id}' is not in maintenance: put it (or its stage) in maintenance "
                                  "to run its commands by hand")
@@ -526,7 +560,7 @@ class Sequencer:
             via = None
             if spec.get("via"):
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
-            keys = self._manual_keys(comp, stage, root, via)
+            keys = self._manual_keys(comp, stage, root, via, by_hand)
             request = httpcall.normalize(render(spec["http"], keys, f"{comp_id}.{name}"), f"command '{name}'")
             limit = timeout or (parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
                                 if spec.get("timeout") is not None else httpcall.timeout_of(request))
@@ -553,7 +587,7 @@ class Sequencer:
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
                 transport = self.transport_for(via.id)
                 manual_dir = f"{await transport.resolve_root()}/.tsq/manual/{comp_id}"
-            keys = self._manual_keys(comp, stage, root, via)
+            keys = self._manual_keys(comp, stage, root, via, by_hand)
             text = str(render(spec["run"], keys, f"{comp_id}.{name}"))
             env = {str(k): str(v) for k, v in (render(spec.get("env") or {}, keys, f"{comp_id}.{name}") or {}).items()}
             if timeout is None and spec.get("timeout") is not None:
@@ -573,9 +607,18 @@ class Sequencer:
                 done = await transport.run(strict(text), env=env, timeout=timeout or 300, pidfile=pidfile)
                 result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
         result["duration"] = round(time.monotonic() - started, 3)
-        self.notify("manual_command", {"component": comp_id, "command": name, "ok": result["ok"],
-                                       "audit": "run by hand, in maintenance"})
-        log.info("manual command %s of %s: %s", name, comp_id, "ok" if result["ok"] else "failed")
+        used = command.get("set_by_hand") or [] if command["kind"] in ("run", "http") else []
+        overridden = [k["key"] for k in used if k["overrides"]]
+        audit = "run by hand, in maintenance"
+        if used:
+            result["keys"] = used
+            audit += (f", with {len(used)} key(s) set by hand"
+                      + (f" ({len(overridden)} overriding the lab: {', '.join(overridden)})" if overridden else ""))
+        self.notify("manual_command", {"component": comp_id, "command": name, "ok": result["ok"], "audit": audit,
+                                       **({"keys": used} if used else {})})
+        log.info("manual command %s of %s: %s%s", name, comp_id, "ok" if result["ok"] else "failed",
+                 "".join(f"; {k['key']}={k['value']!r} set by hand" + (f" (overrides {k['was']!r})" if k["overrides"] else "")
+                         for k in used))
         return result
 
     # ── restart recovery and housekeeping ───────────────────────────────

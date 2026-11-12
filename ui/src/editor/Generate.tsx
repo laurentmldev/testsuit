@@ -17,7 +17,8 @@ import { useEffect, useRef, useState } from "react";
 import { get, post, url } from "../api";
 import { Choices, Dialog, Field, Toggle } from "../fields";
 import { FileBrowser } from "../files";
-import { attempt, Markdown, navigate, size, Spinner } from "../util";
+import { handKeys, KeysByHand, statusAmong, type HandKey } from "../keysbyhand";
+import { attempt, classes, Markdown, navigate, size, Spinner } from "../util";
 import { useSession } from "./state";
 
 export function GenerateDialog({ onClose }: { onClose: () => void }) {
@@ -42,8 +43,23 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   const configs = Object.keys(setup?.configurations || {});
   const [config, setConfig] = useState<string | null>(initialConfig && initialConfig !== td?.setup_config ? initialConfig : null);
   const [check, setCheck] = useState(false);
+  // keys set by hand for this generation (datapack --set), and the keys the dictionaries define, to say what each does
+  const [rows, setRows] = useState<HandKey[]>([]);
+  const [defined, setDefined] = useState<any[] | null>(null);
+  useEffect(() => {
+    if (!testdef) return;
+    let current = true;
+    setDefined(null);
+    post(`edit/sessions/${sid}/keys`, { testdef, setup_config: config }).then((r) => current && setDefined(r.keys || [])).catch(() => current && setDefined([]));
+    return () => { current = false; };
+  }, [sid, testdef, config]);
+  const keyStatus = defined ? statusAmong(defined, (origin) => origin === "<datapack>") : () => undefined;
+  const manual = handKeys(rows);
+  const overridden = Object.keys(manual || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked);
+  const blockedKeys = Object.keys(manual || {}).filter((k) => keyStatus(k)?.blocked);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [failed, setFailed] = useState("");            // the error of the last failed generation: its undefined keys are proposed
   const [priority, setPriority] = useState("");
   const [posted, setPosted] = useState<any>(null);
 
@@ -114,7 +130,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
     setLastLine(Date.now());
     try {
       // in the background: its log comes line by line, subprocess errors included
-      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient });
+      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient, keys: manual });
       setJob(job);
       let since = 0;
       let failures = 0;
@@ -176,7 +192,7 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
   ) : (
     <>
       {busy && <button onClick={stop} disabled={!job || stopping} title="Stop the generation: at its next line of output; a command it runs is killed">{stopping ? "Stopping…" : "Stop"}</button>}
-      <button className="primary" disabled={!testdef || busy || checking} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
+      <button className="primary" disabled={!testdef || busy || checking || blockedKeys.length > 0} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
     </>
   );
   return (
@@ -211,13 +227,23 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
           <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
+          <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text.">
+            <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={undefinedIn(failed)}
+              known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
+              setNote="the datapack stays conform." overrideNote="the datapack will be non-conform." />
+            {overridden.length > 0 && <div className="banner warn">Overriding {overridden.length === 1 ? "a defined key" : `${overridden.length} defined keys`} makes this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</div>}
+          </Field>
         </>
       )}
       {result && !result.ok && (
         <>
           <pre className="error-box">{result.error}</pre>
           {result.log && <details open><summary>Log</summary><LiveLog lines={result.log.split("\n")} /></details>}
-          <button onClick={() => setResult(null)}>Back</button>
+          {undefinedIn(result.error).length > 0 && <p className="small">Undefined: {undefinedIn(result.error).map((k) => <code key={k}>{k} </code>)}: go back to define {undefinedIn(result.error).length === 1 ? "it" : "them"} in a dictionary, or to set {undefinedIn(result.error).length === 1 ? "it" : "them"} by hand for this generation.</p>}
+          <button onClick={() => {
+            setFailed(result.error || "");
+            setResult(null);
+          }}>Back</button>
         </>
       )}
       {result?.ok && (
@@ -226,6 +252,16 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
             <div className="banner warn list">
               Incomplete: {result.datapack.skipped.length} input(s) left out.
               <ul className="problems">{result.datapack.skipped.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+            </div>
+          )}
+          {result.datapack?.keys_set_by_hand?.length > 0 && (
+            <div className={classes("banner list", result.datapack.keys_set_by_hand.some((k: any) => k.overrides) ? "warn" : "info")}>
+              {result.datapack.keys_set_by_hand.some((k: any) => k.overrides)
+                ? <><strong>Non-conform</strong>: defined keys were overridden by hand.</>
+                : <>Keys set by hand (none overrides a defined key: this does not make the datapack non-conform).</>}
+              <ul className="problems">{result.datapack.keys_set_by_hand.map((k: any) => (
+                <li key={k.key}><code>{k.key} = {text(k.value)}</code>{k.overrides ? <> overrides <code>{text(k.was)}</code>{k.origin && <> from {k.origin}</>}</> : <> (not defined by a dictionary)</>}</li>
+              ))}</ul>
             </div>
           )}
           <p>
@@ -250,6 +286,13 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
       )}
     </Dialog>
   );
+}
+
+const text = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value);
+
+/** The keys an error of the datapack tool says are undefined ('name' is undefined). */
+function undefinedIn(error: string): string[] {
+  return [...new Set([...(error || "").matchAll(/'([A-Za-z_]\w*(?:\.\w+)*)' is undefined/g)].map((m) => m[1]))];
 }
 
 type Check = { label: string; state: "running" | "ok" | "problems" | "error"; detail?: string; seconds?: number };

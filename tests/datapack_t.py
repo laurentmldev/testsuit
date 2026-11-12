@@ -117,6 +117,64 @@ def test_clean_tag(tmp_path, monkeypatch):
     assert not zip_path.stem.endswith("_DRAFT")
 
 
+def test_keys_set_by_hand(tmp_path, monkeypatch, capsys):
+    """a key set by hand that no dictionary defines keeps the datapack conform; overriding a defined one does not"""
+    from testsuit.datatools.datapack.baseline import nonconform_reasons
+    from testsuit.datatools.datapack.datapack_tools import read_baseline
+    monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
+    work = TESTDEF.parent / ".current_datapack"
+
+    zip_path = datapack(TESTDEF, output_dir=tmp_path, manual_keys={"operator.name": "J. Doe", "run_number": 7})
+    baseline = read_baseline(zip_path)
+    assert baseline["datapack"]["conform"] is True and nonconform_reasons(baseline) == []
+    assert baseline["keys_set_by_hand"] == [{"key": "operator.name", "value": "J. Doe", "overrides": False},
+                                            {"key": "run_number", "value": 7, "overrides": False}]
+    context = yaml.safe_load((work / "context.yml").read_text())
+    assert context["operator"] == {"name": "J. Doe"} and context["run_number"] == 7
+    assert yaml.safe_load((work / "datapack.yml").read_text())["keys_set_by_hand"] == baseline["keys_set_by_hand"]
+
+    zip_path = datapack(TESTDEF, output_dir=tmp_path, manual_keys={"platform.vendor": "ACME", "operator.name": "J. Doe"})
+    assert "on test platform by ACME" in (work / "data" / "mycmp1" / "input" / "MyRef1.txt").read_text()
+    baseline = read_baseline(zip_path)
+    assert baseline["datapack"]["conform"] is False
+    override = baseline["keys_set_by_hand"][0]
+    assert override["overrides"] and override["was"] == "TOYTRAIN" and override["origin"].endswith("setup/globals.yml")
+    assert not baseline["keys_set_by_hand"][1]["overrides"]
+    reasons = nonconform_reasons(baseline)
+    assert len(reasons) == 1 and "key 'platform.vendor' overridden by hand: 'ACME' instead of 'TOYTRAIN'" in reasons[0]
+    assert verify_datapack(zip_path) == []
+    assert "this datapack is non-conform" in capsys.readouterr().out
+
+    # a key under a defined mapping that it does not define is set, not overridden; a whole mapping is overridden
+    datapack(TESTDEF, output_dir=tmp_path, manual_keys={"platform.site": "lab 2"})
+    assert yaml.safe_load((work / "baseline.yml").read_text())["datapack"]["conform"] is True
+    from testsuit.datatools.datapack.templating import keys_set_by_hand
+    assert [k["overrides"] for k in keys_set_by_hand({"a": {"b": 1}, "c": 2}, {"a": 0, "c.d": 1, "a.z": 1, "n": 1})] == \
+        [True, True, False, False]
+
+    for name in ("testdef.id", "datapack", "setup.name.x"):
+        with pytest.raises(DatapackError, match="is a built-in key"):
+            datapack(TESTDEF, output_dir=tmp_path, manual_keys={name: "x"})
+
+
+def test_cli_set(tmp_path, no_git, monkeypatch, capsys):
+    from testsuit.cli import datapack as cli
+    from testsuit.datatools.datapack.templating import TemplateError, parse_key_value
+    assert parse_key_value("a.b=3") == ("a.b", 3) and parse_key_value("name = J. Doe") == ("name", "J. Doe")
+    assert parse_key_value("x=") == ("x", "") and parse_key_value("x='3'") == ("x", "3") and parse_key_value("u=a=b") == ("u", "a=b")
+    for bad in ("novalue", "=3", "a..b=1"):
+        with pytest.raises(TemplateError):
+            parse_key_value(bad)
+    monkeypatch.setattr("sys.argv", ["datapack", str(TESTDEF), "--nocheck", "-o", str(tmp_path),
+                                     "--set", "platform.vendor=ACME", "--set", "run_number=7"])
+    with pytest.raises(SystemExit) as e:
+        cli.main()
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "key 'platform.vendor' set by hand to 'ACME': it overrides 'TOYTRAIN'" in out
+    assert "key 'run_number' set by hand to 7 (not defined by a dictionary)" in out
+
+
 def test_output_dir_from_dictionary(etc_copy, no_git):
     _edit(etc_copy / "setup" / "globals.yml", "/../../../tmp/datapacks", "/../out")
     zip_path = datapack(etc_copy / "testdef" / "datapack_utest.yml", nocheck=True)

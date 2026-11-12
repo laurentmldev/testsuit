@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { get, post, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
+import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
 import { Address, ago, attempt, Badge, classes, navigate, setQuery, time, useRoute } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
@@ -61,20 +62,45 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const [info, setInfo] = useState<any>(null);
   const [running, setRunning] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
-  useEffect(() => { attempt(() => get(`components/${id}/commands`)).then(setInfo); }, [id]);
+  // keys set by hand for the commands run from this dialog: the commands are shown as they will run with them
+  const [rows, setRows] = useState<HandKey[]>([]);
+  const [keysError, setKeysError] = useState<string | null>(null);
+  const keys = handKeys(rows);
+  const keysText = JSON.stringify(keys || {});
+  useEffect(() => {
+    let current = true;
+    const read = () => (keys ? post(`components/${id}/commands`, { keys }) : get(`components/${id}/commands`))
+      .then((r) => { if (current) { setInfo(r); setKeysError(null); } })
+      .catch((e) => { if (current) setKeysError(e.message); });
+    const timer = setTimeout(read, keys ? 300 : 0);          // while typing: once it pauses
+    return () => { current = false; clearTimeout(timer); };
+  }, [id, keysText]);
   const run = async (name: string) => {
     setRunning(name);
-    const r = await attempt(() => post(`components/${id}/commands/${name}`, {}), `${id}: ${name}`);
+    const r = await attempt(() => post(`components/${id}/commands/${name}`, keys ? { keys } : {}), `${id}: ${name}`);
     setRunning(null);
     if (r) setResults((all) => [r, ...all]);
   };
+  const statusOf = (key: string) => {
+    const known = (info?.keys || []).find((k: any) => k.key === key);
+    return known ? { overrides: known.overrides, was: known.was } : undefined;
+  };
+  // proposed for a new row: the keys the commands read, the undefined ones first
+  const read: string[] = info ? [...new Set<string>(info.commands.flatMap((c: any) => (c.segments || []).map((seg: any) => seg.key).filter((k: any) => k && /^[A-Za-z_]\w*(\.\w+)*$/.test(k))))] : [];
   const blocked = info && (!info.maintenance ? "not in maintenance" : info.held_by?.length ? `held by ${info.held_by.join(", ")}` : null);
   return (
     <Dialog title={`Commands of ${labelOf(id)}`} onClose={onClose} wide>
-      <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params). A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
+      <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params), and with the keys set by hand below. A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
       {!info ? <p className="muted">Reading its commands…</p> : (
         <>
           {blocked && <div className="error-box">Cannot run its commands: {blocked}.</div>}
+          <details className="kbh-box" open={rows.length > 0 || info.missing?.length > 0}>
+            <summary>Keys set by hand{rows.length > 0 && <> ({rows.length})</>}{info.missing?.length > 0 && <span className="warn-text"> · {info.missing.length} undefined key{info.missing.length > 1 ? "s" : ""} read by its commands</span>}</summary>
+            <KeysByHand rows={rows} onChange={setRows} status={statusOf} missing={info.missing}
+              known={[...(info.missing || []), ...read.filter((k) => !(info.missing || []).includes(k))].map((k) => ({ value: k }))}
+              setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
+            {keysError && <div className="error-box">{keysError}</div>}
+          </details>
           <table className="grid compact">
             <tbody>
               {info.commands.map((c: any) => (
@@ -91,6 +117,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
           {results.map((r, i) => (
             <div key={i} className="manual-result">
               <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> on {r.on || labelOf(id)}{r.via && <> (through {r.via})</>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
+              {r.keys?.length > 0 && <div className="small muted">keys set by hand: {r.keys.map((k: any, j: number) => <span key={k.key}>{j > 0 && ", "}<code>{k.key}={typeof k.value === "string" ? k.value : JSON.stringify(k.value)}</code>{k.overrides && <span className="warn-text"> (overrides <code>{typeof k.was === "string" ? k.was : JSON.stringify(k.was)}</code>)</span>}</span>)}</div>}
               {r.run && <pre className="small">$ {r.run}</pre>}
               {(r.output || r.error || r.detail) && <pre className="small">{[r.output, r.error && `error: ${r.error}`, r.detail].filter(Boolean).join("\n")}</pre>}
             </div>

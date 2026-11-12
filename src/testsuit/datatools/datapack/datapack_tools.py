@@ -46,6 +46,11 @@ Keys always available (they override dictionary keys of the same name):
   ``slots.<id>.{id, name, type, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
 
 ``datapack.output_dir`` (from a dictionary, or the ``output_dir`` argument) is where the zip is written.
+
+Keys can also be **set by hand** (``datapack --set name=value``, the ``manual_keys`` argument): they come
+over the dictionaries. Setting a key no dictionary defines keeps the datapack conform; overriding a key
+that is defined makes it non-conform. Both are recorded in ``datapack.yml`` and ``baseline.yml``
+(``keys_set_by_hand``). The built-in keys above cannot be set by hand.
 """
 from __future__ import annotations
 
@@ -74,10 +79,12 @@ from testsuit.datatools.datapack.generators import GeneratorError, run_generator
 from testsuit.datatools.datapack.importers import create_data_importer
 from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef, former_names
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
-from testsuit.datatools.datapack.templating import Keys, TemplateError, load_yaml_mapping, run_time_keys
+from testsuit.datatools.datapack.templating import (Keys, TemplateError, _leaves, expand_dotted_keys, keys_set_by_hand,
+                                                    load_yaml_mapping, run_time_keys)
 from testsuit.plugins import load_plugins
 
 WORK_FOLDER = ".current_datapack"
+SET_BY_HAND = "<set by hand>"
 FORMAT_VERSION = 2
 
 
@@ -403,8 +410,16 @@ def _depth(comp_id: str, components: dict) -> int:
 class _Builder:
 
     def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None,
-                 expected_baseline: dict | None = None, lenient: bool = False) -> None:
+                 expected_baseline: dict | None = None, lenient: bool = False,
+                 manual_keys: dict | None = None) -> None:
         self.lenient = lenient
+        # keys set by hand: dotted name -> value, as given; and what each does to the keys (set in build)
+        self.manual_values: dict[str, Any] = {str(k): v for k, v in (manual_keys or {}).items()}
+        try:
+            self.manual_keys = expand_dotted_keys(self.manual_values)
+        except TemplateError as e:
+            raise DatapackError(f"keys set by hand: {e}") from e
+        self.set_by_hand: list[dict] = []
         self.skipped: list[str] = []                    # lenient: the inputs left out, and why
         nocheck = nocheck or lenient
         self.testdef_file = testdef_file
@@ -424,8 +439,9 @@ class _Builder:
             "testdef": {"file": testdef_file.as_posix(), "path": self.testdef_dir.as_posix()},
         }
 
-    def keys(self, with_setup: bool = True, with_datasets: bool = True) -> Keys:
-        """Keys, lowest precedence first: setup dictionaries, datasets, test definition dictionaries, built-in keys."""
+    def keys(self, with_setup: bool = True, with_datasets: bool = True, with_manual: bool = True) -> Keys:
+        """Keys, lowest precedence first: setup dictionaries, datasets, test definition dictionaries, keys set
+        by hand, built-in keys."""
         keys = Keys()
         order = (["setup"] if with_setup else []) + (["datasets"] if with_datasets else []) + ["testdef"]
         for layer in order:
@@ -436,8 +452,30 @@ class _Builder:
                 for file_layer, path in self.dictionaries:
                     if file_layer == layer:
                         keys.add_file(path)
+        if with_manual and self.manual_keys:
+            keys.add(self.manual_keys, origin=SET_BY_HAND)
         keys.add(self.builtin, origin="<datapack>")
         return keys
+
+    def check_manual_keys(self) -> list[dict]:
+        """What each key set by hand does: it sets a key no dictionary defines, or overrides a defined one.
+        A built-in key (``testdef.id``, ``datapack.name``...) cannot be set by hand: it would not be used."""
+        if not self.manual_values:
+            return []
+        builtin = {".".join(str(p) for p in path) for path, _ in _leaves(self.builtin) if path}
+        for name in self.manual_values:
+            clash = next((b for b in sorted(builtin) if b == name or b.startswith(name + ".") or name.startswith(b + ".")), None)
+            if clash:
+                raise DatapackError(f"key '{name}' cannot be set by hand: '{clash}' is a built-in key of the datapack tool")
+        base = self.keys(with_manual=False)
+        entries = keys_set_by_hand(base.data, self.manual_values, base.origins)
+        for entry in entries:
+            if entry["overrides"]:
+                _warn(f"key '{entry['key']}' set by hand to {entry['value']!r}: it overrides {entry['was']!r}"
+                      + (f" (from {entry['origin']})" if entry["origin"] else "") + ", the datapack is non-conform")
+            else:
+                _info(Fore.LIGHTBLACK_EX + f"key '{entry['key']}' set by hand to {entry['value']!r} (not defined by a dictionary)")
+        return entries
 
     def _load_dictionaries(self, layer: str, files: list[str], base: Path) -> None:
         for name in files:
@@ -717,9 +755,16 @@ class _Builder:
                 files[f"data/{comp_id}/input/{rel}"] = entry
         conform = (not self.nocheck
                    and all(s.get("clean") and s.get("tag") for s in sources if s["role"] != "dataset")
-                   and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset"))
+                   and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset")
+                   and not any(k["overrides"] for k in self.set_by_hand))
         return {"datapack": {"name": name, "format": FORMAT_VERSION, "conform": conform},
-                "sources": sources, "tools": tool_versions(), "files": files}
+                "sources": sources,
+                **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
+                "tools": tool_versions(), "files": files}
+
+    def _set_by_hand_record(self) -> list[dict]:
+        return [{**k, **({"origin": self._relative(k["origin"])} if k.get("origin", "").startswith("/") else {})}
+                for k in self.set_by_hand]
 
     def build(self, output_dir: str | os.PathLike | None) -> Path:
         if self.work.exists():
@@ -733,6 +778,7 @@ class _Builder:
 
         name = f"{testdef.id}_{setup.id}_{getpass.getuser()}_{self.now.strftime('%Y%m%d_%H%M%S')}" + ("_DRAFT" if self.nocheck else "")
         self.builtin["datapack"]["name"] = name
+        self.set_by_hand = self.check_manual_keys()
         keys = self.keys()
         try:
             context = keys.resolve_all()
@@ -764,6 +810,7 @@ class _Builder:
                       "file": self.setup_file.as_posix(), "git": self.setup_git},
             "datasets": self.datasets,
             "slots": components,
+            **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
             **({"skipped": self.skipped} if self.skipped else {}),
         })
         baseline = self.baseline(name, components, testdef_git)
@@ -779,11 +826,15 @@ class _Builder:
             _warn(f"{len(self.skipped)} input(s) skipped (lenient), this datapack is incomplete.")
         if self.nocheck:
             _warn("option 'nocheck' was activated, this datapack shall not be used for a production run.")
+        overridden = [k["key"] for k in self.set_by_hand if k["overrides"]]
+        if overridden:
+            _warn(f"{len(overridden)} defined key(s) overridden by hand ({', '.join(overridden)}): this datapack is non-conform.")
         return zip_path
 
 
 def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None,
-             setup_config: str | None = None, expected_baseline: dict | None = None, lenient: bool = False) -> Path:
+             setup_config: str | None = None, expected_baseline: dict | None = None, lenient: bool = False,
+             manual_keys: dict | None = None) -> Path:
     """Generate the datapack of a test definition file.
 
     The datapack contents are left in '.current_datapack' next to the test definition file.
@@ -795,13 +846,16 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
     :param expected_baseline: an expected baseline to check the datapack against (mismatches are warnings)
     :param lenient: skip, with a warning, the inputs whose source is missing or empty, or whose target is
         empty (listed under 'skipped' in datapack.yml); implies nocheck
+    :param manual_keys: keys set by hand, dotted name -> value, over the dictionaries: setting a key no
+        dictionary defines keeps the datapack conform, overriding a defined one makes it non-conform
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """
     # importers and processors declared by external libraries
     load_plugins()
     try:
-        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline, lenient).build(output_dir)
+        return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline, lenient,
+                        manual_keys).build(output_dir)
     except TemplateError as e:
         raise DatapackError(str(e)) from e
 

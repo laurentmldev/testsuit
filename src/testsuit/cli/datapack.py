@@ -45,6 +45,7 @@ Return 1 if something went wrong, 0 otherwise
     parser.add_argument('--output-dir','-o',help="where to write the datapack zip (default: key 'datapack.output_dir')")
     parser.add_argument('--setup-config','-c',help="setup configuration to use instead of the test definition's 'setup_config'")
     parser.add_argument('--lenient',action='store_true',help="Skip, with a warning, the inputs whose source is missing or empty, or whose target is empty (implies --nocheck).")
+    parser.add_argument('--set',dest='set_keys',action='append',default=[],metavar='KEY=VALUE',help="set a key by hand, over the dictionaries (repeatable; nested: a.b=value; the value is read as YAML).\nSetting a key no dictionary defines keeps the datapack conform; overriding a defined key makes it non-conform.")
     parser.add_argument('--verify',action='store_true',help="check the checksums of the given datapack zip")
     parser.add_argument('--baseline',help="expected baseline YAML file: report how the new datapack differs from it")
     parser.add_argument('--check-baseline',metavar='EXPECTED',help="check the baseline of the given datapack zip against this expected baseline")
@@ -52,7 +53,7 @@ Return 1 if something went wrong, 0 otherwise
 
     if args.check_baseline:
         import yaml
-        from testsuit.datatools.datapack.baseline import check_baseline
+        from testsuit.datatools.datapack.baseline import check_baseline, nonconform_reasons
         from testsuit.datatools.datapack.datapack_tools import read_baseline
         baseline = read_baseline(expandPath(args.file))
         if baseline is None:
@@ -61,8 +62,7 @@ Return 1 if something went wrong, 0 otherwise
         with open(expandPath(args.check_baseline), encoding="utf-8") as f:
             expected = yaml.safe_load(f) or {}
         problems = check_baseline(baseline, expected, parts=("datapack", "sources", "tools"))
-        if not baseline.get("datapack", {}).get("conform"):
-            problems.insert(0, "the datapack is not conform in itself (built with --nocheck, or from untagged or modified sources)")
+        problems = nonconform_reasons(baseline) + problems
         for problem in problems:
             print(Fore.YELLOW+"NON-CONFORM: "+problem+Style.RESET_ALL)
         if not problems:
@@ -83,7 +83,13 @@ Return 1 if something went wrong, 0 otherwise
             import yaml
             with open(expandPath(args.baseline), encoding="utf-8") as f:
                 expected = yaml.safe_load(f) or {}
-        datapack(expandPath(args.file), args.nocheck, args.output_dir, args.setup_config, expected, lenient=args.lenient)
+        from testsuit.datatools.datapack.templating import TemplateError, parse_key_value
+        try:
+            manual_keys = dict(parse_key_value(item) for item in args.set_keys)
+        except TemplateError as e:
+            raise DatapackError(f"--set: {e}") from e
+        datapack(expandPath(args.file), args.nocheck, args.output_dir, args.setup_config, expected, lenient=args.lenient,
+                 manual_keys=manual_keys)
     except DatapackError as e:
         print(Fore.RED+"ERROR: "+str(e)+Style.RESET_ALL)
         sys.exit(1)
