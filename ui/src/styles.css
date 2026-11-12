@@ -475,6 +475,8 @@ button.state-button { cursor: pointer; }
 button.state-button:hover .badge { outline: 2px solid var(--accent-soft); }
 .probe-why { background: var(--panel-2); border-radius: 6px; padding: 8px 10px; }
 .probe-step { margin: 6px 0 10px; }
+.probe-step.running .probe-command { border-left: 3px solid var(--run); }
+.probe-running { margin-left: 8px; color: var(--run); font-size: 12px; white-space: nowrap; }
 .probe-command { background: var(--panel-2); border-radius: 4px; padding: 4px 8px; margin-top: 3px; }
 .probe-answer { margin: 3px 0 0 14px; }
 .probe-answer pre { max-height: 220px; overflow: auto; border-left: 3px solid var(--border); padding-left: 8px; margin-top: 2px; }

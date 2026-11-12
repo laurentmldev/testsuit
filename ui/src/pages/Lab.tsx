@@ -143,13 +143,14 @@ const STATE_HELP: Record<string, string> = {
 };
 
 /** One action of a probe: what was run, and what the component answered. */
-function ProbeStep({ step, index }: { step: any; index: number }) {
+function ProbeStep({ step, index, running }: { step: any; index: number; running?: boolean }) {
   const answer = [step.output, step.error].filter((x) => x && String(x).trim()).join("\n");
   return (
-    <div className="probe-step">
-      <div><span className="muted">{index + 1}.</span> {step.action}{step.ok !== undefined && <> <Badge value={step.ok ? "OK" : "FAILED"} /></>}</div>
+    <div className={classes("probe-step", running && "running")}>
+      <div><span className="muted">{index + 1}.</span> {step.action}{step.ok !== undefined && <> <Badge value={step.ok ? "OK" : "FAILED"} /></>}
+        {running && <span className="probe-running"><span className="pulse run" /> running…</span>}</div>
       {step.command && <pre className="probe-command">{step.command}</pre>}
-      {(answer || step.exit !== undefined) && (
+      {!running && (answer || step.exit !== undefined) && (
         <div className="probe-answer">
           {step.exit !== undefined && step.exit !== null && <span className="muted small">exit status <code>{step.exit}</code></span>}
           {answer ? <pre className={step.error ? "bad-text" : ""}>{answer}</pre> : <span className="muted small"> no output</span>}
@@ -189,12 +190,23 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
   }, [id]);
   const again = async () => {
     setProbing(true);
+    setData((d: any) => d && { ...d, probe: { running: true, steps: [] } });       // the last report is gone at once
     const fresh = await attempt(() => post(`components/${id}/probe`));
     setProbing(false);
     if (fresh) setData(fresh);
+    else get(`components/${id}/probe`).then(setData).catch(() => undefined);
   };
   const p = data?.probe;
-  const failure = p?.kept_broken || data?.selftest_failed;
+  const live = probing || !!p?.running;                  // a probe goes on (this one, or the sequencer's own)
+  // while a probe runs, its report is read again and again: each step shows as it starts, then its answer
+  useEffect(() => {
+    if (!live) return;
+    const timer = window.setInterval(() => {
+      get(`components/${id}/probe`).then((d) => setData((current: any) => (probing && !d.probe?.running ? current : d))).catch(() => undefined);
+    }, 300);
+    return () => window.clearInterval(timer);
+  }, [live, probing, id]);
+  const failure = !live && (p?.kept_broken || data?.selftest_failed);
   const selftest = data?.selftest;
   return (
     <Dialog title={`State of ${labelOf(id)}`} onClose={onClose} wide
@@ -204,24 +216,28 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
       {data && (
         <div className="probe-report">
           <p>
-            <Badge value={data.state} /> <span className="muted">{STATE_HELP[data.state] || ""}</span>
-            {data.expected && data.expected !== data.state && <> · <span className="warning-text">expected {data.expected}</span></>}
+            {live ? <><span className="pulse run" /> <strong>Probing…</strong> <span className="muted">last known state <Badge value={data.state} /></span></>
+              : <><Badge value={data.state} /> <span className="muted">{STATE_HELP[data.state] || ""}</span>
+                {data.expected && data.expected !== data.state && <> · <span className="warning-text">expected {data.expected}</span></>}</>}
           </p>
-          {p?.why && <p className="probe-why"><strong>Why:</strong> {p.why}.</p>}
+          {!live && p?.why && <p className="probe-why"><strong>Why:</strong> {p.why}.</p>}
           {!p && <p className="muted">Not probed since tsqd started{data.detail ? <>: last recorded detail <code>{data.detail}</code></> : ""}. Probe it again to see what is tested.</p>}
           {p && (
             <>
-              <h4>What was tested</h4>
-              <p className="muted small">
-                {p.kind ? <>status probe <code>{p.kind}</code></> : "no status probe"}
-                {p.chain?.length > 1 && <> of the lab component <code>{p.chain[p.chain.length - 2]}</code></>}
-                {p.via
-                  ? <>{" "}for <code>{p.host}</code>, run on <code>{p.via.id}</code> ({p.via.host}, {p.transport}) which it is reached through</>
-                  : <>{" "}on <code>{p.host}</code> ({p.transport})</>}
-                , {time(p.at)}, {p.duration} s
-              </p>
-              {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} />)}
-              {p.rules && Object.keys(p.rules).length > 0 && (
+              <h4>{live ? "What is being tested" : "What was tested"}</h4>
+              {p.host && (
+                <p className="muted small">
+                  {p.kind ? <>status probe <code>{p.kind}</code></> : live ? "status probe" : "no status probe"}
+                  {p.chain?.length > 1 && <> of the lab component <code>{p.chain[p.chain.length - 2]}</code></>}
+                  {p.via
+                    ? <>{" "}for <code>{p.host}</code>, run on <code>{p.via.id}</code> ({p.via.host}, {p.transport}) which it is reached through</>
+                    : <>{" "}on <code>{p.host}</code> ({p.transport})</>}
+                  {!live && <>, {time(p.at)}, {p.duration} s</>}
+                </p>
+              )}
+              {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} running={live && i === p.steps.length - 1} />)}
+              {live && !(p.steps || []).length && <p className="muted small"><span className="pulse run" /> starting…</p>}
+              {!live && p.rules && Object.keys(p.rules).length > 0 && (
                 <>
                   <h4>How its answer gives the state</h4>
                   <p className="muted small">The first rule that matches the answer gives the state; no match gives unknown.</p>
@@ -248,7 +264,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
               {failure.checks ? <Checks checks={failure.checks} /> : <pre>{failure.detail}</pre>}
             </>
           )}
-          {!failure && selftest && (
+          {!live && !failure && selftest && (
             <>
               <h4>Last self-test ({time(selftest.at)}) <Badge value={selftest.ok ? "passed" : "failed"} /></h4>
               <Checks checks={selftest.checks || []} />
@@ -268,7 +284,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
   const view = useResource<LabView>("lab/view", ["lab", "run", "step", "resource", "release"]);
   const [picked, setPicked] = useState<{ kind: "component" | "stage"; id: string } | { kind: "links"; links: LabLink[] } | null>(null);
-  const comps = useResource<any[]>("components", ["component", "probe", "resource", "release", "run", "lab", "selftest"]);
+  const comps = useResource<any[]>("components", ["component", "probe", "probing", "resource", "release", "run", "lab", "selftest"]);
   const stages = useResource<any[]>("stages", ["resource", "release", "run", "lab"]);
   const [selftest, setSelftest] = useState<string | null | undefined>(undefined);
   const [reloading, setReloading] = useState(false);
@@ -329,7 +345,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td><code>{c.extends}</code></td>
       <td>{c.host}</td>
       <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
-        <div className="muted small" title={time(c.probed_at)}>{c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
+        <div className="muted small" title={time(c.probed_at)}>{c.probing ? <><span className="pulse run" /> probing…</> : c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>
       <td><Holders item={c} /></td>
       <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest} onCommands={commandsOf(c)} /></td>
