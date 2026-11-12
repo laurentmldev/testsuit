@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // The Lab page's diagram (sequencer README, section 13.1): each stage an area holding its components, the ad hoc
-// components in their own, the links between components deduced from the lab configuration (probe: via; cmd: keys
+// components outside every stage (as the components shared by stages), the links between components deduced from the lab configuration (probe: via; cmd: keys
 // naming another component; link: tsq_links), and live: states, holds, the run holding each stage and the command each
 // component runs now. A click on a box, an area, a link or a run gives its details or opens its page.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -145,18 +145,11 @@ function sharedAlias(members: any[]): string {
 }
 
 function AreaNode({ data }: NodeProps) {
-  const { stage, runs, adhoc, host, alias, members } = data as any;
+  const { stage, runs, host, alias, members } = data as any;
   if (host) {
     return (
       <div className="lab-area host" title={`${members.length} components at the address ${alias ? `${alias} (${host})` : host}: ${members.join(", ")}`}>
         <div className="lab-host-head"><code>{alias || host}</code><span className="muted small">{members.length} components</span></div>
-      </div>
-    );
-  }
-  if (adhoc) {
-    return (
-      <div className="lab-area adhoc">
-        <div className="lab-area-head"><strong>Ad hoc components</strong><span className="muted small">in no stage</span></div>
       </div>
     );
   }
@@ -344,7 +337,8 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
   const byId = useMemo(() => Object.fromEntries(comps.map((c) => [c.id, c])), [comps]);
   const links = useMemo(() => (view?.links || []).filter((l) => byId[l.source] && byId[l.target]), [view, byId]);
   const groups = useMemo(() => mergeLinks(links), [links]);
-  const parentOf = (c: any) => (c.stages?.length === 1 ? `stage:${c.stages[0]}` : c.stages?.length ? undefined : "adhoc");
+  // a component of one stage is in its area; an ad hoc one (in no stage) and a shared one are outside every stage
+  const parentOf = (c: any) => (c.stages?.length === 1 ? `stage:${c.stages[0]}` : undefined);
   const headOf = (s: any) => ((s.holders || []).length ? 84 : 58);
   // the components of an area that share an address, in a box of their own
   const hostGroups: Record<string, string[]> = {};
@@ -369,7 +363,6 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     let cancelled = false;
     const nodes: any[] = [];
     for (const s of stages) nodes.push({ id: `stage:${s.id}`, width: AREA_MIN_W, height: 120, padding: `[top=${headOf(s)},left=18,bottom=18,right=18]`, minWidth: AREA_MIN_W });
-    if (comps.some((c) => !c.stages?.length)) nodes.push({ id: "adhoc", width: AREA_MIN_W, height: 120, padding: "[top=58,left=18,bottom=18,right=18]", minWidth: AREA_MIN_W });
     for (const h of Object.keys(hostGroups)) nodes.push({ id: h, width: 160, height: 80, padding: `[top=${HOST_HEAD},left=${HOST_PAD},bottom=${HOST_PAD},right=${HOST_PAD}]`, parent: hostParent(h) });
     for (const c of comps) nodes.push({ id: `c:${c.id}`, ...size(c), parent: holderOf(`c:${c.id}`) });
     const edges = groups.map((group, i) => {
@@ -492,7 +485,6 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
       if (r) nodes.push({ id, type: "area", position: { x: r.x, y: r.y }, data, style: { width: r.width, height: r.height }, draggable: !!draft, selectable: false, zIndex: 0 });
     };
     for (const s of stages) area(`stage:${s.id}`, headOf(s), { stage: s, runs });
-    if (comps.some((c) => !c.stages?.length)) area("adhoc", 58, { adhoc: true, runs });
     for (const [h, r] of Object.entries(hostRects)) {
       nodes.push({ id: h, type: "area", position: { x: r.x, y: r.y }, data: { host: byId[hostGroups[h][0]].host, alias: sharedAlias(hostGroups[h].map((c) => byId[c])), members: hostGroups[h].map((c) => byId[c].label || c) },
         style: { width: r.width, height: r.height }, draggable: !!draft, selectable: false, zIndex: 0 });
