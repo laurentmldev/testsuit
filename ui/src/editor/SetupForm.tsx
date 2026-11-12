@@ -684,14 +684,14 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                   for (const id of inStage) delete d.configurations[name].slots[id];
                 });
               }}>Remove</button>}>
-              <Field label="Lab stage type" help="Bound at run time to any free lab stage of this type: its slots to the lab components of that stage.">
+              <Field name="type" label="Lab stage type" help="Bound at run time to any free lab stage of this type: its slots to the lab components of that stage.">
                 <Combo value={st} onChange={(v) => update((d) => {
                   const cur = d.configurations[name].stage_slots[s];
                   d.configurations[name].stage_slots[s] = { ...(typeof cur === "object" && cur ? cur : {}), type: v };
                 })} choices={stageTypeChoices(ctx)} />
                 {!ctx.lab.stage_type_roles?.[st] && <div className="error-text small">no lab stage of this type</div>}
               </Field>
-              <Field label="Tags" help="Tags the lab stage must have (`tsq_tags` of the stage, its id being one): routes the stage slot to given stages.">
+              <Field name="tags" label="Tags" help="Tags the lab stage must have (`tsq_tags` of the stage, its id being one): routes the stage slot to given stages.">
                 <Tags value={stageTags(s)} placeholder="+ tag" choices={stageSlotTagChoices(ctx, st)} onChange={(v) => update((d) => {
                   const cur = d.configurations[name].stage_slots[s];
                   const obj = typeof cur === "object" && cur ? { ...cur } : { type: cur };

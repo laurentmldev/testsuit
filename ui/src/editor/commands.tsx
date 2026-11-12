@@ -121,7 +121,7 @@ export function ExpectEditor({ value, onChange }: { value: any; onChange: (v: an
         <Tags value={codes} onChange={(l) => set("exit", l.map((c) => (/^\d+$/.test(c) ? Number(c) : c)))}
           choices={[{ value: "0", description: "success" }, { value: "1" }, { value: "any", description: "accept every exit code" }]} placeholder="default 0" />
       </Field>
-      <Field label="Output matches" help="Regular expression the standard output must match (multi-line).">
+      <Field name="expect.stdout" label="Output matches" help="Regular expression the standard output must match (multi-line).">
         <Text mono value={v.stdout} onChange={(x) => set("stdout", x)} placeholder="regex, optional" />
       </Field>
     </div>
@@ -204,9 +204,9 @@ export function HttpEditor({ value, onChange, help, withSave }: {
           <Field label="Status" help={help("expect")}>
             <Tags value={statuses} onChange={(l) => setExpect("status", l.length === 1 ? Number(l[0]) : l.map(Number).filter((n) => !Number.isNaN(n)))} placeholder="below 400" />
           </Field>
-          <Field label="Body matches" help="A regular expression the body (or the extracted part) must match."><Text mono value={expect.regex} onChange={(x) => setExpect("regex", x)} /></Field>
+          <Field name="expect.regex" label="Body matches" help="A regular expression the body (or the extracted part) must match."><Text mono value={expect.regex} onChange={(x) => setExpect("regex", x)} /></Field>
         </div>
-        <Field label="JSON contains" help="Values the JSON answer (or the extracted part) must contain; other fields are ignored." wide>
+        <Field name="expect.json" label="JSON contains" help="Values the JSON answer (or the extracted part) must contain; other fields are ignored." wide>
           <JsonField value={expect.json} onChange={(x) => setExpect("json", x)} placeholder='{"state": "started"}' />
         </Field>
       </Section>
@@ -261,8 +261,8 @@ export function WaitForEditor({ value, onChange, withSlot, slots }: {
       )}
       {kind === "log" && (
         <>
-          <Field label="Log file" help="Path of the log file on the component (templates allowed)."><Text keys mono value={val?.file} onChange={(x) => set("log", { ...val, file: x })} /></Field>
-          <Field label="Line matching" help="Regular expression (grep -E) a line must match."><Text keys mono value={val?.regex} onChange={(x) => set("log", { ...val, regex: x })} /></Field>
+          <Field name="log.file" label="Log file" help="Path of the log file on the component (templates allowed)."><Text keys mono value={val?.file} onChange={(x) => set("log", { ...val, file: x })} /></Field>
+          <Field name="log.regex" label="Line matching" help="Regular expression (grep -E) a line must match."><Text keys mono value={val?.regex} onChange={(x) => set("log", { ...val, regex: x })} /></Field>
         </>
       )}
       {kind === "http" && (
@@ -277,11 +277,11 @@ export function WaitForEditor({ value, onChange, withSlot, slots }: {
         <Field label="Value" help="Given to the plugin ready check as is."><Text mono value={typeof val === "object" ? JSON.stringify(val) : val} onChange={(x) => set(kind, x)} /></Field>
       )}
       <div className="inline-fields">
-        <Field label="Timeout" help="Then the step is `error` (default 60 s)."><Text keys value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="60s" /></Field>
-        <Field label="Interval" help="Time between checks (default 0.5 s)."><Text value={v.interval} onChange={(x) => set("interval", x)} placeholder="0.5s" /></Field>
+        <Field name="timeout" label="Timeout" help="Then the step is `error` (default 60 s)."><Text keys value={v.timeout} onChange={(x) => set("timeout", x)} placeholder="60s" /></Field>
+        <Field name="interval" label="Interval" help="Time between checks (default 0.5 s)."><Text value={v.interval} onChange={(x) => set("interval", x)} placeholder="0.5s" /></Field>
       </div>
       {withSlot && (
-        <Field label="Slot checked" help="The slot the check is about, when the step has no slot.">
+        <Field name="slot" label="Slot checked" help="The slot the check is about, when the step has no slot.">
           <Combo value={v.slot} onChange={(x) => set("slot", x)} choices={slots || []} />
         </Field>
       )}
@@ -368,7 +368,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
       {kind === "signal" && (
         <div className="inline-fields">
           <Field label="Signal" help={help("signal")}><Combo value={s.signal} onChange={(x) => set("signal", x)} choices={["TERM", "INT", "HUP", "USR1", "KILL"].map((v) => ({ value: v }))} /></Field>
-          <Field label="Then KILL after" help="Grace period before KILL (default 10 s)."><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="10s" /></Field>
+          <Field name="timeout" label="Then KILL after" help="Grace period before KILL (default 10 s)."><Text keys value={s.timeout} onChange={(x) => set("timeout", x)} placeholder="10s" /></Field>
         </div>
       )}
       {kind === "builtin" && (

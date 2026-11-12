@@ -1175,7 +1175,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
 
 **Help while filling the files.** Defining roles, components, inventories, pipelines and templates takes knowing a lot of names, so every form helps with them:
-- each field shows its help in the panel on the right when pointed at or focused, written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
+- each field shows its help in the panel on the right when pointed at or focused, starting with the name of its key in the YAML file (`tsq_label`), written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
 - every name field proposes the values that make sense where it is, each with what it is: the roles with their commands and users, the components a host can extend, the roles of the stages of a type, the stage types with the stages that have them, the commands a step can run on the components it targets (with the role that offers each command), the keys a template can use with their values and the file each comes from;
 - what the tests ask of the lab and the lab does not have yet (a role, a stage type) is listed in the inventory form and offered when creating a component;
 - wizards start from what exists: a new stage slot copies another with its slots renamed; **Add from the lab** creates a setup's slots and slot types for every role of a stage type; a new test definition comes with a pipeline that deploys, starts and waits for each slot of its setup configuration in the order of their `needs`, and stops and collects them in `finally`;

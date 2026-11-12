@@ -77,9 +77,18 @@ export function schemaAt(schema: any, path: (string | number)[]): any {
   return node;
 }
 
+/** A help text starting with the name of the key it is about in the YAML file, when it has one. */
+export function withKey(key: string | undefined, text: string | undefined): string | undefined {
+  return text && key ? `Key \`${key}\`\n\n${text}` : text;
+}
+
+/** The help of the data at path, from its schema, starting with the name of its key (the last one of the path,
+ * unless it stands for any key or a list item). */
 export function helpText(schema: any, path: (string | number)[]): string | undefined {
   const node = schemaAt(schema, path);
-  return node?.markdownDescription || node?.description;
+  const last = path[path.length - 1];
+  const key = typeof last === "string" && last !== "_" && !/^\d+$/.test(last) ? last : undefined;
+  return withKey(key, node?.markdownDescription || node?.description);
 }
 
 // ── keys: typing {{ in a field whose value is rendered with keys ───────────
@@ -190,16 +199,17 @@ function KeyPicker({ keys, onPick, onClose }: { keys: KeyItem[]; onPick: (key: s
 // ── fields ──────────────────────────────────────────────────────────────
 
 export function Field({
-  label, help, children, error, hint, wide,
-}: { label: string; help?: string; children: ReactNode; error?: string | null; hint?: ReactNode; wide?: boolean }) {
+  label, help: text, children, error, hint, wide, name,
+}: { label: string; help?: string; children: ReactNode; error?: string | null; hint?: ReactNode; wide?: boolean; name?: string }) {
   const setHelp = useHelp();
+  const help = withKey(name, text);           // name: its key in the YAML file, for a help not read from a schema
   const show = () => help && setHelp({ title: label, text: help });
   return (
     <div className={classes("field", wide && "wide", error && "has-error")} onFocusCapture={show} onMouseEnter={show}>
       <label>
         {label}
         {help && (
-          <span className="q" title={help.replace(/[`*]/g, "")}>
+          <span className="q" title={help.replace(/[`*]/g, "").replace(/^(Key) (\S+)\n\n/, "$1 $2: ")}>
             ?
           </span>
         )}

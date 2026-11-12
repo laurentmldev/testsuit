@@ -623,7 +623,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
         }} allowNone="nothing (empty stage)" choices={stages.map((s) => ({ value: s.name, description: `${s.vars.tsq_stage_type}: ${s.hosts.join(", ")}` }))} />
       </Field>
       <Field label="Name" error={labIdProblem(name, taken)}><Text value={name} onChange={(v) => setName(labIdInput(v))} /></Field>
-      <Field label="Stage type" help="What datapacks ask for (`stages: {train: {type: ...}}`)."><Combo value={type} onChange={(v) => setType(labIdInput(v))} choices={stageTypeChoices(ctx)} /></Field>
+      <Field name="tsq_stage_type" label="Stage type" help="What datapacks ask for (`stages: {train: {type: ...}}`)."><Combo value={type} onChange={(v) => setType(labIdInput(v))} choices={stageTypeChoices(ctx)} /></Field>
       {plan.length > 0 && (
         <table className="grid compact">
           <thead><tr><th>From</th><th>Role</th><th>Extends</th><th>New component</th></tr></thead>
@@ -685,7 +685,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Combo value={role} onChange={setRole} choices={roles} strict />
         <RoleCard name={role} />
       </Field>
-      <Field label="Extends" help="The lab component it is: it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the host needs no tsq_role.">
+      <Field name="tsq_extends" label="Extends" help="The lab component it is: it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the host needs no tsq_role.">
         <Combo value={ext} onChange={setExt} choices={componentChoices(ctx, { hosts: true })} strict placeholder="linux_system (default)" />
         <ComponentCard name={ext} />
       </Field>
@@ -693,7 +693,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         error={name ? labIdProblem(name, taken) : null}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} placeholder={`for example ${freeName(labId(role || "component"), taken)}`} />
       </Field>
-      <Field label="Address" help="IP address or host name (leave empty for localhost with the local transport)."><Text mono value={host} onChange={setHost} /></Field>
+      <Field name="ansible_host" label="Address" help="IP address or host name (leave empty for localhost with the local transport)."><Text mono value={host} onChange={setHost} /></Field>
       <Field label="Transport"><Choices value={transport} onChange={setTransport} choices={transportChoices(ctx)} inherit={newHostTransport} /></Field>
     </Dialog>
   );
