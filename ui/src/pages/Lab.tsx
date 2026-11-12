@@ -56,6 +56,9 @@ function Actions({ kind, item, onDone, onSelftest, onCommands }: { kind: "stages
   );
 }
 
+const COMMANDS_SLOW = 4000;          // ms: past this, "Reading its commands…" says it still waits
+const COMMANDS_GIVE_UP = 30000;      // ms: past this, it gives up, with a Retry button
+
 /** The commands of a component in maintenance, each run by hand, with what it did (README section 7.6). */
 function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const labelOf = useLabels();
@@ -65,16 +68,28 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   // keys set by hand for the commands run from this dialog: the commands are shown as they will run with them
   const [rows, setRows] = useState<HandKey[]>([]);
   const [keysError, setKeysError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);                  // Retry: read them again
+  const [slow, setSlow] = useState(false);                  // still no answer after a few seconds
   const keys = handKeys(rows);
   const keysText = JSON.stringify(keys || {});
   useEffect(() => {
     let current = true;
-    const read = () => (keys ? post(`components/${id}/commands`, { keys }) : get(`components/${id}/commands`))
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
+    // the sequencer answers within a few seconds, even for a component that does not answer: past
+    // COMMANDS_GIVE_UP, the dialog says so (with Retry) instead of reading forever
+    const read = () => Promise.race([
+      keys ? post(`components/${id}/commands`, { keys }) : get(`components/${id}/commands`),
+      new Promise((_, reject) => { giveUp = setTimeout(() => reject(new Error(`the sequencer did not answer within ${COMMANDS_GIVE_UP / 1000} s`)), COMMANDS_GIVE_UP); }),
+    ])
       .then((r) => { if (current) { setInfo(r); setKeysError(null); } })
-      .catch((e) => { if (current) setKeysError(e.message); });
+      .catch((e) => { if (current) setKeysError(e.message); })
+      .finally(() => { clearTimeout(giveUp); if (current) setSlow(false); });
+    setSlow(false);
+    const slowTimer = setTimeout(() => { if (current) setSlow(true); }, COMMANDS_SLOW);
     const timer = setTimeout(read, keys ? 300 : 0);          // while typing: once it pauses
-    return () => { current = false; clearTimeout(timer); };
-  }, [id, keysText]);
+    return () => { current = false; clearTimeout(timer); clearTimeout(slowTimer); clearTimeout(giveUp); };
+  }, [id, keysText, reload]);
+  const retry = () => { setKeysError(null); setReload((n) => n + 1); };
   const run = async (name: string) => {
     setRunning(name);
     const r = await attempt(() => post(`components/${id}/commands/${name}`, keys ? { keys } : {}), `${id}: ${name}`);
@@ -91,9 +106,12 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Dialog title={`Commands of ${labelOf(id)}`} onClose={onClose} wide>
       <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params), and with the keys set by hand below. A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
-      {!info ? <p className="muted">Reading its commands…</p> : (
+      {!info ? (keysError
+        ? <div className="error-box">Cannot read its commands: {keysError}. <button className="small" onClick={retry}>Retry</button></div>
+        : <p className="muted">Reading its commands…{slow && <> still waiting for the sequencer (is it busy, or restarting?)</>}</p>) : (
         <>
           {blocked && <div className="error-box">Cannot run its commands: {blocked}.</div>}
+          {info.root_note && <div className="warn-text small">{info.root_note}.</div>}
           <details className="kbh-box" open={rows.length > 0 || info.missing?.length > 0}>
             <summary>Keys set by hand{rows.length > 0 && <> ({rows.length})</>}{info.missing?.length > 0 && <span className="warn-text"> · {info.missing.length} undefined key{info.missing.length > 1 ? "s" : ""} read by its commands</span>}</summary>
             <KeysByHand rows={rows} onChange={setRows} status={statusOf} missing={info.missing}

@@ -114,6 +114,7 @@ class Sequencer:
         self.lab: Lab = load_lab(config.lab_folder, config.inventory_file, config.lab.require_tag)
         self.monitor = Monitor(self.store, config.monitor.interval, self.notify)
         self._transports: dict[str, Transport] = {}
+        self._root_lookups: dict[str, tuple[Transport, asyncio.Task]] = {}   # manual_commands: remote root being resolved
         self.monitor.attach(self.lab, self.transport_for)
         if config.selftest.when_idle:
             self.monitor.on_idle = self._selftest_one
@@ -455,7 +456,7 @@ class Sequencer:
         if "{%" in template:                            # control blocks: the whole, rendered at once
             try:
                 return [{"text": str(render(template, keys, where)), "key": None}]
-            except SequencerError as e:
+            except Exception as e:                      # TemplateError, or one of the expression (1 + 'a')
                 return [{"text": template, "key": None, "error": str(e), "missing": undefined_keys(template, keys)}]
         segments = []
         for part in re.split(r"(\{\{.*?\}\})", template, flags=re.DOTALL):
@@ -464,12 +465,38 @@ class Sequencer:
             if part.startswith("{{"):
                 try:
                     segments.append({"text": str(render(part, keys, where)), "key": part[2:-2].strip()})
-                except SequencerError as e:
+                except Exception as e:                  # TemplateError, or one of the expression (1 + 'a')
                     segments.append({"text": part, "key": part[2:-2].strip(), "error": str(e).split(": ", 1)[-1],
                                      "missing": undefined_keys(part, keys)})
             else:
                 segments.append({"text": part, "key": None})
         return segments
+
+    MANUAL_ROOT_WAIT = 3.0          # seconds the Commands dialog waits for a component's remote root
+
+    async def _manual_root(self, comp_id: str) -> tuple[str, str | None]:
+        """The remote root of a component for the commands shown by hand, and a note when it is the root as
+        configured because the component does not answer (yet).
+
+        Resolving it can mean an ssh login (a root under ``~``), which can take up to its connect timeout on a
+        component that is down, as one in maintenance often is: the dialog waits for it MANUAL_ROOT_WAIT
+        seconds at most. The lookup goes on meanwhile (it is not cancelled), and the next call (a key set by
+        hand) waits for that same lookup instead of starting a new one."""
+        transport = self.transport_for(comp_id)
+        known = self._root_lookups.get(comp_id)
+        failed = known is not None and known[1].done() and (known[1].cancelled() or known[1].exception() is not None)
+        if known is None or known[0] is not transport or failed:      # none yet, lab reloaded, or it failed: again
+            known = (transport, asyncio.ensure_future(transport.resolve_root()))
+            self._root_lookups[comp_id] = known
+        task = known[1]
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), self.MANUAL_ROOT_WAIT), None
+        except asyncio.TimeoutError:
+            return transport._root, (f"{transport.host} does not answer yet: its commands are shown with its remote "
+                                     f"root as configured ({transport._root})")
+        except Exception as e:
+            return transport._root, (f"cannot reach {transport.host} ({e}): its commands are shown with its remote "
+                                     f"root as configured ({transport._root})")
 
     async def manual_commands(self, comp_id: str, keys: dict | None = None) -> dict:
         """The commands of a component (as the lab resolves them), whether each can be run by hand, and each
@@ -484,13 +511,15 @@ class Sequencer:
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
 
-        async def root_of(cid: str) -> str:
-            transport = self.transport_for(cid)
-            try:
-                return await asyncio.wait_for(transport.resolve_root(), 10)
-            except Exception:
-                return transport._root                  # unreachable now: its root as configured
-        root = await root_of(comp_id)
+        root, root_note = await self._manual_root(comp_id)
+        base_keys: dict = {}
+
+        def lab_keys_for(via) -> dict:
+            """The keys of the lab for a command (through via or not), computed once per via."""
+            key = via.id if via is not None else None
+            if key not in base_keys:
+                base_keys[key] = self._manual_keys(comp, stage, root, via)
+            return base_keys[key]                       # never changed: deep_merge makes new dicts
         commands = []
         for name, spec in sorted(resolved.commands.items()):
             spec = dict(spec or {})
@@ -510,14 +539,15 @@ class Sequencer:
                     http = spec["http"] if isinstance(spec["http"], dict) else {"url": spec["http"]}
                     method = str(http.get("method") or "GET")
                     template = f"{method if '{{' in method else method.upper()} {http.get('url', '')}"
-                entry["segments"] = self._segments(template, self._manual_keys(comp, stage, root, via, by_hand),
-                                                   f"{comp_id}.{name}")
+                seen = lab_keys_for(via)
                 # the keys of the lab this command sees (those of its via included), before any set by hand
-                entry["set_by_hand"] = keys_set_by_hand(self._manual_keys(comp, stage, root, via), flat)
+                entry["set_by_hand"] = keys_set_by_hand(seen, flat)
+                entry["segments"] = self._segments(template, deep_merge(seen, nested) if nested else seen,
+                                                   f"{comp_id}.{name}")
             commands.append(entry)
-        lab_keys = self._manual_keys(comp, stage, root)
+        lab_keys = lab_keys_for(None)
         missing = sorted({m for c in commands for seg in c.get("segments") or [] for m in seg.get("missing") or []})
-        return {"component": comp_id, "maintenance": self._in_maintenance(comp_id),
+        return {"component": comp_id, "maintenance": self._in_maintenance(comp_id), "root_note": root_note,
                 "held_by": [r for r, _ in self.store.holders().get(("component", comp_id), [])],
                 "keys": keys_set_by_hand(lab_keys, flat), "missing": missing,
                 "commands": commands}
@@ -658,6 +688,8 @@ class Sequencer:
                     shutil.rmtree(folder, ignore_errors=True)
 
     async def close(self) -> None:
+        for _, lookup in self._root_lookups.values():
+            lookup.cancel()
         for transport in self._transports.values():
             await transport.close()
         self.store.close()
