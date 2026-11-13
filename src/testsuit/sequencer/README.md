@@ -1192,7 +1192,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Applying a modification.** The same for the three kinds of edits:
 1. The UI shows the diff against the branch and asks for a commit message, and optionally a tag.
-2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The commit author is the user, not the sequencer.
+2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The UI always asks for them: it never pushes with tsqd's own credentials. The commit author is the user, not the sequencer.
 3. It commits and pushes. If the push is rejected (the branch moved meanwhile, or the credentials lack the right), nothing is applied: the UI shows why, and the user can rebase on the latest revision and try again.
 4. Nothing is reloaded at this point. For the lab, the UI shows that a newer configuration exists (its commit, tag and author) next to the one in use, with a **Reload** button. Reload is `tsq lab reload --pull` on that revision (section 6.1): it fetches it into the lab folder, validates it, and applies it to the next activations. Datapack definitions are not loaded by the sequencer at all: they are used when a datapack is next generated from them.
 

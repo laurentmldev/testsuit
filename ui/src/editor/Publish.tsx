@@ -74,7 +74,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const lastTag = [...(info.pushed || [])].reverse().find((p: any) => p.tag)?.tag;
   const [tag, setTag] = useState<string>(nextTag(lastTag));
   const [message, setMessage] = useState("");
-  const [auth, setAuth] = useState<string | null>(null);
+  const [auth, setAuth] = useState<string | null>("token");   // the user's own: never those of tsqd
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -133,7 +133,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
     <Dialog title="Review and push" onClose={onClose} wide footer={
       <>
         {result && !result.ok && result.hint?.startsWith("the branch moved") && <button onClick={rebase} disabled={busy}>Rebase on the latest revision</button>}
-        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim()} onClick={push}>
+        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim() || !secret || (auth === "token" && !username.trim())} onClick={push}>
           {busy ? "Pushing…" : `Push to ${diff?.branch || info.branch}`}
         </button>
       </>
@@ -170,8 +170,8 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
           <Text mono value={tag} onChange={setTag} placeholder="none" />
         </Field>
       </div>
-      <Field label="Credentials" help="Used for this push only, never stored: given to git through its askpass, then forgotten. Leave them out when tsqd itself can push (an SSH key of its account, a credential helper).">
-        <Choices value={auth} onChange={setAuth} allowNone="those of tsqd" choices={[
+      <Field label="Credentials" help="Your own, needed for every push: used for this push only, never stored, given to git through its askpass, then forgotten.">
+        <Choices value={auth} onChange={(v) => v && setAuth(v)} choices={[
           { value: "token", label: "user and token", description: "HTTPS remote: a personal access token" },
           { value: "ssh", label: "SSH key passphrase", description: "SSH remote: the passphrase of tsqd's key" },
         ]} />
