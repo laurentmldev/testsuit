@@ -408,6 +408,38 @@ def test_push_needs_the_users_credentials(repos):
     assert editor.push(session, "Longer", "Ada", "ada@example.com", credentials={"passphrase": "secret"})["ok"]
 
 
+def test_push_ignores_url_rewriting(repos, tmp_path):
+    """An insteadOf / pushInsteadOf rule of tsqd's account (one putting a token of its own in the URL) does not
+    redirect a push, a pull or a clone made with the user's credentials."""
+    editor = repos.editor
+    upstream = str(repos.root / "upstream.git")
+    session = editor.open("workspace0")
+    # rules for the host (here: the folder holding the upstream) would send everything elsewhere
+    (tmp_path / "elsewhere").mkdir()
+    for key in ("insteadOf", "pushInsteadOf"):
+        git(session.root, "config", f"url.{tmp_path}/elsewhere/.{key}", f"{repos.root}/")
+    assert "elsewhere" in git(session.root, "remote", "get-url", "--push", "origin")
+    editor.write(session, "setup/globals.yml", data={"duration": "1s", "min_count": 3})
+    pushed = editor.push(session, "Longer", "Ada", "ada@example.com", credentials=CREDS)
+    assert pushed["ok"], pushed
+    assert "duration: 1s" in repos.upstream_file("datapack/setup/globals.yml")
+    assert editor.rebase(session, CREDS)["ok"]
+
+    # a rule for the whole URL: refused, saying which rules to look at
+    git(session.root, "config", f"url.{tmp_path}/elsewhere.git.pushInsteadOf", upstream)
+    editor.write(session, "setup/globals.yml", data={"duration": "3s", "min_count": 3})
+    with pytest.raises(SequencerError, match="insteadOf"):
+        editor.push(session, "Longer still", "Ada", "ada@example.com", credentials=CREDS)
+    assert editor.diff(session)["files"] and git(session.root, "log", "-1", "--format=%s").strip() == "Longer"
+
+    # an origin holding a token itself: refused, nothing committed
+    git(session.root, "remote", "set-url", "origin", "https://bot:systemtoken@example.com/tests.git")
+    editor.write(session, "setup/globals.yml", data={"duration": "2s", "min_count": 3})
+    with pytest.raises(SequencerError, match="holds a password or token"):
+        editor.push(session, "Even longer", "Ada", "ada@example.com", credentials=CREDS)
+    assert editor.diff(session)["files"]
+
+
 def test_repository_added_by_url(repos):
     editor = repos.editor
     upstream = str(repos.root / "upstream.git")
