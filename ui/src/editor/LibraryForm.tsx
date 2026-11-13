@@ -15,9 +15,9 @@
 // what each does) and its components (concrete: how they implement commands, status probe, self-test, transport).
 import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text, Toggle } from "../fields";
-import { post } from "../api";
+import { get, post, put } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
-import { CommandEditor, CommandsEditor, HttpEditor, summary, WELL_KNOWN } from "./commands";
+import { CommandEditor, CommandsEditor, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
 import { ItemLink, ItemLinks, useItemRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
@@ -103,6 +103,51 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
     setItem(kind, name, undefined);
     setSel(null);
   };
+  // copying or moving a command: to a component of this file (one edit, undone at once), or of another library
+  // file of the session (written there, then removed from here for a move)
+  const fileOf = (target: string): string | null => {
+    if (target in components) return doc.path;
+    const source = ctx.lab.library?.[target]?.source;
+    return session.files.some((f) => f.path === source && f.kind === "library") ? source : null;
+  };
+  const commandTransfer = (self: string): CommandTransfer => ({
+    self,
+    targets: [...new Set([...Object.keys(components), ...Object.keys(ctx.lab.library || {})])].filter((t) => fileOf(t)),
+    commandsOf: (target) => {
+      const described = ctx.lab.library?.[target];
+      const own = Object.keys((target in components ? components[target]?.commands : null) || {});
+      const inherited: Record<string, string> = {};
+      for (const [c, i] of Object.entries<any>(described?.commands || {})) if (i.from !== target) inherited[c] = i.from;
+      return { own: target in components ? own : described?.own_commands || [], inherited };
+    },
+    run: async (mode, name, target, as) => {
+      const spec = clone(components[self]?.commands?.[name]);
+      const file = fileOf(target);
+      if (spec === undefined || !file) return;
+      const draft = clone(data);
+      if (mode === "move") {
+        delete draft.components[self].commands[name];
+        if (!Object.keys(draft.components[self].commands).length) delete draft.components[self].commands;
+      }
+      if (file === doc.path) {
+        const t = (draft.components[target] ||= {});
+        t.commands = { ...(t.commands || {}), [as]: spec };
+        api.setData(draft);
+        if (target !== self) notify(`${mode === "copy" ? "Copied" : "Moved"} ${name} to ${target}${as !== name ? ` as ${as}` : ""}`, "info");
+        return;
+      }
+      await api.flush?.();
+      const done = await attempt(async () => {
+        const { version } = await get(`edit/sessions/${session.sid}/files/${file}`);
+        return put(`edit/sessions/${session.sid}/files/${file}`, { data: spec, at: ["components", target, "commands", as], base: version });
+      });
+      if (!done) return;
+      if (mode === "move") api.setData(draft);
+      notify(`${mode === "copy" ? "Copied" : "Moved"} ${name} to ${target}${as !== name ? ` as ${as}` : ""} (${file})`, "info");
+      await session.refreshFiles();
+      await session.refreshContext();
+    },
+  });
   const item = sel ? (sel.kind === "role" ? roles : components)[sel.name] : undefined;
   return (
     <div className="form-split">
@@ -129,7 +174,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       <div className="form-main">
         {sel && item !== undefined ? (sel.kind === "role"
           ? <RoleForm key={"r:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("role", sel.name, v)} onRename={(to) => rename("role", sel.name, to)} onDelete={() => remove("role", sel.name)} />
-          : <ComponentForm key={"c:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("component", sel.name, v)} onRename={(to) => rename("component", sel.name, to)} onDelete={() => remove("component", sel.name)} />)
+          : <ComponentForm key={"c:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("component", sel.name, v)} onRename={(to) => rename("component", sel.name, to)} onDelete={() => remove("component", sel.name)} transfer={commandTransfer(sel.name)} />)
           : <p className="muted">Pick a role or a component, or add one.</p>}
       </div>
       {creating === "component" && <NewComponent taken={[...new Set([...Object.keys(known("component")), ...Object.keys(components)])]} onClose={() => setCreating(null)} onCreate={(name, body) => {
@@ -305,7 +350,9 @@ function RoleInputs({ value, onChange, inherited, help }: { value?: any[]; onCha
   );
 }
 
-function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: string; value: any; onChange: (v: any) => void; onRename: (to: string) => void; onDelete: () => void }) {
+function ComponentForm({ name, value, onChange, onRename, onDelete, transfer }: {
+  name: string; value: any; onChange: (v: any) => void; onRename: (to: string) => void; onDelete: () => void; transfer?: CommandTransfer;
+}) {
   const { ctx, schemas } = useSession();
   const help = (path: string[]) => helpText(schemas.library, [...TP, ...path]);
   const t = value || {};
@@ -351,7 +398,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete }: { name: st
         <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} 
           inherit={parent?.transport ? { value: parent.transport, from: `inherited from ${t.extends}` } : { value: "ssh", from: "default" }} />
       </Field>
-      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} />
+      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} transfer={transfer} />
       <StatusEditor value={t.status} onChange={(v) => set("status", v)} inherited={parent?.status} />
       <SelftestEditor value={t.selftest} onChange={(v) => set("selftest", v)} inherited={parent?.selftest || []} />
       <Section title="Collect filters" help={help(["collect"])} collapsed={!t.collect}>

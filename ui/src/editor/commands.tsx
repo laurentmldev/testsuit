@@ -14,9 +14,9 @@
 // Editors of command definitions (lab components, stage and host overrides), ready checks
 // (wait_for) and expected results, used by every form that has commands.
 import { useState } from "react";
-import { Choices, Combo, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
+import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { CodeEditor } from "../monaco";
-import { classes, Markdown } from "../util";
+import { classes, freeName, Markdown } from "../util";
 import { clone, useSession, viaChoices } from "./state";
 
 const CMD_PATH = ["components", "_", "commands", "_"];
@@ -393,16 +393,79 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
   );
 }
 
+/** Where a command can be copied or moved: the lab components that can be edited in the session (this one
+ * included, to duplicate a command under another name), and what each already has. */
+export interface CommandTransfer {
+  self: string;
+  targets: string[];
+  /** the commands a target defines itself, and those it inherits (with the component each comes from) */
+  commandsOf: (target: string) => { own: string[]; inherited: Record<string, string> };
+  /** copies (or moves) the command `name` of this component to `target`, as `as` (replacing one of that name) */
+  run: (mode: "copy" | "move", name: string, target: string, as: string) => void | Promise<void>;
+}
+
+function TransferDialog({ mode, name, transfer, onClose, onDone }: {
+  mode: "copy" | "move"; name: string; transfer: CommandTransfer; onClose: () => void; onDone: (target: string, as: string) => void;
+}) {
+  const targets = transfer.targets.filter((t) => mode === "copy" || t !== transfer.self);
+  const [target, setTarget] = useState(mode === "copy" && targets.length === 1 ? targets[0] : "");
+  const has = target ? transfer.commandsOf(target) : { own: [], inherited: {} };
+  const self = target === transfer.self;
+  const [as, setAs] = useState<string | null>(null);
+  // the name proposed: the same one when the target does not define it, else a free one
+  const proposed = !target ? name : self || has.own.includes(name) ? freeName(name, self ? [...has.own, name] : has.own) : name;
+  const newName = (as ?? proposed).trim();
+  const replaces = !!target && has.own.includes(newName);
+  const overrides = target && !replaces ? has.inherited[newName] : undefined;
+  const [busy, setBusy] = useState(false);
+  const invalid = !target || !targets.includes(target) || !newName || (self && newName === name) || !/^[A-Za-z0-9_.-]+$/.test(newName);
+  const go = async () => {
+    setBusy(true);
+    try {
+      await transfer.run(mode, name, target, newName);
+      onDone(target, newName);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const verb = mode === "copy" ? "Copy" : "Move";
+  return (
+    <Dialog title={`${verb} the command ${name}`} onClose={onClose} footer={<>
+      <button onClick={onClose}>Cancel</button>
+      <button className={replaces ? "danger" : "primary"} disabled={invalid || busy} onClick={go}>
+        {replaces ? `Replace ${newName} in ${self ? "this component" : target}` : `${verb} to ${self ? "this component" : target || "…"}`}
+      </button>
+    </>}>
+      <Field name="target" label="To the component" help={mode === "copy" ? "Another lab component, or this one to duplicate the command under another name." : "Another lab component: the command leaves this one."}>
+        <Combo strict value={target} onChange={(v) => { setTarget(v); setAs(null); }} autoFocus
+          choices={targets.map((t) => ({ value: t, description: t === transfer.self ? "this component (a duplicate, under another name)" : undefined }))} />
+      </Field>
+      <Field name="name" label="As the command" help="Its name in the target component."
+        hint={!target ? null : self && newName === name ? <span className="error-text">another name than {name}, in the same component</span>
+          : replaces ? <><span className="warning-text">{self ? "this component" : target} already has {newName}: it is replaced</span>
+            {" · "}<button type="button" className="link" onClick={() => setAs(freeName(newName, self ? [...has.own, name] : has.own))}>keep both</button></>
+          : overrides ? <>overrides the {newName} inherited from {overrides}</>
+          : newName !== name ? (has.own.includes(name)
+            ? <>{self ? "this component" : target} already has {name}: renamed{!self && <>{" · "}<button type="button" className="link" onClick={() => setAs(name)}>replace it instead</button></>}</>
+            : null) : null}>
+        <Text mono value={as ?? proposed} onChange={(v) => setAs(v)} />
+      </Field>
+    </Dialog>
+  );
+}
+
 /** Commands by name: inherited ones (read-only, can be overridden) and own ones (editable). With required (the
- * commands a role lists, with what each does), those implemented nowhere are shown as missing. */
-export function CommandsEditor({ value, onChange, inherited, required, title, help }: {
+ * commands a role lists, with what each does), those implemented nowhere are shown as missing. With transfer,
+ * an own command can be copied or moved to another component (or copied to this one under another name). */
+export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer }: {
   value: Record<string, any> | null | undefined; onChange: (v: Record<string, any>) => void;
   inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string }>;
-  title?: string; help?: string;
+  title?: string; help?: string; transfer?: CommandTransfer;
 }) {
   const { schemas } = useSession();
   const own = value || {};
   const [openName, setOpenName] = useState<string | null>(null);
+  const [moving, setMoving] = useState<{ mode: "copy" | "move"; name: string } | null>(null);
   const [adding, setAdding] = useState("");
   const names = [...new Set([...Object.keys(required || {}), ...Object.keys(inherited || {}), ...Object.keys(own)])];
   const set = (name: string, spec: any) => onChange({ ...own, [name]: spec });
@@ -442,10 +505,22 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 <td className="mono small">{summary(mine ? own[name] : from?.spec)}</td>
                 <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}{required && !role && <span className="warning-text"> · not in the role</span>}</td>
                 <td>
-                  {mine ? <button className="small" onClick={(e) => {
-                    e.stopPropagation();
-                    remove(name);
-                  }}>{from ? "Use the inherited one" : "Remove"}</button>
+                  {mine ? <span className="row-actions">
+                    {transfer && <>
+                      <button className="small" title="Copy it to another component, or to this one under another name" onClick={(e) => {
+                        e.stopPropagation();
+                        setMoving({ mode: "copy", name });
+                      }}>Copy</button>
+                      <button className="small" title="Move it to another component" disabled={transfer.targets.every((t) => t === transfer.self)} onClick={(e) => {
+                        e.stopPropagation();
+                        setMoving({ mode: "move", name });
+                      }}>Move</button>
+                    </>}
+                    <button className="small" onClick={(e) => {
+                      e.stopPropagation();
+                      remove(name);
+                    }}>{from ? "Use the inherited one" : "Remove"}</button>
+                  </span>
                     : <button className="small" onClick={(e) => {
                       e.stopPropagation();
                       add(name);
@@ -466,6 +541,12 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
         <Combo value={adding} onChange={setAdding} choices={wellKnown} placeholder="add a command: start, stop, ready…" onPick={add} />
         {adding && <button className="small" onClick={() => add(adding)}>Add</button>}
       </div>
+      {moving && transfer && <TransferDialog mode={moving.mode} name={moving.name} transfer={transfer} onClose={() => setMoving(null)}
+        onDone={(target, as) => {
+          if (target === transfer.self) setOpenName(as);
+          else if (moving.mode === "move" && openName === moving.name) setOpenName(null);
+          setMoving(null);
+        }} />}
     </Section>
   );
 }

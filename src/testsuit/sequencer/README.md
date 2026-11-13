@@ -1177,7 +1177,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Lab inventory.**
 - Forms for stages, ad hoc components and their variables, with a YAML view next to them.
-- **Roles** and **Components** views of a library file: a role lists its commands with what each does, its parent's commands and the hosts that take it; a component shows each implementation with the component it comes from, its status probe and self-test, and the hosts extending it. Renaming one makes the inventories and the other library files of its folders follow.
+- **Roles** and **Components** views of a library file: a role lists its commands with what each does, its parent's commands and the hosts that take it; a component shows each implementation with the component it comes from, its status probe and self-test, and the hosts extending it. Renaming one makes the inventories and the other library files of its folders follow. A command a component implements itself can be copied or moved to another component of the session's library files (written there with its comments kept), or copied to the same component under another name; when the target already has one of that name, the copy takes a free name (`stop_2`) unless the user chooses to replace it.
 - Helpers: when creating a host, the roles it can take (those of the stage first) and the components it can extend; its resolved commands, each with where it comes from, and the commands of its role it does not implement; the stage types; host reachability on demand.
 - Every change is validated like `tsq lab reload` and refused if invalid.
 
