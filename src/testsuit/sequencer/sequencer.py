@@ -585,10 +585,25 @@ class Sequencer:
         spec = command["spec"]
         transport = self.transport_for(comp_id)
         result: dict = {"component": comp_id, "command": name, "kind": command["kind"], "at": now()}
-        try:
-            root = await transport.resolve_root()
-        except Exception as e:
-            return {**result, "ok": False, "error": f"cannot reach {comp.host}: {e}"}
+        vias = self.lab.command_vias(comp, stage)
+        # a command run through another component does not need this one to answer (it may be out of reach of
+        # the sequencer): its remote root, for its keys, is then the configured one; signal and kill reach what
+        # was started through other components even when it does not answer
+        if command["kind"] in ("run", "http"):
+            through = bool(spec.get("via"))
+        else:
+            through = bool(vias)
+        reached = True
+        if through:
+            root, unreached = await self._manual_root(comp_id)
+            reached = unreached is None
+            if unreached:                           # a warning, not an error: the command still runs
+                result["warning"] = unreached
+        else:
+            try:
+                root = await transport.resolve_root()
+            except Exception as e:
+                return {**result, "ok": False, "error": f"cannot reach {comp.host}: {e}"}
         manual_dir = f"{root}/.tsq/manual/{comp_id}"
         started = time.monotonic()
         if command["kind"] == "http":                  # a REST API call, from here or through its via
@@ -607,8 +622,9 @@ class Sequencer:
                           error=answer.error or ("" if ok else why))
         elif command["kind"] != "run":                 # signal, kill: the processes started by hand
             sig = "KILL" if command["kind"] == "builtin kill" else str(spec["signal"])
-            places = [(transport, manual_dir)]         # on the component, and on what its commands run through
-            for via in {v.id: v for v in self.lab.command_vias(comp, stage).values()}.values():
+            # on the component (when it answers), and on what its commands run through
+            places = [(transport, manual_dir)] if reached else []
+            for via in {v.id: v for v in vias.values()}.values():
                 other = self.transport_for(via.id)
                 places.append((other, f"{await other.resolve_root()}/.tsq/manual/{comp_id}"))
             alive = []
