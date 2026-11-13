@@ -569,6 +569,14 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
       if (!r) continue;
       nodes.push({
         id: `c:${c.id}`, type: "component", position: { x: r.x, y: r.y }, style: { width: r.width, height: r.height, opacity: opacity(c.id) },
+        // its size and handles given, not left to React Flow to measure: a node rebuilt here before React Flow measured it
+        // (the lab view or the arrangement arriving during the first render) kept its size but lost its handles, and
+        // React Flow then drew none of its links until a reload (the links draw their own path: the handles only
+        // need to exist)
+        width: r.width, height: r.height, handles: [
+          { type: "target", position: Position.Top, x: r.width / 2, y: r.height / 2, width: 1, height: 1 },
+          { type: "source", position: Position.Bottom, x: r.width / 2, y: r.height / 2, width: 1, height: 1 },
+        ],
         draggable: !!draft, selectable: false, zIndex: 2, className: picked === c.id ? "lab-picked" : undefined,
         data: { comp: c, icon: view?.icons?.[c.id], activity: activity[c.id] || [], runs, shared: (c.stages?.length || 0) > 1 ? c.stages : null, held: c.holders || [],
           arranging: !!draft, onProbe: () => onProbe(c.id), vias: viasOf(view?.links, c.id), labelOf: (id: string) => byId[id]?.label || id },
