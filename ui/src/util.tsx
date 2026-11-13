@@ -314,14 +314,25 @@ const TRACED = /^\++tsq\$ /;
 /** A note of the sequencer in a step log ("[tsq <time>] …"). */
 const NOTE = /^\[tsq [^\]]*\] /;
 
-/** The output of a command as a console: each line it ran, shown as a prompt, then what that line printed. */
+/** A comment line of a traced command, made a no-op (": '# …'") to show where it is; null for another line. */
+function commentOf(ran: string): string | null {
+  if (!ran.startsWith(": ")) return null;
+  let arg = ran.slice(2);
+  if (arg.startsWith("'") && arg.endsWith("'")) arg = arg.slice(1, -1).replace(/'\\''/g, "'");   // bash quotes it
+  return arg.startsWith("#") ? arg : null;
+}
+
+/** The output of a command as a console: each line it ran, shown as a prompt, then what that line printed; its
+ *  comments where they are. */
 export function ConsoleText({ text }: { text: string }) {
   const lines = text.split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
   return (
     <>
       {lines.map((line, i) => TRACED.test(line)
-        ? <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{line.replace(TRACED, "")}</div>
+        ? (commentOf(line.replace(TRACED, "")) !== null
+          ? <div key={i} className="console-comment">{commentOf(line.replace(TRACED, ""))}</div>
+          : <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{line.replace(TRACED, "")}</div>)
         : NOTE.test(line) ? <div key={i} className="console-note">{line}</div>
           : <div key={i} className="console-out">{line || " "}</div>)}
     </>

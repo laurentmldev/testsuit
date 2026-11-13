@@ -186,7 +186,40 @@ def traced(command: str, before: str = "") -> str:
     """A step or a command run by hand as it runs: each line it runs is written to its output just before what
     that line prints (``set -x``, each line after ``TRACE``), so the output reads line by line; ``before``: what
     runs first, not traced (a ``cd``...)."""
-    return (f"{before}\n" if before else "") + f"PS4={shlex.quote(TRACE)}\nset -x\n" + command
+    return (f"{before}\n" if before else "") + f"PS4={shlex.quote(TRACE)}\nset -x\n" + with_comments(command)
+
+
+_HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_]\w*)\2")
+_CONTINUES = re.compile(r"(\\|\|\||&&|\|)\s*$")      # a line that goes on to the next one
+
+
+def with_comments(command: str) -> str:
+    """The command with its comment lines (``# ...`` alone on a line) made no-op commands (``: '# ...'``), so
+    a traced command shows them in its output too, where they are. Only where a command can start: not in a
+    here-document, a ``case``, nor after a line that goes on (``|``, ``&&``, ``\\``...)."""
+    lines = command.split("\n")
+    heredoc: tuple[str, bool] | None = None     # the word that ends the here-document, and whether tabs go
+    cases = 0
+    previous = ""
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if heredoc is not None:
+            if (line.lstrip("\t") if heredoc[1] else line) == heredoc[0]:
+                heredoc = None
+            continue
+        if stripped.startswith("#") and not stripped.startswith("#!") and cases == 0 \
+                and not _CONTINUES.search(previous):
+            lines[i] = line[:len(line) - len(line.lstrip())] + ": " + shlex.quote(stripped)
+            continue
+        if stripped:
+            code = stripped.split(" #", 1)[0]
+            cases += len(re.findall(r"(?:^|[;\s])case\s", code)) - len(re.findall(r"(?:^|[;\s])esac\b", code))
+            cases = max(cases, 0)
+            found = _HEREDOC.search(code)
+            if found:
+                heredoc = (found.group(3), found.group(1) == "-")
+            previous = code
+    return "\n".join(lines)
 
 
 _TRACED = re.compile(r"^\++" + re.escape(TRACE.lstrip("+")) + r".*(\n|$)", re.MULTILINE)
