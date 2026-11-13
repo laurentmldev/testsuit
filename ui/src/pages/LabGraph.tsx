@@ -122,11 +122,12 @@ function ComponentNode({ data }: NodeProps) {
   const src = icon?.file ? url(`lab/icons/${encodeURIComponent(comp.id)}`) : null;
   const running = (activity as Activity[]).find((a) => a.state === "running") || activity[0];
   const otherRuns = (held as any[]).filter((h) => !stageRuns.has(h.run));
+  const note = offNote(comp);
   return (
-    <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
+    <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", note && "noted", activity.length > 0 && "busy")}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <Handle type="target" position={Position.Top} className="lab-handle" /><Handle type="source" position={Position.Bottom} className="lab-handle" />
-      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
+      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={note ? 34 : 52} /></span>
       <strong className="lab-name">{comp.label || comp.id}</strong>
       <div className="lab-node-tags">
         {arranging ? <Badge value={comp.state} />
@@ -136,6 +137,7 @@ function ComponentNode({ data }: NodeProps) {
         {comp.hold && <Badge value="hold" title={comp.note || ""} />}
         {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
       </div>
+      {note && <div className="lab-note" title={note}>{note}</div>}
       {/* the detailed card, floating beside it while it is pointed at (not scaled with the diagram) */}
       <NodeToolbar isVisible={hovered && !arranging} position={Position.Right} offset={10} className="lab-hover">
         <div className="lab-node-head">
@@ -158,7 +160,7 @@ function ComponentNode({ data }: NodeProps) {
         {(comp.detail || comp.probed_at) && (
           <div className="muted small lab-hover-text">{comp.detail}{comp.detail && comp.probed_at ? " · " : ""}{comp.probed_at ? `probed ${ago(comp.probed_at)}` : ""}</div>
         )}
-        {(comp.hold || comp.maintenance) && comp.note && <div className="muted small lab-hover-text">{comp.note}</div>}
+        {note && <div className="lab-note full"><strong>{comp.maintenance ? "Maintenance" : "Hold"} note:</strong> {note}</div>}
         <ViaList vias={vias} labelOf={labelOf} />
         {activity.slice(0, 3).map((a: Activity) => (
           <div key={`${a.run}:${a.phase}:${a.step}:${a.for || ""}`} className="lab-activity">
@@ -177,6 +179,9 @@ function ComponentNode({ data }: NodeProps) {
     </div>
   );
 }
+
+/** The note entered when it was put on hold or in maintenance, while it is (README section 13.1). */
+export const offNote = (item: any): string => ((item?.hold || item?.maintenance) && item?.note) || "";
 
 /** The host name (tsq_hosts) the components of an address all give, if they do. */
 function sharedAlias(members: any[]): string {
@@ -202,6 +207,7 @@ function AreaNode({ data }: NodeProps) {
         <code className="small">{stage.type}</code>
         {stage.hold && <Badge value="hold" title={stage.note || ""} />}
         {stage.maintenance && <Badge value="maintenance" title={stage.note || ""} />}
+        {offNote(stage) && <span className="lab-note" title={stage.note}>{stage.note}</span>}
         <span className="spacer" />
         {held.length === 0 && !stage.hold && !stage.maintenance && <span className="muted small">free</span>}
       </div>

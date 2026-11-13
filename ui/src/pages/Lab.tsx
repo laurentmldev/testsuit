@@ -19,7 +19,7 @@ import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
 import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
-import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
+import { ComponentDialog, LabGraph, LinksDialog, offNote, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
 const ACTION_HELP: Record<string, string> = {
@@ -426,7 +426,8 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td><Address host={c.host} alias={c.host_alias} /></td>
       <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
         <div className="muted small" title={time(c.probed_at)}>{c.probing ? <><span className="pulse run" /> probing…</> : c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
-      <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}</td>
+      <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}
+        {offNote(c) && <div className="lab-note full">{c.note}</div>}</td>
       <td><Holders item={c} /></td>
       <td><Actions kind="components" item={c} onDone={refresh} onSelftest={setSelftest} onCommands={commandsOf(c)} /></td>
     </tr>
@@ -482,6 +483,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
             <span className="muted">type <code>{s.type}</code></span>
             {s.hold && <Badge value="hold" title={s.note || ""} />}
             {s.maintenance && <Badge value="maintenance" title={s.note || ""} />}
+            {offNote(s) && <span className="lab-note full">{s.note}</span>}
             <span className="small">held by <Holders item={s} /></span>
             <span className="spacer" />
             <Actions kind="stages" item={s} onDone={refresh} onSelftest={setSelftest} />
