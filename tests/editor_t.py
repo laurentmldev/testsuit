@@ -127,6 +127,9 @@ def test_locate_and_syntax_error():
 
 # ── editing sessions ────────────────────────────────────────────────────
 
+CREDS = {"username": "ada", "password": "token"}     # a push needs the user's own: unused by a local upstream
+
+
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
                           capture_output=True, text=True).stdout
@@ -219,7 +222,7 @@ def test_workspace_session(repos):
     # push in the user's name, with a tag
     diff = editor.diff(session)
     assert [f["path"] for f in diff["files"]] == ["datapack/testdef/count/testdef.yml"]
-    pushed = editor.push(session, "Add the count test", "Ada", "ada@example.com", tag="v2")
+    pushed = editor.push(session, "Add the count test", "Ada", "ada@example.com", tag="v2", credentials=CREDS)
     assert pushed["ok"], pushed
     assert "id: count" in repos.upstream_file("datapack/testdef/count/testdef.yml")
     assert git(repos.root / "upstream.git", "log", "-1", "--format=%an <%ae> %s", "v2").strip() == \
@@ -380,10 +383,10 @@ def test_rejected_push_then_rebase(repos):
     editor = repos.editor
     first, second = editor.open("workspace0"), editor.open("workspace0")
     editor.write(first, "setup/globals.yml", data={"duration": "1s", "min_count": 3})
-    assert editor.push(first, "Longer", "Ada", "ada@example.com")["ok"]
+    assert editor.push(first, "Longer", "Ada", "ada@example.com", credentials=CREDS)["ok"]
 
     editor.write(second, "setup/globals.yml", data={"duration": "0.5s", "min_count": 5})
-    rejected = editor.push(second, "More counts", "Bob", "bob@example.com", tag="v9")
+    rejected = editor.push(second, "More counts", "Bob", "bob@example.com", tag="v9", credentials=CREDS)
     assert not rejected["ok"] and "rebase" in rejected["hint"]
     assert "v9" not in git(editor.get(second.id).root, "tag")         # undone: no tag, no commit
     assert editor.diff(second)["files"]                               # the change is still there
@@ -391,8 +394,78 @@ def test_rejected_push_then_rebase(repos):
     rebased = editor.rebase(second)
     assert not rebased["ok"] and rebased["conflicts"] == ["datapack/setup/globals.yml"]
     editor.write(second, "setup/globals.yml", content="duration: 1s\nmin_count: 5\n")   # fixed in the YAML view
-    assert editor.push(second, "More counts", "Bob", "bob@example.com")["ok"]
+    assert editor.push(second, "More counts", "Bob", "bob@example.com", credentials=CREDS)["ok"]
     assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml")) == {"duration": "1s", "min_count": 5}
+
+
+def test_push_needs_the_users_credentials(repos):
+    editor = repos.editor
+    session = editor.open("workspace0")
+    editor.write(session, "setup/globals.yml", data={"duration": "1s", "min_count": 3})
+    with pytest.raises(SequencerError, match="credentials"):
+        editor.push(session, "Longer", "Ada", "ada@example.com", tag="v5")
+    assert "v5" not in git(session.root, "tag") and editor.diff(session)["files"]     # nothing committed
+    assert editor.push(session, "Longer", "Ada", "ada@example.com", credentials={"passphrase": "secret"})["ok"]
+
+
+def test_repository_added_by_url(repos):
+    editor = repos.editor
+    upstream = str(repos.root / "upstream.git")
+    with pytest.raises(SequencerError, match="password or token"):
+        editor.add_workspace("https://ada:secret@example.com/tests.git", "main")
+    with pytest.raises(SequencerError, match="give the branch"):
+        editor.add_workspace(upstream, "", name="Bench tests")
+    with pytest.raises(SequencerError, match="not a branch"):
+        editor.add_workspace(upstream, "v1", name="Bench tests")
+    with pytest.raises(SequencerError, match="no folder"):
+        editor.add_workspace(upstream, "main", name="Bench tests", path="nowhere")
+    git(repos.root / "work", "push", "-q", str(repos.root / "upstream.git"), "main:other")
+    repo = editor.add_workspace(upstream, "main", name="Bench tests", path="datapack", credentials=CREDS, by="Ada")
+    assert repo["id"] == "bench-tests" and repo["url"] == upstream and repo["added"]["branch"] == "main"
+    assert {r["id"] for r in editor.repositories()} == {"lab", "workspace0", "bench-tests"}
+    clone = repos.config.root / "workspaces" / "bench-tests"
+    remote = git(clone, "branch", "-r", "--format=%(refname:short)").split()
+    assert "origin/main" in remote and "origin/other" not in remote                      # that branch only
+    assert Path(repo["folder"]) in editor.workspace_folders()
+    assert "secret" not in (repos.config.root / "workspaces.yml").read_text()
+    with pytest.raises(SequencerError, match="already listed"):
+        editor.add_workspace(upstream, "main", name="bench-tests")
+
+    # its datapack definitions, found and edited in place like those of server.workspaces
+    session = editor.open("bench-tests", local=True)
+    assert "setup/bench_setup.yml" in {f["path"] for f in editor.tree(session)}
+    status = editor.workspace_status("bench-tests")
+    assert status["changes"] == [] and status["ahead"] == status["behind"] == 0 and status["git"]["branch"] == "main"
+
+    # a change made meanwhile in its folder (another browser, a hand edit): the stamp changes, the change is listed
+    stamp = status["stamp"]
+    editor.write(session, "setup/globals.yml", data={"duration": "1s", "min_count": 3})
+    status = editor.workspace_status("bench-tests")
+    assert status["stamp"] != stamp and status["changes"] == [{"status": "M", "path": "datapack/setup/globals.yml"}]
+    with pytest.raises(SequencerError, match="local changes"):
+        editor.pull_workspace("bench-tests")
+    with pytest.raises(SequencerError, match="not pushed"):
+        editor.remove_workspace("bench-tests")
+    assert editor.push(session, "Longer", "Ada", "ada@example.com", tag="v3", credentials=CREDS)["ok"]
+    assert editor.workspace_status("bench-tests")["changes"] == []
+
+    # pushed from a scratch clone: the folder is behind, the push is shown as newer, a pull brings it
+    scratch = editor.open("bench-tests")
+    editor.write(scratch, "setup/globals.yml", data={"duration": "2s", "min_count": 3})
+    assert editor.push(scratch, "Even longer", "Bob", "bob@example.com", credentials=CREDS)["ok"]
+    status = editor.workspace_status("bench-tests")
+    assert status["published"]["newer"] and status["published"]["author"] == "Bob <bob@example.com>"
+    pulled = editor.pull_workspace("bench-tests", CREDS)
+    assert pulled["ok"] and pulled["updated"], pulled
+    assert "2s" in (Path(repo["folder"]) / "setup/globals.yml").read_text()
+    assert not editor.workspace_status("bench-tests")["published"]["newer"]
+
+    # removed: its clone and its sessions; server.workspaces cannot be removed from here
+    with pytest.raises(SequencerError, match="server.workspaces"):
+        editor.remove_workspace("workspace0")
+    editor.remove_workspace("bench-tests")
+    assert {r["id"] for r in editor.repositories()} == {"lab", "workspace0"}
+    assert not (repos.config.root / "workspaces" / "bench-tests").exists() and not editor.sessions
 
 
 def test_in_place_session(repos, tmp_path):
@@ -419,18 +492,18 @@ def test_in_place_session(repos, tmp_path):
     assert yaml.safe_load((folder / "setup" / "globals.yml").read_text())["duration"] == "2s"   # written in place
     assert editor.describe(session)["changed"] == 1
     assert [f["path"] for f in editor.diff(session)["files"]] == ["datapack/setup/globals.yml"]
-    assert editor.push(session, "Longer", "Ada", "ada@example.com")["ok"]
+    assert editor.push(session, "Longer", "Ada", "ada@example.com", credentials=CREDS)["ok"]
     assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml"))["duration"] == "2s"
     assert "notes.txt" in git(repos.root / "tests-clone", "status", "--porcelain")   # not pushed, left as is
     # someone pushed meanwhile: the push is refused, the rebase replays the working copy on top
     other = editor.open("workspace0")
     editor.write(other, "setup/extra.yml", data={"extra": 1})
-    assert editor.push(other, "Extra", "Bob", "bob@example.com")["ok"]
+    assert editor.push(other, "Extra", "Bob", "bob@example.com", credentials=CREDS)["ok"]
     editor.write(session, "setup/globals.yml", data={"duration": "2s", "min_count": 6})
-    assert "rebase" in editor.push(session, "More", "Ada", "ada@example.com")["hint"]
+    assert "rebase" in editor.push(session, "More", "Ada", "ada@example.com", credentials=CREDS)["hint"]
     assert editor.rebase(session)["ok"]
     assert (folder / "setup" / "extra.yml").is_file()
-    assert editor.push(session, "More", "Ada", "ada@example.com")["ok"]
+    assert editor.push(session, "More", "Ada", "ada@example.com", credentials=CREDS)["ok"]
     assert yaml.safe_load(repos.upstream_file("datapack/setup/globals.yml"))["min_count"] == 6
 
     editor.close(session.id)
@@ -440,7 +513,7 @@ def test_in_place_session(repos, tmp_path):
     lab = editor.open("lab", local=True)
     assert lab.branch == "" and editor.kind(lab, "inventory.yml") == "inventory"
     with pytest.raises(SequencerError, match="detached"):
-        editor.push(lab, "x", "Ada", "ada@example.com")
+        editor.push(lab, "x", "Ada", "ada@example.com", credentials=CREDS)
 
     # a folder outside git: files only
     plain = tmp_path / "plain"
@@ -488,11 +561,11 @@ def test_lab_session(repos):
     problems = editor.write(session, "inventory.yml", data=inventory)["problems"]
     assert any("nope" in p["message"] for p in problems)
     with pytest.raises(Exception, match="invalid"):
-        editor.push(session, "Break it", "Ada", "ada@example.com")
+        editor.push(session, "Break it", "Ada", "ada@example.com", credentials=CREDS)
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "dut"
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_label"] = "Counter 1"
     editor.write(session, "inventory.yml", data=inventory)
-    pushed = editor.push(session, "Label counter_1", "Ada", "ada@example.com", tag="lab-2")
+    pushed = editor.push(session, "Label counter_1", "Ada", "ada@example.com", tag="lab-2", credentials=CREDS)
     assert pushed["ok"]
     assert editor.published["lab"]["tag"] == "lab-2"
 
@@ -598,6 +671,14 @@ def test_api(repos, tmp_path):
     try:
         home = requests.get(f"{url}/edit").json()
         assert {r["id"] for r in home["repositories"]} == {"lab", "workspace0"}
+        added = requests.post(f"{url}/edit/repositories", json={"url": str(repos.root / "upstream.git"),
+                                                                 "branch": "main", "name": "more", "path": "datapack", **CREDS})
+        assert added.status_code == 201 and added.json()["id"] == "more", added.text
+        assert requests.get(f"{url}/edit/repositories/more/status").json()["changes"] == []
+        assert requests.post(f"{url}/edit/repositories/more/pull", json={}).json()["ok"]
+        refused = requests.post(f"{url}/edit/repositories", json={"url": "https://a:b@example.com/x.git"})
+        assert refused.status_code >= 400 and "b@" not in refused.text
+        assert requests.delete(f"{url}/edit/repositories/more").json() == {"removed": "more"}
         sid = requests.post(f"{url}/edit/sessions", json={"repo": "workspace0"}).json()["id"]
         assert requests.get(f"{url}/edit/sessions/{sid}/schemas").json()["testdef"]["title"] == "Test definition"
         assert "counter_host" in requests.get(f"{url}/edit/sessions/{sid}/context").json()["lab"]["library"]

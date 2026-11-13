@@ -13,7 +13,7 @@
 
 """REST endpoints of the Editor mode (README section 13.2), added when ``server.editor`` is on.
 
-Git credentials sent to ``push`` and ``rebase`` are used for that request only: they go to the
+Git credentials sent to ``push``, ``rebase``, and to add or pull a repository, are used for that request only: they go to the
 git process environment, never to a file, the logs or a response.
 """
 from __future__ import annotations
@@ -54,6 +54,37 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return {"enabled": True, "repositories": await run(editor.repositories),
                 "sessions": [editor.describe(s) for s in editor.sessions.values()],
                 "published": editor.published}
+
+    def credentials(body: dict) -> dict:
+        return {k: body.get(k) for k in ("username", "password", "passphrase") if body.get(k)}
+
+    @app.post("/edit/repositories", status_code=201)
+    async def add_repository(body: dict):
+        """Add a tests repository by its git URL ({url, branch, name?, path?, by?}: only that branch is cloned and the user's credentials, used
+        for this clone only): cloned into <storage.root>/workspaces, listed with server.workspaces."""
+        repo = await run(editor.add_workspace, str(body.get("url") or ""), str(body.get("branch") or ""),
+                         body.get("name"), body.get("path"), credentials(body), body.get("by"))
+        log.info(f"editor: tests repository '{repo['id']}' added from {repo['url']}"
+                 + (f" by {body.get('by')}" if body.get("by") else ""))
+        return repo
+
+    @app.delete("/edit/repositories/{repo_id}")
+    async def remove_repository(repo_id: str, force: bool = False):
+        await run(editor.remove_workspace, repo_id, force)
+        log.info(f"editor: tests repository '{repo_id}' removed")
+        return {"removed": repo_id}
+
+    @app.get("/edit/repositories/{repo_id}/status")
+    async def repository_status(repo_id: str):
+        """The changes of a tests repository's folder (the Datapacks page asks every few seconds)."""
+        return await run(editor.workspace_status, repo_id)
+
+    @app.post("/edit/repositories/{repo_id}/pull")
+    async def pull_repository(repo_id: str, body: dict | None = None):
+        result = await run(editor.pull_workspace, repo_id, credentials(body or {}))
+        if result.get("ok") and result.get("updated"):
+            log.info(f"editor: tests repository '{repo_id}' pulled: {result['commit'][:10]}")
+        return result
 
     @app.post("/edit/sessions", status_code=201)
     async def open_session(body: dict):
@@ -224,9 +255,6 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.get("/edit/sessions/{sid}/diff")
     async def diff(sid: str):
         return await run(editor.diff, session(sid))
-
-    def credentials(body: dict) -> dict:
-        return {k: body.get(k) for k in ("username", "password", "passphrase") if body.get(k)}
 
     @app.post("/edit/sessions/{sid}/push")
     async def push(sid: str, body: dict):

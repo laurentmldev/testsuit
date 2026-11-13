@@ -20,6 +20,7 @@ import { FileBrowser } from "../files";
 import { handKeys, KeysByHand, statusAmong, type HandKey } from "../keysbyhand";
 import { attempt, classes, Markdown, navigate, size, Spinner } from "../util";
 import { useSession } from "./state";
+import { WorkspaceTag, type Repository } from "./workspace";
 
 export function GenerateDialog({ onClose }: { onClose: () => void }) {
   const { sid, ctx, info } = useSession();
@@ -29,12 +30,12 @@ export function GenerateDialog({ onClose }: { onClose: () => void }) {
         <p>Datapacks come from the test definitions of a tests repository: open an editing session on it. A datapack generated there is checked against the lab as it runs now.</p>
       </Dialog>
     );
-  return <GenerateDatapack sid={sid} workspace={ctx.workspace} onClose={onClose} />;
+  return <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} onClose={onClose} />;
 }
 
 /** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
-export function GenerateDatapack({ sid, workspace, testdef: initial, config: initialConfig, onClose }: {
-  sid: string; workspace: any; testdef?: string; config?: string | null; onClose: () => void;
+export function GenerateDatapack({ sid, workspace, repository, testdef: initial, config: initialConfig, onClose }: {
+  sid: string; workspace: any; repository?: Repository | null; testdef?: string; config?: string | null; onClose: () => void;
 }) {
   const testdefs: any[] = workspace?.testdefs || [];
   const [testdef, setTestdef] = useState<string>(initial || testdefs[0]?.path || "");
@@ -196,7 +197,9 @@ export function GenerateDatapack({ sid, workspace, testdef: initial, config: ini
     </>
   );
   return (
-    <Dialog title="Generate a datapack" onClose={onClose} footer={footer} wide>
+    <Dialog title={repository ? `Generate a datapack from ${repository.id}` : "Generate a datapack"} onClose={onClose} footer={footer} wide>
+      {repository && <div className="workspace-banner"><WorkspaceTag repository={repository} />
+        {(repository as any).workspaces > 1 && <span className="muted small">only the test definitions of this workspace are listed</span>}</div>}
       {!result && checks.length > 0 && <Checks checks={checks} />}
       {busy && (
         <>

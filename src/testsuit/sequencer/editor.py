@@ -274,9 +274,185 @@ class Editor:
         repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and components",
                   "folder": str(self.seq.config.lab_folder), "git": git_state(self.seq.config.lab_folder)}]
         for i, folder in enumerate(self.seq.config.workspaces):
+            git = git_state(folder) if folder.exists() else None
             repos.append({"id": f"workspace{i}", "kind": "workspace", "label": f"Tests: {folder.name}",
-                          "folder": str(folder), "git": git_state(folder) if folder.exists() else None})
+                          "folder": str(folder), "git": git, "url": (git or {}).get("repo"), "added": None})
+        for entry in self._added():
+            folder = self._added_folder(entry)
+            git = git_state(folder) if folder.exists() else None
+            repos.append({"id": entry["id"], "kind": "workspace", "label": f"Tests: {entry['id']}", "folder": str(folder),
+                          "git": git, "url": entry["url"], "added": {k: entry.get(k) for k in ("by", "at", "branch", "path")}})
         return repos
+
+    def workspace_folders(self) -> list[Path]:
+        """The folders of the tests repositories: server.workspaces, then those added from the UI."""
+        return [*self.seq.config.workspaces, *(self._added_folder(e) for e in self._added())]
+
+    # ── tests repositories added by git URL ──────────────────────────────
+    # Cloned into <storage.root>/workspaces/<id>, listed in <storage.root>/workspaces.yml, next to server.workspaces.
+
+    _added_lock = threading.Lock()
+
+    @property
+    def _added_file(self) -> Path:
+        return self.seq.config.root / "workspaces.yml"
+
+    def _added(self) -> list[dict]:
+        try:
+            data = yaml.safe_load(self._added_file.read_text()) or []
+        except FileNotFoundError:
+            return []
+        return [e for e in data if isinstance(e, dict) and e.get("id") and e.get("url")] if isinstance(data, list) else []
+
+    def _added_folder(self, entry: dict) -> Path:
+        return self.seq.config.root / "workspaces" / entry["id"] / (entry.get("path") or "")
+
+    @staticmethod
+    def _check_url(url: str) -> str:
+        url = url.strip()
+        if not url:
+            raise SequencerError("give the git URL of the repository")
+        if re.match(r"^[a-z][a-z0-9+.-]*://[^/@]*:[^/@]*@", url, re.I):
+            raise SequencerError("the URL holds a password or token: give it as a credential instead, "
+                                 "it would be stored with the clone otherwise")
+        if url.startswith("-"):
+            raise SequencerError(f"invalid git URL '{url}'")
+        return url
+
+    def add_workspace(self, url: str, branch: str, name: str | None = None, path: str | None = None,
+                      credentials: dict | None = None, by: str | None = None) -> dict:
+        """Clone a tests repository from its git URL, with the user's credentials (used for this clone only, never
+        stored), and list it with the others. branch: the one branch cloned (single-branch), pulled
+        and pushed to, required. path: the folder of the repository holding the datapack definitions."""
+        credentials = credentials or {}
+        url = self._check_url(url)
+        repo_id = (name or "").strip() or re.sub(r"\.git$", "", url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1])
+        repo_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", repo_id).strip("-.").lower()
+        if not repo_id or repo_id == "lab" or re.fullmatch(r"workspace\d+", repo_id):
+            raise SequencerError(f"invalid repository name '{repo_id}': give another one")
+        path = (path or "").strip().strip("/")
+        if path and (Path(path).is_absolute() or ".." in Path(path).parts):
+            raise SequencerError(f"'{path}': give a folder inside the repository")
+        branch = (branch or "").strip()
+        if not branch:
+            raise SequencerError("give the branch to clone: only that branch is cloned, pulled and pushed to")
+        if branch.startswith("-"):
+            raise SequencerError(f"invalid branch '{branch}'")
+        with self._added_lock:
+            if any(r["id"] == repo_id for r in self.repositories()):
+                raise SequencerError(f"a repository '{repo_id}' is already listed: give another name")
+            dest = self.seq.config.root / "workspaces" / repo_id
+            if dest.exists():
+                raise SequencerError(f"'{dest}' already exists: give another name, or remove that folder")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(["git", "-c", "credential.helper=", "clone", "--quiet", "--single-branch",
+                                     "--branch", branch, "--", url, str(dest)],
+                                    capture_output=True, text=True, timeout=600,
+                                    env=self._git_env(credentials))
+            if result.returncode:
+                shutil.rmtree(dest, ignore_errors=True)
+                raise SequencerError("cannot clone the repository: " + self._scrub((result.stderr or result.stdout).strip(), credentials))
+            if path and not (dest / path).is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+                raise SequencerError(f"the repository has no folder '{path}'")
+            if not _git(dest, "symbolic-ref", "--quiet", "HEAD", check=False).strip():
+                shutil.rmtree(dest, ignore_errors=True)
+                raise SequencerError(f"'{branch}' is a tag, not a branch: give a branch, to push to")
+            entry = {"id": repo_id, "url": url, "branch": branch, "path": path, "by": by or None, "at": now()}
+            self._added_file.parent.mkdir(parents=True, exist_ok=True)
+            self._added_file.write_text(yaml.safe_dump([*self._added(), entry], sort_keys=False))
+        return self._repo(repo_id)
+
+    def remove_workspace(self, repo_id: str, force: bool = False) -> None:
+        """Remove a repository added by URL: its clone, and the editing sessions on it. Refused while it holds
+        changes not pushed, unless force."""
+        entry = next((e for e in self._added() if e["id"] == repo_id), None)
+        if entry is None:
+            raise SequencerError(f"'{repo_id}' was not added from the UI: remove it from server.workspaces instead"
+                                 if any(r["id"] == repo_id for r in self.repositories()) else f"no repository '{repo_id}'")
+        clone = self.seq.config.root / "workspaces" / repo_id
+        if not force and clone.is_dir():
+            dirty = _git(clone, "status", "--porcelain", check=False).strip()
+            ahead = _git(clone, "rev-list", "--count", "@{u}..HEAD", check=False).strip()
+            if dirty or (ahead and ahead != "0"):
+                raise SequencerError(f"'{repo_id}' has changes that are not pushed: push them first, or remove it anyway")
+        for session in [s for s in self.sessions.values() if s.repo == repo_id]:
+            self.close(session.id)
+        with self._added_lock:
+            self._added_file.write_text(yaml.safe_dump([e for e in self._added() if e["id"] != repo_id], sort_keys=False))
+        shutil.rmtree(clone, ignore_errors=True)
+        self.published.pop(repo_id, None)
+
+    def workspace_status(self, repo_id: str) -> dict:
+        """What changed in a tests repository's folder, to follow the changes made meanwhile as on the Lab page:
+        its git state, its local changes (files not committed, commits not pushed), the commits of the upstream
+        branch it does not have (as last fetched), the last push from the Editor when it is not checked out
+        there, and a stamp of its files that changes whenever one of them does."""
+        repo = self._repo(repo_id)
+        if repo["kind"] != "workspace":
+            raise SequencerError(f"'{repo_id}' is not a tests repository")
+        folder = Path(repo["folder"])
+        if not folder.is_dir():
+            raise SequencerError(f"no folder '{folder}'")
+        git = repo["git"]
+        stamp = hashlib.sha1((git or {}).get("commit", "").encode() if git else b"")
+        for dirpath, dirnames, filenames in os.walk(folder):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+            for name in sorted(filenames):
+                try:
+                    st = (Path(dirpath) / name).stat()
+                except OSError:
+                    continue
+                stamp.update(f"{dirpath}/{name}:{st.st_mtime_ns}:{st.st_size}\n".encode())
+        result = {"repo": repo_id, "git": git, "stamp": stamp.hexdigest()[:16], "changes": [], "ahead": 0,
+                  "behind": 0, "published": None}
+        if git is None:
+            return result
+        status = _git(folder, "status", "--porcelain", "--untracked-files=all", "--", ".", check=False)
+        result["changes"] = [{"status": line[:2].strip(), "path": line[3:]} for line in status.splitlines() if line.strip()]
+        counts = _git(folder, "rev-list", "--left-right", "--count", "HEAD...@{u}", check=False).split()
+        if len(counts) == 2:
+            result["ahead"], result["behind"] = int(counts[0]), int(counts[1])
+        published = self.published.get(repo_id)
+        if published:
+            result["published"] = {**published, "newer": not self._contains(folder, published["commit"])}
+        return result
+
+    @staticmethod
+    def _contains(folder: Path, commit: str) -> bool:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=folder,
+                              capture_output=True).returncode == 0
+
+    def pull_workspace(self, repo_id: str, credentials: dict | None = None) -> dict:
+        """Fetch a tests repository's folder and bring its branch to the latest upstream commit, as the lab's
+        pull (tsq lab reload --pull) does: refused when it has changes not committed, or commits not pushed
+        (commit and push them first). The credentials are the user's, used for this fetch only (none: a public
+        repository, or one tsqd may read)."""
+        credentials = credentials or {}
+        repo = self._repo(repo_id)
+        if repo["kind"] != "workspace":
+            raise SequencerError(f"'{repo_id}' is not a tests repository: the lab is pulled with a reload")
+        folder = Path(repo["folder"])
+        root = _repo_root(folder)
+        if _git(root, "status", "--porcelain", "--untracked-files=no", check=False).strip():
+            raise SequencerError(f"'{repo_id}' has local changes: commit and push them first, then pull")
+        branch = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip()
+        if not branch:
+            raise SequencerError(f"'{repo_id}' is on no branch (detached HEAD): nothing to pull")
+        before = _git(root, "rev-parse", "HEAD").strip()
+        result = subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--tags", "origin"],
+                                cwd=root, capture_output=True, text=True, timeout=300,
+                                env=self._git_env(credentials))
+        if result.returncode:
+            return {"ok": False, "error": self._scrub((result.stderr or result.stdout).strip(), credentials),
+                    "hint": "check the credentials and their rights on the repository"}
+        merged = subprocess.run(["git", "merge", "--quiet", "--ff-only", f"origin/{branch}"], cwd=root,
+                                capture_output=True, text=True)
+        if merged.returncode:
+            return {"ok": False, "error": (merged.stderr or merged.stdout).strip(),
+                    "hint": "the folder has commits that are not pushed: push them first"}
+        after = _git(root, "rev-parse", "HEAD").strip()
+        return {"ok": True, "before": before, "commit": after, "updated": before != after, "git": git_state(folder)}
 
     def _repo(self, repo_id: str) -> dict:
         for repo in self.repositories():
@@ -791,7 +967,7 @@ class Editor:
             workspace = self.scan_workspace(session.folder, session.folder)
         else:                                          # what the datapacks of the workspaces ask of the lab
             workspace = {"testdefs": [], "setups": [], "subpipelines": {}}
-            for folder in self.seq.config.workspaces:
+            for folder in self.workspace_folders():
                 found = self.scan_workspace(folder, folder)
                 workspace["setups"] += found["setups"]
         described = self.describe_lab(lab)
@@ -803,8 +979,11 @@ class Editor:
                 t["source"] = "lab: " + os.path.relpath(source, self.seq.config.lab_folder)
         described["library_folders"] = [self.rel(session, Path(f)) if Path(f).is_relative_to(session.folder) else f
                                          for f in described["library_folders"]]
+        repository = next((r for r in self.repositories() if r["id"] == session.repo), None)
         return {
             "session": self.describe(session),
+            "repository": repository and {k: repository.get(k) for k in ("id", "kind", "label", "url", "added")}
+            | {"branch": (repository.get("git") or {}).get("branch"), "workspaces": len(self.workspace_folders())},
             "lab": described, "lab_error": lab_error,
             "workspace": workspace,
             "transports": sorted({"local", "ssh", *registry.transports}),
@@ -883,7 +1062,7 @@ class Editor:
                 line, column = _find_line(text, component.icon)
                 problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
                                  "message": f"component '{host}': {icon['error']} (the Lab view draws a plain box)"})
-        for folder in self.seq.config.workspaces:
+        for folder in self.workspace_folders():
             for setup in self.scan_workspace(folder, folder)["setups"]:
                 for cfg_name, cfg in setup["configurations"].items():
                     needs = self._needs_or_none(setup, cfg_name, folder)
@@ -1738,6 +1917,19 @@ class Editor:
                "TSQ_GIT_SECRET": credentials.get("password") or credentials.get("passphrase") or ""}
         return env
 
+    def _git_env(self, credentials: dict) -> dict:
+        """The environment of a git command run with the user's credentials: its prompts are answered from them
+        only; no ssh-agent of tsqd's account and no credential helper (each command passes -c credential.helper=)."""
+        env = {k: v for k, v in os.environ.items() if k not in ("SSH_AUTH_SOCK", "SSH_AGENT_PID")}
+        return {**env, "GIT_TERMINAL_PROMPT": "0", **self._push_env(credentials)}
+
+    @staticmethod
+    def _require_credentials(credentials: dict) -> None:
+        """A push (and its tag) is made with the user's own credentials, never with tsqd's (README section 13.2)."""
+        if not ((credentials.get("username") and credentials.get("password")) or credentials.get("passphrase")):
+            raise SequencerError("your own git credentials are needed to push: a user and a password or access "
+                                 "token, or the passphrase of the SSH key (used for this push only, never stored)")
+
     @staticmethod
     def _scrub(text: str, credentials: dict) -> str:
         for secret in (credentials.get("password"), credentials.get("passphrase")):
@@ -1764,16 +1956,16 @@ class Editor:
         diff = self.diff(session)
         if not diff["files"]:
             raise SequencerError("nothing to push: no change since the session started")
+        self._require_credentials(credentials)
         ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
         _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
         commit = _git(session.root, "rev-parse", "HEAD").strip()
         if tag:
             _git(session.root, *ident, "tag", "-a", tag, "-m", message)
-        env = self._push_env(credentials)
         refs = [f"HEAD:refs/heads/{session.branch}"] + ([f"refs/tags/{tag}"] if tag else [])
         result = subprocess.run(["git", "-c", "credential.helper=", "push", "--porcelain", "origin", *refs],
                                 cwd=session.root, capture_output=True, text=True, timeout=300,
-                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **env})
+                                env=self._git_env(credentials))
         if result.returncode:
             if tag:
                 _git(session.root, "tag", "-d", tag, check=False)
@@ -1797,7 +1989,7 @@ class Editor:
         self._need_git(session)
         result = subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--tags", "origin"],
                                 cwd=session.root, capture_output=True, text=True, timeout=300,
-                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **self._push_env(credentials)})
+                                env=self._git_env(credentials))
         if result.returncode:
             return {"ok": False, "error": self._scrub(result.stderr.strip(), credentials)}
         _git(session.root, "add", "-A")

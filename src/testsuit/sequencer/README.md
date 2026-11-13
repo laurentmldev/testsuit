@@ -278,7 +278,7 @@ server:
   listen: 0.0.0.0:8640
   ui: true
   editor: false                        # Editor mode of the UI (section 13.2)
-  workspaces: [/srv/tsq/tests]         # git clones the Editor creates datapack definitions in
+  workspaces: [/srv/tsq/tests]         # git clones the Editor creates datapack definitions in (more can be added by URL from the UI)
   title: Test sequencer                # the UI's title, in its top bar and browser tab
   logo: logo.png                       # optional image before the title: a file (relative to tsq.yml) or an http(s) URL
 queue: {default_priority: 50, priority_aging: off}
@@ -1125,12 +1125,13 @@ tsq config                                                  # settings in use, a
 - `GET /events` (Server-Sent Events: run and component state changes, log lines);
 - `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`: the run graph of the UI);
 - Editor mode only (section 13.2):
+  - `POST /edit/repositories` (add a tests repository: `url`, `branch` (required, cloned alone), `name`, `path`, and the user's credentials for this clone only), `DELETE /edit/repositories/{id}[?force=true]`, `GET /edit/repositories/{id}/status` (git state, local changes, commits ahead and behind, last push from the Editor, a stamp of its files), `POST /edit/repositories/{id}/pull` (credentials optional);
   - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository, or `local: true` to edit it in place), `GET|DELETE /edit/sessions/{id}`;
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `GET` gives the file's `version`, a hash of its content; a `PUT` of `data` merges it into the file, keeping its comments; a `PUT` with `base: <version>` is refused, 409 with the file as it is now in `current`, when the file is another version), `GET .../version/{path}`, `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
   - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
-  - `GET .../diff`, `POST .../push` (credentials in the request body, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
+  - `GET .../diff`, `POST .../push` (the user's credentials in the request body, required, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
 
 The kernel never depends on the UI below: it is a web front end on the REST API, served by `tsqd` when `server.ui` is set.
 
@@ -1151,6 +1152,8 @@ An optional mode of the same UI, enabled with `server.editor` (off by default, s
 
 **Where it is.** Two entry points replace a separate Editor tab:
 - **Datapacks** (top-level tab) lists the test definitions of the `server.workspaces` repositories, through an in-place session on each. For the one selected it shows its baseline (each dataset, the version in use, the versions its importer lists, and the dictionary key or file that writes it, with a **Set** to change it there), its logical configuration (stage slots and slots, with their role), its template and input files per slot, and its dictionaries with their keys. **Generate…** runs the datapack tool on it; **Edit datapack definitions** opens the repository in the Editor. The versions come from the importer's optional `listVersions()`: tags then branches of the remote for `git` (`git ls-remote`), the releases of the store for the toy-train importer.
+- **Workspaces.** The tests repositories are those of `server.workspaces`, plus those added from the Datapacks tab with **Add repository…**: a git URL and a branch (required), with an optional name and the folder of the repository holding the datapack definitions. tsqd clones that branch only (`git clone --single-branch`) into `<storage.root>/workspaces/<name>`, and lists it in `<storage.root>/workspaces.yml` (URL, branch, folder, who added it and when; never credentials). A URL holding a password or token is refused: credentials are typed in the dialog, used for that clone only, and never stored. **Remove…** deletes such a clone and its editing sessions (refused while it holds changes not pushed, unless confirmed again); a repository of `server.workspaces` is removed from the configuration instead. When there are several, the workspace worked on is picked on the Datapacks tab (one card each: name, branch, URL), named in the Editor's session bar (with a switch to another one) and in the **Generate a datapack** dialog.
+- **Changes made meanwhile** in a tests repository are followed as the Lab page follows the lab files: the Datapacks tab asks `GET /edit/repositories/<id>/status` every 2 s and shows a banner when the files changed since it read them (another browser, a hand edit, a pull), with **Read them again**; when the folder has local changes or commits not pushed, with **Commit and push…** (the Review and push dialog of its in-place session); and when a newer revision was pushed from the Editor (a scratch clone), or the upstream branch is ahead as last fetched, with **Pull…** (`POST /edit/repositories/<id>/pull`: fetch, then fast-forward only; refused while the folder has local changes).
 - **Edit lab config**, on the Lab tab, opens the lab repository in the Editor, in place.
 - **Commit and push…**, on the banner saying the lab folder has local changes (every page, Editor mode, on a branch), reviews those changes and commits and pushes them through the in-place lab session: the same dialog as **Review and push**, in the user's name, with their own credentials, used for this push only and never stored.
 Leaving a session, with its back link or **Close**, returns to the tab it belongs to: Lab for the lab repository, Datapacks for a tests repository. Leaving a lab session asks whether to reload the lab: from the folder as it is for an in-place session, from the latest pushed commit (`tsq lab reload --pull`) for a scratch clone.
@@ -1192,7 +1195,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Applying a modification.** The same for the three kinds of edits:
 1. The UI shows the diff against the branch and asks for a commit message, and optionally a tag.
-2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The UI always asks for them: it never pushes with tsqd's own credentials. The commit author is the user, not the sequencer.
+2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The UI always asks for them, and tsqd refuses a push (and its tag) without them: it never pushes with tsqd's own credentials, nor through an ssh-agent or a credential helper of its account. The commit author is the user, not the sequencer.
 3. It commits and pushes. If the push is rejected (the branch moved meanwhile, or the credentials lack the right), nothing is applied: the UI shows why, and the user can rebase on the latest revision and try again.
 4. Nothing is reloaded at this point. For the lab, the UI shows that a newer configuration exists (its commit, tag and author) next to the one in use, with a **Reload** button. Reload is `tsq lab reload --pull` on that revision (section 6.1): it fetches it into the lab folder, validates it, and applies it to the next activations. Datapack definitions are not loaded by the sequencer at all: they are used when a datapack is next generated from them.
 
