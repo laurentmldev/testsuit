@@ -12,15 +12,13 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Review the changes of the session and push them (sequencer README, section 13.2): the diff, a commit message
-// and an optional tag, the author (kept in this browser), and credentials used for this push only.
+// and an optional tag, and credentials used for this push only.
 import { useEffect, useState } from "react";
 import { get, post } from "../api";
 import { Choices, Dialog, Field, Text } from "../fields";
 import { DiffView } from "../monaco";
 import { attempt, classes, Markdown } from "../util";
 import { SessionContext, useSession, useSessionData } from "./state";
-
-const AUTHOR = "tsq.author";
 
 function nextTag(tag?: string | null): string {
   const m = tag?.match(/^(.*?)(\d+)$/);
@@ -62,15 +60,6 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const [diff, setDiff] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<string | null>(null);
-  const stored = (() => {
-    try {
-      return JSON.parse(localStorage.getItem(AUTHOR) || "{}");
-    } catch {
-      return {};
-    }
-  })();
-  const [name, setName] = useState<string>(stored.name || "");
-  const [email, setEmail] = useState<string>(stored.email || "");
   const lastTag = [...(info.pushed || [])].reverse().find((p: any) => p.tag)?.tag;
   const [tag, setTag] = useState<string>(nextTag(lastTag));
   const [message, setMessage] = useState("");
@@ -92,12 +81,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const push = async () => {
     setBusy(true);
     try {
-      localStorage.setItem(AUTHOR, JSON.stringify({ name, email }));
-    } catch {
-      // private window: the author is not remembered
-    }
-    try {
-      setResult(await post(`edit/sessions/${sid}/push`, { message, author_name: name, author_email: email, tag: tag || null, ...credentials }));
+      setResult(await post(`edit/sessions/${sid}/push`, { message, tag: tag || null, ...credentials }));
     } catch (e: any) {
       setResult({ ok: false, error: e.message });
     } finally {
@@ -131,7 +115,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
     <Dialog title="Review and push" onClose={onClose} wide footer={
       <>
         {result && !result.ok && result.hint?.startsWith("the branch moved") && <button onClick={rebase} disabled={busy}>Rebase on the latest revision</button>}
-        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim() || !creds.complete} onClick={push}>
+        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !creds.complete} onClick={push}>
           {busy ? "Pushing…" : `Push to ${diff?.branch || info.branch}`}
         </button>
       </>
@@ -162,8 +146,6 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
         <Text multiline value={message} onChange={setMessage} />
       </Field>
       <div className="inline-fields">
-        <Field label="Author" help="Commits are made in your name, as if you had pushed from your own checkout. Kept in this browser."><Text value={name} onChange={setName} placeholder="Your Name" /></Field>
-        <Field label="E-mail"><Text value={email} onChange={setEmail} placeholder="you@example.com" /></Field>
         <Field label="Tag" help={`An annotated tag on the commit, pushed with it. ${info.kind === "lab" ? "Operators reload the lab at a tag: `tsq lab reload --pull <tag>`." : "Datapacks record the revision they come from."}${lastTag ? ` Last tag of this session: \`${lastTag}\`.` : ""}`}>
           <Text mono value={tag} onChange={setTag} placeholder="none" />
         </Field>
@@ -216,7 +198,7 @@ function suggest(files: { status: string; path: string }[]): string {
 }
 
 /** The local changes of a repository's folder (the lab, or a tests repository), committed and pushed from the banner
- * that shows them: through its in-place session (opened, or the one already open), with the same review, author and
+ * that shows them: through its in-place session (opened, or the one already open), with the same review and
  * credentials (used for this push only, never stored) as the Editor's "Review and push". */
 export function RepoPushDialog({ repo, onClose }: { repo: string; onClose: () => void }) {
   const [sid, setSid] = useState<string | null>(null);

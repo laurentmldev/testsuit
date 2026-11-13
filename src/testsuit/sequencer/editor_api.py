@@ -298,10 +298,10 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         result = await run(editor.push, s, str(body.get("message") or ""), str(body.get("author_name") or ""),
                            str(body.get("author_email") or ""), body.get("tag") or None, credentials(body))
         if result.get("ok"):
-            log.info(f"editor: {s.repo} pushed by {body.get('author_name')}: {result.get('commit', '')[:10]}"
+            log.info(f"editor: {s.repo} pushed by {result.get('author') or body.get('username') or '?'}: {result.get('commit', '')[:10]}"
                      + (f" tag {body.get('tag')}" if body.get("tag") else ""))
         else:
-            log.warning(f"editor: push of {s.repo} by {body.get('author_name')} refused: {result.get('error') or result.get('message')}")
+            log.warning(f"editor: push of {s.repo} by {body.get('username') or '?'} refused: {result.get('error') or result.get('message')}")
         return result
 
     @app.post("/edit/sessions/{sid}/rebase")

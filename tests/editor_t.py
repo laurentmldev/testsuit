@@ -405,7 +405,12 @@ def test_push_needs_the_users_credentials(repos):
     with pytest.raises(SequencerError, match="credentials"):
         editor.push(session, "Longer", "Ada", "ada@example.com", tag="v5")
     assert "v5" not in git(session.root, "tag") and editor.diff(session)["files"]     # nothing committed
-    assert editor.push(session, "Longer", "Ada", "ada@example.com", credentials={"passphrase": "secret"})["ok"]
+    # no author given: git's identity of the working copy, else the user of the credentials
+    pushed = editor.push(session, "Longer", credentials={"username": "ada", "password": "token"})
+    assert pushed["ok"], pushed
+    author = git(repos.root / "upstream.git", "log", "-1", "--format=%an <%ae>", "main").strip()
+    configured = subprocess.run(["git", "config", "user.name"], cwd=session.root, capture_output=True, text=True).stdout.strip()
+    assert author.startswith(configured or "ada <ada@") and pushed["author"] == author
 
 
 def test_repository_added_by_url(repos):

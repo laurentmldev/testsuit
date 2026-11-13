@@ -59,7 +59,7 @@ Who does what with the sequencer. [Section 2.2](#22-use-cases-step-by-step) says
 | UC-5 | **Run a test and follow it**: post a datapack with a priority, see it queued, bound and running, live | test author, CI job | SQ-1 to SQ-4, SQ-7, SQ-8, SQ-11, SQ-24 |
 | UC-6 | **Stop a run**: cancel or kill it, keeping cleanup and collection, then post it again | test author, lab operator | SQ-17 |
 | UC-7 | **Get the results**: the collected outputs, logs, verdict and conformity, as a results datapack | test author, CI job | SQ-27, DG-5 |
-| UC-8 | **Change the lab or the tests in the Editor**: edit in forms, try, push in one's name | lab operator, test author | SQ-29 |
+| UC-8 | **Change the lab or the tests in the Editor**: edit in forms, try, push with one's credentials | lab operator, test author | SQ-29 |
 | UC-9 | **Run tests from CI**, as a GitLab runner | CI job | SQ-20 |
 | UC-10 | **Try the platform on a dev host**, every component emulated | anyone | SQ-31 |
 
@@ -238,7 +238,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 | **palette** | in the pipeline graph, what a step can do on each slot: its commands, with where each comes from, plus the generic and plugin step types. |
 | **flattened view** | the whole pipeline with sub-pipelines expanded and every command resolved for a setup configuration, as the run will see it. |
 | **draft datapack** | a datapack generated from uncommitted files of a session: the queue accepts it, its report says so. |
-| **push** | committing a session's changes in the user's name, optionally tagged, and pushing them with credentials used for that request only. |
+| **push** | committing a session's changes, optionally tagged, and pushing them with credentials used for that request only. |
 
 ## 3. Principles
 
@@ -1157,7 +1157,7 @@ An optional mode of the same UI, enabled with `server.editor` (off by default, s
 - **Local changes.** **Show changes…**, on the banner saying a workspace has local changes, lists what is not committed against its last commit, file by file with its diff; **Download patch** gives them as a patch to apply at the root of the repository (`git apply`); **Revert this file…** and **Revert all…** (each confirmed by a second click) put the files back as committed and delete new ones. Commits are never touched there: the Datapacks tab is not a git client, and offers no merge, reset or branch handling (pull is fast-forward only). When there are several, the workspace worked on is picked on the Datapacks tab (one card each: name, branch, URL), named in the Editor's session bar (with a switch to another one) and in the **Generate a datapack** dialog.
 - **Changes made meanwhile** in a tests repository are followed as the Lab page follows the lab files: the Datapacks tab asks `GET /edit/repositories/<id>/status` every 2 s and shows a banner when the files changed since it read them (another browser, a hand edit, a pull), with **Read them again**; when the folder has local changes or commits not pushed, with **Commit and push…** (the Review and push dialog of its in-place session); and when a newer revision was pushed from the Editor (a scratch clone), or the upstream branch is ahead as last fetched, with **Pull…** (`POST /edit/repositories/<id>/pull`: fetch, then fast-forward only; refused while the folder has local changes).
 - **Edit lab config**, on the Lab tab, opens the lab repository in the Editor, in place.
-- **Commit and push…**, on the banner saying the lab folder has local changes (every page, Editor mode, on a branch), reviews those changes and commits and pushes them through the in-place lab session: the same dialog as **Review and push**, in the user's name, with their own credentials, used for this push only and never stored.
+- **Commit and push…**, on the banner saying the lab folder has local changes (every page, Editor mode, on a branch), reviews those changes and commits and pushes them through the in-place lab session: the same dialog as **Review and push**, with the user's own credentials, used for this push only and never stored.
 Leaving a session, with its back link or **Close**, returns to the tab it belongs to: Lab for the lab repository, Datapacks for a tests repository. Leaving a lab session asks whether to reload the lab: from the folder as it is for an in-place session, from the latest pushed commit (`tsq lab reload --pull`) for a scratch clone.
 The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration tab) still lists every session and can open a scratch clone.
 
@@ -1165,7 +1165,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **In place.** A session that edits the folder itself:
 - The files are saved where the sequencer reads them. A lab change still applies only on **Reload**; a test definition is used the next time a datapack is generated.
-- The folder need not be a git work tree. When it is, the session works on the checked-out branch, and review and push commit and push only the edited folder, in the user's name: other changes of that working copy are left alone. From a detached HEAD (a lab on a tag) nothing can be pushed.
+- The folder need not be a git work tree. When it is, the session works on the checked-out branch, and review and push commit and push only the edited folder: other changes of that working copy are left alone. From a detached HEAD (a lab on a tag) nothing can be pushed.
 - Rebase replays the working copy's own commits on the upstream branch; it never drops them.
 - One in-place session per repository at a time; opening it again returns the same session. Closing it keeps the files.
 - Several browsers can share a session (an in-place one always is), with no user accounts: each save names the version of the file it started from, and is refused when the file changed since (another browser, a pull, a hand edit). The Editor also looks at the version of the file it shows every 2 s. Either way it saves nothing more and asks which version to keep: **Load that version** (the changes not saved are dropped) or **Overwrite it with mine**.
@@ -1197,7 +1197,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Applying a modification.** The same for the three kinds of edits:
 1. The UI shows the diff against the branch and asks for a commit message, and optionally a tag.
-2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The UI always asks for them, and tsqd refuses a push (and its tag) without them: it never pushes with tsqd's own credentials, nor through an ssh-agent or a credential helper of its account. The commit author is the user, not the sequencer.
+2. It asks the user for git credentials to push: a username with a password or access token, or the passphrase of an SSH key. They are used for this push only, kept in memory for the time of the request, and never stored or logged. The UI always asks for them, and tsqd refuses a push (and its tag) without them: it never pushes with tsqd's own credentials, nor through an ssh-agent or a credential helper of its account. The form asks for no author: the commit is made with the git identity configured for the working copy (`user.name`, `user.email`, from its git config or tsqd's account), else with the user name of the credentials. `POST .../push` still takes an optional `author_name` and `author_email`.
 3. It commits and pushes. If the push is rejected (the branch moved meanwhile, or the credentials lack the right), nothing is applied: the UI shows why, and the user can rebase on the latest revision and try again.
 4. Nothing is reloaded at this point. For the lab, the UI shows that a newer configuration exists (its commit, tag and author) next to the one in use, with a **Reload** button. Reload is `tsq lab reload --pull` on that revision (section 6.1): it fetches it into the lab folder, validates it, and applies it to the next activations. Datapack definitions are not loaded by the sequencer at all: they are used when a datapack is next generated from them.
 

@@ -509,18 +509,11 @@ function AddRepositoryDialog({ onClose, onAdded }: { onClose: () => void; onAdde
   const creds = useCredentials("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const author = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("tsq.author") || "{}").name || null;
-    } catch {
-      return null;
-    }
-  })();
   const add = async () => {
     setBusy(true);
     setError(null);
     try {
-      const repo = await post("edit/repositories", { url: gitUrl, name: name || null, branch: branch.trim(), path: path || null, by: author, ...creds.value });
+      const repo = await post("edit/repositories", { url: gitUrl, name: name || null, branch: branch.trim(), path: path || null, ...creds.value });
       notify(`repository ${repo.id} added`);
       onAdded(repo.id);
     } catch (e: any) {

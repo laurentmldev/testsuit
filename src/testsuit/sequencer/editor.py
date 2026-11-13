@@ -35,6 +35,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1996,6 +1997,16 @@ class Editor:
         return {**env, "GIT_TERMINAL_PROMPT": "0", **self._push_env(credentials)}
 
     @staticmethod
+    def _author(session: EditSession, name: str, email: str, credentials: dict) -> tuple[str, str]:
+        """The commit author: as given, else git's configured identity for the working copy, else the user of the
+        credentials (at the sequencer host's name)."""
+        name = name.strip() or _git(session.root, "config", "user.name", check=False).strip() \
+            or (credentials.get("username") or "").strip() or "tsq editor"
+        email = email.strip() or _git(session.root, "config", "user.email", check=False).strip() \
+            or f"{re.sub(r'[^A-Za-z0-9._-]+', '.', name).strip('.') or 'tsq'}@{socket.getfqdn() or 'localhost'}"
+        return name, email
+
+    @staticmethod
     def _require_credentials(credentials: dict) -> None:
         """A push (and its tag) is made with the user's own credentials, never with tsqd's (README section 13.2)."""
         if not ((credentials.get("username") and credentials.get("password")) or credentials.get("passphrase")):
@@ -2009,18 +2020,17 @@ class Editor:
                 text = text.replace(secret, "***")
         return re.sub(r"(https?://)[^/@\s]+@", r"\1***@", text)
 
-    def push(self, session: EditSession, message: str, author_name: str, author_email: str,
+    def push(self, session: EditSession, message: str, author_name: str = "", author_email: str = "",
              tag: str | None = None, credentials: dict | None = None) -> dict:
-        """Commit the session's changes as the user, tag, and push to the session's branch. On a refused
-        push nothing is applied: the commit and the tag are undone, the changes stay in the session."""
+        """Commit the session's changes, tag, and push to the session's branch. On a refused push nothing is
+        applied: the commit and the tag are undone, the changes stay in the session. The author, when not given:
+        the git identity of the working copy (user.name, user.email), else the user of the credentials."""
         credentials = credentials or {}
         self._need_git(session)
         if not session.branch:
             raise SequencerError("the working copy is on no branch (detached HEAD): check out a branch to push from it")
         if not message.strip():
             raise SequencerError("a commit message is needed")
-        if not author_name.strip() or not author_email.strip():
-            raise SequencerError("the commit author (name and e-mail) is needed: commits are made in the user's name")
         if session.kind == "lab":
             problems = [p for p in self.check_lab(session) if p["severity"] == "error"]
             if problems:
@@ -2029,6 +2039,7 @@ class Editor:
         if not diff["files"]:
             raise SequencerError("nothing to push: no change since the session started")
         self._require_credentials(credentials)
+        author_name, author_email = self._author(session, author_name, author_email, credentials)
         ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
         _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
         commit = _git(session.root, "rev-parse", "HEAD").strip()
