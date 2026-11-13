@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
+import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -410,12 +410,12 @@ export function LabPage({ editor }: { editor?: boolean }) {
     lab.refresh();
     refresh();
   };
-  const editLab = async (host?: string) => {
+  const editLab = (host?: string) => openInNewTab((async () => {
     const s = await attempt(() => post("edit/sessions", { repo: "lab", local: true }));
-    if (!s) return;
+    if (!s) return null;
     const ctx = host ? await get<any>(`edit/sessions/${s.id}/context`).catch(() => null) : null;
-    navigate(`edit/${s.id}`, ctx?.inventory ? { file: ctx.inventory, item: `host:${host}` } : {});
-  };
+    return { path: `edit/${s.id}`, query: ctx?.inventory ? { file: ctx.inventory, item: `host:${host}` } : {} };
+  })());
   const commandsOf = (c: any) => c.maintenance || (c.stages || []).some((st: string) => stageById[st]?.maintenance) ? () => setCommands(c.id) : undefined;
   const git = lab.data?.git;
   const row = (c: any) => (
@@ -445,7 +445,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         ]} />
         <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
-        {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and components in the Editor, in place">Edit lab config</button>}
+        {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and components in the Editor (in place), in a new browser tab">Edit lab config</button>}
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}
