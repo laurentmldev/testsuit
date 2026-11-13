@@ -678,3 +678,10 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .step-via { margin-top: 3px; }
 .step-via .via-tag { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .step-via-note { margin-top: 4px; }
+
+/* a command's output as a console: the lines it ran (prompt) between what they printed */
+.console-cmd { color: var(--accent); font-weight: 600; margin-top: 2px; }
+.console-cmd:first-child { margin-top: 0; }
+.console-prompt { opacity: 0.7; user-select: none; }
+.console-out { white-space: pre-wrap; }
+.console-note { color: var(--muted); }

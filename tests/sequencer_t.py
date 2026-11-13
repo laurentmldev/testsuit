@@ -1041,9 +1041,10 @@ def test_manual_command_keys_set_by_hand(tmp_path, no_git):
     assert out["keyed"]["missing"] == []
     assert out["keyed"]["keys"] == [{"key": "params.speed", "value": 3, "overrides": False},
                                     {"key": "component.host", "value": "elsewhere", "overrides": True, "was": host, "origin": ""}]
-    assert out["unset"]["ok"] and out["unset"]["output"].strip() == f"speed=3 host={host}"
+    from testsuit.sequencer.transports import untraced
+    assert out["unset"]["ok"] and untraced(out["unset"]["output"]).strip() == f"speed=3 host={host}"
     assert out["unset"]["keys"] == [{"key": "params.speed", "value": 3, "overrides": False}]
-    assert out["override"]["ok"] and out["override"]["output"].strip() == "speed=4 host=elsewhere"
+    assert out["override"]["ok"] and untraced(out["override"]["output"]).strip() == "speed=4 host=elsewhere"
     assert "not a key name" in out["bad"]
     assert "keys" in out["events"][0] and "overriding" not in out["events"][0]["audit"]
     assert "1 overriding the lab: component.host" in out["events"][1]["audit"]
@@ -1109,7 +1110,12 @@ def test_manual_command(tmp_path, no_git):
         out["segments"] = next(c["segments"] for c in listed["commands"] if c["name"] == "check")
         out["version"] = await seq.manual_command("counter_1", "version")
         out["check"] = await seq.manual_command("counter_1", "check")
-        out["lines"] = await seq.manual_command("counter_1", "lines")
+        events: asyncio.Queue = asyncio.Queue()
+        seq.subscribers.add(events)
+        out["lines"] = await seq.manual_command("counter_1", "lines", token="t1")
+        seq.subscribers.discard(events)
+        out["live"] = "".join(e["text"] for e in [events.get_nowait() for _ in range(events.qsize())]
+                              if e["kind"] == "manual_output" and e["token"] == "t1")
         out["start"] = await seq.manual_command("counter_1", "start")
         out["stop"] = await seq.manual_command("counter_1", "stop")
         try:
@@ -1126,6 +1132,10 @@ def test_manual_command(tmp_path, no_git):
     # the lines of a command share one shell, and it stops at the first one that fails
     assert out["lines"]["ok"] is False and out["lines"]["exit"] == 1
     assert "/ kept" in out["lines"]["output"] and "after" not in out["lines"]["output"]
+    # each line it ran, just before what it printed (traced), sent as it comes too (manual_output events)
+    traced = [line for line in out["lines"]["output"].splitlines() if line]
+    assert traced == ["+tsq$ cd /", "+tsq$ export X=kept", "+tsq$ echo / kept", "/ kept", "+tsq$ false"], traced
+    assert out["live"] == out["lines"]["output"]
     assert out["start"]["ok"] and out["start"]["detached"]
     assert out["stop"]["ok"] and "start.pid" in out["stop"]["output"]
     assert "can be run by hand" in out["ready"]
@@ -1975,3 +1985,18 @@ def test_http_manual_command(tmp_path, no_git, api):
     shown = next(c for c in info["commands"] if c["name"] == "version")["segments"]   # the Lab page shows it rendered
     assert "".join(s["text"] for s in shown) == f"GET {api.url}/status"
     assert {"text": api.url, "key": "component.vars.api"} in shown
+
+
+def test_traced_command():
+    """A traced command writes each line it runs before what it prints; untraced() gives back what it printed
+    (what a step's expect stdout is matched against)."""
+    import subprocess
+
+    from testsuit.sequencer.transports import strict, traced, untraced
+    script = strict(traced('echo "grep READY" | tr a-z A-Z\nfor i in 1 2; do echo $i; done', before="cd /"))
+    output = subprocess.run(["sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+    assert output.splitlines() == ['+tsq$ echo grep READY', "+tsq$ tr a-z A-Z", "GREP READY",
+                                   "+tsq$ echo 1", "1", "+tsq$ echo 2", "2"]
+    assert "+tsq$ cd /" not in output
+    assert untraced(output) == "GREP READY\n1\n2\n"
+    assert untraced("++tsq$ nested\nkept\n") == "kept\n"

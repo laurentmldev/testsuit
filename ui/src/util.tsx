@@ -308,3 +308,22 @@ export function ViaRoute({ via, viaHost, target, targetHost }: {
     </div>
   );
 }
+
+/** A line a traced command ran (the sequencer's set -x: "+tsq$ "), in its output just before what it printed. */
+const TRACED = /^\++tsq\$ /;
+/** A note of the sequencer in a step log ("[tsq <time>] …"). */
+const NOTE = /^\[tsq [^\]]*\] /;
+
+/** The output of a command as a console: each line it ran, shown as a prompt, then what that line printed. */
+export function ConsoleText({ text }: { text: string }) {
+  const lines = text.split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return (
+    <>
+      {lines.map((line, i) => TRACED.test(line)
+        ? <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{line.replace(TRACED, "")}</div>
+        : NOTE.test(line) ? <div key={i} className="console-note">{line}</div>
+          : <div key={i} className="console-out">{line || " "}</div>)}
+    </>
+  );
+}

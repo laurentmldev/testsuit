@@ -18,7 +18,7 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edg
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, Badge, classes, duration, setQuery, STATE_COLORS, time, ViaTag } from "../util";
+import { ago, Badge, classes, ConsoleText, duration, setQuery, STATE_COLORS, time, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -214,7 +214,7 @@ export function LogTail({ runId, step, live }: { runId: string; step: string; li
         <a className="button small" href={url(`runs/${runId}/logs/${encodeURIComponent(step)}`)} target="_blank" rel="noreferrer">raw</a>
       </div>
       {error && <div className="error-box">{error}</div>}
-      <pre className="log" ref={box}>{text || (error ? "" : "(no output yet)")}</pre>
+      <pre className="log" ref={box}>{text ? <ConsoleText text={text} /> : error ? "" : "(no output yet)"}</pre>
     </div>
   );
 }

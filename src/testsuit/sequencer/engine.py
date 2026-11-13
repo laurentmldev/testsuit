@@ -36,7 +36,7 @@ from typing import Any, Callable
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
-from testsuit.sequencer.transports import Result, Transport, strict
+from testsuit.sequencer.transports import Result, Transport, strict, traced, untraced
 from testsuit.sequencer.library import Resolved
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
@@ -456,6 +456,7 @@ class StepRunner:
     async def shell(self, command: str, env: dict, timeout: float | None, detach: bool, expect: dict | None,
                     on: tuple[Transport, str] | None = None):
         """on: the transport and pid file to run it with, for a command run through another component."""
+        before = ""
         if on is not None:
             transport, pidfile = on
         elif self.slot is None:                 # no component: on the sequencer host, in the run folder
@@ -463,13 +464,14 @@ class StepRunner:
             from testsuit.sequencer.transports.local import LocalTransport
             transport = LocalTransport(_Component("sequencer", {}), str(self.ctx.bag))
             pidfile = str(self.ctx.bag / ".tsq" / self.ctx.run_id / f"{self.fs.id}.pid")
-            command = f"cd {shlex.quote(str(self.ctx.bag))} && {command}"
+            before = f"cd {shlex.quote(str(self.ctx.bag))}"
         else:
             transport, pidfile = self.slot.transport, self.pidfile
         self.note(f"{'start (detached)' if detach else 'run'} on {transport.host}: {command}")
+        script = strict(traced(command, before))            # its log: each line it runs, then what it prints
         if detach:
             try:
-                process = await transport.start(strict(command), env=env, log=self.write, pidfile=pidfile)
+                process = await transport.start(script, env=env, log=self.write, pidfile=pidfile)
             except Exception as e:
                 return ERROR, f"transport: {e}"
             try:
@@ -478,7 +480,7 @@ class StepRunner:
                 self.ctx.detached.append(process)
                 return SUCCEEDED, "started"
             return self.judge(result, expect)
-        result = await transport.run(strict(command), env=env, timeout=timeout, log=self.write, pidfile=pidfile)
+        result = await transport.run(script, env=env, timeout=timeout, log=self.write, pidfile=pidfile)
         return self.judge(result, expect)
 
     def judge(self, result: Result, expect: dict | None) -> tuple[str, str]:
@@ -493,7 +495,7 @@ class StepRunner:
             self.note(f"exit status {result.exit_status}, expected {codes}")
             return FAILED, f"exit status {result.exit_status}"
         for stream in ("stdout", "stderr"):
-            if expect.get(stream) and not re.search(str(expect[stream]), result.output, re.MULTILINE):
+            if expect.get(stream) and not re.search(str(expect[stream]), untraced(result.output), re.MULTILINE):
                 self.note(f"output does not match '{expect[stream]}'")
                 return FAILED, f"{stream} does not match"
         self.note(f"exit status {result.exit_status}")
