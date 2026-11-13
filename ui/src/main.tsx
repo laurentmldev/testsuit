@@ -25,9 +25,11 @@ import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
 import { DatapacksPage } from "./pages/Datapacks";
 import { SessionPage } from "./editor/Session";
+import { LabPushDialog } from "./editor/Publish";
 
-function LabBanner() {
+function LabBanner({ editor }: { editor: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
+  const [pushing, setPushing] = useState(false);
   const d = lab.data;
   if (!d) return null;
   const reload = async () => {
@@ -47,8 +49,14 @@ function LabBanner() {
         </div>
       )}
       {(d.warnings || []).map((w: string) => (
-        <div className="banner warn" key={w}>{w}</div>
+        <div className="banner warn" key={w}>
+          {w}
+          {/* local changes of the lab folder: committed and pushed in the user's name, with their own credentials */}
+          {editor && w.endsWith("has local changes") && d.git?.branch &&
+            <button className="small" onClick={() => setPushing(true)} title="Review the changes of the lab folder, then commit and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
+        </div>
       ))}
+      {pushing && <LabPushDialog onClose={() => { setPushing(false); lab.refresh(); }} />}
     </>
   );
 }
@@ -103,7 +111,7 @@ function App() {
           <span className={classes("dot", connected ? "on" : "off")} title={connected ? "live updates on" : "no live updates (reconnecting)"} />
         </div>
       </header>
-      <LabBanner />
+      <LabBanner editor={editor} />
       <main>{content}</main>
       <Toasts />
     </div>

@@ -18,7 +18,7 @@ import { get, post } from "../api";
 import { Choices, Dialog, Field, Text } from "../fields";
 import { DiffView } from "../monaco";
 import { attempt, classes, Markdown } from "../util";
-import { useSession } from "./state";
+import { SessionContext, useSession, useSessionData } from "./state";
 
 const AUTHOR = "tsq.author";
 
@@ -74,7 +74,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const lastTag = [...(info.pushed || [])].reverse().find((p: any) => p.tag)?.tag;
   const [tag, setTag] = useState<string>(nextTag(lastTag));
   const [message, setMessage] = useState("");
-  const [auth, setAuth] = useState<string | null>(null);
+  const [auth, setAuth] = useState<string | null>("token");   // the user's own: never those of tsqd
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -133,7 +133,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
     <Dialog title="Review and push" onClose={onClose} wide footer={
       <>
         {result && !result.ok && result.hint?.startsWith("the branch moved") && <button onClick={rebase} disabled={busy}>Rebase on the latest revision</button>}
-        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim()} onClick={push}>
+        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim() || !secret || (auth === "token" && !username.trim())} onClick={push}>
           {busy ? "Pushing…" : `Push to ${diff?.branch || info.branch}`}
         </button>
       </>
@@ -170,8 +170,8 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
           <Text mono value={tag} onChange={setTag} placeholder="none" />
         </Field>
       </div>
-      <Field label="Credentials" help="Used for this push only, never stored: given to git through its askpass, then forgotten. Leave them out when tsqd itself can push (an SSH key of its account, a credential helper).">
-        <Choices value={auth} onChange={setAuth} allowNone="those of tsqd" choices={[
+      <Field label="Credentials" help="Your own, needed for every push: used for this push only, never stored, given to git through its askpass, then forgotten.">
+        <Choices value={auth} onChange={(v) => v && setAuth(v)} choices={[
           { value: "token", label: "user and token", description: "HTTPS remote: a personal access token" },
           { value: "ssh", label: "SSH key passphrase", description: "SSH remote: the passphrase of tsqd's key" },
         ]} />
@@ -193,4 +193,29 @@ function suggest(files: { status: string; path: string }[]): string {
   if (files.length === 1) return `${verb(files[0].status)} ${files[0].path}`;
   const dirs = [...new Set(files.map((f) => f.path.split("/").slice(0, -1).join("/") || "."))];
   return `Update ${files.length} files in ${dirs.slice(0, 3).join(", ")}${dirs.length > 3 ? "…" : ""}`;
+}
+
+/** The local changes of the lab folder, committed and pushed from the banner that shows them: through the in-place
+ * session of the lab (opened, or the one already open), with the same review, author and credentials (used for
+ * this push only, never stored) as the Editor's "Review and push". */
+export function LabPushDialog({ onClose }: { onClose: () => void }) {
+  const [sid, setSid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    post("edit/sessions", { repo: "lab", local: true }).then((s) => setSid(s.id)).catch((e) => setError(e.message));
+  }, []);
+  if (error || !sid)
+    return (
+      <Dialog title="Review and push" onClose={onClose}>
+        {error ? <div className="error-box">Cannot open the lab folder: {error}</div> : <p className="muted">Reading the local changes…</p>}
+      </Dialog>
+    );
+  return <LabPushSession sid={sid} onClose={onClose} />;
+}
+
+function LabPushSession({ sid, onClose }: { sid: string; onClose: () => void }) {
+  const session = useSessionData(sid, () => undefined);
+  if (!session)
+    return <Dialog title="Review and push" onClose={onClose}><p className="muted">Reading the local changes…</p></Dialog>;
+  return <SessionContext.Provider value={session}><PublishDialog onClose={onClose} /></SessionContext.Provider>;
 }
