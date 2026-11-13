@@ -347,6 +347,18 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             described["published"] = {**published, "newer": published["commit"] != current}
         return described
 
+    checked: dict = {}                          # the last /lab/changes: one look at the files for every open page
+
+    @app.get("/lab/changes")
+    async def lab_changes():
+        """The lab files added, removed or modified since the lab was read (the Lab page asks every few seconds,
+        to offer a reload): their modification times and sizes, compared; at most once every 2 s."""
+        import time
+        lab = seq.lab
+        if checked.get("lab") is not lab or time.monotonic() - checked["at"] > 2:
+            checked.update(lab=lab, at=time.monotonic(), result=await asyncio.to_thread(lab.changes))
+        return checked["result"]
+
     @app.get("/lab/view")
     async def lab_view():
         """The Lab view: links between components deduced from the lab configuration, their pictures, the active
