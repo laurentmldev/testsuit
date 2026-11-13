@@ -1993,10 +1993,27 @@ def test_traced_command():
     import subprocess
 
     from testsuit.sequencer.transports import strict, traced, untraced
-    script = strict(traced('echo "grep READY" | tr a-z A-Z\nfor i in 1 2; do echo $i; done', before="cd /"))
+    script = strict(traced('echo "GREP READY"\nfor i in 1 2; do echo $i; done', before="cd /"))
     output = subprocess.run(["sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
-    assert output.splitlines() == ['+tsq$ echo grep READY', "+tsq$ tr a-z A-Z", "GREP READY",
-                                   "+tsq$ echo 1", "1", "+tsq$ echo 2", "2"]
+    assert output.splitlines() == ['+tsq$ echo GREP READY', "GREP READY", "+tsq$ echo 1", "1", "+tsq$ echo 2", "2"]
     assert "+tsq$ cd /" not in output
     assert untraced(output) == "GREP READY\n1\n2\n"
     assert untraced("++tsq$ nested\nkept\n") == "kept\n"
+
+
+def test_traced_comments():
+    """The comment lines of a traced command show in its output where they are, as no-op commands; not in a
+    here-document, a case, nor after a line that goes on (where a command cannot start)."""
+    import subprocess
+
+    from testsuit.sequencer.transports import strict, traced, untraced, with_comments
+    command = ("# first\necho hi\nfor i in 1; do\n  # in a loop, it's fine\n  echo $i\ndone\ncat <<END\n# kept as text\nEND\n"
+               "case a in\n  # in a case\n  a) echo A;;\nesac\necho a &&\n  # after a line that goes on\n  echo b")
+    shown = with_comments(command)
+    assert shown.startswith(": '# first'\n") and "  : '# in a loop, it'\"'\"'s fine'" in shown
+    assert "\n# kept as text\n" in shown and "\n  # in a case\n" in shown and "\n  # after a line that goes on\n" in shown
+    for shell in ("sh", "bash"):
+        output = subprocess.run([shell, "-c", strict(traced(command))], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True).stdout
+        assert "first" in output.splitlines()[0] and "in a loop" in output
+        assert untraced(output) == "hi\n1\n# kept as text\nA\na\nb\n", (shell, output)

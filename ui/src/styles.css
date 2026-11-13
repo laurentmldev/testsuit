@@ -685,3 +685,4 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .console-prompt { opacity: 0.7; user-select: none; }
 .console-out { white-space: pre-wrap; }
 .console-note { color: var(--muted); }
+.console-comment { color: var(--ok); font-style: italic; margin-top: 2px; }
