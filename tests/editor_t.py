@@ -404,6 +404,16 @@ def test_in_place_session(repos, tmp_path):
     with pytest.raises(SequencerError, match="checked-out branch"):
         editor.open("workspace0", "other", local=True)
 
+    # two browsers on the one in-place session: a save from a version that is no longer the file's is refused
+    from testsuit.sequencer.editor import EditConflict
+    first = editor.read(session, "setup/globals.yml")
+    editor.write(session, "setup/globals.yml", data={**first["data"], "min_count": 7}, base=first["version"])
+    with pytest.raises(EditConflict, match="changed elsewhere") as refused:
+        editor.write(session, "setup/globals.yml", data={**first["data"], "min_count": 8}, base=first["version"])
+    assert refused.value.current["data"]["min_count"] == 7
+    (folder / "setup" / "globals.yml").write_text(first["content"])        # by hand, as it was: that version again
+    assert editor.version(session, "setup/globals.yml") == first["version"]
+
     (repos.root / "tests-clone" / "notes.txt").write_text("mine")               # outside the edited folder
     editor.write(session, "setup/globals.yml", data={"duration": "2s", "min_count": 4})
     assert yaml.safe_load((folder / "setup" / "globals.yml").read_text())["duration"] == "2s"   # written in place
@@ -594,6 +604,19 @@ def test_api(repos, tmp_path):
         put = requests.put(f"{url}/edit/sessions/{sid}/files/setup/globals.yml",
                            json={"data": {"duration": "0.2s", "min_count": 2}})
         assert put.status_code == 200 and put.json()["data"]["min_count"] == 2
+        # a save from the version it started from: refused (409) once the file changed elsewhere
+        version = put.json()["version"]
+        assert requests.get(f"{url}/edit/sessions/{sid}/version/setup/globals.yml").json()["version"] == version
+        mine = requests.put(f"{url}/edit/sessions/{sid}/files/setup/globals.yml",
+                            json={"data": {"duration": "0.2s", "min_count": 3}, "base": version})
+        assert mine.status_code == 200 and mine.json()["version"] != version
+        stale = requests.put(f"{url}/edit/sessions/{sid}/files/setup/globals.yml",
+                             json={"data": {"duration": "0.2s", "min_count": 9}, "base": version})
+        assert stale.status_code == 409 and "changed elsewhere" in stale.json()["detail"]
+        assert stale.json()["current"]["data"]["min_count"] == 3
+        assert requests.put(f"{url}/edit/sessions/{sid}/files/setup/globals.yml",
+                            json={"data": {"duration": "0.2s", "min_count": 2}}).status_code == 200   # no base: written
+        assert requests.get(f"{url}/edit/sessions/{sid}/version/setup/none.yml").json()["version"] is None
         assert requests.get(f"{url}/edit/sessions/{sid}/files/../../etc/passwd").status_code in (400, 404)
         assert requests.post(f"{url}/edit/sessions/{sid}/validate", json={}).json()["problems"] == []
         diff = requests.get(f"{url}/edit/sessions/{sid}/diff").json()

@@ -26,10 +26,10 @@ import time
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from testsuit.sequencer.api import zip_entry
-from testsuit.sequencer.editor import Editor
+from testsuit.sequencer.editor import EditConflict, Editor
 from testsuit.sequencer.editor_schemas import schemas
 from testsuit.sequencer.util import SequencerError
 
@@ -78,12 +78,23 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     async def read(sid: str, path: str):
         return await run(editor.read, session(sid), path)
 
+    @app.get("/edit/sessions/{sid}/version/{path:path}")
+    async def version(sid: str, path: str):
+        """The version of a file (a hash of its content; null: no such file): the Editor asks every 2 s for the
+        file it shows, to tell when it changed elsewhere."""
+        return {"path": path, "version": await run(editor.version, session(sid), path)}
+
     @app.put("/edit/sessions/{sid}/files/{path:path}")
     async def write(sid: str, path: str, body: dict):
-        """{content: text} replaces the file; {data, at: [path]} merges data onto it, keeping comments."""
+        """{content: text} replaces the file; {data, at: [path]} merges data onto it, keeping comments. With
+        {base: version}, refused (409, with the file as it is now in 'current') when the file is another version."""
         if "content" not in body and "data" not in body:
             raise HTTPException(400, "give 'content' (text) or 'data' (merged, at the optional path 'at')")
-        return await run(editor.write, session(sid), path, body.get("content"), body.get("data"), body.get("at"))
+        try:
+            return await run(editor.write, session(sid), path, body.get("content"), body.get("data"), body.get("at"),
+                             body.get("base"))
+        except EditConflict as e:
+            return JSONResponse(status_code=409, content={"detail": str(e), "current": e.current})
 
     @app.post("/edit/sessions/{sid}/upload/{path:path}")
     async def upload(sid: str, path: str, file: Annotated[UploadFile, File()]):

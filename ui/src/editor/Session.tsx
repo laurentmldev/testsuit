@@ -160,7 +160,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
             <button className="small" onClick={api.redo} disabled={!api.canRedo} title="Redo (Ctrl+Shift+Z or Ctrl+Y)">↷ Redo</button>
           </span>
         )}
-        <span className={classes("save-state", api.state)}>{{ saved: "saved in the session", pending: "editing…", saving: "saving…", error: "not saved" }[api.state]}</span>
+        <span className={classes("save-state", api.state)}>{{ saved: "saved in the session", pending: "editing…", saving: "saving…", error: "not saved", conflict: "not saved: changed elsewhere" }[api.state]}</span>
         {doc.aliases && current !== "yaml" && <span className="badge info" title="This file uses YAML aliases (*name). A form change to an aliased part gives that place a copy of its own.">aliases</span>}
       </div>
       {showYaml && sections.length > 1 && (
@@ -170,6 +170,12 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
         </nav>
       )}
       {api.error && <div className="error-box">{api.error}</div>}
+      {api.external && <div className="banner warn">
+        <span>{api.external.deleted ? "This file was deleted elsewhere" : "This file was changed elsewhere"} since you opened it (in another browser, by a pull or by hand).
+          {api.state === "conflict" ? " Your last changes are not saved." : ""} Which version do you keep?</span>
+        {!api.external.deleted && <button className="small" onClick={api.loadTheirs} title={api.state === "conflict" ? "Show the file as it is now; your changes not saved are dropped" : "Show the file as it is now"}>Load that version</button>}
+        <button className="small" onClick={api.overwrite} title="Write what this page shows over the file as it is now">{api.external.deleted ? "Save mine again" : "Overwrite it with mine"}</button>
+      </div>}
       {!parsed && current !== "yaml" && current !== "template" && <div className="banner warn">The file does not parse as YAML: fix it in the YAML view first.</div>}
       <div className="doc-body">{body}</div>
     </div>

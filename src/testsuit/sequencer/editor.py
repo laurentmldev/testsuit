@@ -28,6 +28,7 @@ YAML files, and keeps them as written (``yamledit``).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import logging
@@ -53,6 +54,25 @@ from testsuit.sequencer.util import SequencerError, now
 SKIP_DIRS = {".git", ".work", ".current_datapack", "__pycache__", "node_modules", ".pytest_cache", ".venv"}
 MAX_FILES = 2000
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def file_version(path: Path) -> str | None:
+    """The version of a file as the Editor read it: a hash of its bytes (None: no such file). A save giving the
+    version it started from is refused when the file changed since (another browser, a pull, a hand edit)."""
+    try:
+        return hashlib.sha1(path.read_bytes()).hexdigest()[:16]
+    except (FileNotFoundError, IsADirectoryError):
+        return None
+
+
+class EditConflict(SequencerError):
+    """A save refused: the file changed since the version the save started from. current: the file as it is now
+    (read()), or None when it was deleted."""
+
+    def __init__(self, rel: str, current: dict | None):
+        super().__init__(f"'{rel}' was changed elsewhere since you opened it (another browser, a pull or a hand "
+                         f"edit)" if current is not None else f"'{rel}' was deleted elsewhere since you opened it")
+        self.current = current
 
 ASKPASS = """#!/bin/sh
 # Answers git and ssh prompts from the environment of one push (never stored, never logged).
@@ -429,7 +449,7 @@ class Editor:
         except UnicodeDecodeError as e:
             raise SequencerError(f"'{rel}' is not a text file") from e
         kind = self.kind(session, rel, text)
-        result = {"path": rel, "kind": kind, "content": text}
+        result = {"path": rel, "kind": kind, "content": text, "version": file_version(path)}
         if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary"):
             try:
                 result["data"] = yaml.safe_load(text)
@@ -438,15 +458,28 @@ class Editor:
                 pass
         return result
 
+    _write_lock = threading.Lock()          # the version check and the write, one save at a time
+
+    def version(self, session: EditSession, rel: str) -> str | None:
+        """The version of a file of the session (file_version), None when there is none."""
+        return file_version(self.path(session, rel))
+
     def write(self, session: EditSession, rel: str, content: str | None = None, data: Any = None,
-              at: list | None = None) -> dict:
-        """Write a file: its text (content), or its data merged onto it (data, at a path) keeping comments."""
+              at: list | None = None, base: str | None = None) -> dict:
+        """Write a file: its text (content), or its data merged onto it (data, at a path) keeping comments.
+
+        :param base: the version the edit started from (read()): EditConflict if the file is another one now.
+            None writes whatever the file is.
+        """
         path = self.path(session, rel)
-        if content is None:
-            current = path.read_text(encoding="utf-8") if path.is_file() else ""
-            content = yamledit.merge(current, data, at)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        with self._write_lock:
+            if base is not None and file_version(path) != base:
+                raise EditConflict(rel, self.read(session, rel) if path.is_file() else None)
+            if content is None:
+                current = path.read_text(encoding="utf-8") if path.is_file() else ""
+                content = yamledit.merge(current, data, at)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
         result = self.read(session, rel)
         result["problems"] = self.check_file(session, rel)
         return result
