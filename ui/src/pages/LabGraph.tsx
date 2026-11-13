@@ -589,8 +589,8 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     const kinds = new Set(group.map((l) => l.kind));
     const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd");
     const physical = kinds.has("link");
-    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label
-      : l.kind === "probe" ? `via: ${l.details.map((d) => d.title.replace(/^command /, "").replace("status probe", "probe")).join(", ")}` : l.kind))].filter(Boolean).join(" · ");
+    // the probes and commands behind a via link are listed when it is pointed at (title), not on it
+    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label : l.kind === "probe" ? "via" : l.kind))].filter(Boolean).join(" · ");
     const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}${d.commands.length ? ": " + d.commands.map(textOf).join(" ; ") : ""}`).join("\n")}`).join("\n") + "\nClick: details";
     const main = physical ? "link" : directed!.kind;
     const color = main === "probe" ? "var(--accent)" : main === "cmd" ? "var(--muted)" : "var(--text)";
