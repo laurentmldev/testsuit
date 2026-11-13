@@ -15,10 +15,10 @@
 // links, live states and runs), and a table; monitored state, lock state and holder, self-test results; hold,
 // release, maintenance, resume and self-test.
 import { useEffect, useState } from "react";
-import { get, post, useLabels, useResource } from "../api";
+import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
+import { Address, ago, attempt, Badge, classes, ConsoleText, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -65,6 +65,14 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const [info, setInfo] = useState<any>(null);
   const [running, setRunning] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
+  // the output of each command run from here as it comes (by its token): line by line, while it runs, and
+  // after for a detached one
+  const [streams, setStreams] = useState<Record<string, string>>({});
+  const [current, setCurrent] = useState<string | null>(null);      // the token of the command running
+  useEvents((kind, data) => {
+    if (kind === "manual_output" && data.component === id && data.token)
+      setStreams((all) => (data.token in all ? { ...all, [data.token]: all[data.token] + data.text } : all));
+  });
   // keys set by hand for the commands run from this dialog: the commands are shown as they will run with them
   const [rows, setRows] = useState<HandKey[]>([]);
   const [keysError, setKeysError] = useState<string | null>(null);
@@ -91,10 +99,19 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   }, [id, keysText, reload]);
   const retry = () => { setKeysError(null); setReload((n) => n + 1); };
   const run = async (name: string) => {
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     setRunning(name);
-    const r = await attempt(() => post(`components/${id}/commands/${name}`, keys ? { keys } : {}), `${id}: ${name}`);
+    setCurrent(token);
+    setStreams((all) => ({ ...all, [token]: "" }));
+    const r = await attempt(() => post(`components/${id}/commands/${name}`, { ...(keys ? { keys } : {}), token }), `${id}: ${name}`);
     setRunning(null);
-    if (r) setResults((all) => [r, ...all]);
+    setCurrent(null);
+    if (r) setResults((all) => [{ ...r, token }, ...all]);
+  };
+  // what a result printed: as streamed (it may go on, detached), or as answered when that is longer
+  const outputOf = (r: any) => {
+    const streamed = r.token ? streams[r.token] || "" : "";
+    return streamed.length >= (r.output || "").length ? streamed : r.output;
   };
   const statusOf = (key: string) => {
     const known = (info?.keys || []).find((k: any) => k.key === key);
@@ -119,9 +136,6 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
             {keysError && <div className="error-box">{keysError}</div>}
           </details>
-          {info.commands.some((c: any) => c.spec.via) && (
-            <p className="small">Commands marked <span className="via-tag">↪ via <strong>…</strong></span> do not run on {labelOf(id)}: they run on the component named, which reaches it (a jump host, a stage server…).</p>
-          )}
           <table className="grid compact">
             <tbody>
               {info.commands.map((c: any) => (
@@ -138,14 +152,25 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               ))}
             </tbody>
           </table>
+          {running && current && (
+            <div className="manual-result">
+              <div><span className="pulse run" /> <code>{running}</code> running…</div>
+              <pre className="small console">{streams[current] ? <ConsoleText text={streams[current]} /> : <span className="muted">no output yet</span>}</pre>
+            </div>
+          )}
           {results.map((r, i) => (
             <div key={i} className="manual-result">
               <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> {r.via
                 ? <ViaTag via={r.via} label={labelOf(r.via)} host={r.on} title={`${r.command} ran on ${r.via} (${r.on}), for ${id}`}>ran on</ViaTag>
                 : <>on {r.on || labelOf(id)}</>}{r.via && <span className="muted"> for {labelOf(id)}</span>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
               {r.keys?.length > 0 && <div className="small muted">keys set by hand: {r.keys.map((k: any, j: number) => <span key={k.key}>{j > 0 && ", "}<code>{k.key}={typeof k.value === "string" ? k.value : JSON.stringify(k.value)}</code>{k.overrides && <span className="warn-text"> (overrides <code>{typeof k.was === "string" ? k.was : JSON.stringify(k.was)}</code>)</span>}</span>)}</div>}
-              {r.run && <pre className="small">$ {r.run}</pre>}
-              {(r.output || r.error || r.detail) && <pre className="small">{[r.output, r.error && `error: ${r.error}`, r.detail].filter(Boolean).join("\n")}</pre>}
+              {r.kind !== "run" && r.run && <pre className="small">$ {r.run}</pre>}
+              {(outputOf(r) || r.error || r.detail) && (
+                <pre className="small console">
+                  {outputOf(r) && <ConsoleText text={outputOf(r)} />}
+                  {[r.error && `error: ${r.error}`, r.detail].filter(Boolean).map((x) => <div key={x} className="console-note">{x}</div>)}
+                </pre>
+              )}
             </div>
           ))}
         </>
@@ -288,7 +313,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
                   {!live && <>, {time(p.at)}, {p.duration} s</>}
                 </p>
               )}
-              {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} what="Its status probe" />}
+              {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} />}
               {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} running={live && i === p.steps.length - 1} />)}
               {live && !(p.steps || []).length && <p className="muted small"><span className="pulse run" /> starting…</p>}
               {!live && p.rules && Object.keys(p.rules).length > 0 && (

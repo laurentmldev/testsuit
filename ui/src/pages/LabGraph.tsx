@@ -126,7 +126,7 @@ function ComponentNode({ data }: NodeProps) {
     <div className={classes("lab-node compact", color, (comp.hold || comp.maintenance) && "off", activity.length > 0 && "busy")}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <Handle type="target" position={Position.Top} className="lab-handle" /><Handle type="source" position={Position.Bottom} className="lab-handle" />
-      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={vias.through.length ? 40 : 52} /></span>
+      <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={52} /></span>
       <strong className="lab-name">{comp.label || comp.id}</strong>
       <div className="lab-node-tags">
         {arranging ? <Badge value={comp.state} />
@@ -136,12 +136,6 @@ function ComponentNode({ data }: NodeProps) {
         {comp.hold && <Badge value="hold" title={comp.note || ""} />}
         {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
       </div>
-      {vias.through.length > 0 && (            // its probe or commands do not run on it: said on the card itself
-        <div className="lab-node-via">
-          {vias.through.map((v: any) => <ViaTag key={v.other} via={v.other} label={labelOf(v.other)}
-            title={`${v.what.join(", ")}: run on ${v.other}, which reaches ${comp.id}`} />)}
-        </div>
-      )}
       {/* the detailed card, floating beside it while it is pointed at (not scaled with the diagram) */}
       <NodeToolbar isVisible={hovered && !arranging} position={Position.Right} offset={10} className="lab-hover">
         <div className="lab-node-head">
@@ -401,8 +395,7 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     : id.startsWith("host:") ? hostParent(id) : undefined;
   /** The components inside an area or an address box: they move with it. */
   const membersOf = (id: string) => id.startsWith("host:") ? (hostGroups[id] || []).map((c) => byId[c]) : comps.filter((c) => parentOf(c) === id);
-  // a card whose probe or commands run through another component says so on itself: a little taller
-  const size = (c: any) => links.some((l) => l.kind === "probe" && l.target === c.id) ? { ...COMPACT, height: COMPACT.height + 20 } : COMPACT;
+  const size = (_c: any) => COMPACT;
   // the automatic layout changes with what is drawn and the sizes, not with the states
   const structure = JSON.stringify([stages.map((s) => [s.id, s.components, headOf(s)]),
     comps.map((c) => [c.id, c.stages, size(c), hostOf[c.id]]), links.map((l) => [l.source, l.target])]);

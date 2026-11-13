@@ -43,7 +43,7 @@ from testsuit.sequencer.model import FlatStep, Step
 from testsuit.sequencer.monitor import Monitor, component_keys, selftest_component
 from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resources, find_binding, order_queue)
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
-from testsuit.sequencer.transports import Transport, create_transport, strict
+from testsuit.sequencer.transports import Transport, create_transport, strict, traced
 from testsuit.sequencer.results import pack_results
 from testsuit.sequencer.util import SequencerError, deep_merge, dump_yaml, now, parse_duration, render, wait_event
 
@@ -125,9 +125,9 @@ class Sequencer:
 
     # ── events ─────────────────────────────────────────────────────────
     def notify(self, kind: str, data: dict) -> None:
-        if kind not in ("log", "probe"):            # a probe is not an event worth keeping: every few seconds
+        if kind not in ("log", "probe", "manual_output"):   # a probe is not an event worth keeping: every few seconds
             self.store.add_event(kind, data)
-        if kind not in ("log", "step", "probe"):            # the events in the log of tsqd too (Lab page, Logs)
+        if kind not in ("log", "step", "probe", "manual_output"):   # the events in the log of tsqd too (Lab page, Logs)
             log.log(logging.WARNING if kind == "state_mismatch" or str(data.get("verdict", "")).upper() == "ERROR"
                     else logging.INFO, _event_line(kind, data))
         event = {"kind": kind, "ts": now(), **data}
@@ -555,13 +555,17 @@ class Sequencer:
                 "commands": commands}
 
     async def manual_command(self, comp_id: str, name: str, timeout: float | None = None,
-                             keys: dict | None = None) -> dict:
+                             keys: dict | None = None, token: str | None = None) -> dict:
         """Run one command of a component by hand (README section 7.7): only in maintenance, and not while a run
         holds it. A ``run`` command runs with the keys of the lab (no datapack: no params, no slot), and with
         the keys set by hand (``keys``: dotted name -> value), which can add a key or override one of the lab:
         both are in the answer (``keys``) and in the ``manual_command`` event kept for audit;
         a detached one is started with its pid file under ``<root>/.tsq/manual/<component>/``, where ``signal``
-        commands and the built-in ``kill`` find the processes started by hand."""
+        commands and the built-in ``kill`` find the processes started by hand.
+
+        A ``run`` command is traced (each line it runs written to its output before what it prints), and its
+        output is sent as it comes, in ``manual_output`` events (``token``: the caller's, to tell its run from
+        others)."""
         by_hand = keys
         info = await self.manual_commands(comp_id, by_hand)
         if not info["maintenance"]:
@@ -626,9 +630,14 @@ class Sequencer:
                 timeout = parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
             await transport.shell(f"mkdir -p {shlex.quote(manual_dir)}", timeout=15)
             pidfile = f"{manual_dir}/{name}.pid"
+
+            def live(data: bytes) -> None:              # its output as it comes, for the Commands dialog
+                self.notify("manual_output", {"component": comp_id, "command": name, "token": token,
+                                              "text": data.decode("utf-8", "replace")})
+            script = strict(traced(text))
             result.update(run=text, via=via.id if via else None, on=via.host if via else comp.host)
             if spec.get("detach"):
-                process = await transport.start(strict(text), env=env, pidfile=pidfile)
+                process = await transport.start(script, env=env, log=live, pidfile=pidfile)
                 try:
                     done = await process.wait(2.0)
                     result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
@@ -636,7 +645,7 @@ class Sequencer:
                     result.update(ok=True, detached=True, output=process.text(),
                                   detail="started, still running (stop it with a signal command or kill)")
             else:
-                done = await transport.run(strict(text), env=env, timeout=timeout or 300, pidfile=pidfile)
+                done = await transport.run(script, env=env, timeout=timeout or 300, log=live, pidfile=pidfile)
                 result.update(ok=done.exit_status == 0, exit=done.exit_status, output=done.output, error=done.error)
         result["duration"] = round(time.monotonic() - started, 3)
         used = command.get("set_by_hand") or [] if command["kind"] in ("run", "http") else []

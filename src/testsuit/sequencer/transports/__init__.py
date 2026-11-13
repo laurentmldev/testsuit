@@ -179,6 +179,24 @@ def shell_of(component) -> str:
     return value
 
 
+TRACE = "+tsq$ "                         # before each line of a traced command, in its output
+
+
+def traced(command: str, before: str = "") -> str:
+    """A step or a command run by hand as it runs: each line it runs is written to its output just before what
+    that line prints (``set -x``, each line after ``TRACE``), so the output reads line by line; ``before``: what
+    runs first, not traced (a ``cd``...)."""
+    return (f"{before}\n" if before else "") + f"PS4={shlex.quote(TRACE)}\nset -x\n" + command
+
+
+_TRACED = re.compile(r"^\++" + re.escape(TRACE.lstrip("+")) + r".*(\n|$)", re.MULTILINE)
+
+
+def untraced(output: str) -> str:
+    """The output of a traced command without the lines it ran: what the command itself printed."""
+    return _TRACED.sub("", output)
+
+
 def strict(command: str) -> str:
     """A command written by the user (a step, a component's command, probe or self-test), as it runs: it
     stops at the first line that fails (``set -e``), its exit status then that line's. To go on after a

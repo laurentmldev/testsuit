@@ -304,7 +304,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         timeout = (body or {}).get("timeout")
         try:
             return await seq.manual_command(name, command, parse_duration(timeout) if timeout else None,
-                                            (body or {}).get("keys") or None)
+                                            (body or {}).get("keys") or None, (body or {}).get("token") or None)
         except SequencerError as e:
             raise HTTPException(409, str(e)) from e
 
