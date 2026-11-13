@@ -328,6 +328,7 @@ function squareRoute(s: Rect, t: Rect): Point[] {
 }
 
 const AREA_PAD = { left: 18, right: 18, bottom: 18 };
+const OUTSIDE_GAP = 24;                               // between a stage area and a card moved out of it
 const AREA_MIN_W = 200;
 const HOST_HEAD = 30;                                 // a box around the components that share an address
 const HOST_PAD = 10;
@@ -469,6 +470,34 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     if (!members.length) return absolute(id);
     return around(members, head, AREA_PAD, AREA_MIN_W);
   };
+  // a card outside every stage (ad hoc, or shared by stages), or an address box of such cards, placed by hand over
+  // a stage area (an arrangement saved before, or one where the stage grew) is moved beside that area, its cards
+  // with it: nothing outside a stage is ever shown inside one
+  if (manual && !draft) {
+    const areas = stages.map((s) => areaRect(`stage:${s.id}`, headOf(s))).filter(Boolean) as Rect[];
+    const overlaps = (a: Rect, r: Rect) => r.x < a.x + a.width && r.x + r.width > a.x && r.y < a.y + a.height && r.y + r.height > a.y;
+    const pad = { left: HOST_PAD, right: HOST_PAD, bottom: HOST_PAD };
+    const blocks: string[][] = [
+      ...Object.keys(hostGroups).filter((h) => !hostParent(h)).map((h) => hostGroups[h]),
+      ...comps.filter((c) => !parentOf(c) && !hostOf[c.id]).map((c) => [c.id]),
+    ];
+    for (const ids of blocks) {
+      const members = ids.filter((id) => rects[id]);
+      if (!members.length) continue;
+      const boxOf = () => members.length > 1 ? around(members.map((id) => rects[id]), HOST_HEAD, pad, 0) : rects[members[0]];
+      for (let k = 0; k <= areas.length; k++) {
+        const box = boxOf();
+        const hit = areas.find((a) => overlaps(a, box));
+        if (!hit) break;
+        const left = hit.x - box.width - OUTSIDE_GAP;
+        const right = hit.x + hit.width + OUTSIDE_GAP;
+        const dx = (Math.abs(box.x - left) <= Math.abs(box.x - right) ? left : right) - box.x;
+        for (const id of members) rects[id] = { ...rects[id], x: rects[id].x + dx };
+      }
+      const host = hostOf[members[0]];
+      if (members.length > 1 && host) hostRects[host] = boxOf();
+    }
+  }
 
   const startArranging = () => {
     setDraft(Object.fromEntries(comps.filter((c) => rects[c.id]).map((c) => [c.id, { x: rects[c.id].x, y: rects[c.id].y, opacity: opacity(c.id) }])));
@@ -560,8 +589,8 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
     const kinds = new Set(group.map((l) => l.kind));
     const directed = group.find((l) => l.kind === "probe") || group.find((l) => l.kind === "cmd");
     const physical = kinds.has("link");
-    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label
-      : l.kind === "probe" ? `via: ${l.details.map((d) => d.title.replace(/^command /, "").replace("status probe", "probe")).join(", ")}` : l.kind))].filter(Boolean).join(" · ");
+    // the probes and commands behind a via link are listed when it is pointed at (title), not on it
+    const text = [...new Set(group.map((l) => l.kind === "link" ? l.label : l.kind === "probe" ? "via" : l.kind))].filter(Boolean).join(" · ");
     const title = group.map((l) => `${byId[l.source]?.label || l.source} → ${byId[l.target]?.label || l.target} (${l.kind})\n${l.details.map((d) => `  ${d.title}${d.commands.length ? ": " + d.commands.map(textOf).join(" ; ") : ""}`).join("\n")}`).join("\n") + "\nClick: details";
     const main = physical ? "link" : directed!.kind;
     const color = main === "probe" ? "var(--accent)" : main === "cmd" ? "var(--muted)" : "var(--text)";
