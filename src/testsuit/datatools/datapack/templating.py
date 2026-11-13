@@ -147,7 +147,7 @@ class _ValueMarks(jinja2.ext.Extension):
             expressions.append(_expression_text(body))
             self.environment.tsq_names.append(_names(body))
 
-            def t(kind: str, value: Any = None) -> tokens.Token:
+            def t(kind: str, value: Any = None, line: int = line) -> tokens.Token:
                 return tokens.Token(line, kind, value)
             yield from (token, t(tokens.TOKEN_NAME, "tsq_open"), t(tokens.TOKEN_LPAREN, "("), t(tokens.TOKEN_RPAREN, ")"), end)
             yield from (token, t(tokens.TOKEN_NAME, "tsq_close"), t(tokens.TOKEN_LPAREN, "("),
