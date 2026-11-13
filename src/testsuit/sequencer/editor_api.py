@@ -21,12 +21,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import os
 import socket
+import tempfile
 import time
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
 
 from testsuit.sequencer.api import zip_entry
 from testsuit.sequencer.editor import EditConflict, Editor
@@ -69,8 +73,9 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return repo
 
     @app.delete("/edit/repositories/{repo_id}")
-    async def remove_repository(repo_id: str, force: bool = False):
-        await run(editor.remove_workspace, repo_id, force)
+    async def remove_repository(repo_id: str):
+        """Only a clean repository (nothing not committed or not pushed) is removed."""
+        await run(editor.remove_workspace, repo_id)
         log.info(f"editor: tests repository '{repo_id}' removed")
         return {"removed": repo_id}
 
@@ -78,6 +83,37 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     async def repository_status(repo_id: str):
         """The changes of a tests repository's folder (the Datapacks page asks every few seconds)."""
         return await run(editor.workspace_status, repo_id)
+
+    @app.get("/edit/repositories/{repo_id}/diff")
+    async def repository_diff(repo_id: str, download: bool = False):
+        """The local changes of a tests repository's folder (files and patch); with download, the patch as a file."""
+        diff = await run(editor.workspace_diff, repo_id)
+        if not download:
+            return diff
+        name = f"{repo_id}-{diff['base'][:10]}-local.patch"
+        return Response(diff["patch"], media_type="text/x-diff",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/edit/repositories/{repo_id}/revert")
+    async def revert_repository(repo_id: str, body: dict | None = None):
+        """Drop the local changes of the folder ({paths: [...]} relative to it: those files only)."""
+        paths = (body or {}).get("paths") or None
+        result = await run(editor.revert_workspace, repo_id, [str(p) for p in paths] if paths else None)
+        log.info(f"editor: local changes of '{repo_id}' reverted: {', '.join(result['reverted']) or 'none'}")
+        return result
+
+    @app.get("/edit/repositories/{repo_id}/archive")
+    async def repository_archive(repo_id: str):
+        """The folder as it is now, local changes included, as a zip (without .git)."""
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        tmp.close()
+        try:
+            name = await run(editor.workspace_archive, repo_id, Path(tmp.name))
+        except Exception:
+            os.unlink(tmp.name)
+            raise
+        return FileResponse(tmp.name, media_type="application/zip", filename=name,
+                            background=BackgroundTask(os.unlink, tmp.name))
 
     @app.post("/edit/repositories/{repo_id}/pull")
     async def pull_repository(repo_id: str, body: dict | None = None):

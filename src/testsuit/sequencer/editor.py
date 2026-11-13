@@ -37,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -363,25 +364,96 @@ class Editor:
             self._added_file.write_text(yaml.safe_dump([*self._added(), entry], sort_keys=False))
         return self._repo(repo_id)
 
-    def remove_workspace(self, repo_id: str, force: bool = False) -> None:
-        """Remove a repository added by URL: its clone, and the editing sessions on it. Refused while it holds
-        changes not pushed, unless force."""
+    def remove_workspace(self, repo_id: str) -> None:
+        """Remove a repository added by URL: its clone, and the editing sessions on it. Only when it is clean: no
+        change not committed, no commit not pushed (push them, or revert them, first)."""
         entry = next((e for e in self._added() if e["id"] == repo_id), None)
         if entry is None:
             raise SequencerError(f"'{repo_id}' was not added from the UI: remove it from server.workspaces instead"
                                  if any(r["id"] == repo_id for r in self.repositories()) else f"no repository '{repo_id}'")
         clone = self.seq.config.root / "workspaces" / repo_id
-        if not force and clone.is_dir():
-            dirty = _git(clone, "status", "--porcelain", check=False).strip()
+        if clone.is_dir():
+            dirty = _git(clone, "status", "--porcelain", "--untracked-files=all", check=False).strip()
             ahead = _git(clone, "rev-list", "--count", "@{u}..HEAD", check=False).strip()
             if dirty or (ahead and ahead != "0"):
-                raise SequencerError(f"'{repo_id}' has changes that are not pushed: push them first, or remove it anyway")
+                raise SequencerError(f"'{repo_id}' has changes that are not pushed: push or revert them first, "
+                                     f"a repository is removed only when it is clean")
         for session in [s for s in self.sessions.values() if s.repo == repo_id]:
             self.close(session.id)
         with self._added_lock:
             self._added_file.write_text(yaml.safe_dump([e for e in self._added() if e["id"] != repo_id], sort_keys=False))
         shutil.rmtree(clone, ignore_errors=True)
         self.published.pop(repo_id, None)
+
+    def _workspace_git(self, repo_id: str) -> tuple[Path, Path]:
+        """(folder, git work tree root) of a tests repository that is in git."""
+        repo = self._repo(repo_id)
+        if repo["kind"] != "workspace":
+            raise SequencerError(f"'{repo_id}' is not a tests repository")
+        folder = Path(repo["folder"]).resolve()
+        if not folder.is_dir():
+            raise SequencerError(f"no folder '{folder}'")
+        return folder, _repo_root(folder).resolve()
+
+    def workspace_diff(self, repo_id: str) -> dict:
+        """The local changes of a tests repository's folder: what is not committed, against its last commit
+        (new files included), as a list of files and a patch to apply at the root of the repository with
+        `git apply` (paths from that root; folder: the workspace's folder in it). Neither the folder nor its git index is changed. Commits not pushed are counted, not shown."""
+        folder, root = self._workspace_git(repo_id)
+        where = ["--", folder.relative_to(root).as_posix() or "."]
+        with tempfile.TemporaryDirectory() as tmp:            # a scratch index: the user's one is left as it is
+            env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+            _git(root, "read-tree", "HEAD", env=env)
+            _git(root, "add", "-A", *where, env=env)
+            names = _git(root, "diff", "--cached", "--name-status", "HEAD", *where, env=env)
+            patch = _git(root, "diff", "--cached", "--binary", "HEAD", *where, env=env)
+        files = [{"status": line.split("\t")[0], "path": line.split("\t")[-1]} for line in names.splitlines() if line]
+        ahead = _git(root, "rev-list", "--count", "@{u}..HEAD", check=False).strip()
+        return {"repo": repo_id, "files": files, "patch": patch, "folder": "" if folder == root else folder.relative_to(root).as_posix(),
+                "base": _git(root, "rev-parse", "HEAD").strip(),
+                "branch": _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip() or None,
+                "ahead": int(ahead or 0)}
+
+    def revert_workspace(self, repo_id: str, paths: list[str] | None = None) -> dict:
+        """Drop the local changes of a tests repository's folder, or of some of its files (paths relative to the
+        folder): each file back as in the last commit, new files deleted. Commits are not touched: no merge, no
+        reset of the branch. Files ignored by git are kept."""
+        folder, root = self._workspace_git(repo_id)
+        before = {f["path"] for f in self.workspace_diff(repo_id)["files"]}
+        targets = []
+        for rel in paths or ["."]:
+            target = (folder / rel).resolve()
+            if not target.is_relative_to(folder) or ".git" in target.relative_to(root).parts:
+                raise SequencerError(f"'{rel}' is outside the repository's folder")
+            targets.append(target.relative_to(root).as_posix() or ".")
+        _git(root, "reset", "--quiet", "HEAD", "--", *targets, check=False)       # unstaged: the index as committed
+        for target in targets:
+            if _git(root, "ls-tree", "--name-only", "HEAD", "--", target, check=False).strip() or target == ".":
+                _git(root, "checkout", "--quiet", "HEAD", "--", target, check=False)
+        _git(root, "clean", "--quiet", "-f", "-d", "--", *targets)
+        after = {f["path"] for f in self.workspace_diff(repo_id)["files"]}
+        return {"reverted": sorted(before - after), "left": sorted(after)}
+
+    def workspace_archive(self, repo_id: str, dest: Path) -> str:
+        """A zip of a tests repository's folder as it is now (local changes included; no .git), written to dest.
+        Returns the name to download it as: <repo>-<commit>[-modified].zip."""
+        import zipfile
+        repo = self._repo(repo_id)
+        if repo["kind"] != "workspace":
+            raise SequencerError(f"'{repo_id}' is not a tests repository")
+        folder = Path(repo["folder"]).resolve()
+        if not folder.is_dir():
+            raise SequencerError(f"no folder '{folder}'")
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+            for dirpath, dirnames, filenames in os.walk(folder):
+                dirnames[:] = sorted(d for d in dirnames if d not in (".git", ".current_datapack"))
+                for name in sorted(filenames):
+                    path = Path(dirpath) / name
+                    if path.is_file():
+                        z.write(path, Path(repo_id) / path.relative_to(folder))
+        git = repo["git"] or {}
+        label = git.get("tag") or (git.get("commit") or "")[:10] or "files"
+        return f"{repo_id}-{label}{'' if git.get('clean', True) else '-modified'}.zip"
 
     def workspace_status(self, repo_id: str) -> dict:
         """What changed in a tests repository's folder, to follow the changes made meanwhile as on the Lab page:

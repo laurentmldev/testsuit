@@ -14,9 +14,10 @@
 // Datapacks (sequencer README, section 13.2): the test definitions of the tests repositories, what each one
 // is made of (logical configuration, input files, dictionaries), its baseline, and generating its datapack.
 import { Fragment, useEffect, useRef, useState } from "react";
-import { del, get, post, useResource } from "../api";
+import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
-import { CredentialsFields, RepoPushDialog, useCredentials } from "../editor/Publish";
+import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
+import { DiffView } from "../monaco";
 import { WorkspacePicker } from "../editor/workspace";
 import { RunGraph } from "./Run";
 import { Dialog, Field, Section, Text } from "../fields";
@@ -71,7 +72,9 @@ export function DatapacksPage({ route }: { route: Route }) {
       <div className="page-head">
         <h2>Datapacks</h2>
         <button className="small" onClick={() => setAdding(true)} title="Clone another tests repository from its git URL, next to those of server.workspaces">Add repository…</button>
-        {current?.added && <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host">Remove…</button>}
+        {current && <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
+                       title="Download the workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>}
+        {current?.added && <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>}
         <span className="spacer" />
         <button disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open the test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">Edit datapack definitions</button>
       </div>
@@ -398,6 +401,7 @@ function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => v
   const [seen, setSeen] = useState<string | null>(null);      // the stamp of the files as this page read them
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [showing, setShowing] = useState(false);
   useEffect(() => {
     let stop = false;
     const check = () => {
@@ -448,6 +452,7 @@ function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => v
               <span className="muted small">({changes.slice(0, 4).map((c) => c.path.split("/").pop()).join(", ")}{changes.length > 4 ? "…" : ""})</span>. </>}
             {status.ahead > 0 && <>{status.ahead} commit{status.ahead > 1 ? "s are" : " is"} not pushed.</>}
           </span>
+          {changes.length > 0 && <button className="small" onClick={() => setShowing(true)} title="See the local changes file by file, download them as a patch, or revert them">Show changes…</button>}
           {branch && changes.length > 0 &&
             <button className="small" onClick={() => setPushing(true)} title="Review the changes, then commit, tag and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
           {!branch && <span className="muted"> The folder is on no branch: check one out to push.</span>}
@@ -459,6 +464,8 @@ function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => v
           <button className="link" onClick={() => setPulling(true)} title="Fetch the repository: commits pushed from elsewhere are only known after a fetch">Pull…</button>
         </div>
       )}
+      {showing && <LocalChangesDialog repo={repo} onClose={() => setShowing(false)} onChanged={reread}
+                                      onPush={branch ? () => { setShowing(false); setPushing(true); } : undefined} />}
       {pushing && <RepoPushDialog repo={repo} onClose={() => { setPushing(false); reread(); }} />}
       {pulling && <PullDialog repo={repo} onClose={() => setPulling(false)} onPulled={() => { setPulling(false); reread(); }} />}
     </>
@@ -542,29 +549,109 @@ function AddRepositoryDialog({ onClose, onAdded }: { onClose: () => void; onAdde
 }
 
 function RemoveRepositoryDialog({ repo, onClose, onRemoved }: { repo: any; onClose: () => void; onRemoved: () => void }) {
-  const [refused, setRefused] = useState<string | null>(null);
+  const [status, setStatus] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const remove = async (force: boolean) => {
+  useEffect(() => {
+    get(`edit/repositories/${encodeURIComponent(repo.id)}/status`).then(setStatus).catch((e) => setError(e.message));
+  }, [repo.id]);
+  const clean = status && !status.changes.length && !status.ahead;
+  const remove = async () => {
     setBusy(true);
     try {
-      await del(`edit/repositories/${encodeURIComponent(repo.id)}${force ? "?force=true" : ""}`);
+      await del(`edit/repositories/${encodeURIComponent(repo.id)}`);
       notify(`repository ${repo.id} removed`);
       onRemoved();
     } catch (e: any) {
-      setRefused(e.message);
+      setError(e.message);
     } finally {
       setBusy(false);
     }
   };
   return (
     <Dialog title={`Remove ${repo.id}`} onClose={onClose} footer={
-      <>
-        {refused && <button className="danger" disabled={busy} onClick={() => remove(true)}>Remove anyway</button>}
-        <button className="primary" disabled={busy} onClick={() => remove(false)}>Remove</button>
-      </>
+      <button className="primary" disabled={busy || !clean} onClick={remove}>Remove</button>
     }>
       <p>Removes the clone of <code>{repo.url}</code> from the sequencer host, and the editing sessions on it. The remote repository is not changed.</p>
-      {refused && <div className="banner error">{refused}. <strong>Remove anyway</strong> loses them.</div>}
+      {!status && !error && <Spinner text="Looking for local changes…" />}
+      {status && !clean && (
+        <div className="banner warn">
+          Not clean: {status.changes.length ? `${status.changes.length} local change${status.changes.length > 1 ? "s" : ""} not committed` : ""}
+          {status.changes.length && status.ahead ? ", " : ""}{status.ahead ? `${status.ahead} commit${status.ahead > 1 ? "s" : ""} not pushed` : ""}.
+          Commit and push them, or revert them, first: a repository is removed only when it is clean.
+        </div>
+      )}
+      {error && <div className="banner error">{error}</div>}
+    </Dialog>
+  );
+}
+
+/** The local changes of the workspace's folder, file by file (what is not committed, against its last commit): downloaded
+ * as a patch, reverted file by file or all at once. Commits are never touched here: no merge, no reset. */
+function LocalChangesDialog({ repo, onClose, onChanged, onPush }: {
+  repo: string; onClose: () => void; onChanged: () => void; onPush?: () => void;
+}) {
+  const [diff, setDiff] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [file, setFile] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<string | null>(null);   // what a second click reverts: a file, or "all"
+  const [busy, setBusy] = useState(false);
+  const base = `edit/repositories/${encodeURIComponent(repo)}`;
+  const load = () => get(`${base}/diff`).then((d) => {
+    setDiff(d);
+    setFile((f) => (d.files.some((x: any) => x.path === f) ? f : d.files[0]?.path || null));
+  }).catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo]);
+  const files = diff ? splitPatch(diff.patch) : {};
+  // the files are given from the root of the repository; reverting takes them from the workspace's folder
+  const folderOf = (path: string) => (diff?.folder && path.startsWith(`${diff.folder}/`) ? path.slice(diff.folder.length + 1) : path);
+  const revert = async (what: string) => {
+    if (confirm !== what) {
+      setConfirm(what);
+      return;
+    }
+    setBusy(true);
+    setConfirm(null);
+    const r = await attempt(() => post(`${base}/revert`, what === "all" ? {} : { paths: [folderOf(what)] }));
+    setBusy(false);
+    if (r) {
+      notify(`reverted: ${r.reverted.length} file${r.reverted.length === 1 ? "" : "s"}`);
+      onChanged();
+      load();
+    }
+  };
+  return (
+    <Dialog title={`Local changes of ${repo}`} onClose={onClose} wide footer={
+      <>
+        {diff?.files.length > 0 && <a className="button" href={url(`${base}/diff?download=true`)} download title="The changes as a patch file, to apply at the root of the repository with git apply">Download patch</a>}
+        {diff?.files.length > 0 && <button className="danger" disabled={busy} onClick={() => revert("all")}>
+          {confirm === "all" ? `Click again: revert all ${diff.files.length} files` : "Revert all…"}</button>}
+        {onPush && diff?.files.length > 0 && <button className="primary" onClick={onPush}>Commit and push…</button>}
+      </>
+    }>
+      <p className="muted small">What is not committed in the workspace's folder, against its last commit{diff?.base ? <> (<code>{diff.base.slice(0, 10)}</code>{diff.branch ? <> on <code>{diff.branch}</code></> : null})</> : null}. Reverting puts a file back as committed, and deletes a new one: it cannot be undone.{diff?.ahead ? ` ${diff.ahead} commit${diff.ahead > 1 ? "s are" : " is"} not pushed: not shown here, and never reverted.` : ""}</p>
+      {error && <div className="error-box">{error}</div>}
+      {!diff && !error && <Spinner text="Reading the local changes…" />}
+      {diff && !diff.files.length && <p>No local change: the folder is as committed.</p>}
+      {diff && diff.files.length > 0 && (
+        <div className="publish">
+          <div className="diff-files">
+            {diff.files.map((f: any) => (
+              <div key={f.path} className={classes("tree-row", file === f.path && "selected")} onClick={() => { setFile(f.path); setConfirm(null); }}>
+                <span className={classes("status", `st-${f.status[0]}`)}>{f.status[0]}</span> {f.path}
+              </div>
+            ))}
+          </div>
+          <div className="diff-view">
+            {file && files[file] ? <DiffView key={file} original={files[file].before} modified={files[file].after} height={300} /> : <p className="muted">{file ? "binary file" : ""}</p>}
+            {file && <button className="small danger" disabled={busy} onClick={() => revert(file)}>
+              {confirm === file ? `Click again: revert ${file.split("/").pop()}` : "Revert this file…"}</button>}
+          </div>
+        </div>
+      )}
     </Dialog>
   );
 }
