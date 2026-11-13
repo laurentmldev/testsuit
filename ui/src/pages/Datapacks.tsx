@@ -14,11 +14,13 @@
 // Datapacks (sequencer README, section 13.2): the test definitions of the tests repositories, what each one
 // is made of (logical configuration, input files, dictionaries), its baseline, and generating its datapack.
 import { Fragment, useEffect, useRef, useState } from "react";
-import { get, post, useResource } from "../api";
+import { del, get, post, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
+import { CredentialsFields, RepoPushDialog, useCredentials } from "../editor/Publish";
+import { WorkspacePicker } from "../editor/workspace";
 import { RunGraph } from "./Run";
-import { Section } from "../fields";
-import { attempt, classes, Markdown, navigate, openInNewTab, setQuery, Spinner, type Route } from "../util";
+import { Dialog, Field, Section, Text } from "../fields";
+import { attempt, classes, Markdown, navigate, notify, openInNewTab, setQuery, Spinner, type Route } from "../util";
 
 const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit datapack definitions** opens them in the Editor in a new browser tab, where they can be reviewed and pushed.`;
 
@@ -27,6 +29,7 @@ function useWorkspace(repo: string | null) {
   const [sid, setSid] = useState<string | null>(null);
   const [ctx, setCtx] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);       // read again (after a pull, or files changed meanwhile)
   useEffect(() => {
     setSid(null);
     setCtx(null);
@@ -45,15 +48,18 @@ function useWorkspace(repo: string | null) {
     return () => {
       live = false;
     };
-  }, [repo]);
-  return { sid, ctx, error };
+  }, [repo, version]);
+  return { sid, ctx, error, reread: () => setVersion((v) => v + 1) };
 }
 
 export function DatapacksPage({ route }: { route: Route }) {
   const home = useResource<any>("edit");
   const repos: any[] = (home.data?.repositories || []).filter((r: any) => r.kind !== "lab");
   const repo = route.query.get("repo") || repos[0]?.id || null;
-  const { sid, ctx, error } = useWorkspace(repo);
+  const { sid, ctx, error, reread } = useWorkspace(repo);
+  const current = repos.find((r) => r.id === repo);
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const testdefs: any[] = ctx?.workspace?.testdefs || [];
   const selected = route.query.get("def") || testdefs[0]?.path || null;
   const [config, setConfig] = useState<string | null>(null);
@@ -64,17 +70,18 @@ export function DatapacksPage({ route }: { route: Route }) {
     <div className="page datapacks-page">
       <div className="page-head">
         <h2>Datapacks</h2>
-        {repos.length > 1 && (
-          <select value={repo || ""} onChange={(e) => navigate("datapacks", { repo: e.target.value })} title="Tests repository">
-            {repos.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-        )}
+        <button className="small" onClick={() => setAdding(true)} title="Clone another tests repository from its git URL, next to those of server.workspaces">Add repository…</button>
+        {current?.added && <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host">Remove…</button>}
         <span className="spacer" />
         <button disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open the test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">Edit datapack definitions</button>
       </div>
+      {repos.length > 0 && <WorkspacePicker repositories={repos} value={repo} onChange={(id) => navigate("datapacks", { repo: id })} />}
       <Markdown text={INTRO} className="intro" />
+      {repo && sid && ctx && <RepositoryBanners key={repo} repo={repo} onReread={reread} />}
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}
-      {home.data && repos.length === 0 && <p className="muted">No tests repository: add one to <code>server.workspaces</code> in the configuration.</p>}
+      {home.data && repos.length === 0 && <p className="muted">No tests repository: <strong>Add repository…</strong> clones one from its git URL, or list its folder in <code>server.workspaces</code> in the configuration.</p>}
+      {adding && <AddRepositoryDialog onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); home.refresh(); navigate("datapacks", { repo: id }); }} />}
+      {removing && current && <RemoveRepositoryDialog repo={current} onClose={() => setRemoving(false)} onRemoved={() => { setRemoving(false); home.refresh(); navigate("datapacks", {}); }} />}
       {error && <div className="error-box">{error}</div>}
       {repo && !ctx && !error && <Spinner className="block" text="Reading the test definitions…" />}
       {ctx && (
@@ -192,7 +199,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
           <Dictionaries data={data} edit={edit} />
         </>
       )}
-      {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} />}
+      {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} />}
     </div>
   );
 }
@@ -378,5 +385,186 @@ function Baseline({ sid, testdef, config, datasets, onChanged, edit }: {
       )}
       <p className="muted small">A version is changed in the file that writes it; a datapack generated from uncommitted files is a draft until the change is committed and pushed.</p>
     </Section>
+  );
+}
+
+// ── tests repositories: added by git URL, and the changes made meanwhile ──
+
+/** What changed in the repository's folder since this page read it, asked every 2 s while shown, as the Lab page
+ * does for the lab files: files changed elsewhere (another browser, a hand edit, a pull), local changes to commit and
+ * push, and a newer revision upstream to pull. */
+function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => void }) {
+  const [status, setStatus] = useState<any>(null);
+  const [seen, setSeen] = useState<string | null>(null);      // the stamp of the files as this page read them
+  const [pushing, setPushing] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    const check = () => {
+      if (document.visibilityState !== "visible") return;
+      get(`edit/repositories/${encodeURIComponent(repo)}/status`).then((s) => {
+        if (stop) return;
+        setStatus(s);
+        setSeen((old) => old ?? s.stamp);
+      }).catch(() => undefined);
+    };
+    check();
+    const t = setInterval(check, 2000);
+    document.addEventListener("visibilitychange", check);
+    return () => { stop = true; clearInterval(t); document.removeEventListener("visibilitychange", check); };
+  }, [repo]);
+  if (!status) return null;
+  const reread = () => {
+    setSeen(status.stamp);
+    onReread();
+  };
+  const changes: any[] = status.changes || [];
+  const branch = status.git?.branch;
+  const newer = status.published?.newer ? status.published : null;
+  return (
+    <>
+      {seen && status.stamp !== seen && (
+        <div className="banner info">
+          The files of this repository changed since this page read them (another browser, a hand edit, a pull).
+          <button className="small" onClick={reread}>Read them again</button>
+        </div>
+      )}
+      {(newer || status.behind > 0) && (
+        <div className="banner info">
+          <span>
+            {newer
+              ? <>A newer revision was pushed from the Editor: <strong>{newer.tag || newer.commit.slice(0, 10)}</strong> by {newer.author}, “{newer.message}”. </>
+              : <>The upstream branch <strong>{branch}</strong> has {status.behind} commit{status.behind > 1 ? "s" : ""} this folder does not. </>}
+            The folder is on <code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>.
+          </span>
+          <button className="primary small" onClick={() => setPulling(true)} disabled={changes.length > 0}
+                  title={changes.length ? "Commit and push the local changes first" : "Fetch the repository and bring the folder to the latest commit of its branch"}>Pull…</button>
+        </div>
+      )}
+      {(changes.length > 0 || status.ahead > 0) && (
+        <div className="banner warn">
+          <span>
+            {changes.length > 0 && <>This repository's folder has {changes.length} local change{changes.length > 1 ? "s" : ""} not committed{" "}
+              <span className="muted small">({changes.slice(0, 4).map((c) => c.path.split("/").pop()).join(", ")}{changes.length > 4 ? "…" : ""})</span>. </>}
+            {status.ahead > 0 && <>{status.ahead} commit{status.ahead > 1 ? "s are" : " is"} not pushed.</>}
+          </span>
+          {branch && changes.length > 0 &&
+            <button className="small" onClick={() => setPushing(true)} title="Review the changes, then commit, tag and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
+          {!branch && <span className="muted"> The folder is on no branch: check one out to push.</span>}
+        </div>
+      )}
+      {!newer && status.behind === 0 && changes.length === 0 && (
+        <div className="repo-sync muted small">
+          {branch ? <>On <strong>{branch}</strong> at <code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>. </> : null}
+          <button className="link" onClick={() => setPulling(true)} title="Fetch the repository: commits pushed from elsewhere are only known after a fetch">Pull…</button>
+        </div>
+      )}
+      {pushing && <RepoPushDialog repo={repo} onClose={() => { setPushing(false); reread(); }} />}
+      {pulling && <PullDialog repo={repo} onClose={() => setPulling(false)} onPulled={() => { setPulling(false); reread(); }} />}
+    </>
+  );
+}
+
+function PullDialog({ repo, onClose, onPulled }: { repo: string; onClose: () => void; onPulled: () => void }) {
+  const creds = useCredentials("none");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const pull = async () => {
+    setBusy(true);
+    try {
+      const r = await post(`edit/repositories/${encodeURIComponent(repo)}/pull`, creds.value);
+      if (r.ok) {
+        notify(r.updated ? `pulled: now on ${r.git?.tag || r.commit.slice(0, 10)}` : "already on the latest commit");
+        onPulled();
+      } else setResult(r);
+    } catch (e: any) {
+      setResult({ ok: false, error: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title="Pull the repository" onClose={onClose} footer={
+      <button className="primary" disabled={busy || !creds.complete} onClick={pull}>{busy ? "Pulling…" : "Pull"}</button>
+    }>
+      <p>Fetches the branch of the repository and brings its folder to its latest commit. Refused while it has changes not committed or not pushed.</p>
+      {result && !result.ok && <div className="banner error"><strong>Not pulled:</strong> {result.error}{result.hint && <div>{result.hint}.</div>}</div>}
+      <CredentialsFields creds={creds} help="Your own, if the repository needs them to be read: used for this pull only, never stored." />
+    </Dialog>
+  );
+}
+
+function AddRepositoryDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
+  const [gitUrl, setGitUrl] = useState("");
+  const [name, setName] = useState("");
+  const [branch, setBranch] = useState("");
+  const [path, setPath] = useState("");
+  const creds = useCredentials("none");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const author = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("tsq.author") || "{}").name || null;
+    } catch {
+      return null;
+    }
+  })();
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const repo = await post("edit/repositories", { url: gitUrl, name: name || null, branch: branch.trim(), path: path || null, by: author, ...creds.value });
+      notify(`repository ${repo.id} added`);
+      onAdded(repo.id);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title="Add a tests repository" onClose={onClose} footer={
+      <button className="primary" disabled={busy || !gitUrl.trim() || !branch.trim() || !creds.complete} onClick={add}>{busy ? "Cloning…" : "Clone and add"}</button>
+    }>
+      <Markdown text="Clones a repository of datapack definitions (test definitions, setups, dictionaries, templates) on the sequencer host, next to those of `server.workspaces`. Its changes are pushed back from the Editor or from this page, always with your own credentials." />
+      {error && <div className="banner error"><strong>Not added:</strong> {error}</div>}
+      <Field label="Git URL" help="HTTPS or SSH URL of the repository. Give no password or token in it: those go to the credentials below." wide>
+        <Text mono value={gitUrl} onChange={setGitUrl} placeholder="https://git.example.com/team/tests.git" />
+      </Field>
+      <div className="inline-fields">
+        <Field label="Name" help="How the repository is named here (its id). Default: the last part of the URL."><Text value={name} onChange={setName} placeholder="from the URL" /></Field>
+        <Field label="Branch" help="Required: the one branch cloned (single-branch), pulled and pushed to. Other branches of the repository are not fetched."><Text mono value={branch} onChange={setBranch} placeholder="main" /></Field>
+        <Field label="Folder" help="The folder of the repository holding the datapack definitions. Default: the whole repository."><Text mono value={path} onChange={setPath} placeholder="whole repository" /></Field>
+      </div>
+      <CredentialsFields creds={creds} help="Your own, if the repository needs them to be read: used for this clone only, never stored (neither in the clone's configuration)." />
+    </Dialog>
+  );
+}
+
+function RemoveRepositoryDialog({ repo, onClose, onRemoved }: { repo: any; onClose: () => void; onRemoved: () => void }) {
+  const [refused, setRefused] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const remove = async (force: boolean) => {
+    setBusy(true);
+    try {
+      await del(`edit/repositories/${encodeURIComponent(repo.id)}${force ? "?force=true" : ""}`);
+      notify(`repository ${repo.id} removed`);
+      onRemoved();
+    } catch (e: any) {
+      setRefused(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title={`Remove ${repo.id}`} onClose={onClose} footer={
+      <>
+        {refused && <button className="danger" disabled={busy} onClick={() => remove(true)}>Remove anyway</button>}
+        <button className="primary" disabled={busy} onClick={() => remove(false)}>Remove</button>
+      </>
+    }>
+      <p>Removes the clone of <code>{repo.url}</code> from the sequencer host, and the editing sessions on it. The remote repository is not changed.</p>
+      {refused && <div className="banner error">{refused}. <strong>Remove anyway</strong> loses them.</div>}
+    </Dialog>
   );
 }

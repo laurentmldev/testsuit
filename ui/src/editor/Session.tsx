@@ -14,7 +14,7 @@
 // An editing session: its files by kind, the form or YAML view of the open file, the help panel,
 // and the session actions (check everything, generate a datapack, review and push).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { del, post, put } from "../api";
+import { del, post, put, useResource } from "../api";
 import { HelpPanel, HelpProvider, KeysProvider } from "../fields";
 import { CodeEditor, yamlSections } from "../monaco";
 import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
@@ -27,6 +27,7 @@ import { PipelineEditor } from "./PipelineEditor";
 import { TemplateEditor } from "./TemplateEditor";
 import { GenerateDialog } from "./Generate";
 import { PublishDialog } from "./Publish";
+import { WorkspaceTag } from "./workspace";
 import { NewFileDialog } from "./wizards";
 
 const KIND_LABELS: [string, string, string][] = [
@@ -232,7 +233,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   useEffect(() => {
     if (!repoOf) return;
     const before = document.title;
-    document.title = repoOf === "lab" ? "Edit Lab" : "Edit Datapacks";
+    document.title = repoOf === "lab" ? "Edit Lab" : `Edit Datapacks · ${repoOf}`;
     return () => { document.title = before; };
   }, [repoOf]);
   if (!session) return <div className="page"><Spinner className="block" text="Opening the session: reading its files, the lab and the schemas…" /></div>;
@@ -276,7 +277,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
           <div className="session">
             <div className="session-bar">
               <button className="link muted" onClick={() => leave()} title={`Back to the ${back.label} page`}>{back.label}</button>
-              <strong>{info.repo === "lab" ? "Lab" : `Tests (${info.folder})`}</strong>
+              {info.repo === "lab" ? <strong>Lab</strong> : <WorkspaceSwitch current={session.ctx.repository} local={info.local} />}
               {info.local && <span className="badge info" title={`Files are saved directly in ${info.source}, where the sequencer reads them. Closing the session keeps them.`}>in place</span>}
               {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
                 <span className="muted">branch <code>{info.branch || "detached"}</code> · {info.changed ? `${info.changed} changed file(s)` : "no change yet"}</span>
@@ -374,4 +375,29 @@ function SessionWelcome({ session }: { session: Session }) {
 // exported for the dialogs that create files
 export async function createFile(sid: string, path: string, data: any, content?: string) {
   return put(`edit/sessions/${sid}/files/${path}`, content !== undefined ? { content } : { data });
+}
+
+/** The workspace this session edits, and when there are several, a switch to another one: an editing session on it,
+ * in place or a scratch clone like this one. */
+function WorkspaceSwitch({ current, local }: { current: any; local: boolean }) {
+  const home = useResource<any>("edit");
+  const others: any[] = (home.data?.repositories || []).filter((r: any) => r.kind === "workspace");
+  const [busy, setBusy] = useState(false);
+  const open = async (repo: string) => {
+    setBusy(true);
+    const s = await attempt(() => post("edit/sessions", { repo, local }));
+    setBusy(false);
+    if (s) navigate(`edit/${s.id}`);
+  };
+  return (
+    <>
+      <WorkspaceTag repository={current} />
+      {others.length > 1 && (
+        <select value={current?.id || ""} disabled={busy} onChange={(e) => open(e.target.value)}
+                title={`Edit another workspace (${local ? "in place" : "in a scratch clone"}). This session stays open.`}>
+          {others.map((r) => <option key={r.id} value={r.id}>{r.id === current?.id ? `${r.id} (this one)` : `switch to ${r.id}`}</option>)}
+        </select>
+      )}
+    </>
+  );
 }

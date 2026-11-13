@@ -74,9 +74,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const lastTag = [...(info.pushed || [])].reverse().find((p: any) => p.tag)?.tag;
   const [tag, setTag] = useState<string>(nextTag(lastTag));
   const [message, setMessage] = useState("");
-  const [auth, setAuth] = useState<string | null>("token");   // the user's own: never those of tsqd
-  const [username, setUsername] = useState("");
-  const [secret, setSecret] = useState("");
+  const creds = useCredentials("token");                       // the user's own: never those of tsqd
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
 
@@ -90,7 +88,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sid]);
 
-  const credentials = auth === "token" ? { username, password: secret } : auth === "ssh" ? { passphrase: secret } : {};
+  const credentials = creds.value;
   const push = async () => {
     setBusy(true);
     try {
@@ -133,7 +131,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
     <Dialog title="Review and push" onClose={onClose} wide footer={
       <>
         {result && !result.ok && result.hint?.startsWith("the branch moved") && <button onClick={rebase} disabled={busy}>Rebase on the latest revision</button>}
-        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim() || !secret || (auth === "token" && !username.trim())} onClick={push}>
+        <button className="primary" disabled={busy || !diff?.files.length || !message.trim() || !name.trim() || !email.trim() || !creds.complete} onClick={push}>
           {busy ? "Pushing…" : `Push to ${diff?.branch || info.branch}`}
         </button>
       </>
@@ -170,20 +168,42 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
           <Text mono value={tag} onChange={setTag} placeholder="none" />
         </Field>
       </div>
-      <Field label="Credentials" help="Your own, needed for every push: used for this push only, never stored, given to git through its askpass, then forgotten.">
-        <Choices value={auth} onChange={(v) => v && setAuth(v)} choices={[
+      <CredentialsFields creds={creds} help="Your own, needed for every push and its tag: used for this push only, never stored, given to git through its askpass, then forgotten. A push is refused without them." />
+    </Dialog>
+  );
+}
+
+export type Credentials = ReturnType<typeof useCredentials>;
+
+/** Git credentials typed for one request (a push, a clone, a pull): kept in this component's state only, never stored.
+ * initial "none": none at all may be given (a public repository, to read it). */
+export function useCredentials(initial: "token" | "ssh" | "none") {
+  const [auth, setAuth] = useState<string>(initial);
+  const [username, setUsername] = useState("");
+  const [secret, setSecret] = useState("");
+  const value: Record<string, string> = auth === "token" ? { username, password: secret } : auth === "ssh" ? { passphrase: secret } : {};
+  const complete = auth === "none" || (!!secret && (auth !== "token" || !!username.trim()));
+  return { auth, setAuth, username, setUsername, secret, setSecret, value, complete, optional: initial === "none" };
+}
+
+export function CredentialsFields({ creds, help }: { creds: Credentials; help: string }) {
+  return (
+    <>
+      <Field label="Credentials" help={help}>
+        <Choices value={creds.auth} onChange={(v) => v && creds.setAuth(v)} choices={[
+          ...(creds.optional ? [{ value: "none", label: "none", description: "a public repository, or one tsqd may read" }] : []),
           { value: "token", label: "user and token", description: "HTTPS remote: a personal access token" },
           { value: "ssh", label: "SSH key passphrase", description: "SSH remote: the passphrase of tsqd's key" },
         ]} />
       </Field>
-      {auth === "token" && (
+      {creds.auth === "token" && (
         <div className="inline-fields">
-          <Field label="User"><Text value={username} onChange={setUsername} /></Field>
-          <Field label="Token"><input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" /></Field>
+          <Field label="User"><Text value={creds.username} onChange={creds.setUsername} /></Field>
+          <Field label="Token"><input type="password" value={creds.secret} onChange={(e) => creds.setSecret(e.target.value)} autoComplete="off" /></Field>
         </div>
       )}
-      {auth === "ssh" && <Field label="Passphrase"><input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" /></Field>}
-    </Dialog>
+      {creds.auth === "ssh" && <Field label="Passphrase"><input type="password" value={creds.secret} onChange={(e) => creds.setSecret(e.target.value)} autoComplete="off" /></Field>}
+    </>
   );
 }
 
@@ -195,25 +215,29 @@ function suggest(files: { status: string; path: string }[]): string {
   return `Update ${files.length} files in ${dirs.slice(0, 3).join(", ")}${dirs.length > 3 ? "…" : ""}`;
 }
 
-/** The local changes of the lab folder, committed and pushed from the banner that shows them: through the in-place
- * session of the lab (opened, or the one already open), with the same review, author and credentials (used for
- * this push only, never stored) as the Editor's "Review and push". */
-export function LabPushDialog({ onClose }: { onClose: () => void }) {
+/** The local changes of a repository's folder (the lab, or a tests repository), committed and pushed from the banner
+ * that shows them: through its in-place session (opened, or the one already open), with the same review, author and
+ * credentials (used for this push only, never stored) as the Editor's "Review and push". */
+export function RepoPushDialog({ repo, onClose }: { repo: string; onClose: () => void }) {
   const [sid, setSid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    post("edit/sessions", { repo: "lab", local: true }).then((s) => setSid(s.id)).catch((e) => setError(e.message));
-  }, []);
+    post("edit/sessions", { repo, local: true }).then((s) => setSid(s.id)).catch((e) => setError(e.message));
+  }, [repo]);
   if (error || !sid)
     return (
       <Dialog title="Review and push" onClose={onClose}>
-        {error ? <div className="error-box">Cannot open the lab folder: {error}</div> : <p className="muted">Reading the local changes…</p>}
+        {error ? <div className="error-box">Cannot open the {repo === "lab" ? "lab folder" : "repository's folder"}: {error}</div> : <p className="muted">Reading the local changes…</p>}
       </Dialog>
     );
-  return <LabPushSession sid={sid} onClose={onClose} />;
+  return <RepoPushSession sid={sid} onClose={onClose} />;
 }
 
-function LabPushSession({ sid, onClose }: { sid: string; onClose: () => void }) {
+export function LabPushDialog({ onClose }: { onClose: () => void }) {
+  return <RepoPushDialog repo="lab" onClose={onClose} />;
+}
+
+function RepoPushSession({ sid, onClose }: { sid: string; onClose: () => void }) {
   const session = useSessionData(sid, () => undefined);
   if (!session)
     return <Dialog title="Review and push" onClose={onClose}><p className="muted">Reading the local changes…</p></Dialog>;
