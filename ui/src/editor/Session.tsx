@@ -211,6 +211,14 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  // the browser tab says what it edits (the Lab page and the Datapacks page open the Editor in a tab of its own)
+  const repoOf = session?.info.repo;
+  useEffect(() => {
+    if (!repoOf) return;
+    const before = document.title;
+    document.title = repoOf === "lab" ? "Edit Lab" : "Edit Datapacks";
+    return () => { document.title = before; };
+  }, [repoOf]);
   if (!session) return <div className="page"><Spinner className="block" text="Opening the session: reading its files, the lab and the schemas…" /></div>;
   const doc = api.doc;
   const validateAll = async () => {

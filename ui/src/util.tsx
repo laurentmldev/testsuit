@@ -37,11 +37,30 @@ export function useRoute(): Route {
   return route;
 }
 
-export function navigate(path: string, query?: Record<string, string | null | undefined>) {
+function hashOf(path: string, query?: Record<string, string | null | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(query || {})) if (v) q.set(k, v);
   const s = q.toString();
-  window.location.hash = "#/" + path.replace(/^\//, "") + (s ? "?" + s : "");
+  return "#/" + path.replace(/^\//, "") + (s ? "?" + s : "");
+}
+
+export function navigate(path: string, query?: Record<string, string | null | undefined>) {
+  window.location.hash = hashOf(path, query);
+}
+
+// Opens a route of this app in a new browser tab. The tab is opened at once (inside the click, so the
+// browser does not block it as a popup); `target` may be a promise for the route, resolved afterwards, and
+// the tab is closed again if it resolves to nothing.
+export async function openInNewTab(target: { path: string; query?: Record<string, string | null | undefined> } | null
+  | Promise<{ path: string; query?: Record<string, string | null | undefined> } | null>) {
+  const base = window.location.href.split("#")[0];
+  const tab = window.open("", "_blank");
+  let t = null;
+  try { t = await target; } catch { /* reported by the caller */ }
+  if (!t) { tab?.close(); return; }
+  const url = base + hashOf(t.path, t.query);
+  if (tab) tab.location.href = url;
+  else window.location.hash = hashOf(t.path, t.query);  // popups blocked: open here instead
 }
 
 export function setQuery(key: string, value: string | null) {

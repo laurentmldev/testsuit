@@ -63,10 +63,11 @@ function App() {
   }, []);
   const title = health.data?.title || "Test sequencer";
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
-  useEffect(() => {
-    document.title = title;
-  }, [title]);
   const page = route.parts[0] || "queue";
+  const editing = page === "edit" && !!route.parts[1];   // an editor session names its own tab
+  useEffect(() => {
+    if (!editing) document.title = title;
+  }, [title, editing]);
   const nav = [
     ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ["config", "Configuration"],
   ];

@@ -18,9 +18,9 @@ import { get, post, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { RunGraph } from "./Run";
 import { Section } from "../fields";
-import { attempt, classes, Markdown, navigate, setQuery, Spinner, type Route } from "../util";
+import { attempt, classes, Markdown, navigate, openInNewTab, setQuery, Spinner, type Route } from "../util";
 
-const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit datapack definitions** opens them in the Editor, where they can be reviewed and pushed.`;
+const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit datapack definitions** opens them in the Editor in a new browser tab, where they can be reviewed and pushed.`;
 
 /** The in-place editing session of a tests repository: opened once, then reused. */
 function useWorkspace(repo: string | null) {
@@ -70,7 +70,7 @@ export function DatapacksPage({ route }: { route: Route }) {
           </select>
         )}
         <span className="spacer" />
-        <button disabled={!sid} onClick={() => navigate(`edit/${sid}`)} title="Open the test definitions, setups, dictionaries and templates in the Editor">Edit datapack definitions</button>
+        <button disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open the test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">Edit datapack definitions</button>
       </div>
       <Markdown text={INTRO} className="intro" />
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}
