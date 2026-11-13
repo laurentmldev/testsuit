@@ -66,7 +66,7 @@ def _absoluteTimeTrack(channel) -> np.ndarray:
     return start_time + (relative_time * 1e9).astype("timedelta64[ns]")
 
 def readChannelData(channel, chunkCb: Callable[[int], None] | None = None,
-                    chunkSize: int | None = None, readLock: threading.Lock | None = None) -> np.ndarray:
+                    chunkSize: int | None = None, readLock: "threading.Lock | None" = None) -> np.ndarray:
     """Values of a TDMS channel opened in streaming mode (TdmsFile.open), read in chunks so that
     chunkCb(nbValues) can report progress (and raise to abort) after each chunk.
 
@@ -96,7 +96,7 @@ def readChannelData(channel, chunkCb: Callable[[int], None] | None = None,
     return data
 
 def channelAsSeries(channel, chunkCb: Callable[[int], None] | None = None,
-                    readLock: threading.Lock | None = None) -> pd.Series:
+                    readLock: "threading.Lock | None" = None) -> pd.Series:
     """Values of a TDMS channel (opened with TdmsFile.open) indexed by absolute time, read in chunks (see readChannelData)."""
     data = readChannelData(channel, chunkCb, readLock=readLock)
     return pd.Series(data=data, index=_absoluteTimeTrack(channel))
