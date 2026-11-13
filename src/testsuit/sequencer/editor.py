@@ -52,6 +52,7 @@ from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
 from testsuit.sequencer.util import SequencerError, now
 
+WORK_DIRS = (".current_datapack/", ".work/")     # what the datapack tool writes next to the definitions: never committed
 SKIP_DIRS = {".git", ".work", ".current_datapack", "__pycache__", "node_modules", ".pytest_cache", ".venv"}
 MAX_FILES = 2000
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -158,7 +159,9 @@ def _git(cwd: Path, *args: str, env: dict | None = None, check: bool = True, tim
     result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=timeout,
                             env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})})
     if check and result.returncode:
-        raise SequencerError(f"git {args[0]}: {(result.stderr or result.stdout).strip()}")
+        # the git command, after its -c options: "git commit", not "git -c"
+        name = next((a for i, a in enumerate(args) if not a.startswith("-") and (i == 0 or args[i - 1] != "-c")), "")
+        raise SequencerError(f"git {name}: {(result.stderr or result.stdout).strip()}")
     return result.stdout
 
 
@@ -562,7 +565,7 @@ class Editor:
         else:
             _git(root, "checkout", "--quiet", "-B", branch)
         with open(root / ".git" / "info" / "exclude", "a") as f:
-            f.write("\n.current_datapack/\n")
+            f.write("".join(f"\n{d}" for d in WORK_DIRS) + "\n")
         session = EditSession(id=session_id, repo=repo_id, kind=repo["kind"], source=str(source), dir=str(folder),
                               sub=sub, branch=branch, base=_git(root, "rev-parse", "HEAD").strip(), upstream=upstream)
         self.sessions[session_id] = session
@@ -596,10 +599,12 @@ class Editor:
         if git:                                         # datapacks generated here leave their work folder
             exclude = Path(_git(root, "rev-parse", "--git-path", "info/exclude").strip())
             exclude = exclude if exclude.is_absolute() else root / exclude
-            if ".current_datapack/" not in (exclude.read_text() if exclude.is_file() else ""):
+            known = (exclude.read_text() if exclude.is_file() else "").split()
+            missing = [d for d in WORK_DIRS if d not in known]
+            if missing:
                 exclude.parent.mkdir(parents=True, exist_ok=True)
                 with open(exclude, "a") as f:
-                    f.write("\n.current_datapack/\n")
+                    f.write("".join(f"\n{d}" for d in missing) + "\n")
         session = EditSession(id=session_id, repo=repo_id, kind=repo["kind"], source=str(source), dir=str(folder),
                               sub=source.relative_to(root).as_posix() if source != root else "", branch=current,
                               base=_git(root, "rev-parse", "HEAD", check=False).strip() if git else "",
@@ -2063,7 +2068,12 @@ class Editor:
         remote = self._origin(session.root, push=True)            # before committing: refused, nothing to undo
         remote_options = self._user_git_config(remote, session.root, push=True)
         ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
-        _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
+        # what is left to commit; the changes may already be in commits of the working copy (made by hand), which
+        # are then pushed as they are
+        staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", session.sub or "."], cwd=session.root).returncode
+        committed = bool(staged)
+        if committed:
+            _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
         commit = _git(session.root, "rev-parse", "HEAD").strip()
         if tag:
             _git(session.root, *ident, "tag", "-a", tag, "-m", message)
@@ -2075,7 +2085,8 @@ class Editor:
         if result.returncode:
             if tag:
                 _git(session.root, "tag", "-d", tag, check=False)
-            _git(session.root, "reset", "--quiet", "--soft", "HEAD~1")
+            if committed:
+                _git(session.root, "reset", "--quiet", "--soft", "HEAD~1")
             why = self._scrub((result.stderr or result.stdout).strip(), credentials)
             hint = ("the branch moved meanwhile: rebase the session on the latest revision and push again"
                     if re.search(r"rejected|non-fast-forward|fetch first", why) else

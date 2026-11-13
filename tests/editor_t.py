@@ -440,6 +440,28 @@ def test_push_ignores_url_rewriting(repos, tmp_path):
     assert editor.diff(session)["files"]
 
 
+def test_push_of_commits_made_by_hand(repos):
+    """Changes already committed in the working copy (by hand) are pushed as they are; the datapack tool's work
+    folders are never committed."""
+    editor = repos.editor
+    folder = repos.root / "tests-clone" / "datapack"
+    session = editor.open("workspace0", local=True)
+    (folder / ".work" / "datapacks").mkdir(parents=True)
+    (folder / ".work" / "datapacks" / "x.zip").write_text("zip")
+    (folder / "setup/globals.yml").write_text("duration: 4s\nmin_count: 3\n")
+    git(session.root, "commit", "-qam", "By hand")
+    assert [f["path"] for f in editor.diff(session)["files"]] == ["datapack/setup/globals.yml"]
+    pushed = editor.push(session, "Longer", "Ada", "ada@example.com", tag="hand-1", credentials=CREDS)
+    assert pushed["ok"], pushed
+    assert git(repos.root / "upstream.git", "log", "-1", "--format=%s", "main").strip() == "By hand"
+    assert "duration: 4s" in repos.upstream_file("datapack/setup/globals.yml")
+    assert ".work" not in git(repos.root / "upstream.git", "ls-tree", "-r", "--name-only", "main")
+    assert git(repos.root / "upstream.git", "rev-parse", "hand-1^{commit}") == git(session.root, "rev-parse", "HEAD")
+    with pytest.raises(SequencerError, match="git commit:"):            # the command, not 'git -c'
+        from testsuit.sequencer.editor import _git
+        _git(session.root, "-c", "user.name=a", "commit", "-m", "nothing")
+
+
 def test_repository_added_by_url(repos):
     editor = repos.editor
     upstream = str(repos.root / "upstream.git")
