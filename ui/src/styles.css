@@ -686,3 +686,11 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .console-out { white-space: pre-wrap; }
 .console-note { color: var(--muted); }
 .console-comment { color: var(--ok); font-style: italic; margin-top: 2px; }
+
+/* a button opening a short list of actions */
+.menu-button { position: relative; display: inline-block; }
+.menu-caret { font-size: 10px; opacity: 0.7; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 100%; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgba(20, 30, 50, 0.16); padding: 4px; }
+.menu button { border: none; background: none; text-align: left; white-space: nowrap; padding: 6px 10px; border-radius: 5px; }
+.menu button:hover { background: var(--accent-soft); color: var(--accent); }

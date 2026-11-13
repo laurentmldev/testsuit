@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Small helpers: hash routing, formatting, light Markdown for help texts, notifications.
-import { Fragment, ReactNode, useEffect, useState } from "react";
+import { Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // ── routing (#/page/arg?key=value) ─────────────────────────────────────
 
@@ -336,5 +336,63 @@ export function ConsoleText({ text }: { text: string }) {
         : NOTE.test(line) ? <div key={i} className="console-note">{line}</div>
           : <div key={i} className="console-out">{line || " "}</div>)}
     </>
+  );
+}
+
+/** The output of a command that runs, kept in view: as lines come, the dialog (or page) scrolls with them, unless
+ *  the user scrolled away from its end (to read above), then it stays where it is until they come back. */
+export function LiveConsole({ text, empty }: { text: string; empty?: ReactNode }) {
+  const end = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => {                          // what the user does: back at its end, or away from it
+    const check = () => {
+      const r = end.current?.getBoundingClientRect();
+      if (r) following.current = r.top <= window.innerHeight + 40;
+    };
+    window.addEventListener("scroll", check, true);      // any scroll: the page's or the dialog's
+    return () => window.removeEventListener("scroll", check, true);
+  }, []);
+  useLayoutEffect(() => {
+    if (following.current) end.current?.scrollIntoView({ block: "end" });
+  }, [text]);
+  return (
+    <pre className="small console">
+      {text ? <ConsoleText text={text} /> : empty}
+      <div ref={end} />
+    </pre>
+  );
+}
+
+/** A button opening a short list of actions under it (a menu); a click outside, or Escape, closes it. */
+export function MenuButton({ label, items, disabled, title }: {
+  label: ReactNode; disabled?: boolean; title?: string;
+  items: { label: ReactNode; title?: string; onClick: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <span className="menu-button" ref={box}>
+      <button disabled={disabled} title={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {label} <span className="menu-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          {items.map((item, i) => (
+            <button key={i} role="menuitem" title={item.title} onClick={() => { setOpen(false); item.onClick(); }}>{item.label}</button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
