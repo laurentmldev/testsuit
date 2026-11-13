@@ -473,7 +473,7 @@ function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => v
 }
 
 function PullDialog({ repo, onClose, onPulled }: { repo: string; onClose: () => void; onPulled: () => void }) {
-  const creds = useCredentials("none");
+  const creds = useCredentials(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const pull = async () => {
@@ -506,7 +506,7 @@ function AddRepositoryDialog({ onClose, onAdded }: { onClose: () => void; onAdde
   const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
   const [path, setPath] = useState("");
-  const creds = useCredentials("none");
+  const creds = useCredentials(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const author = (() => {
