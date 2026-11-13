@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Small helpers: hash routing, formatting, light Markdown for help texts, notifications.
-import { Fragment, ReactNode, useEffect, useState } from "react";
+import { Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // ── routing (#/page/arg?key=value) ─────────────────────────────────────
 
@@ -336,5 +336,29 @@ export function ConsoleText({ text }: { text: string }) {
         : NOTE.test(line) ? <div key={i} className="console-note">{line}</div>
           : <div key={i} className="console-out">{line || " "}</div>)}
     </>
+  );
+}
+
+/** The output of a command that runs, kept in view: as lines come, the dialog (or page) scrolls with them, unless
+ *  the user scrolled away from its end (to read above), then it stays where it is until they come back. */
+export function LiveConsole({ text, empty }: { text: string; empty?: ReactNode }) {
+  const end = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => {                          // what the user does: back at its end, or away from it
+    const check = () => {
+      const r = end.current?.getBoundingClientRect();
+      if (r) following.current = r.top <= window.innerHeight + 40;
+    };
+    window.addEventListener("scroll", check, true);      // any scroll: the page's or the dialog's
+    return () => window.removeEventListener("scroll", check, true);
+  }, []);
+  useLayoutEffect(() => {
+    if (following.current) end.current?.scrollIntoView({ block: "end" });
+  }, [text]);
+  return (
+    <pre className="small console">
+      {text ? <ConsoleText text={text} /> : empty}
+      <div ref={end} />
+    </pre>
   );
 }

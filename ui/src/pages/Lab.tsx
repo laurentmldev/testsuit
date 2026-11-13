@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, ConsoleText, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
+import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -155,7 +155,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
           {running && current && (
             <div className="manual-result">
               <div><span className="pulse run" /> <code>{running}</code> running…</div>
-              <pre className="small console">{streams[current] ? <ConsoleText text={streams[current]} /> : <span className="muted">no output yet</span>}</pre>
+              <LiveConsole text={streams[current] || ""} empty={<span className="muted">no output yet</span>} />
             </div>
           )}
           {results.map((r, i) => (
