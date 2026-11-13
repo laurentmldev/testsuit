@@ -330,7 +330,7 @@ tr.finally-row td { color: var(--muted); }
 .doc-body > .form-split { flex: 1; }
 .save-state { font-size: 12px; color: var(--muted); margin-left: auto; }
 .save-state.pending, .save-state.saving { color: var(--warn); }
-.save-state.error { color: var(--bad); }
+.save-state.error, .save-state.conflict { color: var(--bad); }
 .welcome ul { padding-left: 20px; }
 
 /* pipeline editor */

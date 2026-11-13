@@ -1126,7 +1126,7 @@ tsq config                                                  # settings in use, a
 - `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`: the run graph of the UI);
 - Editor mode only (section 13.2):
   - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository, or `local: true` to edit it in place), `GET|DELETE /edit/sessions/{id}`;
-  - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `PUT` of `data` merges it into the file, keeping its comments), `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
+  - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `GET` gives the file's `version`, a hash of its content; a `PUT` of `data` merges it into the file, keeping its comments; a `PUT` with `base: <version>` is refused, 409 with the file as it is now in `current`, when the file is another version), `GET .../version/{path}`, `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
   - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
@@ -1162,6 +1162,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - The folder need not be a git work tree. When it is, the session works on the checked-out branch, and review and push commit and push only the edited folder, in the user's name: other changes of that working copy are left alone. From a detached HEAD (a lab on a tag) nothing can be pushed.
 - Rebase replays the working copy's own commits on the upstream branch; it never drops them.
 - One in-place session per repository at a time; opening it again returns the same session. Closing it keeps the files.
+- Several browsers can share a session (an in-place one always is), with no user accounts: each save names the version of the file it started from, and is refused when the file changed since (another browser, a pull, a hand edit). The Editor also looks at the version of the file it shows every 2 s. Either way it saves nothing more and asks which version to keep: **Load that version** (the changes not saved are dropped) or **Overwrite it with mine**.
 
 **Lab inventory.**
 - Forms for stages, ad hoc components and their variables, with a YAML view next to them.

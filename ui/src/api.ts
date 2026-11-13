@@ -23,9 +23,11 @@ export function url(path: string): string {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  body: any;                                 // the answer, parsed (a 409 of the Editor: the file as it is now)
+  constructor(status: number, message: string, body?: any) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -42,7 +44,7 @@ async function parse(response: Response): Promise<any> {
     const message = Array.isArray(detail)
       ? detail.map((d: any) => `${(d.loc || []).join(".")}: ${d.msg}`).join("; ")
       : String(detail || response.statusText);
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, body);
   }
   return body;
 }

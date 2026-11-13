@@ -14,7 +14,7 @@
 // State shared by the views of an editing session: its files, the helpers of the lab and workspace
 // (context), the schemas, and the document being edited (saved to the scratch clone as you go).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { get, post, put } from "../api";
+import { ApiError, get, post, put } from "../api";
 import type { Choice, KeyItem } from "../fields";
 import { notify } from "../util";
 
@@ -85,7 +85,14 @@ export interface Doc {
   content: string;
   data: any;
   aliases?: boolean;
+  version?: string;                          // a hash of the file as read or saved: a save from another one is refused
   problems: Problem[];
+}
+
+/** The file changed elsewhere (another browser, a pull, a hand edit) since it was read: found by a save refused
+ * (conflict), or by the check every 2 s of the file shown. Nothing is saved until the user picks a version. */
+export interface External {
+  deleted: boolean;
 }
 
 /** A file of the session: setData merges a new version of its data (forms), setText replaces its text
@@ -94,7 +101,12 @@ export interface Doc {
  * than a second apart, such as typing in a field, make one step. The history starts with the file. */
 export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) => void) {
   const [doc, setDoc] = useState<Doc | null>(null);
-  const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
+  const [state, setState] = useState<"saved" | "pending" | "saving" | "error" | "conflict">("saved");
+  const [external, setExternal] = useState<External | null>(null);
+  const version = useRef<string | null | undefined>(undefined);   // the version the edits start from
+  const held = useRef<{ data?: any; content?: string } | null>(null);   // the edit a conflict kept from saving
+  const saves = useRef(0);
+  const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ data?: any; content?: string } | null>(null);
   const timer = useRef<number | null>(null);
@@ -112,6 +124,10 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
   useEffect(() => {
     setDoc(null);
     setError(null);
+    setExternal(null);
+    setState("saved");
+    version.current = undefined;
+    held.current = null;
     pending.current = null;
     past.current = [];
     future.current = [];
@@ -119,12 +135,38 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     if (!path) return;
     let cancelled = false;
     Promise.all([get(`edit/sessions/${sid}/files/${path}`), post(`edit/sessions/${sid}/validate`, { path }).catch(() => ({ problems: [] }))])
-      .then(([d, v]) => !cancelled && setDoc({ ...d, problems: v.problems || [] }))
+      .then(([d, v]) => {
+        if (cancelled) return;
+        version.current = d.version;
+        setDoc({ ...d, problems: v.problems || [] });
+      })
       .catch((e) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
     };
-  }, [sid, path]);
+  }, [sid, path, reload]);
+
+  // the file shown, looked at every 2 s (while the page is shown, between saves): changed elsewhere, the user
+  // picks which version to keep before anything is saved
+  useEffect(() => {
+    if (!path) return;
+    let stop = false;
+    const check = async () => {
+      if (document.visibilityState !== "visible" || version.current === undefined || saving.current || timer.current) return;
+      const before = saves.current;
+      const known = version.current;
+      try {
+        const { version: now } = await get<{ version: string | null }>(`edit/sessions/${sid}/version/${path}`);
+        if (stop || saves.current !== before || version.current !== known || now === known) return;
+        setExternal({ deleted: now === null });
+      } catch {
+        /* the next check tells */
+      }
+    };
+    const t = window.setInterval(check, 2000);
+    document.addEventListener("visibilitychange", check);
+    return () => { stop = true; window.clearInterval(t); document.removeEventListener("visibilitychange", check); };
+  }, [sid, path, reload]);
 
   const flush = useCallback(async () => {
     if (timer.current) window.clearTimeout(timer.current);
@@ -135,10 +177,15 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     if (!body || !path) return;
     pending.current = null;
     const sent = edits.current;
+    saves.current++;
     setState("saving");
     saving.current = (async () => {
       try {
-        const result = await put(`edit/sessions/${sid}/files/${path}`, body);
+        const base = version.current;            // null: write whatever the file is (Overwrite with mine)
+        const result = await put(`edit/sessions/${sid}/files/${path}`, base === null ? body : { ...body, base });
+        version.current = result.version;
+        held.current = null;
+        setExternal(null);
         setDoc((d) => {
           // typed since this save was sent: the field keeps it (the next save writes it)
           if (d && edits.current !== sent) return { ...result, content: d.content, data: d.data };
@@ -148,6 +195,14 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
         setError(null);
         savedRef.current?.(result);
       } catch (e: any) {
+        if (e instanceof ApiError && e.status === 409) {
+          // changed elsewhere: this edit is kept (a later one replaces it) until the user picks a version
+          held.current = pending.current || body;
+          pending.current = null;
+          setState("conflict");
+          setExternal({ deleted: !e.body?.current });
+          return;
+        }
         setState("error");
         setError(e.message);
       } finally {
@@ -156,6 +211,23 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     })();
     await saving.current;
   }, [sid, path]);
+
+  /** Drop the edits not saved and show the file as it is now. */
+  const loadTheirs = () => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    setReload((n) => n + 1);
+  };
+  /** Write what this page shows over the file as it is now. */
+  const overwrite = async () => {
+    while (saving.current) await saving.current;
+    const d = docRef.current;
+    pending.current = pending.current || held.current || (d ? { content: d.content } : null);
+    held.current = null;
+    version.current = null;
+    setExternal(null);
+    await flush();
+  };
 
   const schedule = (delay: number) => {
     setState("pending");
@@ -207,7 +279,8 @@ export function useDoc(sid: string, path: string | null, onSaved?: (doc: Doc) =>
     if (pending.current) flush();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
-  return { doc, state, error, setData, setText, flush, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0 };
+  return { doc, state, error, external, loadTheirs, overwrite, setData, setText, flush, undo, redo,
+    canUndo: past.current.length > 0, canRedo: future.current.length > 0 };
 }
 
 // ── choices built from the context ──────────────────────────────────────
