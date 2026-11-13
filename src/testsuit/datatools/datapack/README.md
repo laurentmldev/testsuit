@@ -164,6 +164,8 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
   datapack.yml        what it was built from: test definition, setup and configuration, git state,
                       datasets, each slot's inputs, and the keys each generated file used
   context.yml         every key, resolved: using the datapack needs no dictionary
+  values.json         where each '{{ expression }}' output is in the rendered files, and the keys it
+                      read (the UI shows them on hover); left out for a file that cannot be told
   baseline.yml        where the contents come from, and whether the datapack is conform
   definition/         the test definition, setup and dictionaries, as written
   data/<slot>/input/         the generated files

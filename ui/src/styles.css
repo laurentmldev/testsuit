@@ -712,3 +712,8 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .workspace-choice .workspace-url { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .workspace-choice.selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .workspace-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+/* values of a datapack's rendered file (hover: expression and keys) */
+.monaco-editor .rendered-value { text-decoration: underline dotted; text-underline-offset: 3px; background: var(--panel-2); border-radius: 2px; }
+.file-keys { margin-bottom: 6px; font-size: 12px; }
+.file-keys summary { cursor: pointer; }
+.file-keys table { margin-top: 4px; max-height: 200px; overflow: auto; display: block; }

@@ -75,6 +75,45 @@ export function setKeys(modelUri: string, keys: { label: string; detail?: string
   keyProvider = monaco.languages.registerCompletionItemProvider(["yaml", "plaintext", "shell", "ini", "python"], provider);
 }
 
+/** A value of a rendered file: its place (UTF-16 offsets) and what to show on hover (Markdown). */
+export interface ValueHover {
+  start: number;
+  end: number;
+  hover: string;
+}
+
+// values of rendered files, by model URI, sorted by start
+const valueSets = new Map<string, ValueHover[]>();
+let valueProvider: monaco.IDisposable | null = null;
+
+export function setValueHovers(modelUri: string, values: ValueHover[] | null) {
+  const key = monaco.Uri.parse(modelUri).toString();      // as the model gives it back
+  if (values?.length) valueSets.set(key, values);
+  else valueSets.delete(key);
+  if (valueProvider) return;
+  valueProvider = monaco.languages.registerHoverProvider(["yaml", "plaintext", "shell", "ini", "python", "markdown"], {
+    provideHover(model, position) {
+      const values = valueSets.get(model.uri.toString());
+      if (!values) return null;
+      const offset = model.getOffsetAt(position);
+      let lo = 0;
+      let hi = values.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (values[mid].end <= offset) lo = mid + 1;
+        else if (values[mid].start > offset) hi = mid - 1;
+        else {
+          const v = values[mid];
+          const a = model.getPositionAt(v.start);
+          const b = model.getPositionAt(v.end);
+          return { range: new monaco.Range(a.lineNumber, a.column, b.lineNumber, b.column), contents: [{ value: v.hover }] };
+        }
+      }
+      return null;
+    },
+  });
+}
+
 export interface Marker {
   line?: number;
   column?: number;
@@ -122,7 +161,7 @@ export function sectionStarts(text: string): number[] {
 }
 
 export function CodeEditor({
-  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine, reveal, sections,
+  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine, reveal, sections, values,
 }: {
   uri: string; value: string; onChange?: (v: string) => void; language?: string; readOnly?: boolean; markers?: Marker[];
   height?: number | string; onSave?: () => void; schema?: any; keys?: { label: string; detail?: string; doc?: string }[];
@@ -131,6 +170,8 @@ export function CodeEditor({
   reveal?: { line: number } | null;
   /** draw a rule above each top-level YAML section */
   sections?: boolean;
+  /** values of a rendered file: underlined, with where they come from on hover */
+  values?: ValueHover[] | null;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -146,7 +187,7 @@ export function CodeEditor({
     if (!model) model = monaco.editor.createModel(value, language || languageOf(uri), modelUri);
     else if (model.getValue() !== value) model.setValue(value);
     const instance = monaco.editor.create(box.current!, {
-      model, readOnly, automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2,
+      model, readOnly, automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2, fixedOverflowWidgets: true,
       scrollBeyondLastLine: false, wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: true },
       theme: window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "vs-dark" : "vs",
     });
@@ -212,6 +253,25 @@ export function CodeEditor({
       options: { isWholeLine: true, className: "yaml-section-rule", linesDecorationsClassName: "yaml-section-gutter" },
     })) : []);
   }, [uri, value, sections]);
+
+  const valueDecorations = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  useEffect(() => {
+    const instance = editor.current;
+    const model = instance?.getModel();
+    if (!instance || !model) return;
+    setValueHovers(uri, values || null);
+    try {
+      valueDecorations.current?.clear();
+    } catch {
+      // the collection of an editor already disposed
+    }
+    valueDecorations.current = instance.createDecorationsCollection((values || []).map((v) => {
+      const a = model.getPositionAt(v.start);
+      const b = model.getPositionAt(v.end);
+      return { range: new monaco.Range(a.lineNumber, a.column, b.lineNumber, b.column), options: { inlineClassName: "rendered-value" } };
+    }));
+    return () => setValueHovers(uri, null);
+  }, [uri, value, values]);
 
   useEffect(() => {
     if (reveal && editor.current) {
