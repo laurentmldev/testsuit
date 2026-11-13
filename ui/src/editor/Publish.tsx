@@ -175,11 +175,28 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
 
 export type Credentials = ReturnType<typeof useCredentials>;
 
+const GIT_USER = "tsq.git.user";
+
 /** Git credentials typed for one request (a push, a clone, a pull): kept in this component's state only, never stored.
  * Asked as a user and token first. optional: "none" may be picked (a public repository, to read it). */
 export function useCredentials(optional = false, initial: "token" | "ssh" | "none" = "token") {
   const [auth, setAuth] = useState<string>(initial);
-  const [username, setUsername] = useState("");
+  // the user name (never the token or passphrase) is kept in this browser, like the commit author
+  const [username, setStoredUsername] = useState<string>(() => {
+    try {
+      return localStorage.getItem(GIT_USER) || "";
+    } catch {
+      return "";
+    }
+  });
+  const setUsername = (v: string) => {
+    setStoredUsername(v);
+    try {
+      localStorage.setItem(GIT_USER, v);
+    } catch {
+      // private window: not remembered
+    }
+  };
   const [secret, setSecret] = useState("");
   const value: Record<string, string> = auth === "token" ? { username, password: secret } : auth === "ssh" ? { passphrase: secret } : {};
   const complete = auth === "none" || (!!secret && (auth !== "token" || !!username.trim()));
