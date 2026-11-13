@@ -896,9 +896,21 @@ def test_commands_via(tmp_path, no_git):
     assert shown["start"]["via"]["id"] == "seq_host" and "via" not in shown["stop"]
     assert not list((tmp_path / "remote" / "seq_host" / ".tsq").glob(f"{done['id']}/counter_1/*.pid"))
 
-    start["via"] = "nobody"
+    # a role not in its stage: the ad hoc component of that role (seq_host is the ad hoc 'sequencer')
+    start["via"] = "sequencer"
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    seq = bench.sequencer()
+    comp = seq.lab.inventory.components["counter_1"]
+    assert seq.lab.command_vias(comp, seq.lab.inventory.stages["bench_1"])["start"].id == "seq_host"
     from testsuit.sequencer.util import SequencerError
+    inventory["all"]["hosts"]["seq_2"] = {"tsq_role": "sequencer", "tsq_lock": "none", "tsq_transport": "local"}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    with pytest.raises(SequencerError, match="several ad hoc components"):
+        bench.sequencer()
+
+    start["via"] = "nobody"
+    del inventory["all"]["hosts"]["seq_2"]
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
     with pytest.raises(SequencerError, match="command 'start' goes via 'nobody'"):
         bench.sequencer()
 

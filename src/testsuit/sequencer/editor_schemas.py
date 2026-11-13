@@ -160,7 +160,7 @@ COMMAND = h(
         "detach": h("Start the command and go on without waiting for it to end (a server, a simulation). "
                     "Its processes are recorded, then stopped by `signal` or `kill`.", type="boolean"),
         "via": h("Run the command on another component, for a component the sequencer cannot reach itself (in a "
-                 "sub-network behind the stage server): a role of its stage (`stage_server`), or another host. It "
+                 "sub-network behind the stage server): a role of its stage (`stage_server`), else of an ad hoc component, or another host. It "
                  "gets `{{ component.host }}` (this component) and `{{ via.host }}`; its processes are recorded "
                  "there, so `signal`, `kill` and the end of the run stop them. A `run` or `http` command (sent with curl "
                  "from there).",
@@ -240,7 +240,7 @@ STATUS = h(
                     additionalProperties=False),
         "interval": DURATION,
         "via": h("Run the probe on another component, for a component the sequencer cannot reach itself (in a "
-                 "sub-network behind the stage server): a role of its stage (`stage_server`), or another host. Its "
+                 "sub-network behind the stage server): a role of its stage (`stage_server`), else of an ad hoc component, or another host. Its "
                  "commands get `{{ component.host }}` (the component probed) and `{{ via.host }}`; the self-test's "
                  "`run` checks run there too. Map a powered-off component to `idle` in `states`, not `offline`, "
                  "so that its stage stays available.", type="string"),

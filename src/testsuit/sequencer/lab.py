@@ -168,8 +168,8 @@ class Lab:
 
     def via(self, component: Component, stage: Stage | None = None, status: dict | None = None) -> Component | None:
         """The component a status probe (and its self-test) runs on when the component cannot be reached itself,
-        for example in a sub-network behind the stage server: ``status.via`` names a role of its stage, or another
-        host of the inventory. None: the probe runs on the component itself."""
+        for example in a sub-network behind the stage server: ``status.via`` names a role of its stage, or of an ad
+        hoc component, or another host of the inventory. None: the probe runs on the component itself."""
         if status is None:
             status = self.resolve(component, stage).status
         name = (status or {}).get("via")
@@ -182,16 +182,24 @@ class Lab:
         return self.find_via(component, stage, name, where)
 
     def find_via(self, component: Component, stage: Stage | None, name: str, where: str) -> Component:
-        """The component a 'via' names: the component of that role in the stage, or another host."""
+        """The component a 'via' names: the component of that role in the stage, else the ad hoc component (in no
+        stage) of that role, else another host."""
         for cid in stage.components if stage else []:
             other = self.inventory.components[cid]
             if cid != component.id and other.role == name:
                 return other
+        adhoc = [c for c in self.inventory.adhoc if c.id != component.id and c.role == name]
+        if len(adhoc) > 1:
+            raise SequencerError(f"{where}, the role of several ad hoc components ({', '.join(c.id for c in adhoc)}): "
+                                 "name one of them (its host id)")
+        if adhoc:
+            return adhoc[0]
         other = self.inventory.components.get(name)
         if other is not None and other.id != component.id:
             return other
         raise SequencerError(f"{where}, which is neither the role of another component of "
-                             + (f"its stage '{stage.id}'" if stage else "its stage (it has none)") + " nor another host")
+                             + (f"its stage '{stage.id}'" if stage else "its stage (it has none)")
+                             + ", nor of an ad hoc component, nor another host")
 
     def command_vias(self, component: Component, stage: Stage | None = None,
                      resolved: Resolved | None = None) -> dict[str, Component]:
