@@ -54,3 +54,36 @@ def test_load_tdms(tmp_path, channel_props, first_date_sec):
     assert temp.index.tolist() == [first_date_sec + 0.5 * i for i in range(5)]
     assert temp.iloc[:, 0].tolist() == [0.0, 1.5, 3.0, 4.5, 6.0]
     assert dfs["Grp_1___Press_1_a"].iloc[:, 0].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
+
+
+def test_load_tdms_reports_progress_per_chunk(tmp_path, monkeypatch):
+    import testsuit.datatools.DataFileMgrs.TdmsFileMgr as tdmsMgr
+    monkeypatch.setattr(tdmsMgr, "MIN_CHUNK_SIZE", 2)   # 5 values -> 3 chunks per channel
+    path = tmp_path / "sample.tdms"
+    _write_tdms(path, {"wf_increment": 0.5})
+
+    percents = []
+    monitorProgress = MonitorProgress(name="tdms_utest",
+                                      progressCb=lambda percent, msg, msgSeverity: percents.append(percent))
+    dfs = loadDataframeFromFile(str(path), ".*Temp.*", monitorProgress=monitorProgress, silent=True)
+    monitorProgress.close()
+
+    assert dfs[0].iloc[:, 0].tolist() == [0.0, 1.5, 3.0, 4.5, 6.0]
+    progress = [p for p in percents if p is not None]
+    # loading counts for half of the param: 2/5 and 4/5 of it read before the end
+    assert [round(p) for p in progress[:2]] == [20, 40]
+    assert progress[-1] == 100.0
+
+
+def test_read_channel_data_in_chunks(tmp_path):
+    from nptdms import TdmsFile
+    from testsuit.datatools.DataFileMgrs.TdmsFileMgr import readChannelData
+    path = tmp_path / "sample.tdms"
+    _write_tdms(path, {"wf_increment": 0.5})
+
+    chunks = []
+    with TdmsFile.open(str(path)) as tdmsFile:
+        data = readChannelData(tdmsFile["Grp 1"]["Press-1.a"], chunks.append, chunkSize=2)
+
+    assert chunks == [2, 2, 1]
+    assert data.tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
