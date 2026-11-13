@@ -346,7 +346,7 @@ class Editor:
             if dest.exists():
                 raise SequencerError(f"'{dest}' already exists: give another name, or remove that folder")
             dest.parent.mkdir(parents=True, exist_ok=True)
-            result = subprocess.run(["git", "-c", "credential.helper=", "clone", "--quiet", "--single-branch",
+            result = subprocess.run(["git", *self._user_git_config(url, dest.parent), "clone", "--quiet", "--single-branch",
                                      "--branch", branch, "--", url, str(dest)],
                                     capture_output=True, text=True, timeout=600,
                                     env=self._git_env(credentials))
@@ -512,7 +512,7 @@ class Editor:
         if not branch:
             raise SequencerError(f"'{repo_id}' is on no branch (detached HEAD): nothing to pull")
         before = _git(root, "rev-parse", "HEAD").strip()
-        result = subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--tags", "origin"],
+        result = subprocess.run(["git", *self._user_git_config(self._origin(root), root), "fetch", "--quiet", "--tags", "origin"],
                                 cwd=root, capture_output=True, text=True, timeout=300,
                                 env=self._git_env(credentials))
         if result.returncode:
@@ -1996,6 +1996,37 @@ class Editor:
         return {**env, "GIT_TERMINAL_PROMPT": "0", **self._push_env(credentials)}
 
     @staticmethod
+    def _user_git_config(url: str, cwd: Path | None = None, push: bool = False) -> list[str]:
+        """The -c options of a git command that talks to url with the user's credentials: no credential helper, and
+        no url.<base>.insteadOf / pushInsteadOf rewriting of that URL (a rule of tsqd's account or of the host may
+        put a token of its own in it, which git would then use instead of asking for the user's credentials). The
+        URL is mapped to itself, which wins over any shorter rule; the rest of git's configuration (proxy,
+        certificates) is kept. A rule for the whole URL still rewriting it is refused, naming it."""
+        options = ["-c", "credential.helper=", "-c", f"url.{url}.insteadOf={url}", "-c", f"url.{url}.pushInsteadOf={url}"]
+        where = cwd if cwd is not None and cwd.is_dir() else Path.cwd()
+        used = _git(where, *options, "ls-remote", "--get-url", url, check=False).strip()
+        if push and cwd is not None:
+            used = _git(where, *options, "remote", "get-url", "--push", "origin", check=False).strip() or used
+        if used and used != url:
+            raise SequencerError(f"a url.<base>.insteadOf or pushInsteadOf rule of git's configuration rewrites "
+                                 f"'{url}' entirely, so git would not use your credentials: remove that rule "
+                                 f"(git config --show-origin --get-regexp '^url\\.')")
+        return options
+
+    @staticmethod
+    def _origin(root: Path, push: bool = False) -> str:
+        """The URL of the remote origin as configured, before any insteadOf rewriting. Refused when it holds a password
+        or a token: git would use it instead of the user's credentials."""
+        url = (_git(root, "config", "--get", "remote.origin.pushurl", check=False).strip() if push else "") \
+            or _git(root, "config", "--get", "remote.origin.url", check=False).strip()
+        if not url:
+            raise SequencerError("the repository has no remote 'origin'")
+        if re.match(r"^[a-z][a-z0-9+.-]*://[^/@]*:[^/@]*@", url, re.I):
+            raise SequencerError("the URL of the remote 'origin' holds a password or token, which git would use instead "
+                                 "of your credentials: remove it (git remote set-url origin <URL without it>)")
+        return url
+
+    @staticmethod
     def _require_credentials(credentials: dict) -> None:
         """A push (and its tag) is made with the user's own credentials, never with tsqd's (README section 13.2)."""
         if not ((credentials.get("username") and credentials.get("password")) or credentials.get("passphrase")):
@@ -2029,13 +2060,16 @@ class Editor:
         if not diff["files"]:
             raise SequencerError("nothing to push: no change since the session started")
         self._require_credentials(credentials)
+        remote = self._origin(session.root, push=True)            # before committing: refused, nothing to undo
+        remote_options = self._user_git_config(remote, session.root, push=True)
         ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
         _git(session.root, *ident, "commit", "--quiet", "-m", message, "--", session.sub or ".")
         commit = _git(session.root, "rev-parse", "HEAD").strip()
         if tag:
             _git(session.root, *ident, "tag", "-a", tag, "-m", message)
         refs = [f"HEAD:refs/heads/{session.branch}"] + ([f"refs/tags/{tag}"] if tag else [])
-        result = subprocess.run(["git", "-c", "credential.helper=", "push", "--porcelain", "origin", *refs],
+        result = subprocess.run(["git", *remote_options, "push",
+                                 "--porcelain", "origin", *refs],
                                 cwd=session.root, capture_output=True, text=True, timeout=300,
                                 env=self._git_env(credentials))
         if result.returncode:
@@ -2059,8 +2093,8 @@ class Editor:
         """Fetch the upstream branch and put the session's changes on top of it."""
         credentials = credentials or {}
         self._need_git(session)
-        result = subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--tags", "origin"],
-                                cwd=session.root, capture_output=True, text=True, timeout=300,
+        result = subprocess.run(["git", *self._user_git_config(self._origin(session.root), session.root), "fetch", "--quiet",
+                                 "--tags", "origin"], cwd=session.root, capture_output=True, text=True, timeout=300,
                                 env=self._git_env(credentials))
         if result.returncode:
             return {"ok": False, "error": self._scrub(result.stderr.strip(), credentials)}
