@@ -356,6 +356,22 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
+type LabChanges = { changed: boolean; added: string[]; removed: string[]; modified: string[]; loaded_at: string };
+
+function changeSummary(c: LabChanges): string {
+  const parts = [[c.modified, "modified"], [c.added, "added"], [c.removed, "removed"]] as const;
+  return parts.filter(([files]) => files.length).map(([files, what]) => `${files.length} ${what}`).join(", ");
+}
+
+function ChangedFiles({ changes }: { changes: LabChanges }) {
+  const rows = [...changes.modified.map((f) => [f, "modified"]), ...changes.added.map((f) => [f, "added"]), ...changes.removed.map((f) => [f, "removed"])];
+  return (
+    <table className="grid"><tbody>
+      {rows.map(([file, what]) => <tr key={file}><td><code>{file}</code></td><td className="muted">{what}</td></tr>)}
+    </tbody></table>
+  );
+}
+
 export function LabPage({ editor }: { editor?: boolean }) {
   const route = useRoute();
   const tab = route.query.get("view") === "table" ? "table" : "diagram";
@@ -401,12 +417,32 @@ export function LabPage({ editor }: { editor?: boolean }) {
     return () => window.clearTimeout(t);
   }, [tab, focus, comps.data]);
   const byId: Record<string, any> = Object.fromEntries((comps.data || []).map((c) => [c.id, c]));
+  // the files the lab is read from (inventory, roles and components, icons), looked at every 2 s while the page is
+  // shown: a change since the lab was read asks once whether to reload (the open dialog follows later changes), then
+  // stays as a banner
+  const [changes, setChanges] = useState<LabChanges | null>(null);
+  const [asked, setAsked] = useState<string | null>(null);      // the changes already asked about (not again)
+  const loadedAt = lab.data?.loaded_at;
+  useEffect(() => {
+    let stop = false;
+    const check = () => {
+      if (document.visibilityState !== "visible") return;
+      get<LabChanges>("lab/changes").then((c) => !stop && setChanges(c)).catch(() => undefined);
+    };
+    check();
+    const t = setInterval(check, 2000);
+    document.addEventListener("visibilitychange", check);
+    return () => { stop = true; clearInterval(t); document.removeEventListener("visibilitychange", check); };
+  }, [loadedAt]);
+  const changed = changes?.changed && changes.loaded_at === loadedAt ? changes : null;
+  const changedKey = changed ? JSON.stringify([changed.added, changed.removed, changed.modified]) : null;
   const reload = async (pull: boolean) => {
     const revision = pull ? window.prompt("Revision to check out (tag or commit; empty: the latest commit of the branch):", "") : null;
     if (pull && revision === null) return;
     setReloading(true);
     await attempt(() => post("lab/reload", { pull, revision: revision || null }), "lab reloaded");
     setReloading(false);
+    setChanges(null);
     lab.refresh();
     refresh();
   };
@@ -450,6 +486,20 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}
+      {changed && <div className="banner warn">
+        <span>The lab files changed since the lab was loaded ({changeSummary(changed)}): reload to use them.</span>
+        <button className="small" disabled={reloading} onClick={() => reload(false)} title="Read the lab folder again as it is (tsq lab reload)">Reload local files</button>
+      </div>}
+      {changed && changedKey !== asked && !reloading && (
+        <Dialog title="The lab files changed" onClose={() => setAsked(changedKey)}
+          footer={<>
+            <button onClick={() => setAsked(changedKey)}>Not now</button>
+            <button className="primary" onClick={() => { setAsked(changedKey); reload(false); }}>Reload local files</button>
+          </>}>
+          <p>Files the lab is read from changed since it was loaded {ago(loadedAt)}. Reload the lab to use them? Until then the sequencer goes on with the lab as it was loaded.</p>
+          <ChangedFiles changes={changed} />
+        </Dialog>
+      )}
       {lab.data?.description && <p className="description lab-description">{lab.data.description}</p>}
       <div className="tabs">
         <button className={tab === "diagram" ? "selected" : ""} onClick={() => setQuery("view", null)} title="Stages, components and their links, with what runs on them now">Diagram</button>

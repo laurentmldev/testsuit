@@ -25,6 +25,24 @@ from testsuit.sequencer.util import SequencerError, now
 log = logging.getLogger("testsuit.sequencer")
 
 
+def lab_files(files: list[Path], library_folders: list[Path]) -> dict[str, tuple[int, int]]:
+    """(modification time, size) of each file the lab is read from, by path: the given files (the inventory, the
+    icons) and the YAML files of the library folders (roles and components, as Library.load finds them). Compared
+    with a later one, it tells those files changed since they were read: a cheap check, stat only, no file read."""
+    found: dict[str, tuple[int, int]] = {}
+    paths = list(files)
+    for folder in library_folders:
+        if folder.is_dir():
+            paths += list(folder.rglob("*.yml")) + list(folder.rglob("*.yaml"))
+    for path in paths:
+        try:
+            st = path.stat()
+        except OSError:                    # gone meanwhile
+            continue
+        found[str(path)] = (st.st_mtime_ns, st.st_size)
+    return found
+
+
 def git_state(folder: Path) -> dict | None:
     """Commit, tag, branch, remote and cleanliness of the git work tree holding folder (None if not in one)."""
     try:
@@ -62,6 +80,7 @@ class Lab:
     require_tag: bool = True
     loaded_at: str = field(default_factory=now)
     extra_commands: dict[str, list[str]] = field(default_factory=dict)   # host -> commands none of its roles lists
+    files: dict[str, tuple[int, int]] = field(default_factory=dict)      # lab_files of the files read, as read
 
     @property
     def warnings(self) -> list[str]:
@@ -216,6 +235,28 @@ class Lab:
             vias[name] = self.find_via(component, stage, str(spec["via"]), where)
         return vias
 
+    def icon_files(self) -> list[Path]:
+        """The image files of the components' tsq_icon, in the lab folder."""
+        from testsuit.sequencer.labview import icon_path
+        return [p for c in self.inventory.components.values() if (p := icon_path(self, c)) is not None]
+
+    def changes(self) -> dict:
+        """The files the lab is read from (inventory, library roles and components, icons) added, removed or
+        modified since the lab was read, by path relative to the lab folder when in it: a reload would read
+        another lab. Other files of the lab folder are not looked at."""
+        current = lab_files([self.inventory.file, *self.icon_files()], self.inventory.library_folders)
+
+        def rel(path: str) -> str:
+            try:
+                return Path(path).relative_to(self.folder).as_posix()
+            except ValueError:
+                return path
+        added = sorted(rel(p) for p in current.keys() - self.files.keys())
+        removed = sorted(rel(p) for p in self.files.keys() - current.keys())
+        modified = sorted(rel(p) for p in current.keys() & self.files.keys() if current[p] != self.files[p])
+        return {"changed": bool(added or removed or modified), "added": added, "removed": removed,
+                "modified": modified, "loaded_at": self.loaded_at}
+
     def describe(self) -> dict:
         return {"folder": str(self.folder), "inventory": str(self.inventory.file), "git": self.git,
                 "description": self.inventory.description, "hosts": self.inventory.hosts,
@@ -237,9 +278,13 @@ def load_lab(folder: Path, inventory_file: Path, require_tag: bool = True, stric
     """
     if not inventory_file.is_file():
         raise SequencerError(f"lab inventory not found: '{inventory_file}'")
+    files = lab_files([inventory_file], [])            # each one before it is read: a change meanwhile shows next check
     inventory = load_inventory(inventory_file)
+    files.update(lab_files([], inventory.library_folders))
     library = Library.load(inventory.library_folders, strict)
-    lab = Lab(folder=folder, inventory=inventory, library=library, git=git_state(folder), require_tag=require_tag)
+    lab = Lab(folder=folder, inventory=inventory, library=library, git=git_state(folder), require_tag=require_tag,
+              files=files)
+    lab.files.update(lab_files(lab.icon_files(), []))
     for component in inventory.components.values():           # roles first: the stage checks need them
         try:
             component._role = library.host_role(component, lab.hosts)

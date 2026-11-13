@@ -1008,6 +1008,41 @@ def test_lab_view(tmp_path, no_git):
         bench.sequencer()
 
 
+def test_lab_file_changes(tmp_path, no_git):
+    """The Lab page asks every 2 s whether the files the lab is read from changed since it was read: its
+    inventory, the roles and components of its library, the icons; other files of the lab folder do not count."""
+    import os
+
+    from testsuit.sequencer.api import create_app
+    bench = Bench(tmp_path)
+    seq = bench.sequencer()
+    routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
+    lab_folder = tmp_path / "lab"
+
+    async def main():
+        assert (await routes["/lab/changes"]())["changed"] is False
+        write(lab_folder / "notes.md", "not read by the lab")
+        write(lab_folder / "scripts" / "x.yml", "outside the library")
+        assert seq.lab.changes()["changed"] is False
+        bench_yml = lab_folder / "components" / "bench.yml"
+        later = bench_yml.stat().st_mtime_ns + 10**9
+        os.utime(bench_yml, ns=(later, later))
+        write(lab_folder / "components" / "more.yaml", "components: {}")
+        assert (await routes["/lab/changes"]())["changed"] is False        # asked again within 1 s: as it was
+        changes = seq.lab.changes()
+        assert changes["changed"] and changes["modified"] == ["components/bench.yml"]
+        assert changes["added"] == ["components/more.yaml"] and changes["removed"] == []
+        await seq.reload_lab()
+        assert (await routes["/lab/changes"]())["changed"] is False        # another lab: looked at again
+        (lab_folder / "components" / "more.yaml").unlink()
+        inventory = lab_folder / "inventory.yml"
+        inventory.write_text(inventory.read_text() + "\n")
+        changes = seq.lab.changes()
+        assert changes["removed"] == ["components/more.yaml"] and changes["modified"] == ["inventory.yml"]
+        await seq.close()
+    asyncio.run(main())
+
+
 def test_lab_view_icons_match_the_ui():
     """The built-in pictures of tsq_icon are the drawings of the UI, in the same order."""
     import re
