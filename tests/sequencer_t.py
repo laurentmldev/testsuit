@@ -2029,3 +2029,30 @@ def test_traced_comments():
                                 stderr=subprocess.STDOUT, text=True).stdout
         assert "first" in output.splitlines()[0] and "in a loop" in output
         assert untraced(output) == "hi\n1\n# kept as text\nA\na\nb\n", (shell, output)
+
+
+def test_manual_command_via_unreachable(tmp_path, no_git):
+    """In maintenance, a command run through another component runs even when its own component does not answer:
+    a warning says so, its keys use its remote root as configured. A command run on it still needs it."""
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    counter = inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]
+    counter.update(tsq_transport="ssh", ansible_host="device0.invalid", tsq_remote_root="~/device0",
+                   tsq_commands={"build": {"run": "echo built for {{ component.host }} in {{ component.remote_root }}",
+                                           "via": "sequencer"}})
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        seq.set_flag("counter_1", "maintenance", True)
+        out = {"build": await seq.manual_command("counter_1", "build"),
+               "version": await seq.manual_command("counter_1", "version")}
+        await seq.close()
+        return out
+    out = asyncio.run(main())
+    build = out["build"]
+    assert build["ok"], build
+    assert "built for device0.invalid in " in build["output"] and build["via"] == "seq_host"
+    assert "device0.invalid" in build["warning"]
+    assert out["version"]["ok"] is False and "cannot reach device0.invalid" in out["version"]["error"]

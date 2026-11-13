@@ -163,6 +163,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               <div><Badge value={r.ok ? "OK" : "FAILED"} /> <code>{r.command}</code> {r.via
                 ? <ViaTag via={r.via} label={labelOf(r.via)} host={r.on} title={`${r.command} ran on ${r.via} (${r.on}), for ${id}`}>ran on</ViaTag>
                 : <>on {r.on || labelOf(id)}</>}{r.via && <span className="muted"> for {labelOf(id)}</span>}, {time(r.at)}, {r.duration} s{r.exit !== undefined && r.exit !== null && <>, exit status <code>{r.exit}</code></>}</div>
+              {r.warning && <div className="small warn-text">{r.warning}</div>}
               {r.keys?.length > 0 && <div className="small muted">keys set by hand: {r.keys.map((k: any, j: number) => <span key={k.key}>{j > 0 && ", "}<code>{k.key}={typeof k.value === "string" ? k.value : JSON.stringify(k.value)}</code>{k.overrides && <span className="warn-text"> (overrides <code>{typeof k.was === "string" ? k.was : JSON.stringify(k.was)}</code>)</span>}</span>)}</div>}
               {r.kind !== "run" && r.run && <pre className="small">$ {r.run}</pre>}
               {(outputOf(r) || r.error || r.detail) && (
