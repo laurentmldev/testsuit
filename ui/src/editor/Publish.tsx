@@ -18,7 +18,7 @@ import { get, post } from "../api";
 import { Choices, Dialog, Field, Text } from "../fields";
 import { DiffView } from "../monaco";
 import { attempt, classes, Markdown } from "../util";
-import { useSession } from "./state";
+import { SessionContext, useSession, useSessionData } from "./state";
 
 const AUTHOR = "tsq.author";
 
@@ -193,4 +193,29 @@ function suggest(files: { status: string; path: string }[]): string {
   if (files.length === 1) return `${verb(files[0].status)} ${files[0].path}`;
   const dirs = [...new Set(files.map((f) => f.path.split("/").slice(0, -1).join("/") || "."))];
   return `Update ${files.length} files in ${dirs.slice(0, 3).join(", ")}${dirs.length > 3 ? "…" : ""}`;
+}
+
+/** The local changes of the lab folder, committed and pushed from the banner that shows them: through the in-place
+ * session of the lab (opened, or the one already open), with the same review, author and credentials (used for
+ * this push only, never stored) as the Editor's "Review and push". */
+export function LabPushDialog({ onClose }: { onClose: () => void }) {
+  const [sid, setSid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    post("edit/sessions", { repo: "lab", local: true }).then((s) => setSid(s.id)).catch((e) => setError(e.message));
+  }, []);
+  if (error || !sid)
+    return (
+      <Dialog title="Review and push" onClose={onClose}>
+        {error ? <div className="error-box">Cannot open the lab folder: {error}</div> : <p className="muted">Reading the local changes…</p>}
+      </Dialog>
+    );
+  return <LabPushSession sid={sid} onClose={onClose} />;
+}
+
+function LabPushSession({ sid, onClose }: { sid: string; onClose: () => void }) {
+  const session = useSessionData(sid, () => undefined);
+  if (!session)
+    return <Dialog title="Review and push" onClose={onClose}><p className="muted">Reading the local changes…</p></Dialog>;
+  return <SessionContext.Provider value={session}><PublishDialog onClose={onClose} /></SessionContext.Provider>;
 }
