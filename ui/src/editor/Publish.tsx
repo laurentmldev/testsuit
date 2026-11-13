@@ -28,7 +28,7 @@ function nextTag(tag?: string | null): string {
 }
 
 /** One diff per file, out of a unified patch. */
-function splitPatch(patch: string): Record<string, { before: string; after: string }> {
+export function splitPatch(patch: string): Record<string, { before: string; after: string }> {
   const result: Record<string, { before: string; after: string }> = {};
   for (const chunk of patch.split(/^diff --git /m).slice(1)) {
     const name = chunk.match(/^\+\+\+ b\/(.+)$/m)?.[1] || chunk.match(/^--- a\/(.+)$/m)?.[1] || chunk.split("\n")[0];

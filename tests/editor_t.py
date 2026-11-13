@@ -468,6 +468,55 @@ def test_repository_added_by_url(repos):
     assert not (repos.config.root / "workspaces" / "bench-tests").exists() and not editor.sessions
 
 
+def test_repository_local_changes(repos, tmp_path):
+    """Its local changes: shown as a diff and a patch, reverted (all, or some files), downloaded as a zip; the
+    repository removed only once clean."""
+    import zipfile
+    editor = repos.editor
+    repo = editor.add_workspace(str(repos.root / "upstream.git"), "main", name="more", path="datapack")
+    folder = Path(repo["folder"])
+    clone = repos.config.root / "workspaces" / "more"
+    assert editor.workspace_diff("more")["files"] == []
+    (folder / "setup/globals.yml").write_text("duration: 3s\nmin_count: 3\n")
+    (folder / "setup/extra.yml").write_text("extra: 1\n")
+    (folder / "setup/files/check.sh").unlink()
+
+    diff = editor.workspace_diff("more")
+    assert {(f["status"], f["path"]) for f in diff["files"]} == {
+        ("M", "datapack/setup/globals.yml"), ("A", "datapack/setup/extra.yml"), ("D", "datapack/setup/files/check.sh")}
+    assert "+duration: 3s" in diff["patch"] and diff["branch"] == "main" and diff["ahead"] == 0
+    assert diff["folder"] == "datapack"
+    assert git(clone, "diff", "--cached", "--name-only").strip() == ""      # the index is not touched
+    # the patch applies on the last commit
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(repos.root / "upstream.git"), "other")
+    (tmp_path / "local.patch").write_text(diff["patch"])
+    git(other, "apply", str(tmp_path / "local.patch"))
+    assert (other / "datapack/setup/extra.yml").read_text() == "extra: 1\n"
+
+    # the folder as it is, local changes included, without .git
+    name = editor.workspace_archive("more", tmp_path / "more.zip")
+    assert name.startswith("more-v1") and name.endswith("-modified.zip")
+    with zipfile.ZipFile(tmp_path / "more.zip") as z:
+        names = z.namelist()
+        assert "more/setup/extra.yml" in names and "more/setup/files/check.sh" not in names
+        assert not [n for n in names if "/.git/" in n] and z.read("more/setup/globals.yml").startswith(b"duration: 3s")
+
+    with pytest.raises(SequencerError, match="clean"):
+        editor.remove_workspace("more")
+    with pytest.raises(SequencerError, match="outside"):
+        editor.revert_workspace("more", ["../../lab-clone"])
+    reverted = editor.revert_workspace("more", ["setup/extra.yml"])                       # one file: a new one, deleted
+    assert reverted["reverted"] == ["datapack/setup/extra.yml"] and not (folder / "setup/extra.yml").exists()
+    assert len(reverted["left"]) == 2
+    reverted = editor.revert_workspace("more")                                             # all the others
+    assert sorted(reverted["reverted"]) == ["datapack/setup/files/check.sh", "datapack/setup/globals.yml"]
+    assert reverted["left"] == [] and (folder / "setup/files/check.sh").is_file()
+    assert "3s" not in (folder / "setup/globals.yml").read_text()
+    editor.remove_workspace("more")                                                        # clean: removed
+    assert not clone.exists()
+
+
 def test_in_place_session(repos, tmp_path):
     editor = repos.editor
     folder = repos.root / "tests-clone" / "datapack"
@@ -678,6 +727,14 @@ def test_api(repos, tmp_path):
         assert requests.post(f"{url}/edit/repositories/more/pull", json={}).json()["ok"]
         refused = requests.post(f"{url}/edit/repositories", json={"url": "https://a:b@example.com/x.git"})
         assert refused.status_code >= 400 and "b@" not in refused.text
+        (repos.config.root / "workspaces/more/datapack/setup/extra.yml").write_text("extra: 1\n")
+        assert "+extra: 1" in requests.get(f"{url}/edit/repositories/more/diff").json()["patch"]
+        patch = requests.get(f"{url}/edit/repositories/more/diff?download=true")
+        assert "attachment" in patch.headers["content-disposition"] and "+extra: 1" in patch.text
+        archive = requests.get(f"{url}/edit/repositories/more/archive")
+        assert archive.headers["content-type"] == "application/zip" and "-modified.zip" in archive.headers["content-disposition"]
+        assert requests.delete(f"{url}/edit/repositories/more").status_code >= 400          # not clean
+        assert requests.post(f"{url}/edit/repositories/more/revert", json={}).json()["left"] == []
         assert requests.delete(f"{url}/edit/repositories/more").json() == {"removed": "more"}
         sid = requests.post(f"{url}/edit/sessions", json={"repo": "workspace0"}).json()["id"]
         assert requests.get(f"{url}/edit/sessions/{sid}/schemas").json()["testdef"]["title"] == "Test definition"
