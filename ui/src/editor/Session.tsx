@@ -176,6 +176,16 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   );
 }
 
+// the window that opened this tab, when it is still open and shows this app
+function openerOfThisApp(): boolean {
+  try {
+    const o = window.opener as Window | null;
+    return !!o && !o.closed && o.location.origin === window.location.origin && o.location.pathname === window.location.pathname;
+  } catch {
+    return false;   // another site: not readable
+  }
+}
+
 export function SessionPage({ id, route }: { id: string; route: Route }) {
   const path = route.query.get("file");
   const view = route.query.get("view") || "form";
@@ -236,11 +246,20 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const back = info.repo === "lab" ? { path: "lab", label: "Lab" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };
   // leaving a lab session offers to reload the lab, so that tsqd runs what was edited: the folder as it is
   // (in place), or the latest pushed commit (a clone on a branch, once pushed)
-  const leave = async () => {
+  // closing the session (closeTab) in a tab the Lab or Datapacks page opened closes that tab and refreshes the
+  // page that opened it; a tab opened otherwise (a bookmark, a typed address) goes back to that page instead
+  const leave = async (closeTab = false) => {
     if (info.repo === "lab" && window.confirm(info.local
       ? "Reload the lab now, so that the sequencer uses the files as they are?"
       : "Reload the lab now from its latest pushed commit (tsq lab reload --pull)?")) {
       await attempt(() => post("lab/reload", { pull: !info.local, revision: null }), "lab reloaded");
+    }
+    if (closeTab && openerOfThisApp()) {
+      const opener = window.opener as Window;
+      opener.location.reload();
+      opener.focus();
+      window.close();
+      if (window.closed) return;
     }
     navigate(back.path, back.query);
   };
@@ -250,7 +269,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
         {(topic) => (
           <div className="session">
             <div className="session-bar">
-              <button className="link muted" onClick={leave} title={`Back to the ${back.label} page`}>{back.label}</button>
+              <button className="link muted" onClick={() => leave()} title={`Back to the ${back.label} page`}>{back.label}</button>
               <strong>{info.repo === "lab" ? "Lab" : `Tests (${info.folder})`}</strong>
               {info.local && <span className="badge info" title={`Files are saved directly in ${info.source}, where the sequencer reads them. Closing the session keeps them.`}>in place</span>}
               {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
@@ -264,8 +283,8 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               <button onClick={async () => {
                 if (!info.local && info.changed && !window.confirm("Close the session and drop the changes that were not pushed?")) return;
                 await attempt(() => del(`edit/sessions/${id}`));
-                await leave();
-              }} title={`Close the session and go back to the ${back.label} page`}>Close</button>
+                await leave(true);
+              }} title={`Close the session and this tab, back to the ${back.label} page`}>Close</button>
             </div>
             <div className="session-main">
               <FileTree files={session.files} current={path} problems={problems} onNew={() => setDialog("new")} />
