@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
+import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, navigate, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -439,8 +439,10 @@ export function LabPage({ editor }: { editor?: boolean }) {
         <span className="muted">{git ? <>commit <code>{git.commit?.slice(0, 10)}</code>{git.tag && <> tag <code>{git.tag}</code></>}{git.branch && <> on {git.branch}</>}{!git.clean && <Badge value="local changes" />}</> : "not a git work tree"}</span>
         <span className="muted small">loaded {ago(lab.data?.loaded_at)}</span>
         <span className="spacer" />
-        <button disabled={reloading} onClick={() => reload(false)} title="Read the lab folder again as it is (tsq lab reload)">Reload</button>
-        <button disabled={reloading} onClick={() => reload(true)} title="Fetch the lab repository and check out a revision first (tsq lab reload --pull)">Pull and reload…</button>
+        <MenuButton label={reloading ? "Reloading…" : "Reload"} disabled={reloading} items={[
+          { label: "Reload local files", title: "Read the lab folder again as it is (tsq lab reload)", onClick: () => reload(false) },
+          { label: "Pull and reload…", title: "Fetch the lab repository and check out a revision first (tsq lab reload --pull)", onClick: () => reload(true) },
+        ]} />
         <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
         {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and components in the Editor, in place">Edit lab config</button>}

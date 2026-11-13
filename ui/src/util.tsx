@@ -362,3 +362,37 @@ export function LiveConsole({ text, empty }: { text: string; empty?: ReactNode }
     </pre>
   );
 }
+
+/** A button opening a short list of actions under it (a menu); a click outside, or Escape, closes it. */
+export function MenuButton({ label, items, disabled, title }: {
+  label: ReactNode; disabled?: boolean; title?: string;
+  items: { label: ReactNode; title?: string; onClick: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <span className="menu-button" ref={box}>
+      <button disabled={disabled} title={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {label} <span className="menu-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          {items.map((item, i) => (
+            <button key={i} role="menuitem" title={item.title} onClick={() => { setOpen(false); item.onClick(); }}>{item.label}</button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
