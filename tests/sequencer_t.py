@@ -1009,7 +1009,7 @@ def test_lab_view(tmp_path, no_git):
 
 
 def test_lab_file_changes(tmp_path, no_git):
-    """The Lab page asks every few seconds whether the files the lab is read from changed since it was read: its
+    """The Lab page asks every 2 s whether the files the lab is read from changed since it was read: its
     inventory, the roles and components of its library, the icons; other files of the lab folder do not count."""
     import os
 
@@ -1028,7 +1028,7 @@ def test_lab_file_changes(tmp_path, no_git):
         later = bench_yml.stat().st_mtime_ns + 10**9
         os.utime(bench_yml, ns=(later, later))
         write(lab_folder / "components" / "more.yaml", "components: {}")
-        assert (await routes["/lab/changes"]())["changed"] is False        # asked again within 2 s: as it was
+        assert (await routes["/lab/changes"]())["changed"] is False        # asked again within 1 s: as it was
         changes = seq.lab.changes()
         assert changes["changed"] and changes["modified"] == ["components/bench.yml"]
         assert changes["added"] == ["components/more.yaml"] and changes["removed"] == []

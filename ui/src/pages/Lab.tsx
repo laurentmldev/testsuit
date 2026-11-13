@@ -417,8 +417,9 @@ export function LabPage({ editor }: { editor?: boolean }) {
     return () => window.clearTimeout(t);
   }, [tab, focus, comps.data]);
   const byId: Record<string, any> = Object.fromEntries((comps.data || []).map((c) => [c.id, c]));
-  // the files the lab is read from (inventory, roles and components, icons), looked at every 5 s while the page is
-  // shown: a change since the lab was read asks once whether to reload, then stays as a banner
+  // the files the lab is read from (inventory, roles and components, icons), looked at every 2 s while the page is
+  // shown: a change since the lab was read asks once whether to reload (the open dialog follows later changes), then
+  // stays as a banner
   const [changes, setChanges] = useState<LabChanges | null>(null);
   const [asked, setAsked] = useState<string | null>(null);      // the changes already asked about (not again)
   const loadedAt = lab.data?.loaded_at;
@@ -429,7 +430,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       get<LabChanges>("lab/changes").then((c) => !stop && setChanges(c)).catch(() => undefined);
     };
     check();
-    const t = setInterval(check, 5000);
+    const t = setInterval(check, 2000);
     document.addEventListener("visibilitychange", check);
     return () => { stop = true; clearInterval(t); document.removeEventListener("visibilitychange", check); };
   }, [loadedAt]);

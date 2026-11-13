@@ -352,10 +352,10 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     @app.get("/lab/changes")
     async def lab_changes():
         """The lab files added, removed or modified since the lab was read (the Lab page asks every few seconds,
-        to offer a reload): their modification times and sizes, compared; at most once every 2 s."""
+        to offer a reload): their modification times and sizes, compared; at most once a second."""
         import time
         lab = seq.lab
-        if checked.get("lab") is not lab or time.monotonic() - checked["at"] > 2:
+        if checked.get("lab") is not lab or time.monotonic() - checked["at"] > 1:
             checked.update(lab=lab, at=time.monotonic(), result=await asyncio.to_thread(lab.changes))
         return checked["result"]
 
