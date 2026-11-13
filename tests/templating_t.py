@@ -93,6 +93,41 @@ def test_render_tree(tmp_path):
     assert used == {"sub/f.yml": {"v": "d0"}}
 
 
+def _at(text, value):
+    """The text of a value, offsets in UTF-16 code units."""
+    return text.encode("utf-16-le")[2 * value[0]:2 * value[1]].decode("utf-16-le")
+
+
+def test_render_file_values(tmp_path):
+    (tmp_path / "inc.txt").write_text("inc {{ a.b }}\n")
+    (tmp_path / "t.txt").write_text(
+        "é😀 {{ a.b }}:{{ c | string | upper }}\n"
+        "{% for x in a.list %}- {{ x }}\n{% endfor %}"
+        "{% macro m(v) %}<{{ v }}>{% endmacro %}{{ m(a.b) }} {{ [1, 2][0] }}\n"
+        '{% include "inc.txt" %}')
+    keys = _keys({"a": {"b": 1, "list": ["p", "q"]}, "c": "{{ a.b + 1 }}x"})
+    values = {}
+    text, _ = keys.render_file(tmp_path / "t.txt", values=values)
+    assert text == "é😀 1:2X\n- p\n- q\n<1> 1\ninc 1\n"
+    expressions = values["expressions"]
+    found = [(_at(text, v), expressions[v[2]], v[3]) for v in values["values"]]
+    assert found == [
+        ("1", "a.b", ["a.b"]),
+        ("2X", "c | string | upper", ["c"]),
+        ("p", "x", []), ("q", "x", []),                   # read by the loop, not by '{{ x }}'
+        ("1", "v", []),                                   # in a macro: the innermost value
+        ("1", "[1, 2][0]", []),
+        ("1", "a.b", ["a.b"]),                            # included
+    ]
+
+
+def test_render_file_values_dropped_when_marks_change_the_text(tmp_path):
+    (tmp_path / "t.txt").write_text("{% set s %}{{ a }}{% endset %}{{ s | length }}\n")
+    values = {}
+    text, used = _keys({"a": "xyz"}).render_file(tmp_path / "t.txt", values=values)
+    assert text == "3\n" and used == {"a": "d0"} and values == {}
+
+
 def test_add_file_errors(tmp_path):
     (tmp_path / "list.yml").write_text("- a\n")
     with pytest.raises(TemplateError, match="mapping"):

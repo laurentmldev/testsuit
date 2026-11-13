@@ -30,6 +30,8 @@ Steps, from a test definition file (see model for the file formats, templating f
          datapack.yml                what the datapack was built from: ids, git state, datasets,
                                      slots and the keys used by each generated file
          context.yml                 every key, resolved: the datapack needs no dictionary to be used
+         values.json                 where each '{{ expression }}' output is in the rendered files, and
+                                     the keys it read (for viewers: hover a value to see where it comes from)
          baseline.yml                where the contents come from: sources (git), datasets, tools,
                                      and each generated file with its checksum (conform or not)
          definition/                 test definition, setup and dictionaries, as written
@@ -59,6 +61,7 @@ import getpass
 import glob
 import graphlib
 import hashlib
+import json
 import os
 import shutil
 import socket
@@ -421,6 +424,7 @@ class _Builder:
             raise DatapackError(f"keys set by hand: {e}") from e
         self.set_by_hand: list[dict] = []
         self.skipped: list[str] = []                    # lenient: the inputs left out, and why
+        self.values: dict[str, dict] = {}               # where each value of a rendered file comes from (values.json)
         nocheck = nocheck or lenient
         self.testdef_file = testdef_file
         self.expected_baseline = expected_baseline
@@ -641,6 +645,7 @@ class _Builder:
                     _info(Fore.YELLOW + "    [OPTIONAL] " + Fore.LIGHTBLACK_EX + f"{input_file.source} not found, skipped")
                     continue
                 used: dict[str, dict[str, str]] = {}
+                values: dict[str, dict] = {}
                 for source in sources:
                     # a glob pattern always gives a folder, even when it matches one file
                     destination = target / source.name if glob.has_magic(input_file.source) else target
@@ -664,12 +669,17 @@ class _Builder:
                             raise DatapackError(f"slot '{comp_id}': copy of '{source}' failed: {e}") from e
                     else:
                         try:
-                            rendered = keys.render_tree(source, destination, [self.testdef_dir, setup_dir], extra)
+                            file_values: dict[str, dict] = {}
+                            rendered = keys.render_tree(source, destination, [self.testdef_dir, setup_dir], extra, file_values)
                         except TemplateError as e:
                             raise DatapackError(f"slot '{comp_id}': {e}") from e
                         prefix = destination.relative_to(input_dir)
                         used.update({(prefix / name if source.is_dir() else prefix.parent / name).as_posix(): k
                                      for name, k in rendered.items()})
+                        values.update({(prefix / name if source.is_dir() else prefix.parent / name).as_posix(): v
+                                       for name, v in file_values.items()})
+                if not input_file.postprocess:      # a postprocessed file no longer has its values where they were
+                    self.values.update({f"data/{comp_id}/input/{name}": v for name, v in values.items()})
                 for spec in input_file.postprocess:
                     _info(Fore.LIGHTBLACK_EX + "        [POSTPROCESS] " + spec)
                     try:
@@ -813,6 +823,9 @@ class _Builder:
             **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
             **({"skipped": self.skipped} if self.skipped else {}),
         })
+        if self.values:
+            (self.work / "values.json").write_text(json.dumps({"format": 1, "files": self.values}, ensure_ascii=False,
+                                                              separators=(",", ":")), encoding="utf-8")
         baseline = self.baseline(name, components, testdef_git)
         _dump_yaml(self.work / "baseline.yml", baseline, "# where the contents of this datapack come from (sequencer README, section 5.3)\n")
         problems = check_baseline(baseline, self.expected_baseline, parts=("datapack", "sources", "tools"))

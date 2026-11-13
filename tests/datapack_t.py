@@ -12,6 +12,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 """datapack: Jinja2 rendering of the slot inputs from YAML dictionaries, BagIt zip."""
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -71,6 +72,13 @@ def test_datapack_nominal(tmp_path, no_git):
     assert keys["platform.name"].endswith("testdef/overrides.yml")
     assert keys["platform.vendor"].endswith("setup/globals.yml")
     assert manifest["slots"]["mycmp1"]["inputs"][2]["keys"]["conf/limits.yml"]["my_dataset.param2.value"].endswith("values.yml")
+
+    # where each value of the rendered files comes from
+    values = json.loads((work / "values.json").read_text())["files"]["data/mycmp1/input/MyRef1.txt"]
+    text = (inputs / "MyRef1.txt").read_text()
+    by_expression = {values["expressions"][v[2]]: (text[v[0]:v[1]], v[3]) for v in values["values"]}
+    assert by_expression["platform.name"] == ("test platform", ["platform.name"])
+    assert "data/mycmp1/input/replaced.txt" not in json.loads((work / "values.json").read_text())["files"]  # postprocessed
 
     context = yaml.safe_load((work / "context.yml").read_text())
     assert context["value"]["sensors"] == ["s1", "s2", "s3"]
