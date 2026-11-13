@@ -74,7 +74,7 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
   const lastTag = [...(info.pushed || [])].reverse().find((p: any) => p.tag)?.tag;
   const [tag, setTag] = useState<string>(nextTag(lastTag));
   const [message, setMessage] = useState("");
-  const creds = useCredentials("token");                       // the user's own: never those of tsqd
+  const creds = useCredentials();                              // the user's own: never those of tsqd
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
 
@@ -176,14 +176,14 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
 export type Credentials = ReturnType<typeof useCredentials>;
 
 /** Git credentials typed for one request (a push, a clone, a pull): kept in this component's state only, never stored.
- * initial "none": none at all may be given (a public repository, to read it). */
-export function useCredentials(initial: "token" | "ssh" | "none") {
+ * Asked as a user and token first. optional: "none" may be picked (a public repository, to read it). */
+export function useCredentials(optional = false, initial: "token" | "ssh" | "none" = "token") {
   const [auth, setAuth] = useState<string>(initial);
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
   const value: Record<string, string> = auth === "token" ? { username, password: secret } : auth === "ssh" ? { passphrase: secret } : {};
   const complete = auth === "none" || (!!secret && (auth !== "token" || !!username.trim()));
-  return { auth, setAuth, username, setUsername, secret, setSecret, value, complete, optional: initial === "none" };
+  return { auth, setAuth, username, setUsername, secret, setSecret, value, complete, optional };
 }
 
 export function CredentialsFields({ creds, help }: { creds: Credentials; help: string }) {
