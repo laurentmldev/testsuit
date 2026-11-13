@@ -658,6 +658,11 @@ A datapack does not redefine commands: what a test runs that the role does not o
 
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
+`via` only moves where the shell runs: the inputs are not copied to the `via` component. The built-in `deploy` (and `collect`) always go straight from the sequencer to the component itself, into `<remote_root>/<slot>/input`, and `{{ component.input_dir }}` still names that folder on the component, not on the `via` one (there is no `via.input_dir`). So:
+
+- if the sequencer reaches the component, `deploy` works and a `via` command uses the files there, through the component: `run: "ssh {{ component.host }} app --config {{ component.input_dir }}/app.yml", via: stage_server`;
+- if the component can **only** be reached through the `via` component, `deploy` cannot push its inputs. Move the commands that need input files to the `via` component instead: give it a slot of its own whose inputs are those files, `deploy` them there, and run the command on it (with `{{ component.input_dir }}` then naming its own input folder), copying what the component needs from there if it reads them itself.
+
 **REST API commands.** A command (or a pipeline step, or a status probe, or a `wait_for`) can be an HTTP request rather than a shell command, for an instrument or a service driven through a REST API:
 
 ```yaml
