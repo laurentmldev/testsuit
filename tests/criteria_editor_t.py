@@ -195,3 +195,43 @@ def test_mxp_edit_routes(folder):
     finally:
         server.should_exit = True
         thread.join(10)
+
+
+def test_mxp_vscode_keeps_the_settings_there(folder):
+    import json
+
+    from testsuit.exploit.mexploit.vscode import SCHEMA_FILE, TASK_LABELS, UTEST_PLUGIN, setup_vscode
+    vscode = folder.root / ".vscode"
+    vscode.mkdir()
+    (vscode / "settings.json").write_text(json.dumps({"editor.tabSize": 2, "yaml.schemas": {"other.json": "*.x.yml"},
+                                                      "python.testing.pytestArgs": ["tests"]}))
+    (vscode / "tasks.json").write_text(json.dumps({"version": "2.0.0", "tasks": [{"label": "mine"}, {"label": TASK_LABELS[0]}]}))
+    for _ in range(2):                      # twice: nothing is added twice
+        setup_vscode(folder.root, plugins=False)
+    settings = json.loads((vscode / "settings.json").read_text())
+    assert settings["editor.tabSize"] == 2 and settings["yaml.schemas"]["other.json"] == "*.x.yml"
+    assert settings["yaml.schemas"][f".vscode/{SCHEMA_FILE}"] == ["*.mexploit.yml", "*.mexploit.yaml"]
+    assert settings["python.testing.pytestArgs"] == ["tests", "-p", UTEST_PLUGIN]
+    tasks = [t["label"] for t in json.loads((vscode / "tasks.json").read_text())["tasks"]]
+    assert tasks == ["mine", *TASK_LABELS]
+    schema = json.loads((vscode / SCHEMA_FILE).read_text())
+    assert "crit.assert_compare" in schema["$defs"]
+    # a settings file with comments is not overwritten
+    (vscode / "settings.json").write_text('{\n  // mine\n  "a": 1\n}\n')
+    with pytest.raises(ValueError, match="not plain JSON"):
+        setup_vscode(folder.root, plugins=False)
+    assert "// mine" in (vscode / "settings.json").read_text()
+
+
+def test_mxp_lint_auto(folder):
+    """mxp lint --auto: the keys of the unit tests, problems printed as the VSCode task reads them."""
+    import re
+    import subprocess
+    import sys
+    scn = folder.root / SCN
+    scn.write_text(scn.read_text().replace("compOperator", "compOperatr"))
+    out = subprocess.run([sys.executable, "-m", "testsuit.cli.mxp", "lint", "--auto", str(scn.parent)],
+                         capture_output=True, text=True, cwd=folder.root)
+    lines = [line for line in out.stdout.splitlines() if line.strip()]
+    assert lines and all(re.match(r"^(.+?):(\d+): (error|warning): (.*)$", line) for line in lines), out.stdout
+    assert "compOperatr" in out.stdout and lines[0].startswith(str(scn))

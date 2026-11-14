@@ -43,7 +43,7 @@ class _HelpParser(argparse.ArgumentParser):
     
 ## the main function
 def main():
-    # mxp describe | lint | utest | edit: tools helping to write scenarios (see mxp_tools.py)
+    # mxp describe | lint | utest | edit | vscode: tools helping to write scenarios (see mxp_tools.py)
     from testsuit.cli import mxp_tools
     if len(sys.argv) > 1 and sys.argv[1] in mxp_tools.SUBCOMMANDS:
         sys.exit(mxp_tools.main(sys.argv[1:]))
@@ -56,7 +56,7 @@ def main():
     
     Another note: this tool is called by exploit_runner.py to execute M-Exploit analysis as a separate process.
 
-    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', and the editor 'mxp edit' (each with -h).
+    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', the editor 'mxp edit', and 'mxp vscode' (each with -h).
 
     
     Return 1 if something went wrong, 0 otherwise

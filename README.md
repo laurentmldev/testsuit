@@ -20,6 +20,8 @@ Optional features are installed as extras:
 | `plotly`   | plotly figures updated in place in Jupyter   |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
+| `editor`   | the criteria editor in the browser (`mxp edit`) |
+| `sequencer`| the test sequencer `tsq`/`tsqd` and its web UI, with `editor` |
 | `test`     | what the test suite needs                    |
 | `dev`      | `test` plus build and lint tools             |
 
@@ -54,6 +56,20 @@ Figures (Data-Plot GUI, mexploit `plot*` checks, sequence timelines) are drawn b
 Pick it per check with `rendering_engine: matplotlib` in the scenario YAML, per run with `mxp --plot-backend matplotlib` / `exploit_runner --plot-backend matplotlib` (or the `PLOT_RENDERING_BACKEND` environment variable), and in the Data-Plot GUI with its Backend menu. The figure format works the same way: `figure_format`, `--figure-format`, `PLOT_FIGURE_FORMAT`.
 
 The exploit_runner HTML report stays a single file that works offline with plotly figures: they are stored as gzipped plotly JSON and drawn by plotly.js, which the report then embeds once (about 2 MB). Reports made with matplotlib only don't embed it. In mxp's own `pytest_report.html`, each plotly figure is drawn in a frame by a page of `pytest_report_files/`, which shares one copy of plotly.js. Another library can add its own backend with `testsuit.datatools.plotBackends.register_plot_backend()`.
+
+## Writing criteria
+
+The checks run on test results are mexploit scenarios: YAML files of entries, each running a criterion (a `crit_*` function, built in or from a plugin) with its fields. Each criterion declares its fields (a Pydantic model), so the tools know what a scenario may contain:
+
+| Tool | What it does |
+|---|---|
+| `mxp describe` | every criterion a scenario can use, with its help and the JSON Schema of its fields; the helpers of expressions |
+| `mxp lint` | checks a scenario without running it: fields, expressions, computed parameters, parameter names against data (`--auto`: with the keys of its test definition) |
+| `mxp utest` | unit tests of a scenario: small data cases (`criteria_utests/<scenario>/utests.yml`), each with the status every check must give, and the coverage of each check |
+| `mxp edit` | the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots. Also in tsqd (**Edit criteria** on the Datapacks tab). |
+| `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
+
+An unknown field in a scenario is a warning when it runs, in its log and in the exploit_runner report; it will be an error in a next version. The [exploit README](src/testsuit/exploit/README.md#writing-scenarios-describe-lint-and-unit-tests) tells more, and [examples/toytrain](examples/toytrain) has unit tests for its criteria, every check covered.
 
 ## Datapacks
 
@@ -103,7 +119,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `extract_data_any`       | decode raw bit fields into parameters from a JSON/YAML config (example: `examples/config_extract_data_any.json`) |
 | `extract_data_flags`     | extract flag values described in a YAML file                      |
 | `apply_clock_correction` | shift timestamps of a folder of data files                        |
-| `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest` help to write and test scenarios, `mxp edit` opens them in the criteria editor (`pip install "testsuit[editor]"`) |
+| `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest`, `mxp edit`, `mxp vscode` help to write and test scenarios ([Writing criteria](#writing-criteria)) |
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
 | `tsq`                    | test sequencer client: submit datapacks, follow runs, manage the lab (`pip install "testsuit[sequencer]"`) |
