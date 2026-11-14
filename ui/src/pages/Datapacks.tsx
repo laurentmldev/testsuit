@@ -171,6 +171,8 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
             </select>
           </label>
         )}
+        <button onClick={() => navigate(`criteria/${sid}`, { scope: testdef.split("/").slice(0, -1).join("/") || undefined })}
+          title="The criteria checked on the results of this test, with completion, checks as you type and their unit tests">Edit criteria</button>
         <button className="primary" disabled={!data} onClick={() => setGenerate(true)}>Generate…</button>
       </div>
       {error && <pre className="error-box">{error}</pre>}
@@ -198,12 +200,54 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
           <Baseline sid={sid} testdef={testdef} config={config} datasets={data.baseline} onChanged={load} edit={edit} />
           <LogicalConfig data={data} edit={edit} />
           <PipelineGraph sid={sid} testdef={testdef} config={config} edit={edit} />
+          <Criteria sid={sid} testdef={testdef} />
           <Inputs data={data} edit={edit} />
           <Dictionaries data={data} edit={edit} />
         </>
       )}
       {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} />}
     </div>
+  );
+}
+
+/** The criteria (mexploit scenarios) of the test definition, their unit tests and last coverage. */
+function Criteria({ sid, testdef }: { sid: string; testdef: string }) {
+  const [ov, setOv] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    get(`edit/sessions/${sid}/criteria`).then(setOv).catch((e) => setError(e.message));
+  }, [sid, testdef]);
+  const mine = (ov?.scenarios || []).filter((s: any) => s.testdef === testdef);
+  const folder = testdef.split("/").slice(0, -1).join("/");
+  const open = (file?: string) => navigate(`criteria/${sid}`, { scope: folder || undefined, file });
+  if (error) return <Section title="Criteria"><pre className="error-box">{error}</pre></Section>;
+  if (ov && !mine.length) return null;
+  return (
+    <Section title={<>Criteria <span className="muted small">{ov ? `${mine.length} scenario(s), checked on the results` : ""}</span></>}
+      actions={<button className="link small" onClick={() => open()}>open the criteria editor</button>}>
+      {!ov && <Spinner text="Reading the criteria…" />}
+      {mine.length > 0 && (
+        <table className="kv">
+          <tbody>
+            {mine.map((s: any) => {
+              const utests = (ov.utests || []).filter((u: any) => s.utests.includes(u.path));
+              const last = utests.find((u: any) => u.last)?.last;
+              return (
+                <tr key={s.path}>
+                  <td><button className="link" onClick={() => open(s.files[0])}>{s.name}</button> <span className="muted small">{s.files.length} file(s)</span></td>
+                  <td>
+                    {!utests.length && <span className="badge warn" title="No utests.yml for this scenario: its checks are not tested">no unit tests</span>}
+                    {utests.length > 0 && !last && <span className="badge">{utests.reduce((n: number, u: any) => n + (u.cases?.length || 0), 0)} unit-test case(s), not run in this server</span>}
+                    {last && <span className={classes("badge", last.ok && last.fully_covered ? "ok" : last.ok ? "warn" : "bad")}>
+                      {last.cases_ok}/{last.cases} case(s) as expected, {last.fully_covered ? "every check covered" : `${Object.values(last.coverage).filter((c) => c !== "covered").length} check(s) not covered`}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </Section>
   );
 }
 

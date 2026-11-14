@@ -39,9 +39,14 @@ function yamlSupport(): MonacoYaml {
   return yaml;
 }
 
+// the URI of the schema of each model: plain letters and digits, as the YAML worker normalizes the URIs it
+// is given (an authority made of the encoded model URI came back lowercased, its schema then not found)
+const schemaIds = new Map<string, string>();
+
 /** Associates a JSON Schema to the model of a file (by its model URI). */
 export function setSchema(modelUri: string, schema: any | null) {
-  if (schema) schemaSettings.set(modelUri, { uri: `schema://${encodeURIComponent(modelUri)}`, fileMatch: [modelUri], schema });
+  if (!schemaIds.has(modelUri)) schemaIds.set(modelUri, `schema://tsq/model${schemaIds.size + 1}.json`);
+  if (schema) schemaSettings.set(modelUri, { uri: schemaIds.get(modelUri)!, fileMatch: [modelUri], schema });
   else schemaSettings.delete(modelUri);
   yamlSupport().update({ schemas: [...schemaSettings.values()], enableSchemaRequest: false, hover: true, completion: true, validate: true });
 }
@@ -161,7 +166,7 @@ export function sectionStarts(text: string): number[] {
 }
 
 export function CodeEditor({
-  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine, reveal, sections, values,
+  uri, value, onChange, language, readOnly, markers, height, onSave, schema, keys, revealLine, reveal, sections, values, onCursor,
 }: {
   uri: string; value: string; onChange?: (v: string) => void; language?: string; readOnly?: boolean; markers?: Marker[];
   height?: number | string; onSave?: () => void; schema?: any; keys?: { label: string; detail?: string; doc?: string }[];
@@ -172,6 +177,8 @@ export function CodeEditor({
   sections?: boolean;
   /** values of a rendered file: underlined, with where they come from on hover */
   values?: ValueHover[] | null;
+  /** called with the line of the cursor when it moves */
+  onCursor?: (line: number) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -179,6 +186,8 @@ export function CodeEditor({
   changeRef.current = onChange;
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
+  const cursorRef = useRef(onCursor);
+  cursorRef.current = onCursor;
   const settingValue = useRef(false);
 
   useEffect(() => {
@@ -196,8 +205,10 @@ export function CodeEditor({
       if (!settingValue.current) changeRef.current?.(model!.getValue());
     });
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveRef.current?.());
+    const cursor = instance.onDidChangeCursorPosition((e) => cursorRef.current?.(e.position.lineNumber));
     return () => {
       sub.dispose();
+      cursor.dispose();
       instance.dispose();
       editor.current = null;
     };

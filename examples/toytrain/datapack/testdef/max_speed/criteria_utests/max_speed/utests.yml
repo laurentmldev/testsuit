@@ -1,0 +1,42 @@
+# Unit tests of the max_speed criteria (mxp utest): small recordings, each with what every check must
+# give on it. A check not listed under 'expect' must succeed.
+#   mxp utest utests.yml
+scenario: ../../criteria/max_speed
+dictionaries: [../../scenario.yml]
+
+cases:
+  nominal:
+    description: The sample recording of the nominal behaviour, where every check passes.
+    data: ../../../../../sample/data/max_speed
+
+  overspeed:
+    description: The speed reaches 0.52 m/s between 20 and 20.5 s.
+    data: overspeed/
+    expect:
+      speed_never_over_limit: {status: FAILED, message: "out of range, first one 0.52"}
+      reaches_speed_limit: FAILED
+
+  gap:
+    description: CALC-TM recorded nothing between 10 and 10.5 s.
+    data: gap/
+    expect:
+      telemetry_continuous: {status: FAILED, message: "without data"}
+
+  contact:
+    description: A front contact is seen between 15 and 15.2 s.
+    data: contact/
+    expect:
+      no_contact: FAILED
+
+  start_profile:
+    description: The train starts at 0.3 m/s instead of 0.25 m/s, with a jump.
+    data: start_profile/
+    expect:
+      start_speed: FAILED
+      acceleration: FAILED
+
+  propulsion_over:
+    description: The propulsion controller sends 0.6 m/s at 25 s.
+    data: propulsion_over/
+    expect:
+      propulsion_never_over_limit: FAILED

@@ -103,7 +103,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `extract_data_any`       | decode raw bit fields into parameters from a JSON/YAML config (example: `examples/config_extract_data_any.json`) |
 | `extract_data_flags`     | extract flag values described in a YAML file                      |
 | `apply_clock_correction` | shift timestamps of a folder of data files                        |
-| `mxp`                    | run a mexploit scenario folder against data folders               |
+| `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest` help to write and test scenarios, `mxp edit` opens them in the criteria editor (`pip install "testsuit[editor]"`) |
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
 | `tsq`                    | test sequencer client: submit datapacks, follow runs, manage the lab (`pip install "testsuit[sequencer]"`) |

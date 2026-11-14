@@ -33,7 +33,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from pydantic import Field, model_validator
 
+from testsuit.exploit.mexploit.spec import CpName, CritConf, ParamName, ParamSet, conf
 from testsuit.misc.logger import get_logger
 
 
@@ -43,6 +45,21 @@ def when(date: float) -> str:
     if abs(date) > 1e8:
         return pd.Timestamp(date, unit="s").strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     return f"{date:.3f}s"
+
+
+class Signal(ParamSet):
+    """The values a toy-train criterion checks: a data parameter or a computed one, in a time window.
+    Shared by every criterion of this package (see signal())."""
+    param: ParamName | None = Field(None, description="Parameter of the data checked (name or regex, exactly one match).")
+    computed_param: CpName | None = Field(None, description="In place of `param`: name of an earlier computed_param entry.")
+    from_sec: float | None = Field(None, description="Keep the values from this date (s, from the time origin).")
+    to_sec: float | None = Field(None, description="Keep the values up to this date (s, from the time origin).")
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.param is None) == (self.computed_param is None):
+            raise ValueError("give either 'param' or 'computed_param'")
+        return self
 
 
 def signal(critConf: dict[str, Any]) -> pd.Series:
@@ -70,6 +87,13 @@ def signal(critConf: dict[str, Any]) -> pd.Series:
     return data
 
 
+class WithinRange(CritConf, Signal):
+    """Every value is within [min, max] (either bound can be omitted)."""
+    min: float | None = Field(None, description="Lowest value allowed.")
+    max: float | None = Field(None, description="Highest value allowed.")
+
+
+@conf(WithinRange)
 def crit_within_range(critConf: dict[str, Any]) -> None:
     """Every value is within [min, max] (either bound can be omitted).
 
@@ -97,6 +121,12 @@ speed_within_limit:
         f"first one {data[outside].iloc[0]:.6g} at {when(data[outside].index[0])}")
 
 
+class MaxSlope(CritConf, Signal):
+    """The rate of change never exceeds max_per_sec (in absolute value)."""
+    max_per_sec: float = Field(description="Highest rate of change allowed, per second.")
+
+
+@conf(MaxSlope)
 def crit_max_slope(critConf: dict[str, Any]) -> None:
     """The rate of change never exceeds ``max_per_sec`` (in absolute value).
 
@@ -118,6 +148,14 @@ acceleration_ok:
         f"exceeds {limit:g}/s")
 
 
+class Settles(CritConf, Signal):
+    """The signal reaches target +- tolerance at most within_sec after its first value, and stays there."""
+    target: float = Field(description="Value reached.")
+    tolerance: float = Field(description="Accepted distance to the target.")
+    within_sec: float = Field(description="Longest delay (s) to reach the target, from the first value.")
+
+
+@conf(Settles)
 def crit_settles(critConf: dict[str, Any]) -> None:
     """The signal reaches ``target`` +- ``tolerance`` at most ``within_sec`` after its first value,
     and stays there until its last value.

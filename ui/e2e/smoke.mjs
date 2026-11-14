@@ -12,7 +12,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Smoke test of the built UI against a running tsqd: every page and every editor view renders without a
-// JavaScript error. TSQ_URL (default http://127.0.0.1:8640), CHROMIUM (browser path), SHOTS (screenshot folder).
+// JavaScript error. TSQ_URL (default http://127.0.0.1:8640), CHROMIUM (browser path), SHOTS (screenshot folder),
+// MXP_EDIT_URL (a running `mxp edit`: its criteria editor, unit tests run from the page).
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 
@@ -58,6 +59,37 @@ if (edit?.enabled) {
       const views = { testdef: ["form", "pipeline", "yaml"], subpipelines: ["pipeline"], template: ["template"] }[f.kind] || ["form", "yaml"];
       for (const v of views) await visit(`edit/${s.id}?file=${encodeURIComponent(f.path)}&view=${v}`, 2500, `${s.kind}-${f.kind}-${v}`);
     }
+    // the criteria editor on the session: a scenario file, then a utests file with its unit tests panel
+    const criteria = await api(`edit/sessions/${s.id}/criteria`);
+    for (const sc of criteria.scenarios || []) {
+      await visit(`criteria/${s.id}?file=${encodeURIComponent(sc.files[0])}`, 3000, `${s.kind}-criteria-${sc.name}`);
+      for (const u of sc.utests) await visit(`criteria/${s.id}?file=${encodeURIComponent(u)}`, 3000, `${s.kind}-utests-${sc.name}`);
+    }
+  }
+}
+
+// mxp edit: the same UI in its criteria mode (MXP_EDIT_URL, a running `mxp edit`)
+if (process.env.MXP_EDIT_URL) {
+  const mxp = process.env.MXP_EDIT_URL.replace(/\/$/, "");
+  const overview = await (await fetch(`${mxp}/criteria`)).json();
+  const scenario = overview.scenarios.find((sc) => sc.utests.length) || overview.scenarios[0];
+  await page.goto(`${mxp}/ui/#/criteria?file=${encodeURIComponent(scenario.files[0])}`);
+  await page.waitForSelector(".crit-tree .tree-row", { timeout: 20000 });
+  await page.waitForSelector(".monaco-editor", { timeout: 20000 });
+  if (scenario.utests.length) {
+    // run the unit tests, as a user would, and wait for the matrix
+    await page.click("text=Run all");
+    await page.waitForSelector(".utests-bar .badge", { timeout: 300000 });
+    const failing = await page.$$eval(".utests-matrix td.cell.bad", (cells) => cells.length);
+    if (failing) errors.push(`mxp edit: ${failing} unit-test cell(s) not as expected`);
+  }
+  if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-edit.png` });
+  // a data file of a case: its table and plot
+  const csv = overview.utests.flatMap((u) => (u.cases || []).flatMap((c) => c.data_files)).find((f) => /\.csv$/.test(f));
+  if (csv) {
+    await page.goto(`${mxp}/ui/#/criteria?file=${encodeURIComponent(csv)}`);
+    await page.waitForSelector(".data-plot", { timeout: 20000 });
+    if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-edit-data.png` });
   }
 }
 await browser.close();

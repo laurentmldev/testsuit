@@ -22,13 +22,27 @@ from typing import Any
 
 import numpy as np
 
+from pydantic import Field
+
 from testsuit.exploit.mexploit.registry import register_criterion
+from testsuit.exploit.mexploit.spec import CritConf
 from testsuit.misc.logger import get_logger
 
-from toytrain.criteria import signal, when
+from toytrain.criteria import Signal, signal, when
 
 
-@register_criterion("no_dropout")
+class NoDropout(CritConf, Signal):
+    """No hole in the acquisition: two consecutive samples are at most max_gap_sec apart."""
+    max_gap_sec: float = Field(description="Longest gap (s) allowed between two samples.")
+
+
+class MeanCloseTo(CritConf, Signal):
+    """The mean value is expected +- tolerance."""
+    expected: float = Field(description="Expected mean.")
+    tolerance: float = Field(description="Accepted distance to the expected mean.")
+
+
+@register_criterion("no_dropout", conf=NoDropout)
 def crit_tt_no_dropout(critConf: dict[str, Any]) -> None:
     """No hole in the acquisition: two consecutive samples are at most ``max_gap_sec`` apart.
 
@@ -48,7 +62,7 @@ telemetry_continuous:
         f"CRIT_CHECK\n[no_dropout::{critConf['name']}] {maxGap:.3f}s without data after {when(data.index[worst])}")
 
 
-@register_criterion
+@register_criterion(conf=MeanCloseTo)
 def crit_mean_close_to(critConf: dict[str, Any]) -> None:
     """The mean value is ``expected`` +- ``tolerance``.
 

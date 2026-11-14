@@ -48,6 +48,8 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
+                                             is_scenario, is_utests)
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
 from testsuit.sequencer.util import SequencerError, now
@@ -629,7 +631,32 @@ class Editor:
         """Drop the session: its clone, generated datapacks and notes. An in-place session's folder is kept."""
         session = self.sessions.pop(session_id, None)
         if session is not None:
+            if not session.local:
+                forget_criteria_folder(session.folder)
             shutil.rmtree(session.dir, ignore_errors=True)
+
+    def criteria(self, session: EditSession) -> CriteriaFolder:
+        """The criteria editor's services on the session's folder: scenarios rendered with the keys of their
+        test definition, as the datapack tool resolves them."""
+        return criteria_folder(session.folder, keys_for=lambda folder: self.criteria_keys(session, folder))
+
+    def criteria_keys(self, session: EditSession, folder: Path) -> KeySource | None:
+        """The keys of the test definition a scenario folder belongs to (None: not in a test definition, or
+        its keys cannot be resolved: the criteria editor then reads its dictionaries itself)."""
+        for parent in [folder, *folder.parents]:
+            testdef = next((parent / n for n in ("testdef.yml", "testdef.yaml") if (parent / n).is_file()), None)
+            if testdef is not None:
+                break
+            if parent == session.folder:
+                return None
+        else:
+            return None
+        try:
+            builder, _, _ = self._builder(session, self.rel(session, testdef))
+            values = builder.keys().resolve_all()
+        except Exception:
+            return None
+        return KeySource([], values, f"keys of {self.rel(session, testdef)}")
 
     def describe(self, session: EditSession) -> dict:
         if not session.git:
@@ -662,12 +689,17 @@ class Editor:
         return files
 
     def kind(self, session: EditSession, rel: str, text: str | None = None) -> str:
-        """What a file is: inventory, library, setup, testdef, subpipelines, dictionary, template, or other."""
+        """What a file is: inventory, library, setup, testdef, subpipelines, dictionary, template, criteria (a
+        mexploit scenario file), utests (unit tests of a scenario), or other."""
         path = self.path(session, rel)
         if session.kind == "lab" and path == self._inventory(session):
             return "inventory"
         if path.suffix not in (".yml", ".yaml", ".j2", ".jinja", ".tmpl") and "templates" not in path.parts:
             return "other"
+        if is_scenario(path.name):
+            return "criteria"
+        if is_utests(path.name):
+            return "utests"
         if "templates" in Path(rel).parts:
             return "template"
         if text is None:

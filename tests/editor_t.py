@@ -182,6 +182,14 @@ def test_workspace_session(repos):
                    {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}]}]}}
     written = editor.write(session, "testdef/count/testdef.yml", data=testdef)
     assert written["kind"] == "testdef"
+    # its criteria: a kind of their own, and the criteria editor's services on the session's folder
+    scn = editor.write(session, "testdef/count/criteria/count/count.mexploit.yml",
+                       content="ok:\n  type: assert\n  expression: 1 == 1\n")
+    assert scn["kind"] == "criteria"
+    overview = editor.criteria(session).overview()
+    assert [(s["path"], s["testdef"]) for s in overview["scenarios"]] == [("testdef/count/criteria/count", "testdef/count/testdef.yml")]
+    assert editor.criteria(session).lint("testdef/count/criteria/count/count.mexploit.yml")["problems"] == []
+    editor.delete(session, "testdef/count/criteria")
     assert not [p for p in written["problems"] if p["severity"] == "error"], written["problems"]
     assert not [p for p in editor.validate(session)["problems"] if p["severity"] == "error"]
 
