@@ -18,3 +18,6 @@ dist/
 # web UI: dependencies, and the build served by tsqd (npm run build in ui/)
 ui/node_modules/
 src/testsuit/sequencer/ui/
+
+# mxp utest results (default output folder)
+mxp_utest_result/

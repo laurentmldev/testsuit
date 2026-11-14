@@ -64,6 +64,7 @@ datapack/                              owned by the test authors
   testdef/<test>/testdef.yml           test definition and pipeline
   testdef/<test>/scenario.yml          scenario keys
   testdef/<test>/criteria/<test>/      exploitation criteria (mexploit)
+  testdef/<test>/criteria_utests/<test>/  their unit tests (mxp utest): hand-made recordings, expected statuses
   release_store/                       stand-in for the release server (toytrain-release importer)
 baseline_expected.yml                  expected baseline of the campaign
 tsq.yml                                main configuration of the lab's sequencer
@@ -136,6 +137,13 @@ exploit_runner sample/exploit_front_contact.yml
 ```
 
 A single test run works with mxp too: `mxp datapack/testdef/max_speed/criteria/max_speed sample/data/max_speed -o .work/mxp -f`.
+
+**Check and unit-test the criteria.** `mxp lint` checks a scenario without running it; `mxp utest` runs its unit tests, small recordings each with the status every check must give, and shows which checks are covered (both seen succeeding and failing). The max_speed criteria have six cases, made from the sample recording: an overspeed, a gap in the telemetry, a contact, a wrong start profile, a propulsion command over the limit. See the [exploit README](../../src/testsuit/exploit/README.md#writing-scenarios-describe-lint-and-unit-tests):
+
+```bash
+mxp lint datapack/testdef/max_speed/criteria -k datapack/testdef/max_speed/scenario.yml -d sample/data/max_speed
+mxp utest datapack/testdef/max_speed/criteria_utests/max_speed/utests.yml -o .work/utest --require-coverage
+```
 
 **Build a datapack.** The software and simulation datasets come from the release store (`datapack/release_store`). `--nocheck` is needed because the example folders are not a tagged Git checkout:
 
@@ -264,7 +272,7 @@ register_file_format("propulsion-json", ["propj"], PropulsionJsonFileMgr)
 
 Extensions can contain dots (`"sim.yml"`), and `accepts=lambda filename: ...` narrows a format to some of the files with its extensions. For a CSV dialect, subclass `CsvFileMgr` and register a detector instead: `register_csv_variant("toytrain-telemetry", isTelemetryCsv, TelemetryCsvFileMgr)`.
 
-**A criterion.** A function `crit_<type>(critConf)` that raises (usually with `assert`) when the check fails. `critConf` is the scenario entry, with its `name` and `type`. Load data with testsuit's `param()` helper, or read an earlier `computed_param` entry, as `criteria.signal()` does. Register a whole module with `register_criteria_module("mylib.criteria")`, or single functions with `@register_criterion`. A docstring with a `<TEMPLATE>` block, as in testsuit's own criteria, documents the scenario syntax.
+**A criterion.** A function `crit_<type>(critConf)` that raises (usually with `assert`) when the check fails. `critConf` is the scenario entry, with its `name` and `type`. Load data with testsuit's `param()` helper, or read an earlier `computed_param` entry, as `criteria.signal()` does. Register a whole module with `register_criteria_module("mylib.criteria")`, or single functions with `@register_criterion`. Declare the fields of its entries with a model (`@conf(WithinRange)`, or `register_criterion(conf=...)`): a Pydantic class deriving from testsuit's `CritConf`, made of parameter sets such as `Signal` here. Misspelled fields are then reported, and the editors and `mxp describe` know the fields. A docstring with a `<TEMPLATE>` block, as in testsuit's own criteria, gives the sample entry.
 
 **A datapack importer.** Subclass `ADataImporter` (`retrieve()`, `checkVersion()`, `getChanges()`, `getTag()`) and register the class, or any factory `(targetDir, remotePath, versionId)`: `register_data_importer("toytrain-release", ReleaseImporter)`. The datapack tool provides `<dataset id>.path` and `<dataset id>.version`; after `retrieve()`, the dataset folder can also hold a `dataset.yml` file with more keys for the datapack files (`{{ toytrain_sw.pilot_version }}`).
 

@@ -57,7 +57,7 @@ Copy it from any existing file. `tests/license_t.py` fails for a tracked source 
 
 A scenario entry `type: foo` runs the criterion `foo`, a function `crit_foo(critConf, ...)`. It is looked up in the scenario's own libraries first, then in the criteria registered by external code, then in the default ones.
 
-- For a check everyone can use, add `crit_foo` to `src/testsuit/exploit/mexploit/criteria.py` and cover it with a scenario under `tests/etc/mexploit/scenarii/mxp_OK_main_functions/`.
+- For a check everyone can use, add `crit_foo` to `src/testsuit/exploit/mexploit/criteria.py` with the model of its fields (`@conf(Foo)`, a `CritConf` subclass built from the parameter sets of `spec.py`, see the [exploit README](src/testsuit/exploit/README.md#extending-it)), and cover it with a scenario under `tests/etc/mexploit/scenarii/mxp_OK_main_functions/`. `tests/mexploit_tools_t.py` fails for a built-in criterion without model.
 - For a project-specific check, keep it outside this repo: either register it from your library (see below), or write `crit_foo` in your own module and load it from the scenario with a `# MXP_REGISTER_CRITLIB(path/to/your_criteria.py)` line, as in `tests/etc/mexploit/scenarii/mxp_OK_custom_crit/`.
 
 ## Extending testsuit from another library
