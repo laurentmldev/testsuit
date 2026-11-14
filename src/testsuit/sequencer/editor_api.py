@@ -32,6 +32,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
+from testsuit.exploit.editor.routes import criteria_routes
 from testsuit.sequencer.api import zip_entry
 from testsuit.sequencer.editor import EditConflict, Editor
 from testsuit.sequencer.editor_schemas import schemas
@@ -323,6 +324,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
             return {"ok": True, "detail": f"{host}:{port} answers ({(time.monotonic() - start) * 1000:.0f} ms)"}
         except (OSError, asyncio.TimeoutError, socket.gaierror) as e:
             return {"ok": False, "detail": f"{host}:{port}: {e or 'timeout'}"}
+
+    def session_criteria(sid: str):
+        return editor.criteria(session(sid))
+
+    # the criteria editor (testsuit.exploit.editor), on the session's folder
+    app.include_router(criteria_routes(session_criteria), prefix="/edit/sessions/{sid}/criteria")
 
     @app.get("/edit/schemas")
     async def lab_schemas():

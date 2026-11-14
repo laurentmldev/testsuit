@@ -26,6 +26,7 @@ import { EditorHome } from "./editor/EditorHome";
 import { DatapacksPage } from "./pages/Datapacks";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
+import { SessionCriteriaPage, StandaloneCriteriaApp } from "./criteria/CriteriaPage";
 
 function LabBanner({ editor }: { editor: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
@@ -72,7 +73,7 @@ function App() {
   const title = health.data?.title || "Test sequencer";
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
   const page = route.parts[0] || "queue";
-  const editing = page === "edit" && !!route.parts[1];   // an editor session names its own tab
+  const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
   useEffect(() => {
     if (!editing) document.title = title;
   }, [title, editing]);
@@ -86,10 +87,11 @@ function App() {
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
   else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
+  else if (page === "criteria" && route.parts[1]) content = <SessionCriteriaPage sid={route.parts[1]} route={route} />;
   else if (page === "edit") content = <EditorHome />;
   else content = <QueuePage />;
   return (
-    <div className={classes("app", page === "edit" && route.parts[1] && "full")}>
+    <div className={classes("app", editing && "full")}>
       <header className="topbar">
         <a className="brand" href="#/">
           {logo && <img src={logo} alt="" />}
@@ -118,10 +120,20 @@ function App() {
   );
 }
 
+// `mxp edit` serves this UI in its criteria mode: only the criteria editor (tsqd has no /mode)
+function Root() {
+  const [mode, setMode] = useState<any>(undefined);
+  useEffect(() => {
+    get("mode").then((m) => setMode(m?.mode === "criteria" ? m : null)).catch(() => setMode(null));
+  }, []);
+  if (mode === undefined) return null;
+  return mode ? <StandaloneCriteriaApp mode={mode} /> : <App />;
+}
+
 window.addEventListener("unhandledrejection", (e) => notify(String(e.reason?.message || e.reason), "error"));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <Root />
   </StrictMode>,
 );

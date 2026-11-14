@@ -38,6 +38,8 @@ const KIND_LABELS: [string, string, string][] = [
   ["subpipelines", "Shared sub-pipelines", "Groups of steps used by several test definitions (pipeline.include)."],
   ["dictionary", "Key files", "Keys used by the templates (dictionaries)."],
   ["template", "Templates", "Input files rendered with the keys (Jinja2)."],
+  ["criteria", "Criteria (mexploit scenarios)", "The checks run on the results of a test: open them in the criteria editor for completion, checks and unit tests."],
+  ["utests", "Unit tests of criteria", "Small data cases, each with the status expected of each check (mxp utest)."],
   ["yaml", "Other YAML", ""],
   ["other", "Other files", ""],
 ];
@@ -48,6 +50,7 @@ const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "li
 const KIND_NAME: Record<string, string> = {
   inventory: "Lab inventory", library: "Roles and components", testdef: "Test definition", setup: "Setup",
   subpipelines: "Sub-pipelines", dictionary: "Key file", template: "Template", yaml: "YAML", other: "File",
+  criteria: "Criteria", utests: "Unit tests of criteria",
 };
 
 /** The folder (with its trailing slash) and the name of a path. */
@@ -160,6 +163,10 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
             <button className="small" onClick={api.undo} disabled={!api.canUndo} title="Undo (Ctrl+Z)">↶ Undo</button>
             <button className="small" onClick={api.redo} disabled={!api.canRedo} title="Redo (Ctrl+Shift+Z or Ctrl+Y)">↷ Redo</button>
           </span>
+        )}
+        {(doc.kind === "criteria" || doc.kind === "utests") && (
+          <button className="small primary" onClick={() => navigate(`criteria/${session.sid}`, { file: doc.path })}
+            title="Completion of the criteria and their fields, checks as you type, unit tests and their coverage">Open in the criteria editor</button>
         )}
         <span className={classes("save-state", api.state)}>{{ saved: "saved in the session", pending: "editing…", saving: "saving…", error: "not saved", conflict: "not saved: changed elsewhere" }[api.state]}</span>
         {doc.aliases && current !== "yaml" && <span className="badge info" title="This file uses YAML aliases (*name). A form change to an aliased part gives that place a copy of its own.">aliases</span>}

@@ -95,15 +95,23 @@ jobs:
           EOF
           nohup tsqd --config "$RUNNER_TEMP/tsq/tsq.yml" > "$RUNNER_TEMP/tsq/tsqd.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8640/health > /dev/null && break; sleep 1; done
+      - name: Start mxp edit (the criteria editor on its own)
+        run: |
+          nohup mxp edit examples/toytrain/datapack --port 8650 --no-browser > "$RUNNER_TEMP/mxp_edit.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8650/mode > /dev/null && break; sleep 1; done
       - name: Render every view
         working-directory: ui
         env:
           TSQ_URL: http://127.0.0.1:8640
+          MXP_EDIT_URL: http://127.0.0.1:8650
           CHROMIUM: /usr/bin/google-chrome
         run: npm run e2e
       - name: tsqd log
         if: always()
         run: cat "$RUNNER_TEMP/tsq/tsqd.log"
+      - name: mxp edit log
+        if: always()
+        run: cat "$RUNNER_TEMP/mxp_edit.log"
 
   build:
     runs-on: ubuntu-latest

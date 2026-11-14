@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-SUBCOMMANDS = ("describe", "lint", "utest")
+SUBCOMMANDS = ("describe", "lint", "utest", "edit")
 
 
 def _parse_set(values: list[str]) -> dict:
@@ -121,4 +121,7 @@ def utest_main(argv: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     """Run the sub-command named by argv[0]."""
+    if argv[0] == "edit":
+        from testsuit.exploit.editor.standalone import edit_main
+        return edit_main(argv[1:])
     return {"describe": describe_main, "lint": lint_main, "utest": utest_main}[argv[0]](argv[1:])

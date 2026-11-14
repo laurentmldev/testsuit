@@ -1138,6 +1138,7 @@ tsq config                                                  # settings in use, a
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
   - `GET .../diff`, `POST .../push` (the user's credentials in the request body, required, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
+  - the criteria editor, on the session's folder (routes of `testsuit.exploit.editor.routes`, also served by `mxp edit` under `/criteria`): `GET .../criteria` (scenarios, unit-test files and cases, last results), `GET .../criteria/describe?scenario=`, `GET|PUT .../criteria/files/{path}` (with `base`: 409 when the file changed), `POST .../criteria/lint` (`path`, `text` not saved yet), `.../criteria/keys`, `.../criteria/params`, `POST .../criteria/utests/jobs` (`utests`, `cases`), `GET .../criteria/utests/jobs/{job}[/files/{path}]`, `POST .../criteria/utests/jobs/{job}/stop`, `POST .../criteria/utests/last`.
 
 The kernel never depends on the UI below: it is a web front end on the REST API, served by `tsqd` when `server.ui` is set.
 
@@ -1191,6 +1192,8 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - a palette of what a step can do on each slot, built from the commands its lab role offers, with the implementation of each bound host (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `http`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's stage slots and slots;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
+
+**Criteria.** The criteria of a test definition (its mexploit scenarios, `criteria/<name>/*.mexploit.yml`) and their unit tests (`criteria_utests/<name>/utests.yml`) open in the criteria editor, the same one `mxp edit` serves on its own ([exploit README](../exploit/README.md#the-criteria-editor-mxp-edit-and-in-tsqd)): **Edit criteria** on a test definition of the Datapacks tab, which also shows a **Criteria** section with the last result of their unit tests, or **Open in the criteria editor** on such a file in the Editor. It completes and checks the scenarios as they are typed, with the keys of the test definition, and runs their unit tests on the tsqd host (one `mxp` process per case). Its changes are saved in the session and pushed with the rest.
 
 **Help while filling the files.** Defining roles, components, inventories, pipelines and templates takes knowing a lot of names, so every form helps with them:
 - each field shows its help in the panel on the right when pointed at or focused, starting with the name of its key in the YAML file (`tsq_label`), written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
