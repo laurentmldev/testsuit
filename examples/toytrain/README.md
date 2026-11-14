@@ -145,7 +145,7 @@ mxp lint datapack/testdef/max_speed/criteria -k datapack/testdef/max_speed/scena
 mxp utest datapack/testdef/max_speed/criteria_utests/max_speed/utests.yml -o .work/utest --require-coverage
 ```
 
-Or all of it in the browser: `mxp edit datapack` opens the criteria editor on the test definitions, with completion of the criteria and their fields, the problems as you type, the unit tests to run with their matrix and coverage, and the recordings of the cases as tables and plots.
+In VSCode, `mxp vscode` (from this folder) sets up completion and validation of the scenarios, the unit tests in the Testing view, and a lint task. Or all of it in the browser: `mxp edit datapack` opens the criteria editor on the test definitions, with completion of the criteria and their fields, the problems as you type, the unit tests to run with their matrix and coverage, and the recordings of the cases as tables and plots.
 
 **Build a datapack.** The software and simulation datasets come from the release store (`datapack/release_store`). `--nocheck` is needed because the example folders are not a tagged Git checkout:
 

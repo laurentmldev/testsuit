@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-SUBCOMMANDS = ("describe", "lint", "utest", "edit")
+SUBCOMMANDS = ("describe", "lint", "utest", "edit", "vscode")
 
 
 def _parse_set(values: list[str]) -> dict:
@@ -68,8 +68,27 @@ def lint_main(argv: list[str]) -> int:
     parser.add_argument("-d", "--data", action="append", default=[], help="data folder whose parameters the names are checked against")
     parser.add_argument("--critlib", action="append", default=[], help="a library of criteria (Python file) to load too")
     parser.add_argument("--json", action="store_true", help="print the problems as JSON")
+    parser.add_argument("--auto", action="store_true", help="as the criteria editor does: render with the keys of "
+                        "the test definition holding the scenario (else those of its unit tests), and check the "
+                        "parameter names against the data of its first unit-test case")
     args = parser.parse_args(argv)
-    problems = lint(args.scenario, args.dictionary, _parse_set(args.set), args.data, args.critlib)
+    if args.auto:
+        from testsuit.exploit.editor.service import CriteriaFolder
+        from testsuit.exploit.mexploit.lint import Problem
+        scenario = Path(args.scenario).resolve()
+        root = Path.cwd().resolve()
+        if not scenario.is_relative_to(root):
+            root = scenario if scenario.is_dir() else scenario.parent
+        folder = CriteriaFolder(root)
+        try:
+            result = folder.lint(folder.rel(scenario))
+        finally:
+            folder.close()
+        for note in result["notes"]:
+            print(note, file=sys.stderr)
+        problems = [Problem(**{**p, "file": str(root / p["file"])}) for p in result["problems"]]
+    else:
+        problems = lint(args.scenario, args.dictionary, _parse_set(args.set), args.data, args.critlib)
     if args.json:
         print(json.dumps([p.as_dict() for p in problems], indent=2))
     else:
@@ -119,8 +138,33 @@ def utest_main(argv: list[str]) -> int:
     return rc
 
 
+def vscode_main(argv: list[str]) -> int:
+    from testsuit.exploit.mexploit.vscode import setup_vscode
+    parser = argparse.ArgumentParser(prog="mxp vscode", description=
+        "Set up VSCode for the scenarios of a workspace, with no extension of its own: the JSON Schemas of "
+        "scenario and utests files for the YAML extension (completion, help, validation), pytest with the "
+        "unit tests in the Testing view, and tasks for mxp lint (problems in the Problems view), mxp utest "
+        "and mxp edit. Writes in <workspace>/.vscode, keeping the other settings and tasks. Run it again when "
+        "criteria change (a plugin, a library of criteria).")
+    parser.add_argument("workspace", nargs="?", default=".", help="the folder opened in VSCode (default: the current one)")
+    parser.add_argument("--no-tasks", action="store_true", help="do not write tasks.json")
+    args = parser.parse_args(argv)
+    try:
+        written = setup_vscode(args.workspace, tasks=not args.no_tasks)
+    except ValueError as e:
+        print(f"mxp vscode: {e}", file=sys.stderr)
+        return 1
+    for path in written:
+        print(f"written: {path}")
+    print("In VSCode: install the YAML (redhat.vscode-yaml) and Python extensions, select the Python environment "
+          "where testsuit and your plugins are installed.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     """Run the sub-command named by argv[0]."""
+    if argv[0] == "vscode":
+        return vscode_main(argv[1:])
     if argv[0] == "edit":
         from testsuit.exploit.editor.standalone import edit_main
         return edit_main(argv[1:])
