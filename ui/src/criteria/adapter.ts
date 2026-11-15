@@ -15,6 +15,14 @@
 // adapter on an editing session, `mxp edit` one on its folder (feasibility study, section 6.5).
 import { get, post, put, url } from "../api";
 
+/** An entry of a scenario as it runs (rendered: a loop gives one per pass), with where it is written. */
+export interface RunEntry {
+  name: string;
+  type: string | null;
+  file: string;
+  line: number | null;
+}
+
 export interface Problem {
   file: string;
   line: number | null;
@@ -138,7 +146,7 @@ export interface CriteriaAdapter {
   version(path: string): Promise<string | null>;
   /** refused with an ApiError 409 (body.current: the file as it is now) when the file is not base any more */
   write(path: string, content: string, base: string | null, create?: boolean): Promise<FileDoc>;
-  lint(path: string, text?: string): Promise<{ problems: Problem[]; notes: string[]; keys: string; data: string[] }>;
+  lint(path: string, text?: string): Promise<{ problems: Problem[]; notes: string[]; keys: string; data: string[]; entries?: RunEntry[] }>;
   keys(scenario: string): Promise<{ keys: { key: string; value: string; origin: string }[]; error: string | null; origin: string }>;
   params(scenario: string): Promise<{ params: string[]; data: string[]; error?: string }>;
   runUtests(utests: string, cases?: string[]): Promise<{ job: string; cases: string[] }>;

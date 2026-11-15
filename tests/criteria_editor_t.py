@@ -310,3 +310,30 @@ def test_unit_tests_include_without_keys(folder):
     assert "{%" not in text and "value_max:" in text and "expression_right: 5" in text
     state = wait_job(folder, folder.start_utests("limits/utests.yml")["job"])
     assert state["error"] is None and state["report"]["ok"], state["report"]
+
+
+def test_loops_lines_and_entries(folder):
+    """A Jinja loop: problems on the lines written, after the loop too; one entry per pass, as they run."""
+    scn = folder.root / SCN
+    scn.write_text(scn.read_text() + """
+{% for p in ["value", "other"] %}
+{{ p }}_cp:
+  type: computed_param
+  expression: |
+    x = param("{{ p }}")
+    return nosuch(x)
+{% endfor %}
+
+after_loop:
+  type: assert
+  expression: cp.nope > 1
+""")
+    lines = scn.read_text().split("\n")
+    result = folder.lint(SCN)
+    got = sorted((p["line"], p["entry"]) for p in result["problems"] if p["severity"] == "error")
+    loop = lines.index("  expression: |") + 1
+    assert got == [(loop, "other_cp"), (loop, "value_cp"), (lines.index("  expression: cp.nope > 1") + 1, "after_loop")]
+    entries = [(e["name"], e["line"]) for e in result["entries"]]
+    assert entries[-3:] == [("value_cp", lines.index("{{ p }}_cp:") + 1), ("other_cp", lines.index("{{ p }}_cp:") + 1),
+                            ("after_loop", lines.index("after_loop:") + 1)]
+    assert entries[0] == ("value_max", 2)

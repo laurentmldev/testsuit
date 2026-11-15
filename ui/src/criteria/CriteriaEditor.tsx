@@ -21,7 +21,7 @@ import { ApiError } from "../api";
 import { Dialog } from "../fields";
 import { CodeEditor, type Marker } from "../monaco";
 import { attempt, classes, Markdown, notify, relPath, Spinner } from "../util";
-import type { CriteriaAdapter, CriterionInfo, Description, FileDoc, Overview, Problem, ScenarioInfo, UtestsInfo } from "./adapter";
+import type { CriteriaAdapter, CriterionInfo, Description, FileDoc, Overview, Problem, RunEntry, ScenarioInfo, UtestsInfo } from "./adapter";
 import { DataView } from "./DataView";
 import { setCriteriaContext } from "./expressions";
 import { entries, entryAt, fieldsOf, freeEntryName, templateEntryName, templateNamed, type Entry } from "./scenario";
@@ -193,11 +193,17 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
   const allTexts = useMemo(() => (isScenarioDoc(file) && doc ? { ...texts, [file]: text } : texts), [texts, file, doc, text, scenario]);
   const allEntries = useMemo(() => Object.entries(allTexts).sort(([a], [b]) => a.localeCompare(b))
     .flatMap(([f, t]) => entries(t).map((e) => ({ ...e, file: f }))), [allTexts]);
+  // the entries as they run, from the server's rendering (keys, includes, loops), else as written here
+  const [runEntries, setRunEntries] = useState<RunEntry[]>([]);
+  useEffect(() => setRunEntries([]), [scenarioPath]);
   const locate = useCallback((check: string) => {
+    const r = runEntries.find((x) => x.name === check && x.line);
+    if (r) return { file: r.file, line: r.line! };
     const e = allEntries.find((x) => x.name === check);
     return e ? { file: e.file, line: e.line } : null;
-  }, [allEntries]);
-  const scenarioChecks = useMemo(() => allEntries.filter((e) => e.type).map((e) => ({ name: e.name, asserts: desc?.criteria[e.type!]?.asserts ?? true })), [allEntries, desc]);
+  }, [allEntries, runEntries]);
+  const scenarioChecks = useMemo(() => (runEntries.length ? runEntries : allEntries).filter((e) => e.type)
+    .map((e) => ({ name: e.name, asserts: desc?.criteria[e.type!]?.asserts ?? true })), [allEntries, runEntries, desc]);
 
   // ── problems ──────────────────────────────────────────────────────
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -211,7 +217,7 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
     const t = window.setTimeout(() => {
       setLinting(true);
       adapter.lint(target, isScenarioDoc(file) && doc ? text : undefined)
-        .then((r) => { if (current) { setProblems(r.problems); setNotes(r.notes); } })
+        .then((r) => { if (current) { setProblems(r.problems); setNotes(r.notes); setRunEntries(r.entries || []); } })
         .catch((e) => { if (current) { setProblems([{ file: target, line: null, severity: "error", message: e.message }]); setNotes([]); } })
         .finally(() => setLinting(false));
     }, 700);
