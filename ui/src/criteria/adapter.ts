@@ -49,6 +49,8 @@ export interface ScenarioInfo {
   name: string;
   files: string[];
   critlibs: string[];
+  /** files the scenario files include or import (Jinja) */
+  included?: string[];
   testdef: string | null;
   /** the dictionaries of its test definition */
   dictionaries: string[];

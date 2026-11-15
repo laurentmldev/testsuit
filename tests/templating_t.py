@@ -144,3 +144,16 @@ def test_evalfile_cli(tmp_path):
     assert result.returncode == 0 and result.stdout == "1 2\n"
     result = subprocess.run([sys.executable, "-m", "testsuit.cli.evalfile", str(tmp_path / "t.txt")], capture_output=True, text=True)
     assert result.returncode == 1 and "undefined" in result.stderr
+
+
+def test_render_text_includes_and_sources(tmp_path):
+    """render_text: includes and imports found in the search path, some files taken from texts not saved."""
+    (tmp_path / "part.yml").write_text("speed: {{ train.speed }}\n")
+    (tmp_path / "macros.j2").write_text("{% macro twice(x) %}{{ x * 2 }}{% endmacro %}")
+    keys = Keys()
+    keys.add({"train": {"speed": 3}}, "test")
+    text = '{% include "part.yml" %}{% import "macros.j2" as m %}double: {{ m.twice(train.speed) }}\n'
+    assert keys.render_text(text, [tmp_path]) == "speed: 3\ndouble: 6\n"
+    assert keys.render_text(text, [tmp_path], sources={str(tmp_path / "part.yml"): "speed: 0\n"}) == "speed: 0\ndouble: 6\n"
+    with pytest.raises(TemplateError, match="nope.yml"):
+        keys.render_text('{% include "nope.yml" %}', [tmp_path], where="x")
