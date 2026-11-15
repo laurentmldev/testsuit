@@ -42,16 +42,20 @@ function yamlSupport(): MonacoYaml {
   return yaml;
 }
 
-// a Jinja statement alone on its line ({% include "x.yml" %}, {% if ... %}, {# ... #}) is not YAML: it is
-// gone once the file is rendered, so the YAML checker's complaints about that line are dropped
-const JINJA_LINE = /^\s*(\{%.*%\}|\{#.*#\})\s*$/;
+// a Jinja statement alone on its line ({% include "x.yml" %}, {# ... #}) is not YAML: it is gone once the
+// file is rendered, so the YAML checker's complaints about that line are dropped. In a file with blocks
+// ({% for %}, {% if %}, {% macro %}...) the text is YAML only once rendered: none of its complaints is kept,
+// the checks being those of the server, on the rendering (mxp lint).
+const JINJA_LINE = /^\s*(\{%.*%\}|\{#.*#\})\s*(#.*)?$/;
+const JINJA_BLOCK = /^\s*\{%-?\s*(for|if|macro|call|filter|set|block|raw)\b/m;
 function dropJinjaLineMarkers(uris: readonly monaco.Uri[]) {
   for (const uri of uris) {
     const model = monaco.editor.getModel(uri);
     if (!model || model.getLanguageId() !== "yaml") continue;
     const markers = monaco.editor.getModelMarkers({ resource: uri, owner: "yaml" });
-    const kept = markers.filter((m) => !(m.startLineNumber === m.endLineNumber && m.startLineNumber <= model.getLineCount()
-      && JINJA_LINE.test(model.getLineContent(m.startLineNumber))));
+    if (!markers.length) continue;
+    const kept = JINJA_BLOCK.test(model.getValue()) ? [] : markers.filter((m) => !(m.startLineNumber === m.endLineNumber
+      && m.startLineNumber <= model.getLineCount() && JINJA_LINE.test(model.getLineContent(m.startLineNumber))));
     if (kept.length !== markers.length) monaco.editor.setModelMarkers(model, "yaml", kept);
   }
 }

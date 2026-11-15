@@ -69,6 +69,8 @@ The checks run on test results are mexploit scenarios: YAML files of entries, ea
 | `mxp edit` | the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots. Also in tsqd (**Edit criteria** on the Datapacks tab). |
 | `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
 
+Scenarios are Jinja templates rendered before they run: a value can be a key of the test's dictionaries (`max: "{{ train.speed_limit_mps }}"`), a shared part can be included (`{% include "limits.inc.yml" %}`), and a loop can apply the same checks to several parameters (`{% for p in train.monitored %}`). The tools above render them too, and report each problem on the line where it is written ([examples](src/testsuit/exploit/README.md#templating-with-jinja-keys-includes-and-loops)).
+
 An unknown field in a scenario is a warning when it runs, in its log and in the exploit_runner report; it will be an error in a next version. The [exploit README](src/testsuit/exploit/README.md#writing-scenarios-describe-lint-and-unit-tests) tells more, and [examples/toytrain](examples/toytrain) has unit tests for its criteria, every check covered.
 
 ## Datapacks
