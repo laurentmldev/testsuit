@@ -35,8 +35,25 @@ let yaml: MonacoYaml | null = null;
 const schemaSettings = new Map<string, SchemasSettings>();
 
 function yamlSupport(): MonacoYaml {
-  if (!yaml) yaml = configureMonacoYaml(monaco, { enableSchemaRequest: false, hover: true, completion: true, validate: true, schemas: [] });
+  if (!yaml) {
+    yaml = configureMonacoYaml(monaco, { enableSchemaRequest: false, hover: true, completion: true, validate: true, schemas: [] });
+    monaco.editor.onDidChangeMarkers(dropJinjaLineMarkers);
+  }
   return yaml;
+}
+
+// a Jinja statement alone on its line ({% include "x.yml" %}, {% if ... %}, {# ... #}) is not YAML: it is
+// gone once the file is rendered, so the YAML checker's complaints about that line are dropped
+const JINJA_LINE = /^\s*(\{%.*%\}|\{#.*#\})\s*$/;
+function dropJinjaLineMarkers(uris: readonly monaco.Uri[]) {
+  for (const uri of uris) {
+    const model = monaco.editor.getModel(uri);
+    if (!model || model.getLanguageId() !== "yaml") continue;
+    const markers = monaco.editor.getModelMarkers({ resource: uri, owner: "yaml" });
+    const kept = markers.filter((m) => !(m.startLineNumber === m.endLineNumber && m.startLineNumber <= model.getLineCount()
+      && JINJA_LINE.test(model.getLineContent(m.startLineNumber))));
+    if (kept.length !== markers.length) monaco.editor.setModelMarkers(model, "yaml", kept);
+  }
 }
 
 // the URI of the schema of each model: plain letters and digits, as the YAML worker normalizes the URIs it

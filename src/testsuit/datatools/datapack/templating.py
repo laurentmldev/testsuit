@@ -192,6 +192,22 @@ def _strip_marks(marked: str, records: list[tuple[int, list[str]]]) -> tuple[str
     return "".join(parts), innermost
 
 
+class _SourcesLoader(jinja2.FileSystemLoader):
+    """Files of the search path, some of them taken from texts not saved yet (by absolute path)."""
+
+    def __init__(self, search_path: Iterable[Path], sources: Mapping[str, str]) -> None:
+        super().__init__([str(p) for p in search_path])
+        self.sources = {os.path.abspath(k): v for k, v in sources.items()}
+
+    def get_source(self, environment: jinja2.Environment, template: str):
+        pieces = jinja2.loaders.split_template_path(template)
+        for folder in self.searchpath:
+            path = os.path.abspath(os.path.join(folder, *pieces))
+            if path in self.sources:
+                return self.sources[path], path, lambda: False
+        return super().get_source(environment, template)
+
+
 def _environment(search_path: Iterable[Path] = (), marks: bool = False) -> _Environment:
     env = _Environment(
         extensions=[_ValueMarks] if marks else [],
@@ -574,6 +590,29 @@ class Keys:
         if values is not None and len(text) <= MAX_MARKED_SIZE:
             values.update(self.values_of(source, text, search_path, extra) or {})
         return text, {key: self.origins.get(key, "") for key in sorted(used) if key in self.origins}
+
+    def render_text(self, text: str, search_path: Iterable[Path] = (), extra: Mapping | None = None,
+                    where: str = "string", sources: Mapping[str, str] | None = None) -> str:
+        """Render text as a template file would be: includes and imports looked up in search_path.
+
+        :param sources: contents of files not saved yet, by absolute path (used in place of the file)
+        """
+        search_path = [Path(p) for p in search_path]
+        env = _environment(search_path)
+        if sources:
+            env.loader = _SourcesLoader(search_path, sources)
+        resolver = self._get_resolver()
+        resolver.used = set()
+        try:
+            template = env.from_string(text)
+            return env.concat(template.root_render_func(self._context(template, resolver.root, extra)))
+        except TemplateError as e:
+            raise TemplateError(f"{where}: {e}") from e
+        except jinja2.TemplateError as e:
+            location = where + (f" line {e.lineno}" if getattr(e, "lineno", None) else "")
+            raise TemplateError(f"{location}: {e}") from e
+        finally:
+            resolver.used = None
 
     def _defined(self, key: str) -> str | None:
         """The key defined in a dictionary that holds key ('a.list' for 'a.list.0'), if any."""

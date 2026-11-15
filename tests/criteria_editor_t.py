@@ -235,3 +235,78 @@ def test_mxp_lint_auto(folder):
     lines = [line for line in out.stdout.splitlines() if line.strip()]
     assert lines and all(re.match(r"^(.+?):(\d+): (error|warning): (.*)$", line) for line in lines), out.stdout
     assert "compOperatr" in out.stdout and lines[0].startswith(str(scn))
+
+
+# ── Jinja includes ────────────────────────────────────────────────────────────────────────────────
+
+INC = "limits/scenario/inc/max.inc.yml"
+
+
+def split_with_include(service: CriteriaFolder, keys: bool = True) -> None:
+    """The scenario of the limits, its value_max check moved to an included file (in a sub-folder)."""
+    scn = service.root / SCN
+    text = scn.read_text()
+    head, _, rest = text.partition("value_max:")
+    check, _, tail = rest.partition("\n\n")
+    (service.root / INC).parent.mkdir()
+    (service.root / INC).write_text("# the check of the limit\nvalue_max:" + check + "\n")
+    scn.write_text(head + '{% include "inc/max.inc.yml" %}\n\n' + tail)
+    if not keys:
+        (service.root / INC).write_text((service.root / INC).read_text().replace('"{{ limits.max }}"', "5"))
+        utests = service.root / "limits/utests.yml"
+        utests.write_text(utests.read_text().replace("dictionaries: [limits.yml]\n", "")
+                          .split("  lowered_limit:")[0])
+
+
+def test_included_files_are_part_of_the_scenario(folder):
+    split_with_include(folder)
+    scn = folder.overview()["scenarios"][0]
+    assert scn["files"] == [SCN] and scn["included"] == [INC]
+    assert folder.scenario_folder(INC) == folder.root / "limits" / "scenario"
+    assert folder.lint(SCN)["problems"] == []
+    # a problem of the included file, on its own line, the file being typed
+    text = (folder.root / INC).read_text().replace("compOperator", "compOperatr")
+    problems = folder.lint(INC, text)["problems"]
+    assert [(p["file"], p["line"], p["field"]) for p in problems if p["severity"] == "warning"] == \
+        [(INC, 6, "compOperatr")]
+    # after the include, the lines of the including file are its own
+    (folder.root / SCN).write_text((folder.root / SCN).read_text().replace('param("value") * 2', "nosuch(1)"))
+    problems = folder.lint(SCN)["problems"]
+    line = (folder.root / SCN).read_text().split("\n").index("  expression: nosuch(1)") + 1
+    assert [(p["file"], p["line"]) for p in problems] == [(SCN, line)]
+
+
+def test_included_files_problems(folder):
+    from testsuit.exploit.mexploit.lint import lint
+    split_with_include(folder)
+    scn = folder.root / SCN
+    scn.write_text(scn.read_text() + '{% include "nope.yml" %}\n{% include "nope.yml" ignore missing %}\n')
+    (folder.root / "limits/scenario/inc/self.inc.yml").write_text('{% include "inc/self.inc.yml" %}\n')
+    scn.write_text(scn.read_text() + '{% include "inc/self.inc.yml" %}\n')
+    (folder.root / "limits/scenario/inc/also.mexploit.yml").write_text("")
+    scn.write_text(scn.read_text() + '{% include "inc/also.mexploit.yml" %}\n')
+    messages = [(Path(p.file).name, p.message) for p in lint(scn, (), {"limits.max": 5}, plugins=False)]
+    assert ("1_limits.mexploit.yml", f"included file 'nope.yml' not found in {scn.parent}") in messages
+    assert ("self.inc.yml", "'inc/self.inc.yml' is included in itself") in messages
+    assert any(m.startswith("'inc/also.mexploit.yml' is also a scenario file") for _, m in messages)
+    assert len(messages) == 3
+
+
+def test_unit_tests_of_a_scenario_with_includes(folder):
+    split_with_include(folder)
+    state = wait_job(folder, folder.start_utests("limits/utests.yml")["job"])
+    report = state["report"]
+    assert state["error"] is None and report["ok"], report
+    assert report["coverage"] == {"value_max": "covered"}     # the check of the included file
+
+
+def test_unit_tests_include_without_keys(folder):
+    from testsuit.exploit.mexploit.utest import load_utests, render_scenario
+    split_with_include(folder, keys=False)
+    utests = load_utests(folder.root / "limits/utests.yml")
+    target = folder.root / "rendered"
+    render_scenario(utests, utests.cases["high"], target)
+    text = (target / "1_limits.mexploit.yml").read_text()
+    assert "{%" not in text and "value_max:" in text and "expression_right: 5" in text
+    state = wait_job(folder, folder.start_utests("limits/utests.yml")["job"])
+    assert state["error"] is None and state["report"]["ok"], state["report"]

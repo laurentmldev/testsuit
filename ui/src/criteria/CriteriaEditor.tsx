@@ -39,7 +39,7 @@ const dirOf = (p: string) => p.split("/").slice(0, -1).join("/");
 
 function scenarioOf(ov: Overview | null, path: string | null): ScenarioInfo | null {
   if (!ov || !path) return null;
-  const direct = ov.scenarios.find((s) => s.files.includes(path) || s.critlibs.includes(path));
+  const direct = ov.scenarios.find((s) => s.files.includes(path) || s.critlibs.includes(path) || s.included?.includes(path));
   if (direct) return direct;
   const u = ov.utests.find((x) => x.path === path || x.cases?.some((c) => c.data_files.includes(path)));
   if (u?.scenario) return ov.scenarios.find((s) => s.path === u.scenario || s.files.includes(u.scenario!)) || null;
@@ -62,6 +62,8 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
 
   const scenarios = useMemo(() => (ov?.scenarios || []).filter((s) => !scope || s.path === scope || s.path.startsWith(scope.replace(/\/?$/, "/"))), [ov, scope]);
   const scenario = scenarioOf(ov, file);
+  // a scenario file, or a file a scenario file includes (Jinja): entries of the scenario either way
+  const isScenarioDoc = (p: string | null): p is string => !!p && (isScenarioFile(p) || !!scenario?.included?.includes(p));
   // a file to start with: the first scenario file
   useEffect(() => {
     if (ov && !file && scenarios[0]?.files[0]) onFile(scenarios[0].files[0]);
@@ -183,12 +185,12 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
     setTexts({});
     if (!scenario) return;
     let current = true;      // the answers for a scenario no longer shown are dropped
-    Promise.all(scenario.files.map((f) => adapter.read(f).then((d) => [f, d.content] as const).catch(() => [f, ""] as const)))
+    Promise.all([...scenario.files, ...(scenario.included || [])].map((f) => adapter.read(f).then((d) => [f, d.content] as const).catch(() => [f, ""] as const)))
       .then((pairs) => current && setTexts(Object.fromEntries(pairs)));
     return () => { current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapter, scenarioPath, scenario?.files.join(",")]);
-  const allTexts = useMemo(() => (file && isScenarioFile(file) && doc ? { ...texts, [file]: text } : texts), [texts, file, doc, text]);
+  }, [adapter, scenarioPath, scenario?.files.join(","), scenario?.included?.join(",")]);
+  const allTexts = useMemo(() => (isScenarioDoc(file) && doc ? { ...texts, [file]: text } : texts), [texts, file, doc, text, scenario]);
   const allEntries = useMemo(() => Object.entries(allTexts).sort(([a], [b]) => a.localeCompare(b))
     .flatMap(([f, t]) => entries(t).map((e) => ({ ...e, file: f }))), [allTexts]);
   const locate = useCallback((check: string) => {
@@ -203,29 +205,29 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
   const [linting, setLinting] = useState(false);
   useEffect(() => {
     if (!scenario) { setProblems([]); return; }
-    const target = file && isScenarioFile(file) ? file : scenario.files[0];
+    const target = isScenarioDoc(file) ? file : scenario.files[0];
     if (!target) return;
     let current = true;
     const t = window.setTimeout(() => {
       setLinting(true);
-      adapter.lint(target, file && isScenarioFile(file) && doc ? text : undefined)
+      adapter.lint(target, isScenarioDoc(file) && doc ? text : undefined)
         .then((r) => { if (current) { setProblems(r.problems); setNotes(r.notes); } })
         .catch((e) => { if (current) { setProblems([{ file: target, line: null, severity: "error", message: e.message }]); setNotes([]); } })
         .finally(() => setLinting(false));
     }, 700);
     return () => { current = false; window.clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapter, scenarioPath, file, text, desc]);
+  }, [adapter, scenarioPath, file, text, desc, scenario?.included?.join(",")]);
   const markers: Marker[] = useMemo(() => problems.filter((p) => p.file === file).map((p) => ({ line: p.line || 1, message: p.message, severity: p.severity })), [problems, file]);
 
   // ── editor context: completion of expressions and parameter names ──
   const uri = file ? `file:///criteria/${encodeURIComponent(adapter.label)}/${file}` : "";
   useEffect(() => {
-    if (!uri || !file || !isScenarioFile(file)) return;
+    if (!uri || !isScenarioDoc(file)) return;
     setCriteriaContext(uri, { describe: desc, params });
     return () => setCriteriaContext(uri, null);
   }, [uri, file, desc, params]);
-  const schema = file && isScenarioFile(file) ? desc?.scenario_schema ?? null : file && isUtestsFile(file) ? UTESTS_SCHEMA : null;
+  const schema = isScenarioDoc(file) ? desc?.scenario_schema ?? null : file && isUtestsFile(file) ? UTESTS_SCHEMA : null;
 
   const open = useCallback((path: string, line?: number) => {
     if (path !== file) onFile(path);
@@ -233,9 +235,9 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
   }, [file, onFile]);
 
   // ── adding ────────────────────────────────────────────────────────
-  const fileEntries = useMemo(() => (file && isScenarioFile(file) ? entries(text) : []), [file, text]);
+  const fileEntries = useMemo(() => (isScenarioDoc(file) ? entries(text) : []), [file, text, scenario]);
   const addCheck = (type: string, crit: CriterionInfo) => {
-    if (!file || !isScenarioFile(file)) return;
+    if (!isScenarioDoc(file)) return;
     const name = freeEntryName(allEntries, templateEntryName(crit.template, type));
     const block = templateNamed(crit.template, type, name);
     const current = entryAt(fileEntries, cursor);
@@ -264,7 +266,7 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
   const shownUtests: UtestsInfo | null = scenarioUtests.find((u) => u.path === utestsPick) || (file && scenarioUtests.find((u) => u.path === file)) || scenarioUtests[0] || null;
   const [utestsOpen, setUtestsOpen] = useState(true);
 
-  const entry = file && isScenarioFile(file) ? entryAt(fileEntries, cursor) : null;
+  const entry = isScenarioDoc(file) ? entryAt(fileEntries, cursor) : null;
   const tableView = !!file && isTable(file) && view === "data";
 
   return (
@@ -291,8 +293,8 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
 
         <section className="crit-center">
           {file ? (
-            <div className={classes("doc-head", isScenarioFile(file) || isUtestsFile(file) ? "kind-criteria" : "kind-other")}>
-              <span className="kind-chip">{isScenarioFile(file) ? "Scenario" : isUtestsFile(file) ? "Unit tests" : isTable(file) ? "Data" : /\.py$/.test(file) ? "Library of criteria" : "File"}</span>
+            <div className={classes("doc-head", isScenarioDoc(file) || isUtestsFile(file) ? "kind-criteria" : "kind-other")}>
+              <span className="kind-chip">{isScenarioFile(file) ? "Scenario" : isScenarioDoc(file) ? "Included" : isUtestsFile(file) ? "Unit tests" : isTable(file) ? "Data" : /\.py$/.test(file) ? "Library of criteria" : "File"}</span>
               <span className="doc-path" title={file}>{dirOf(file) && <span className="doc-dir">{dirOf(file)}/</span>}<span className="doc-base">{base(file)}</span></span>
               {isTable(file) && <div className="segmented">
                 <button className={view === "data" ? "selected" : ""} onClick={() => setView("data")}>Table and plot</button>
@@ -313,7 +315,7 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
           <div className="crit-doc">
             {doc && file && (tableView ? <DataView text={text} /> : (
               <CodeEditor uri={uri} value={text} onChange={setText} schema={schema} keys={keys} markers={markers}
-                onSave={() => save()} reveal={reveal} onCursor={setCursor} sections={isScenarioFile(file)} />
+                onSave={() => save()} reveal={reveal} onCursor={setCursor} sections={isScenarioDoc(file)} />
             ))}
             {!doc && file && !loadError && <Spinner text="Loading…" />}
           </div>
@@ -337,7 +339,7 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
 
         <aside className="session-side crit-side">
           <EntryHelp entry={entry} desc={desc} open={open} />
-          <Palette desc={desc} error={descError} canAdd={!!file && isScenarioFile(file) && !!doc} onAdd={addCheck} onRefresh={refreshDescribe} />
+          <Palette desc={desc} error={descError} canAdd={isScenarioDoc(file) && !!doc} onAdd={addCheck} onRefresh={refreshDescribe} />
           <h4>Problems {scenario && <span className="muted small">of {scenario.name}</span>}</h4>
           {notes.map((n, i) => <div key={i} className="banner info small">{n}</div>)}
           {scenario ? (problems.length ? (
@@ -405,6 +407,8 @@ function ScenarioTree({ s, utests, current, problems, open, onNewFile, onNewUtes
       <div className="tree-sub muted small">{s.testdef ? `test ${s.testdef.split("/").slice(-2, -1)[0] || s.testdef}` : s.path}</div>
       {s.files.map((f) => row(f, base(f), count(f)))}
       {s.critlibs.map((f) => row(f, base(f), <span className="badge">library</span>))}
+      {(s.included || []).map((f) => row(f, f.startsWith(`${s.path}/`) ? f.slice(s.path.length + 1) : base(f),
+        <>{count(f)}<span className="badge" title="Included by a scenario file ({% include %}): its entries run where it is included">included</span></>))}
       <button className="link small tree-more" onClick={onNewFile}>+ scenario file</button>
       {utests.map((u) => (
         <div key={u.path}>
