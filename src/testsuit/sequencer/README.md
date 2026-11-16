@@ -761,7 +761,7 @@ components:
 
 ### 7.7 Commands run by hand, in maintenance
 
-A component in maintenance (or in a stage in maintenance) can have its commands run by hand, to check or fix it. Use the **Commands…** button on the Lab page, or `GET /components/<id>/commands` and `POST /components/<id>/commands/<command>`. It is refused while a run holds the component.
+A component in maintenance (or in a stage in maintenance) can have its commands run by hand, to check or fix it. Use the **Commands…** button on the Lab page, or `GET /components/<id>/commands` and `POST /components/<id>/commands/<command>`. It is refused while a run holds the component. The keys set by hand in that dialog are remembered in the browser for each component: it opens again with the last ones.
 
 - **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, `slot`, `slots`), so a command that needs one does not render unless the key is set by hand. A command with `via` runs through that component.
 - **Keys set by hand.** The dialog's **Keys set by hand** gives values for the commands run from it (`{"keys": {"params.speed": 3}}` in the body of the `POST`; `POST /components/<id>/commands` with the same body shows the commands as they would run, without running any). A key can be one the lab does not define (the dialog proposes the undefined keys its commands read), or one it defines, which is then overridden for these commands only: the lab files are not changed. A value is read as YAML (`3` is a number). Each row says which of the two it is, with the value it replaces.

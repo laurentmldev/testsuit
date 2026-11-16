@@ -60,6 +60,31 @@ const COMMANDS_SLOW = 4000;          // ms: past this, "Reading its commands…"
 const COMMANDS_GIVE_UP = 30000;      // ms: past this, it gives up, with a Retry button
 
 /** The commands of a component in maintenance, each run by hand, with what it did (README section 7.6). */
+const HAND_KEYS = "tsq.manualKeys";
+
+/** The keys last set by hand for the commands of a component, in this browser. */
+function rememberedKeys(component: string): HandKey[] {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(HAND_KEYS) || "{}");
+    const rows = all?.[component];
+    return Array.isArray(rows) ? rows.filter((r: any) => r && typeof r.key === "string").map((r: any) => ({ key: r.key, value: String(r.value ?? "") })) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberKeys(component: string, rows: HandKey[]): void {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(HAND_KEYS) || "{}") || {};
+    const kept = rows.filter((r) => r.key.trim() || r.value);
+    if (kept.length) all[component] = kept;
+    else delete all[component];
+    window.localStorage.setItem(HAND_KEYS, JSON.stringify(all));
+  } catch {
+    // no storage (private window...): nothing remembered
+  }
+}
+
 function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const labelOf = useLabels();
   const [info, setInfo] = useState<any>(null);
@@ -74,7 +99,12 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
       setStreams((all) => (data.token in all ? { ...all, [data.token]: all[data.token] + data.text } : all));
   });
   // keys set by hand for the commands run from this dialog: the commands are shown as they will run with them
-  const [rows, setRows] = useState<HandKey[]>([]);
+  // remembered in this browser for each component: the dialog opens with the keys last set for it
+  const [rows, setRowsState] = useState<HandKey[]>(() => rememberedKeys(id));
+  const setRows = (next: HandKey[]) => {
+    setRowsState(next);
+    rememberKeys(id, next);
+  };
   const [keysError, setKeysError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);                  // Retry: read them again
   const [slow, setSlow] = useState(false);                  // still no answer after a few seconds
@@ -122,7 +152,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const blocked = info && (!info.maintenance ? "not in maintenance" : info.held_by?.length ? `held by ${info.held_by.join(", ")}` : null);
   return (
     <Dialog title={`Commands of ${labelOf(id)}`} onClose={onClose} wide>
-      <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params), and with the keys set by hand below. A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
+      <p className="muted small">In maintenance, its commands run by hand with the keys of the lab (no datapack: no params), and with the keys set by hand below (remembered in this browser for this component). A detached command keeps running; its signal commands, or kill, stop what was started by hand.</p>
       {!info ? (keysError
         ? <div className="error-box">Cannot read its commands: {keysError}. <button className="small" onClick={retry}>Retry</button></div>
         : <p className="muted">Reading its commands…{slow && <> still waiting for the sequencer (is it busy, or restarting?)</>}</p>) : (
