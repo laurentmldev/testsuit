@@ -183,7 +183,7 @@ tr.finally-row td { color: var(--muted); }
   box-shadow: 0 0 0 14px color-mix(in srgb, var(--run) 45%, transparent); animation: step-running 1s ease-in-out infinite; }
 @keyframes step-running { 50% { background: var(--panel); border-color: var(--border); border-left-color: var(--run); box-shadow: 0 0 0 14px transparent; } }
 @media (prefers-reduced-motion: reduce) { .step-node.pulsing { animation-duration: 2.4s; } }
-.step-node.bad { border-left-color: var(--bad); }
+.step-node.bad { border-left-color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); background: var(--bad-soft); }
 .step-node.wait { border-left-color: var(--wait); }
 .step-node.finally { border-style: dashed; border-left-style: solid; }
 .step-node.uses { border-left-color: var(--wait); }
