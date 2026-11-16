@@ -65,7 +65,7 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
 }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [where, setWhere] = useState<"run" | "generation">("run");
+  const [where, setWhere] = useState<"run" | "generation">("generation");
   const [filter, setFilter] = useState("");
   useEffect(() => {
     post(`edit/sessions/${sid}/slot_keys`, { testdef, slot, setup_config: config }).then(setData).catch((e) => setError(e.message));
@@ -80,17 +80,17 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
         <div className="keys-explorer">
           <div className="row">
             <div className="segmented">
-              <button className={classes(where === "run" && "selected")} onClick={() => setWhere("run")}
-                title="The keys of the commands its steps run: those of the datapack, of the run and of the lab component it would be bound to">In its commands</button>
               <button className={classes(where === "generation" && "selected")} onClick={() => setWhere("generation")}
-                title="The keys of its template files, rendered when the datapack is generated">In its template files</button>
+                title="The keys of the configuration: its template files see them all, its commands the dictionary and built-in ones">Config and runtime</button>
+              <button className={classes(where === "run" && "selected")} onClick={() => setWhere("run")}
+                title="The keys only the commands of its steps have: of the run and of the lab component it would be bound to">Runtime-only</button>
             </div>
             <input type="search" placeholder="Filter names and values" value={filter} onChange={(e) => setFilter(e.target.value.toLowerCase())} autoFocus />
           </div>
           {where === "run" && (data.component
-            ? <p className="small muted">Bound now to lab component <strong>{data.component}</strong>{data.stage && <> of stage <strong>{data.stage}</strong></>} (it may be another one when it runs). Values in &lt;…&gt; are known when it runs.</p>
+            ? <p className="small muted">Only in the commands of its steps (and their <code>env</code>, <code>wait_for</code>…), rendered when the run executes them: the slot is then bound to a lab component, now <strong>{data.component}</strong>{data.stage && <> of stage <strong>{data.stage}</strong></>} (it may be another one when it runs). Values in &lt;…&gt; are known then. <code>slot</code> here is its run-time form; a template file cannot use these keys. For example, the address of the host the slot runs on is <code>{"{{ component.host }}"}</code>: it depends on the lab component the run is given, so a command can read it, a template cannot.</p>
             : <p className="banner warn">{data.why_not}</p>)}
-          {where === "generation" && <p className="small muted">Values in &lt;…&gt; are known when the datapack is generated.</p>}
+          {where === "generation" && <p className="small muted">The dictionary and built-in keys, the same in its template files (rendered when the datapack is generated) and in its commands (frozen in the datapack). Only templates have <code>slot</code> in this form (<code>slot.configuration</code>, <code>slot.input_dir</code>), <code>slots.&lt;id&gt;</code> of the slots it needs and <code>read_input()</code>; commands have the runtime-only ones instead. Values in &lt;…&gt; are known at generation. For example, a host IP address written in a dictionary (<code>{"{{ net.telemetry }}"}</code>) is fixed by the configuration: templates and commands both read it.</p>}
           {data.error && <p className="banner warn small">Some keys cannot be resolved, shown as written: {data.error}</p>}
           {keys && <Tree keys={keys} filter={filter} />}
           {functions.length > 0 && <p className="small">Functions: {functions.map((f) => <code key={f}>{f} </code>)}</p>}

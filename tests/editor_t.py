@@ -292,7 +292,7 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     explored = editor.slot_keys(session, "testdef/count/testdef.yml", "dut")
     assert explored["generation"]["min_count"] == 3 and explored["generation"]["slot"]["id"] == "dut"
     assert explored["component"] and explored["run"]["component"]["id"] == explored["component"]
-    assert explored["run"]["slot"]["component"] == explored["component"] and explored["run"]["min_count"] == 3
+    assert explored["run"]["slot"]["component"] == explored["component"] and "min_count" not in explored["run"]
     assert "lab" in explored["run"] and "succeeded('<step>')" in explored["run_functions"]
     with pytest.raises(SequencerError, match="no slot 'nowhere'"):
         editor.slot_keys(session, "testdef/count/testdef.yml", "nowhere")

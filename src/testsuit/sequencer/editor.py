@@ -1349,8 +1349,10 @@ class Editor:
 
     def slot_keys(self, session: EditSession, testdef_rel: str, slot: str, setup_config: str | None = None) -> dict:
         """Every key a slot of a test definition can use, as trees to browse (the keys explorer of the Datapacks
-        page): in its template files, rendered at generation, and in the commands its steps run, on the lab
-        component the slot would be bound to now (``component``, ``stage``, ``lab``...). Computed on demand."""
+        page): ``generation``, those of its template files, rendered at generation (the dictionary and built-in
+        keys there are also those of its commands, frozen in the datapack), and ``run``, the keys only the
+        commands its steps run have, on the lab component the slot would be bound to now (``component``,
+        ``stage``, ``lab``, ``run``...). Computed on demand."""
         from testsuit.datatools.datapack.templating import TemplateError
         from testsuit.sequencer.scheduler import Availability, find_binding
         try:
@@ -1387,7 +1389,7 @@ class Editor:
             return result
         concrete = lab.inventory.components[binding.slots[slot]]
         stage = lab.inventory.stages.get(binding.stage_slots.get(needs.slots[slot].stage_slot, ""))
-        run_keys = _step_keys(lab, needs, binding, context, "<phase>", {}, (concrete, needs.slots[slot], stage), {})
+        run_keys = _step_keys(lab, needs, binding, {}, "<phase>", {}, (concrete, needs.slots[slot], stage), {})
         result.update(component=concrete.id, stage=stage.id if stage else None, run=_key_tree(run_keys),
                       run_functions=["succeeded('<step>')", "failed('<step>')", "errored('<step>')", "skipped('<step>')",
                                      "verdict('<step>')"])
