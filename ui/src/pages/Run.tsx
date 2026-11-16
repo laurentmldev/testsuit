@@ -218,8 +218,7 @@ export function LogTail({ runId, step, live }: { runId: string; step: string; li
   return (
     <div className="log-tail">
       <div className="file-view-head">
-        <code>{step}</code>
-        <span className="spacer" />
+        <code className="log-step" title={step}>{step}</code>
         <label className="toggle"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
         <a className="button small" href={url(`runs/${runId}/logs/${encodeURIComponent(step)}`)} target="_blank" rel="noreferrer">raw</a>
       </div>
@@ -286,7 +285,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         {tabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => setQuery("tab", key)}>{label}</button>)}
       </div>
       {tab === "pipeline" && (
-        <div className="split">
+        <div className="split run-split">
           <div className="split-main">
             {pipeline.data ? <RunGraph pipeline={pipeline.data} records={records} selected={selected} onSelect={(k) => pick(k)}
               focus={!pinned && running ? `${running.phase}:${running.id}` : null} />
@@ -305,7 +304,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         </div>
       )}
       {tab === "steps" && (
-        <div className="split">
+        <div className="split run-split">
           <div className="split-main scroll">
             <table className="grid compact">
               <thead><tr><th>Step</th><th>State</th><th>Started</th><th>Duration</th><th>Exit</th><th>Tries</th><th>Reason</th></tr></thead>

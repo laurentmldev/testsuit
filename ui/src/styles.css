@@ -203,7 +203,14 @@ tr.finally-row td { color: var(--muted); }
 .file-view-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .file-image { max-width: 100%; }
 .log { background: var(--code); padding: 8px 10px; border-radius: 6px; max-height: 60vh; overflow: auto; font-size: 12px; }
-.log-tail .log { min-height: 200px; }
+.log-tail .log { min-height: 200px; max-height: none; height: calc(75vh - 150px); font-size: 11px; line-height: 1.35; }
+.log-tail .file-view-head { position: sticky; left: 0; flex-wrap: nowrap; }
+.log-tail .log-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-tail .file-view-head .toggle, .log-tail .file-view-head .button { flex: none; }
+/* the run's pipeline and steps: the log side wider, up to half the page */
+.split.run-split { grid-template-columns: minmax(0, 1fr) minmax(420px, 46%); }
+.run-split .split-side { overflow-x: hidden; max-height: 82vh; }
+@media (max-width: 1000px) { .split.run-split { grid-template-columns: 1fr; } }
 .code-editor { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; min-height: 200px; }
 .csv { overflow: auto; max-height: 60vh; }
 
@@ -703,6 +710,9 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .console-prompt { opacity: 0.7; user-select: none; }
 .console-out { white-space: pre-wrap; }
 .console-note { color: var(--muted); }
+.console-out.tone-bad, .console-note.tone-bad { color: var(--bad); }
+.console-out.tone-warn, .console-note.tone-warn { color: var(--warn); }
+.console-out.tone-ok, .console-note.tone-ok { color: var(--ok); }
 .console-comment { color: var(--ok); font-style: italic; margin-top: 2px; }
 
 /* a button opening a short list of actions */
