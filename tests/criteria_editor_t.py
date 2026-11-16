@@ -13,7 +13,7 @@
 
 
 """The criteria editor's services (testsuit.exploit.editor): on a folder, through Python and through the
-REST routes of ``mxp edit``."""
+REST routes of ``mxp webui``."""
 import shutil
 import socket
 import threading
@@ -146,7 +146,7 @@ def test_unit_tests_stopped(folder):
 
 
 def test_mxp_edit_routes(folder):
-    """The routes and the UI of `mxp edit`, through HTTP."""
+    """The routes and the UI of `mxp webui`, through HTTP."""
     import uvicorn
 
     from testsuit.exploit.editor.standalone import create_app

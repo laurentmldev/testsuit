@@ -331,6 +331,26 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     # the criteria editor (testsuit.exploit.editor), on the session's folder
     app.include_router(criteria_routes(session_criteria), prefix="/edit/sessions/{sid}/criteria")
 
+    # the exploit_runner page: scenarios of the workspaces, data collected by the runs (storage.runs)
+    from testsuit.exploit.editor.routes import exploit_routes
+    from testsuit.exploit.editor.runs import ExploitRuns, Root
+    def workspace_roots() -> list[Root]:
+        # named as on the Datapacks tab: workspace<i> (server.workspaces), the id of those added from the UI
+        named = [*((f"workspace{i}", f) for i, f in enumerate(seq.config.workspaces)),
+                 *((e["id"], editor._added_folder(e)) for e in editor._added())]
+        return [Root(f"{wid}: {folder.name}", Path(folder).resolve(), "tests") for wid, folder in named]
+
+    exploit = ExploitRuns([*workspace_roots(), Root("Runs", seq.config.storage_path("runs"), "data")],
+                          seq.config.root / "exploit")
+    app.state.exploit = exploit
+
+    def exploit_runs():
+        # workspaces added or removed from the UI meanwhile
+        exploit.roots = [*workspace_roots(), *(r for r in exploit.roots if r.kind != "tests")]
+        return exploit
+
+    app.include_router(exploit_routes(exploit_runs), prefix="/exploit")
+
     @app.get("/edit/schemas")
     async def lab_schemas():
         lab = {"lab": Editor.describe_lab(seq.lab)}

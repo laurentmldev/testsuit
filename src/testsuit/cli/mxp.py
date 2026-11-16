@@ -56,7 +56,7 @@ def main():
     
     Another note: this tool is called by exploit_runner.py to execute M-Exploit analysis as a separate process.
 
-    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', the editor 'mxp edit', and 'mxp vscode' (each with -h).
+    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', the editor 'mxp webui', and 'mxp vscode' (each with -h).
 
     
     Return 1 if something went wrong, 0 otherwise

@@ -72,13 +72,18 @@ export function DatapacksPage({ route }: { route: Route }) {
       <div className="page-head">
         <h2>Datapacks</h2>
         <button className="small" onClick={() => setAdding(true)} title="Clone another tests repository from its git URL, next to those of server.workspaces">Add repository…</button>
-        {current && <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
-                       title="Download the workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>}
-        {current?.added && <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>}
         <span className="spacer" />
         <button disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open the test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">Edit datapack definitions</button>
       </div>
       {repos.length > 0 && <WorkspacePicker repositories={repos} value={repo} onChange={(id) => navigate("datapacks", { repo: id })} />}
+      {current && (
+        <div className="workspace-actions" title={`What these act on: the workspace '${current.id}' only`}>
+          <span className="muted small">Workspace <strong>{current.id}</strong>:</span>
+          <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
+             title="Download this workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>
+          {current.added && <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>}
+        </div>
+      )}
       <Markdown text={INTRO} className="intro" />
       {repo && sid && ctx && <RepositoryBanners key={repo} repo={repo} onReread={reread} />}
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}
@@ -171,8 +176,6 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
             </select>
           </label>
         )}
-        <button onClick={() => navigate(`criteria/${sid}`, { scope: testdef.split("/").slice(0, -1).join("/") || undefined })}
-          title="The criteria checked on the results of this test, with completion, checks as you type and their unit tests">Edit criteria</button>
         <button className="primary" disabled={!data} onClick={() => setGenerate(true)}>Generate…</button>
       </div>
       {error && <pre className="error-box">{error}</pre>}

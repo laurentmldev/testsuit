@@ -24,6 +24,7 @@ import { LabPage } from "./pages/Lab";
 import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
 import { DatapacksPage } from "./pages/Datapacks";
+import { ExploitPage } from "./exploit/ExploitPage";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
 import { SessionCriteriaPage, StandaloneCriteriaApp } from "./criteria/CriteriaPage";
@@ -78,13 +79,14 @@ function App() {
     if (!editing) document.title = title;
   }, [title, editing]);
   const nav = [
-    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ["config", "Configuration"],
+    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"], ["exploit", "Run exploit"]] : []), ["lab", "Lab"], ["config", "Configuration"],
   ];
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
   else if (page === "runs") content = <RunsPage />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
+  else if (page === "exploit") content = <ExploitPage />;
   else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
   else if (page === "criteria" && route.parts[1]) content = <SessionCriteriaPage sid={route.parts[1]} route={route} />;
@@ -120,7 +122,7 @@ function App() {
   );
 }
 
-// `mxp edit` serves this UI in its criteria mode: only the criteria editor (tsqd has no /mode)
+// `mxp webui` serves this UI in its criteria mode: only the criteria editor (tsqd has no /mode)
 function Root() {
   const [mode, setMode] = useState<any>(undefined);
   useEffect(() => {

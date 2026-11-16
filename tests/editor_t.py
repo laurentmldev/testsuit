@@ -787,6 +787,9 @@ def test_api(repos, tmp_path):
         assert added.status_code == 201 and added.json()["id"] == "more", added.text
         assert requests.get(f"{url}/edit/repositories/more/status").json()["changes"] == []
         assert requests.post(f"{url}/edit/repositories/more/pull", json={}).json()["ok"]
+        roots = [r["label"] for r in requests.get(f"{url}/exploit").json()["roots"]]
+        assert roots == ["workspace0: datapack", "more: datapack", "Runs"], roots         # the Run exploit tab, on every workspace
+        assert requests.get(f"{url}/exploit/browse", params={"path": "/"}).status_code == 400
         refused = requests.post(f"{url}/edit/repositories", json={"url": "https://a:b@example.com/x.git"})
         assert refused.status_code >= 400 and "b@" not in refused.text
         (repos.config.root / "workspaces/more/datapack/setup/extra.yml").write_text("extra: 1\n")
