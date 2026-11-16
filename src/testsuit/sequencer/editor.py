@@ -131,6 +131,11 @@ def _step_keys(lab: Lab, needs, binding, context: dict, phase: str, params: dict
     return keys
 
 
+# the keys a run gives its commands over those of the datapack (engine.RunContext.keys): one set by hand is hidden
+RUN_KEY_NAMES = {"run", "phase", "slots", "stage_slots", "params", "succeeded", "failed", "errored", "skipped", "verdict",
+                 "lab", "stage", "slot", "component", "remote_root", "via"}
+
+
 def _key_tree(keys: dict) -> dict:
     """Keys as plain data to browse (functions left out: they are listed apart)."""
     def plain(value: Any) -> Any:
@@ -1337,15 +1342,25 @@ class Editor:
         except Exception:
             return []
 
-    def run_problems(self, session: EditSession, testdef_rel: str, setup_config: str | None = None) -> list[str]:
-        """The pipeline and lab checks of the synthesis, on their own (the checks before generating, step by step)."""
+    def run_problems(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
+                     by_hand: dict | None = None) -> list[str]:
+        """The pipeline and lab checks of the synthesis, on their own (the checks before generating, step by step).
+        ``by_hand``: the keys set by hand for the generation (dotted name -> value), defined for the commands too."""
+        return self.run_checks(session, testdef_rel, setup_config, by_hand)["problems"]
+
+    def run_checks(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
+                   by_hand: dict | None = None) -> dict:
+        """``problems``: those of ``run_problems``; ``missing_keys``: the keys the commands of the steps read that
+        nothing defines and that can be set by hand for the generation (not those of the run, ``component.*``...)."""
         try:
             _, testdef, _ = self._builder(session, testdef_rel, setup_config)
         except SequencerError:
             raise
         except Exception as e:
             raise SequencerError(str(e)) from e
-        return self._run_problems(session, testdef_rel, testdef.setup_config)
+        missing: list[str] = []
+        problems = self._run_problems(session, testdef_rel, testdef.setup_config, by_hand, missing)
+        return {"problems": problems, "missing_keys": missing}
 
     def slot_keys(self, session: EditSession, testdef_rel: str, slot: str, setup_config: str | None = None) -> dict:
         """Every key a slot of a test definition can use, as trees to browse (the keys explorer of the Datapacks
@@ -1395,7 +1410,8 @@ class Editor:
                                      "verdict('<step>')"])
         return result
 
-    def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
+    def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str, by_hand: dict | None = None,
+                      missing: list[str] | None = None) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
         setup configuration (phases, stage slots and slots, step targets), and what the lab cannot provide."""
         from testsuit.sequencer.intake import check_against_lab
@@ -1410,7 +1426,17 @@ class Editor:
             return [f"pipeline: {_describe(e)}"]
         lab, _ = self.lab_for(session)
         problems = [f"lab: {p}" for p in check_against_lab(SimpleNamespace(needs=needs), lab)]
-        flat = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, testdef_rel, setup_config))
+        context = self._datapack_keys(session, testdef_rel, setup_config)
+        if context is not None and by_hand:
+            from testsuit.datatools.datapack.templating import expand_dotted_keys
+            from testsuit.sequencer.util import deep_merge
+            try:
+                context = deep_merge(context, expand_dotted_keys({str(k): v for k, v in by_hand.items() if str(k).strip()}))
+            except Exception:                       # a name that is not one: the generation says so
+                pass
+        flat = self._flatten(lab, needs, pipeline, flats, context)
+        if missing is not None:
+            missing += flat["missing_keys"]
         return problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
 
     def _datapack_keys(self, session: EditSession, testdef_rel: str, setup_config: str | None) -> dict | None:
@@ -1546,6 +1572,7 @@ class Editor:
         from testsuit.sequencer.scheduler import Availability, find_binding
         problems: list[str] = []
         key_problems: list[str] = []
+        missing_keys: list[str] = []                  # those that can be set by hand: not the keys of the run
         binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
         if binding is None:
             problems += [f"cannot bind: {r}" for r in reasons]
@@ -1597,6 +1624,8 @@ class Editor:
                                 what = (f"command '{step.do}' of slot '{target}' ({entry['concrete']})" if step.action == "do"
                                         else f"its '{step.action}'" + (f" on slot '{target}'" if target else ""))
                                 for name in _missing_keys({"spec": spec, "env": step.env, "timeout": step.timeout}, keys):
+                                    if name.split(".")[0] not in RUN_KEY_NAMES and name not in missing_keys:
+                                        missing_keys.append(name)
                                     message = (f"phase '{flat.phase.id}', step '{fs.id}': {what} reads '{name}', which no "
                                                f"dictionary nor run-time key defines")
                                     if message not in key_problems:
@@ -1608,7 +1637,7 @@ class Editor:
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
-                "key_problems": key_problems}
+                "key_problems": key_problems, "missing_keys": missing_keys}
 
     def flatten(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
         """The pipeline as the sequencer runs it: sub-pipelines expanded, every command resolved against the lab."""

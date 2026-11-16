@@ -285,6 +285,13 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
                     "dictionary nor run-time key defines",
                     "keys: phase 'run', step 'phase_wide': its 'run' reads 'slot.id', which no "
                     "dictionary nor run-time key defines"], keys
+    # those that can be set by hand for the generation are proposed (not those of the run: slot.*...), and a key
+    # set by hand is defined for the commands
+    checks = editor.run_checks(session, "testdef/count/testdef.yml")
+    assert checks["missing_keys"] == ["nowhere.speed"]
+    checks = editor.run_checks(session, "testdef/count/testdef.yml", by_hand={"nowhere.speed": "3"})
+    assert checks["missing_keys"] == [] and not any("nowhere.speed" in p for p in checks["problems"])
+    assert any("slot.nothing" in p for p in checks["problems"])
     testdef["pipeline"]["phases"][0]["steps"] = testdef["pipeline"]["phases"][0]["steps"][:1]
     editor.write(session, "testdef/count/testdef.yml", data=testdef)
 

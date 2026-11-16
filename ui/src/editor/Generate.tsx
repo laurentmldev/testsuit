@@ -79,6 +79,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [failed, setFailed] = useState("");            // the error of the last failed generation: its undefined keys are proposed
+  const [commandKeys, setCommandKeys] = useState<string[]>([]);   // the undefined keys the commands of the steps read: proposed too
   const [priority, setPriority] = useState("");
   const [posted, setPosted] = useState<any>(null);
 
@@ -127,7 +128,10 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
         });
       if (read)
         await step("Pipeline and lab: phases, stage slots, slots, step targets",
-          () => post(`edit/sessions/${sid}/run_problems`, body), () => "against the lab as it is now");
+          () => post(`edit/sessions/${sid}/run_problems`, { ...body, keys: manual }).then((r) => {
+            setCommandKeys(r.missing_keys || []);
+            return r;
+          }), (r) => "against the lab as it is now" + ((r.missing_keys || []).length ? ` · keys to set: ${r.missing_keys.join(", ")}` : ""));
       if (!live.current) return;
       if (found.length) {
         setProblems(found);
@@ -230,6 +234,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
         <div className="banner warn list">
           <p><strong>This configuration has {problems.length === 1 ? "a problem" : `${problems.length} problems`}</strong>: generate anyway, and the inputs concerned are left out with a warning (the datapack is an incomplete draft); or go back and fix {problems.length === 1 ? "it" : "them"} first.</p>
           <ul className="problems">{problems.map((p, i) => <li key={i}><code>{p}</code></li>)}</ul>
+          {commandKeys.length > 0 && <p className="small">Undefined keys read by the commands of the steps: {commandKeys.map((k) => <code key={k}>{k} </code>)}: go back to set {commandKeys.length === 1 ? "it" : "them"} by hand (proposed under <strong>Keys set by hand</strong>), or define {commandKeys.length === 1 ? "it" : "them"} in a dictionary.</p>}
         </div>
       )}
       {!result && !busy && !problems && (
@@ -251,7 +256,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
           </Field>
           <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text. The keys set here are remembered in this browser for each test definition (one with none remembered starts from those last set for another): check them before generating.">
             {recalled.from && rows.length > 0 && <div className="muted small">None remembered for this test definition: these are the keys last set for <code>{recalled.from}</code>.</div>}
-            <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={undefinedIn(failed)}
+            <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={[...new Set([...undefinedIn(failed), ...commandKeys])]}
               known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
               setNote="the datapack stays conform." overrideNote="the datapack will be non-conform." />
             {overridden.length > 0 && <div className="banner warn">Overriding {overridden.length === 1 ? "a defined key" : `${overridden.length} defined keys`} makes this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</div>}
