@@ -341,19 +341,45 @@ function commentOf(ran: string): string | null {
   return arg.startsWith("#") ? arg : null;
 }
 
+/** The words that color a line of output: red for an error, orange for a warning, green for a success. */
+const LINE_BAD = /\bexit status [1-9]|\b(error|errors|err|fail|fails|failed|failure|fatal|exception|traceback|critical|panic|denied|refused)\b/i;
+const LINE_WARN = /\b(warn|warning|warnings|deprecated|deprecation)\b/i;
+const LINE_OK = /\b(ok|success|succeeded|successful|successfully|done|passed|ready)\b/i;
+/** A line where a Python traceback goes on: its frames ("  File ..."), their code, and "During handling..." lines. */
+const TRACEBACK_GOES_ON = /^(\s+\S|\s*$|During handling|The above exception)/;
+
+/** The tone of a line of output, from its words: "bad", "warn", "ok" or "". */
+export function lineTone(line: string): string {
+  return LINE_BAD.test(line) ? "bad" : LINE_WARN.test(line) ? "warn" : LINE_OK.test(line) ? "ok" : "";
+}
+
 /** The output of a command as a console: each line it ran, shown as a prompt, then what that line printed; its
- *  comments where they are. */
+ *  comments where they are. The lines it printed are colored by their words (error, warning, success), and a
+ *  Python traceback in red as a whole, down to its exception line. */
 export function ConsoleText({ text }: { text: string }) {
   const lines = text.split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  let traceback = false;
   return (
     <>
-      {lines.map((line, i) => TRACED.test(line)
-        ? (commentOf(line.replace(TRACED, "")) !== null
-          ? <div key={i} className="console-comment">{commentOf(line.replace(TRACED, ""))}</div>
-          : <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{line.replace(TRACED, "")}</div>)
-        : NOTE.test(line) ? <div key={i} className="console-note">{line}</div>
-          : <div key={i} className="console-out">{line || " "}</div>)}
+      {lines.map((line, i) => {
+        if (TRACED.test(line)) {
+          traceback = false;
+          const ran = line.replace(TRACED, "");
+          return commentOf(ran) !== null
+            ? <div key={i} className="console-comment">{commentOf(ran)}</div>
+            : <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{ran}</div>;
+        }
+        let tone = lineTone(line);
+        if (/^Traceback \(most recent call last\)/.test(line)) traceback = true;
+        else if (traceback) {
+          tone = "bad";
+          if (!TRACEBACK_GOES_ON.test(line)) traceback = false;      // the exception line ends it
+        }
+        return NOTE.test(line)
+          ? <div key={i} className={classes("console-note", tone && `tone-${tone}`)}>{line}</div>
+          : <div key={i} className={classes("console-out", tone && `tone-${tone}`)}>{line || " "}</div>;
+      })}
     </>
   );
 }
