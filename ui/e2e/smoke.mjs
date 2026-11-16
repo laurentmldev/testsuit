@@ -13,7 +13,7 @@
 
 // Smoke test of the built UI against a running tsqd: every page and every editor view renders without a
 // JavaScript error. TSQ_URL (default http://127.0.0.1:8640), CHROMIUM (browser path), SHOTS (screenshot folder),
-// MXP_EDIT_URL (a running `mxp edit`: its criteria editor, unit tests run from the page).
+// MXP_WEBUI_URL (a running `mxp webui`: its criteria editor, unit tests run from the page).
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 
@@ -45,6 +45,7 @@ const edit = await api("edit").catch(() => null);
 if (edit?.enabled) {
   await visit("edit");
   await visit("datapacks", 4000);
+  await visit("exploit", 3000);
   let sessions = edit.sessions || [];
   if (!sessions.length)
     for (const r of edit.repositories)
@@ -68,9 +69,9 @@ if (edit?.enabled) {
   }
 }
 
-// mxp edit: the same UI in its criteria mode (MXP_EDIT_URL, a running `mxp edit`)
-if (process.env.MXP_EDIT_URL) {
-  const mxp = process.env.MXP_EDIT_URL.replace(/\/$/, "");
+// mxp webui: the same UI in its criteria mode (MXP_WEBUI_URL, a running `mxp webui`)
+if (process.env.MXP_WEBUI_URL) {
+  const mxp = process.env.MXP_WEBUI_URL.replace(/\/$/, "");
   const overview = await (await fetch(`${mxp}/criteria`)).json();
   const scenario = overview.scenarios.find((sc) => sc.utests.length) || overview.scenarios[0];
   await page.goto(`${mxp}/ui/#/criteria?file=${encodeURIComponent(scenario.files[0])}`);
@@ -81,16 +82,21 @@ if (process.env.MXP_EDIT_URL) {
     await page.click("text=Run all");
     await page.waitForSelector(".utests-bar .badge", { timeout: 300000 });
     const failing = await page.$$eval(".utests-matrix td.cell.bad", (cells) => cells.length);
-    if (failing) errors.push(`mxp edit: ${failing} unit-test cell(s) not as expected`);
+    if (failing) errors.push(`mxp webui: ${failing} unit-test cell(s) not as expected`);
   }
-  if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-edit.png` });
+  if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui.png` });
   // a data file of a case: its table and plot
   const csv = overview.utests.flatMap((u) => (u.cases || []).flatMap((c) => c.data_files)).find((f) => /\.csv$/.test(f));
   if (csv) {
     await page.goto(`${mxp}/ui/#/criteria?file=${encodeURIComponent(csv)}`);
     await page.waitForSelector(".data-plot", { timeout: 20000 });
-    if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-edit-data.png` });
+    if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui-data.png` });
   }
+  // its Run exploit page
+  await page.goto(`${mxp}/ui/#/exploit`);
+  await page.waitForSelector("text=Run exploit_runner", { timeout: 20000 });
+  await page.waitForTimeout(1500);
+  if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui-exploit.png` });
 }
 await browser.close();
 if (errors.length) {

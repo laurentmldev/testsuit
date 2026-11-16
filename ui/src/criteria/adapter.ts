@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // How the criteria editor talks to its server. The component never calls a route itself: tsqd gives an
-// adapter on an editing session, `mxp edit` one on its folder (feasibility study, section 6.5).
+// adapter on an editing session, `mxp webui` one on its folder (feasibility study, section 6.5).
 import { get, post, put, url } from "../api";
 
 /** An entry of a scenario as it runs (rendered: a loop gives one per pass), with where it is written. */

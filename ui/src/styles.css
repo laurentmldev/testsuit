@@ -342,6 +342,10 @@ tr.finally-row td { color: var(--muted); }
 .scope-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .scope { padding: 3px 10px; font-size: 12.5px; }
 .scope.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.scope .drag-handle { color: var(--muted); cursor: grab; margin-right: 2px; }
+.scope.dragging { opacity: 0.45; }
+.scope.drop-before { box-shadow: -3px 0 0 var(--accent); }
+.scope.drop-after { box-shadow: 3px 0 0 var(--accent); }
 .scope.add { border-style: dashed; color: var(--muted); }
 .scope-sep { margin-left: 10px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
 .phase-form { padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -783,3 +787,42 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .data-table th { background: var(--panel-2); position: sticky; top: 0; }
 .standalone-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border); height: 46px; box-sizing: border-box; }
 .standalone-bar .brand { font-weight: 700; }
+
+/* ── the exploit_runner page (exploit/ExploitPage.tsx) ─────────────── */
+.page.xr-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .page.xr-page { grid-template-columns: 1fr; } }
+.xr-form { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.xr-section .card-head { flex-wrap: wrap; }
+.xr-found { margin: 4px 0 8px; }
+.xr-check { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; }
+.xr-paths { list-style: none; margin: 4px 0; padding: 0; }
+.xr-paths li { display: flex; align-items: center; gap: 6px; padding: 2px 0; overflow-wrap: anywhere; }
+.xr-paths li .mono { flex: 1; }
+.xr-go { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.xr-go input { flex: 1; min-width: 180px; }
+.xr-used table { margin-top: 6px; }
+.xr-used td { padding: 1px 8px 1px 0; }
+.xr-runs { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.xr-run-list { max-height: 260px; overflow: auto; }
+.xr-run-row { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.xr-run-row:hover { background: var(--panel-2); }
+.xr-run-row.selected { background: var(--accent-soft); }
+.xr-run-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xr-counts { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.xr-testrun { margin-left: 10px; }
+.xr-detail table.xr-kv th { text-align: left; vertical-align: top; padding: 2px 10px 2px 0; color: var(--muted); font-weight: normal; white-space: nowrap; }
+.xr-detail table.xr-kv td { overflow-wrap: anywhere; }
+.xr-log { margin-top: 8px; }
+.xr-log pre.console { max-height: 420px; overflow: auto; }
+.picker-path { display: flex; gap: 6px; margin-bottom: 8px; }
+.picker-path input { flex: 1; }
+.picker-list { max-height: 55vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+.picker-where { display: flex; gap: 6px; align-items: center; padding: 2px 0 6px; overflow-wrap: anywhere; }
+.picker-row { display: flex; gap: 8px; align-items: center; padding: 2px 4px; border-radius: 4px; }
+.picker-row.selected { background: var(--accent-soft); }
+.picker-name { cursor: pointer; overflow-wrap: anywhere; }
+.webui-nav { display: flex; gap: 4px; }
+.webui-nav a { padding: 2px 10px; border-radius: 5px; color: var(--muted); }
+.webui-nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.workspace-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 8px; padding: 6px 10px;
+  border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; background: var(--panel); }

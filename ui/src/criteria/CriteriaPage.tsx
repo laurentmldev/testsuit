@@ -12,10 +12,11 @@
 // see <https://www.gnu.org/licenses/>.
 
 // The two hosts of the criteria editor: a page of tsqd on an editing session (#/criteria/<session>),
-// and the whole app when `mxp edit` serves it (#/criteria, criteria mode).
-import { useCallback, useEffect, useMemo, useState } from "react";
+// and the whole app when `mxp webui` serves it (#/criteria, criteria mode), with its exploit_runner page (#/exploit).
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { get } from "../api";
-import { navigate, setQuery, Toasts, type Route } from "../util";
+import { ExploitPage } from "../exploit/ExploitPage";
+import { classes, navigate, setQuery, Toasts, type Route } from "../util";
 import { restAdapter, type Overview } from "./adapter";
 import { CriteriaEditor } from "./CriteriaEditor";
 
@@ -51,30 +52,53 @@ export function SessionCriteriaPage({ sid, route }: { sid: string; route: Route 
   );
 }
 
+/** The pages of `mxp webui`, in its bar. */
+function WebuiNav({ page }: { page: "criteria" | "exploit" }) {
+  return (
+    <nav className="webui-nav">
+      <a href="#/criteria" className={classes(page === "criteria" && "active")}>Criteria</a>
+      <a href="#/exploit" className={classes(page === "exploit" && "active")}>Run exploit</a>
+    </nav>
+  );
+}
+
 export function StandaloneCriteriaApp({ mode }: { mode: { folder: string; testsuit: string } }) {
   const adapter = useMemo(() => restAdapter("criteria", "local"), []);
-  const [file, setFile] = useState<string | null>(() => new URLSearchParams(window.location.hash.split("?")[1] || "").get("file"));
+  const read = () => ({ page: window.location.hash.startsWith("#/exploit") ? "exploit" as const : "criteria" as const,
+    file: new URLSearchParams(window.location.hash.split("?")[1] || "").get("file") });
+  const [where, setWhere] = useState(read);
   useEffect(() => {
-    const on = () => setFile(new URLSearchParams(window.location.hash.split("?")[1] || "").get("file"));
+    const on = () => setWhere(read());
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
-  useEffect(() => { document.title = `Criteria · ${mode.folder.split("/").pop()}`; }, [mode.folder]);
+  useEffect(() => { if (where.page === "criteria") document.title = `Criteria · ${mode.folder.split("/").pop()}`; }, [mode.folder, where.page]);
   const onFile = useCallback((p: string | null) => {
     if (!window.location.hash.startsWith("#/criteria")) window.location.hash = "#/criteria";
     setQuery("file", p);
   }, []);
+  const head = (extra?: ReactNode) => (
+    <div className="standalone-bar">
+      <span className="brand">mexploit</span>
+      <WebuiNav page={where.page} />
+      <code title="The folder of this web UI">{mode.folder}</code>
+      {extra}
+      <span style={{ flex: 1 }} />
+      <span className="muted small">testsuit {mode.testsuit}</span>
+    </div>
+  );
+  if (where.page === "exploit") {
+    return (
+      <div className="app standalone">
+        {head()}
+        <main><ExploitPage /></main>
+        <Toasts />
+      </div>
+    );
+  }
   return (
     <div className="app full standalone">
-      <CriteriaEditor adapter={adapter} file={file} onFile={onFile} bar={(ov) => (
-        <div className="standalone-bar">
-          <span className="brand">Criteria editor</span>
-          <code title="The folder edited, in place">{mode.folder}</code>
-          <GitTag ov={ov} />
-          <span style={{ flex: 1 }} />
-          <span className="muted small">testsuit {mode.testsuit}</span>
-        </div>
-      )} />
+      <CriteriaEditor adapter={adapter} file={where.file} onFile={onFile} bar={(ov) => head(<GitTag ov={ov} />)} />
       <Toasts />
     </div>
   );
