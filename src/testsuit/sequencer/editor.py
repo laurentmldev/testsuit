@@ -136,6 +136,18 @@ RUN_KEY_NAMES = {"run", "phase", "slots", "stage_slots", "params", "succeeded", 
                  "lab", "stage", "slot", "component", "remote_root", "via"}
 
 
+def _input_counts(setup_raw: dict, config: str) -> dict[str, int]:
+    """The number of inputs the setup configuration gives each of its slots (slot id -> count)."""
+    types = setup_raw.get("slot_types") or {}
+    slots = ((setup_raw.get("configurations") or {}).get(config) or {}).get("slots") or {}
+    counts = {}
+    for slot_id, slot in slots.items():
+        slot = slot if isinstance(slot, dict) else {}
+        cfg = (((types.get(slot.get("type")) or {}).get("configurations") or {}).get(slot.get("configuration")) or {})
+        counts[str(slot_id)] = len([i for i in cfg.get("inputs") or [] if isinstance(i, dict)])
+    return counts
+
+
 USER_KEY = "<user key>"                            # the origin of the placeholder of a key given at each generation
 
 # where the keys of a run come from (the explorer), by name
@@ -1491,7 +1503,7 @@ class Editor:
         if mismatches:
             return [f"pipeline: {m}" for m in mismatches]
         try:
-            _, _, _, _, needs, pipeline, flats = self._testdef_parts(session, testdef_rel, setup_config)
+            _, _, setup_raw, _, needs, pipeline, flats = self._testdef_parts(session, testdef_rel, setup_config)
         except SequencerError as e:
             return [f"pipeline: {e}"]
         except Exception as e:                    # an invalid pipeline (pydantic), a missing include...
@@ -1509,7 +1521,12 @@ class Editor:
         flat = self._flatten(lab, needs, pipeline, flats, context)
         if missing is not None:
             missing += flat["missing_keys"]
-        return problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
+        undeployed = [f"slot '{slot}': {count} input(s) generated for it, but no step deploys them (do: deploy, or a "
+                      f"push, on it): they stay in the datapack, its lab component does not get them"
+                      for slot, count in _input_counts(setup_raw, setup_config).items()
+                      if count and slot in flat["used"] and slot not in flat["deployed"]]
+        return (problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
+                + [f"inputs: {p}" for p in undeployed])
 
     def _datapack_keys(self, session: EditSession, testdef_rel: str, setup_config: str | None) -> dict | None:
         """The keys a datapack of this test definition would hold (its ``context.yml``), unresolved: their
@@ -1645,6 +1662,8 @@ class Editor:
         problems: list[str] = []
         key_problems: list[str] = []
         missing_keys: list[str] = []                  # those that can be set by hand: not the keys of the run
+        deployed: set[str] = set()                    # the slots a step deploys inputs to (do: deploy, push)
+        used: set[str] = set()                        # the slots a step acts on
         binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
         if binding is None:
             problems += [f"cannot bind: {r}" for r in reasons]
@@ -1668,6 +1687,10 @@ class Editor:
                     expanded = []
                     for target in targets or [None]:
                         entry: dict[str, Any] = {"slot": target}
+                        if target:
+                            used.add(target)
+                        if target and (step.action == "push" or (step.action == "do" and step.do == "deploy")):
+                            deployed.add(target)
                         if binding is not None and target in binding.slots:
                             concrete = lab.inventory.components[binding.slots[target]]
                             lc = needs.slots[target]
@@ -1686,6 +1709,8 @@ class Editor:
                                                         f"({concrete.id}, role {concrete.role}) has no command '{step.do}' (it has: "
                                                         f"{', '.join(sorted(resolved.commands)) or 'none'})")
                                     entry.update(command=spec, source=resolved.command_sources.get(step.do))
+                                    if isinstance(spec, dict) and spec.get("builtin") == "deploy":
+                                        deployed.add(target)
                         if context is not None and (target is None or "concrete" in entry):
                             spec = entry.get("command") if step.action == "do" else _inline_spec(step)
                             if spec is not None:
@@ -1712,7 +1737,7 @@ class Editor:
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
-                "key_problems": key_problems, "missing_keys": missing_keys}
+                "key_problems": key_problems, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
 
     def flatten(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
         """The pipeline as the sequencer runs it: sub-pipelines expanded, every command resolved against the lab."""

@@ -80,10 +80,10 @@ export function DatapacksPage({ route }: { route: Route }) {
           <span className="muted small">Workspace <strong>{current.id}</strong>:</span>
           <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
              title="Download this workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>
-          <button className="small" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">Edit…</button>
           {current.added
             ? <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>
             : <button className="small" disabled title="This workspace is set in the server configuration (server.workspaces of tsq.yml): remove it there. Only the repositories added with Add repository… are removed from here.">Remove…</button>}
+          <button className="primary edit-workspace" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">✎ Edit…</button>
         </div>
       )}
       <Markdown text={INTRO} className="intro" />

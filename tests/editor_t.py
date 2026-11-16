@@ -376,7 +376,20 @@ def test_generation_errors_and_stop(repos):
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
         "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+    # the inputs of the dut are generated, but no step deploys them
+    problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
+    assert len(problems) == 1 and problems[0].startswith("inputs: slot 'dut': 2 input(s) generated for it, but no step deploys them"), problems
+    deploy = {"id": "deploy", "slot": "dut", "do": "deploy"}
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [deploy, {"id": "start", "slot": "dut", "do": "start"}]}]}})
     assert editor.synthesis(session, "testdef/count/testdef.yml")["problems"] == []
+    # a push on the slot counts as deploying too
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
+            {"id": "push", "slot": "dut", "push": {"from": "data/dut/input", "to": "/tmp/in"}}, {"id": "start", "slot": "dut", "do": "start"}]}]}})
+    assert not [p for p in editor.synthesis(session, "testdef/count/testdef.yml")["problems"] if p.startswith("inputs:")]
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
     inputs = setup["slot_types"]["dut_app"]["configurations"]["standard"]["inputs"]
 
@@ -384,7 +397,7 @@ def test_generation_errors_and_stop(repos):
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
         "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench", "rig"], "slots": ["test_sequencer"],
-                                 "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+                                 "steps": [deploy, {"id": "start", "slot": "dut", "do": "start"}]}]}})
     problems = editor.synthesis(session, "testdef/count/testdef.yml")["problems"]
     assert problems == ["pipeline: phase 'run': unknown stage slot 'rig' (setup stage_slots: bench)",
                         "pipeline: phase 'run': unknown slot 'test_sequencer' (setup ad hoc slots: analysis)"], problems
@@ -393,7 +406,7 @@ def test_generation_errors_and_stop(repos):
     assert "testdef/count/testdef.yml (bench): phase 'run': unknown stage slot 'rig' (setup stage_slots: bench)" in setup_warnings, setup_warnings
     editor.write(session, "testdef/count/testdef.yml", data={
         "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
-        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [deploy, {"id": "start", "slot": "dut", "do": "start"}]}]}})
 
     # a missing template: the error, in the result and as the last line of the log
     inputs[1]["source"] = "files/nope.txt"
