@@ -711,6 +711,13 @@ TESTDEF = {
         "setup_config": h("The setup configuration used (`datapack --setup-config` can choose another).",
                           type="string"),
         "dictionaries": h("Key files of the test (YAML), relative to this file.", type="array", items={"type": "string"}),
+        "user_keys": h("Keys the user gives at each generation (`datapack --set name=value`, the Generate form), by "
+                       "dotted name: no dictionary defines them, and the generation refuses to start without them.",
+                       type="object", additionalProperties=h(
+                           "A key given at each generation.", type="object", additionalProperties=False, properties={
+                               "description": h("What to give: shown beside its field.", type="string"),
+                               "choices": h("The values it can take (a list to pick from); none: free text.",
+                                            type="array")})),
         "pipeline": PIPELINE,
     },
 }

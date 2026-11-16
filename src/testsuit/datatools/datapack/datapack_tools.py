@@ -83,7 +83,7 @@ from testsuit.datatools.datapack.importers import create_data_importer
 from testsuit.datatools.datapack.model import GONE, DataRepository, Setup, Testdef, former_names
 from testsuit.datatools.datapack.processors import DATASET_KEYS_FILE, ProcessorError, run_processor
 from testsuit.datatools.datapack.templating import (Keys, TemplateError, _leaves, expand_dotted_keys, keys_set_by_hand,
-                                                    load_yaml_mapping, run_time_keys)
+                                                    load_yaml_mapping, parse_value, run_time_keys)
 from testsuit.plugins import load_plugins
 
 WORK_FOLDER = ".current_datapack"
@@ -461,6 +461,21 @@ class _Builder:
         keys.add(self.builtin, origin="<datapack>")
         return keys
 
+    def check_user_keys(self, testdef: Testdef) -> None:
+        """The keys the test definition asks at each generation (``user_keys``): each set by hand, to one of its
+        choices when it lists some."""
+        problems = []
+        for name, spec in testdef.user_keys.items():
+            if name not in self.manual_values or self.manual_values[name] in (None, ""):
+                problems.append(f"key '{name}' is to be given at each generation (user_keys of the test definition"
+                                f"{': ' + spec.description if spec.description else ''}): --set {name}=<value>"
+                                + (f", one of {', '.join(str(c) for c in spec.choices)}" if spec.choices else ""))
+            elif spec.choices and str(parse_value(self.manual_values[name])) not in [str(c) for c in spec.choices]:
+                problems.append(f"key '{name}': '{self.manual_values[name]}' is not one of its choices "
+                                f"({', '.join(str(c) for c in spec.choices)})")
+        if problems:
+            raise DatapackError("\n".join(problems))
+
     def check_manual_keys(self) -> list[dict]:
         """What each key set by hand does: it sets a key no dictionary defines, or overrides a defined one.
         A built-in key (``testdef.id``, ``datapack.name``...) cannot be set by hand: it would not be used."""
@@ -783,6 +798,7 @@ class _Builder:
         self.work.mkdir(parents=True)
 
         testdef = self.load_testdef()
+        self.check_user_keys(testdef)
         testdef_git = self._check_git("Test definition", self.testdef_dir)
         setup = self.load_setup(testdef)
 

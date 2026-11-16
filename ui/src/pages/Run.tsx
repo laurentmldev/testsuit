@@ -276,7 +276,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                 <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={setSelected} />
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
-            ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
+            ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
           </div>
         </div>
       )}

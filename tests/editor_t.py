@@ -280,7 +280,8 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     editor.write(session, "testdef/count/testdef.yml", data=testdef)
     keys = [p for p in editor.run_problems(session, "testdef/count/testdef.yml") if p.startswith("keys:")]
     assert keys == ["keys: phase 'run', step 'unknown': its 'run' on slot 'dut' reads 'nowhere.speed', which no "
-                    "dictionary nor run-time key defines",
+                    "dictionary nor run-time key defines: define it in a dictionary, set it by hand when generating, or declare it in "
+                    "the user_keys of the test definition",
                     "keys: phase 'run', step 'unknown': its 'run' on slot 'dut' reads 'slot.nothing', which no "
                     "dictionary nor run-time key defines",
                     "keys: phase 'run', step 'phase_wide': its 'run' reads 'slot.id', which no "
@@ -292,6 +293,12 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     checks = editor.run_checks(session, "testdef/count/testdef.yml", by_hand={"nowhere.speed": "3"})
     assert checks["missing_keys"] == [] and not any("nowhere.speed" in p for p in checks["problems"])
     assert any("slot.nothing" in p for p in checks["problems"])
+    # declared as given at each generation (user_keys): defined for the checks, listed for the Generate form
+    editor.write(session, "testdef/count/testdef.yml", data={**testdef, "user_keys": {"nowhere.speed": {"choices": [1, 2]}}})
+    assert editor.run_checks(session, "testdef/count/testdef.yml")["missing_keys"] == []
+    assert editor.keys(session, "testdef/count/testdef.yml")["user_keys"] == {"nowhere.speed": {"description": "", "choices": [1, 2]}}
+    assert editor.slot_keys(session, "testdef/count/testdef.yml", "dut")["generation_origins"]["nowhere.speed"]["from"].startswith(
+        "given at each generation")
     testdef["pipeline"]["phases"][0]["steps"] = testdef["pipeline"]["phases"][0]["steps"][:1]
     editor.write(session, "testdef/count/testdef.yml", data=testdef)
 
