@@ -205,6 +205,7 @@ tr.finally-row td { color: var(--muted); }
 .log { background: var(--code); padding: 8px 10px; border-radius: 6px; max-height: 60vh; overflow: auto; font-size: 12px; }
 .log-tail .log { min-height: 200px; max-height: none; height: calc(75vh - 150px); font-size: 11px; line-height: 1.35; }
 .log-tail .file-view-head { position: sticky; left: 0; flex-wrap: nowrap; }
+.log-tail .log-more { display: block; margin: 0 0 6px; font-family: var(--sans, inherit); }
 .log-tail .log-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-tail .file-view-head .toggle, .log-tail .file-view-head .button { flex: none; }
 /* the run's pipeline and steps: the log side wider, up to half the page */

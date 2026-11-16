@@ -18,7 +18,7 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edg
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, Badge, classes, ConsoleText, duration, setQuery, STATE_COLORS, time, ViaTag } from "../util";
+import { ago, Badge, classes, ConsoleText, duration, setQuery, Spinner, STATE_COLORS, time, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -184,25 +184,38 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   );
 }
 
+/** The lines of a log shown at first: its end; the lines above it are shown on demand (a big log renders slowly). */
+const LOG_LINES_SHOWN = 2000;
+
 export function LogTail({ runId, step, live }: { runId: string; step: string; live: boolean }) {
   const [text, setText] = useState("");
+  const [loaded, setLoaded] = useState(false);          // the first answer came: an empty log is then "no output yet"
   const [error, setError] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
   const offset = useRef(0);
   const box = useRef<HTMLPreElement>(null);
   const [follow, setFollow] = useState(true);
   useEffect(() => {
     setText("");
+    setLoaded(false);
     setError(null);
+    setAll(false);
     offset.current = 0;
     let stop = false;
+    let busy = false;                                     // one request at a time: a big log takes more than a tick
     const tick = async () => {
+      if (busy) return;
+      busy = true;
       try {
         const { text: chunk, size } = await getText(`runs/${runId}/logs/${encodeURIComponent(step)}?offset=${offset.current}`);
         if (stop) return;
         if (chunk) setText((t) => t + chunk);
         offset.current = size ?? offset.current + chunk.length;
+        setLoaded(true);
       } catch (e: any) {
         if (!stop) setError(e.message);
+      } finally {
+        busy = false;
       }
     };
     tick();
@@ -212,20 +225,44 @@ export function LogTail({ runId, step, live }: { runId: string; step: string; li
       if (timer) window.clearInterval(timer);
     };
   }, [runId, step, live]);
+  // a big log: its last lines only, unless all are asked for
+  const { shown, hidden } = useMemo(() => {
+    if (all) return { shown: text, hidden: 0 };
+    let at = text.length, count = 0;
+    while (count <= LOG_LINES_SHOWN && at > 0) {
+      at = text.lastIndexOf("\n", at - 1);
+      if (at < 0) break;
+      count++;
+    }
+    if (at <= 0) return { shown: text, hidden: 0 };
+    const before = text.slice(0, at);
+    return { shown: text.slice(at + 1), hidden: before.split("\n").length };
+  }, [text, all]);
+  const lines = useMemo(() => <ConsoleText text={shown} />, [shown]);
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [text, follow]);
+  }, [shown, follow]);
   return (
     <div className="log-tail">
       <div className="file-view-head">
         <code className="log-step" title={step}>{step}</code>
+        {loaded && offset.current > 0 && <span className="muted small" title="The size of the log">{logSize(offset.current)}</span>}
         <label className="toggle"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
         <a className="button small" href={url(`runs/${runId}/logs/${encodeURIComponent(step)}`)} target="_blank" rel="noreferrer">raw</a>
       </div>
       {error && <div className="error-box">{error}</div>}
-      <pre className="log" ref={box}>{text ? <ConsoleText text={text} /> : error ? "" : "(no output yet)"}</pre>
+      <pre className="log" ref={box}>
+        {hidden > 0 && <button className="small log-more" onClick={() => setAll(true)}
+          title="A big log renders slowly: its last lines are shown first">Show the {hidden.toLocaleString()} lines above</button>}
+        {text ? lines : error ? "" : loaded ? "(no output yet)" : <Spinner text="Loading the log…" />}
+      </pre>
     </div>
   );
+}
+
+/** A size in bytes, for a person. */
+function logSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export function RunPage({ id, tab }: { id: string; tab: string }) {
