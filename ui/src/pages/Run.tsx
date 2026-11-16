@@ -14,7 +14,7 @@
 // One run (sequencer README, section 13.1): its pipeline as a live graph of phases, sub-pipelines and steps,
 // the logs of each step, its files before, during and after the run.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
+import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
@@ -67,9 +67,11 @@ function FrameNode({ data }: NodeProps) {
 
 const nodeTypes = { step: StepNode, frame: FrameNode };
 
-export function RunGraph({ pipeline, records, selected, onSelect }: {
+export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   pipeline: any; records: any[]; selected: string | null; onSelect: (key: string, step: any, phase: string) => void;
+  focus?: string | null;                         // a step ('phase:step') to bring into view, at the same zoom
 }) {
+  const flow = useRef<ReactFlowInstance | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const structure = useMemo(() => JSON.stringify(pipeline), [pipeline]);
@@ -158,9 +160,17 @@ export function RunGraph({ pipeline, records, selected, onSelect }: {
     };
   });
 
+  const focusNode = focus ? `phase:${focus.slice(0, focus.indexOf(":"))}/${focus.slice(focus.indexOf(":") + 1)}` : null;
+  useEffect(() => {
+    const f = flow.current;
+    if (!f || !focusNode || !nodes.some((n) => n.id === focusNode)) return;
+    const zoom = f.getZoom();
+    f.fitView({ nodes: [{ id: focusNode }], minZoom: zoom, maxZoom: zoom, duration: 400 });
+  }, [focusNode, nodes]);
+
   return (
     <div className="graph-box">
-      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} nodesConnectable={false} proOptions={{ hideAttribution: true }}
+      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }} nodesConnectable={false} proOptions={{ hideAttribution: true }}
         onNodeClick={(_, n) => {
           if (n.type !== "step") return;
           const { step, phase } = n.data as any;
@@ -224,9 +234,20 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
+  // the step running now is followed (selected, its log shown, brought into view) until a step is picked by hand
+  const [pinned, setPinned] = useState(false);
+  const pick = (key: string | null) => {
+    setSelected(key);
+    setPinned(true);
+  };
   const r = run.data;
   const records: any[] = r?.steps || [];
   const live = r && (ACTIVE.includes(r.state) || ["queued", "waiting_resources"].includes(r.state));
+  const running = records.filter((s) => s.state === "running").sort((a, b) => String(b.started || "").localeCompare(String(a.started || "")))[0];
+  const runningKey = running ? stepKey(running.phase, running.id, slotOf(running)) : null;
+  useEffect(() => {
+    if (!pinned && runningKey && runningKey !== selected) setSelected(runningKey);
+  }, [runningKey, pinned]);
   const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, slotOf(s)) === key);
   // the log to show: the selected record, or the first slot of a step run on several; none before it starts
   const logRecord = selected ? recordFor(selected) || records.find((s) => selected === `${s.phase}:${s.id}`) : null;
@@ -267,13 +288,16 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
       {tab === "pipeline" && (
         <div className="split">
           <div className="split-main">
-            {pipeline.data ? <RunGraph pipeline={pipeline.data} records={records} selected={selected} onSelect={(k) => setSelected(k)} />
+            {pipeline.data ? <RunGraph pipeline={pipeline.data} records={records} selected={selected} onSelect={(k) => pick(k)}
+              focus={!pinned && running ? `${running.phase}:${running.id}` : null} />
               : <p className="muted">{pipeline.error || "Loading the pipeline…"}</p>}
           </div>
           <div className="split-side">
             {selected ? (
               <>
-                <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={setSelected} />
+                {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
+                {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
+                <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={pick} />
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
@@ -289,7 +313,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                 {records.map((s) => {
                   const key = stepKey(s.phase, s.id, slotOf(s));
                   return (
-                    <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => setSelected(key)}>
+                    <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => pick(key)}>
                       <td><code>{key}</code>{s.via && <> <ViaTag via={s.via} title={`its command ran on ${s.via}, which reaches the component of slot ${slotOf(s)}`} /></>}</td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
                       <td>{s.started ? duration(s.started, s.ended || null) : ""}</td><td>{s.exit_status ?? ""}</td><td>{s.attempts || ""}</td>
                       <td className="reason">{s.reason}</td>
