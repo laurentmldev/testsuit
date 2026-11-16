@@ -176,10 +176,13 @@ tr.finally-row td { color: var(--muted); }
 .frame-title { font-size: 12px; font-weight: 600; padding: 4px 8px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .step-node { background: var(--panel); border: 1.5px solid var(--border); border-left-width: 5px; border-radius: 7px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
 .step-node.ok { border-left-color: var(--ok); }
-.step-node.run { border-left-color: var(--run); border-color: var(--run); box-shadow: 0 0 0 3px var(--run-soft); animation: step-running 1.4s ease-in-out infinite; }
-/* the step running now: its border and halo pulse (the text stays still and readable) */
-@keyframes step-running { 50% { border-color: var(--border); border-left-color: var(--run); box-shadow: 0 0 0 6px transparent; } }
-@media (prefers-reduced-motion: reduce) { .step-node.run { animation: none; } }
+.step-node.run { border-left-color: var(--run); border-color: var(--run); }
+/* the step running now (or one of its slots): it blinks, its background, border and halo (the text stays still and
+   readable), seen even when the diagram is zoomed out. With reduced motion asked by the system: slower, still there. */
+.step-node.pulsing { border-color: var(--run); border-left-color: var(--run); background: color-mix(in srgb, var(--run) 55%, var(--panel));
+  box-shadow: 0 0 0 14px color-mix(in srgb, var(--run) 45%, transparent); animation: step-running 1s ease-in-out infinite; }
+@keyframes step-running { 50% { background: var(--panel); border-color: var(--border); border-left-color: var(--run); box-shadow: 0 0 0 14px transparent; } }
+@media (prefers-reduced-motion: reduce) { .step-node.pulsing { animation-duration: 2.4s; } }
 .step-node.bad { border-left-color: var(--bad); }
 .step-node.wait { border-left-color: var(--wait); }
 .step-node.finally { border-style: dashed; border-left-style: solid; }
@@ -205,7 +208,7 @@ tr.finally-row td { color: var(--muted); }
 .log { background: var(--code); padding: 8px 10px; border-radius: 6px; max-height: 60vh; overflow: auto; font-size: 12px; }
 .log-tail .log { min-height: 200px; max-height: none; height: calc(75vh - 150px); font-size: 11px; line-height: 1.35; }
 .log-tail .file-view-head { position: sticky; left: 0; flex-wrap: nowrap; }
-.log-tail .log-more { display: block; margin: 0 0 6px; font-family: var(--sans, inherit); }
+.log-tail .log-more { color: var(--muted); font-style: italic; margin: 4px 0; }
 .log-tail .log-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-tail .file-view-head .toggle, .log-tail .file-view-head .button { flex: none; }
 /* the run's pipeline and steps: the log side wider, up to half the page */

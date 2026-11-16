@@ -13,7 +13,7 @@
 
 // One run (sequencer README, section 13.1): its pipeline as a live graph of phases, sub-pipelines and steps,
 // the logs of each step, its files before, during and after the run.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
@@ -40,7 +40,8 @@ function StepNode({ data }: NodeProps) {
   // its command runs through another component (a command's via): said on the step itself
   const vias = [...new Set<string>((d.items || []).map((i: any) => i.via).filter(Boolean))];
   return (
-    <div className={classes("step-node", STATE_COLORS[d.state] || "muted", d.selected && "selected", d.part === "finally" && "finally")}
+    <div className={classes("step-node", STATE_COLORS[d.state] || "muted", d.selected && "selected", d.part === "finally" && "finally",
+      (d.items || []).some((i: any) => i.state === "running") && "pulsing")}
       title={d.title}>
       <Handle type="target" position={Position.Left} />
       <div className="step-id">{d.label}</div>
@@ -184,22 +185,25 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   );
 }
 
-/** The lines of a log shown at first: its end; the lines above it are shown on demand (a big log renders slowly). */
+/** The lines of a log rendered at a time: a big log renders slowly, so it is shown by windows of lines, the next
+ *  ones rendered when scrolling reaches the bottom (or the top) of those shown. */
 const LOG_LINES_SHOWN = 2000;
 
 export function LogTail({ runId, step, live }: { runId: string; step: string; live: boolean }) {
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);          // the first answer came: an empty log is then "no output yet"
   const [error, setError] = useState<string | null>(null);
-  const [all, setAll] = useState(false);
   const offset = useRef(0);
   const box = useRef<HTMLPreElement>(null);
-  const [follow, setFollow] = useState(true);
+  // follow: a live log shows its end as it grows; an ended one opens at its start, to read down
+  const [follow, setFollow] = useState(live);
+  const [win, setWin] = useState<{ start: number; end: number } | null>(null);   // the lines shown
+  const keepFromBottom = useRef<number | null>(null);   // lines added above: keep what was in view where it was
   useEffect(() => {
     setText("");
     setLoaded(false);
     setError(null);
-    setAll(false);
+    setWin(null);
     offset.current = 0;
     let stop = false;
     let busy = false;                                     // one request at a time: a big log takes more than a tick
@@ -225,36 +229,63 @@ export function LogTail({ runId, step, live }: { runId: string; step: string; li
       if (timer) window.clearInterval(timer);
     };
   }, [runId, step, live]);
-  // a big log: its last lines only, unless all are asked for
-  const { shown, hidden } = useMemo(() => {
-    if (all) return { shown: text, hidden: 0 };
-    let at = text.length, count = 0;
-    while (count <= LOG_LINES_SHOWN && at > 0) {
-      at = text.lastIndexOf("\n", at - 1);
-      if (at < 0) break;
-      count++;
+  const lines = useMemo(() => {
+    const all = text.split("\n");
+    if (all.length && all[all.length - 1] === "") all.pop();
+    return all;
+  }, [text]);
+  const total = lines.length;
+  // the window: at the end when following, else from where it was (at first, the start)
+  const shownWin = follow
+    ? { start: Math.min(win?.start ?? Infinity, Math.max(0, total - LOG_LINES_SHOWN)), end: total }
+    : win ?? { start: 0, end: Math.min(total, LOG_LINES_SHOWN) };
+  const { start, end } = shownWin;
+  const shown = useMemo(() => <ConsoleText text={lines.slice(start, end).join("\n")} />, [lines, start, end]);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    if (follow) el.scrollTop = el.scrollHeight;
+    else if (keepFromBottom.current !== null) {
+      el.scrollTop = el.scrollHeight - keepFromBottom.current;
+      keepFromBottom.current = null;
     }
-    if (at <= 0) return { shown: text, hidden: 0 };
-    const before = text.slice(0, at);
-    return { shown: text.slice(at + 1), hidden: before.split("\n").length };
-  }, [text, all]);
-  const lines = useMemo(() => <ConsoleText text={shown} />, [shown]);
-  useEffect(() => {
-    if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [shown, follow]);
+  const onScroll = () => {
+    const el = box.current;
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+    const atTop = el.scrollTop < 40;
+    if (follow && !atBottom) {                            // the user scrolled up: stop following, keep the lines in view
+      setFollow(false);
+      if (atTop && start > 0) {
+        keepFromBottom.current = el.scrollHeight - el.scrollTop;
+        setWin({ start: Math.max(0, start - LOG_LINES_SHOWN), end });
+      } else setWin(shownWin);
+      return;
+    }
+    if (!follow && atBottom && end < total) setWin({ start, end: Math.min(total, end + LOG_LINES_SHOWN) });
+    else if (!follow && atTop && start > 0) {
+      keepFromBottom.current = el.scrollHeight - el.scrollTop;
+      setWin({ start: Math.max(0, start - LOG_LINES_SHOWN), end });
+    }
+  };
+  const followNow = (on: boolean) => {
+    setFollow(on);
+    setWin(on ? null : shownWin);
+  };
   return (
     <div className="log-tail">
       <div className="file-view-head">
         <code className="log-step" title={step}>{step}</code>
-        {loaded && offset.current > 0 && <span className="muted small" title="The size of the log">{logSize(offset.current)}</span>}
-        <label className="toggle"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+        {loaded && offset.current > 0 && <span className="muted small" title={`The size of the log: ${total.toLocaleString()} lines`}>{logSize(offset.current)}</span>}
+        <label className="toggle" title="Show the end of the log, as it grows"><input type="checkbox" checked={follow} onChange={(e) => followNow(e.target.checked)} /> follow</label>
         <a className="button small" href={url(`runs/${runId}/logs/${encodeURIComponent(step)}`)} target="_blank" rel="noreferrer">raw</a>
       </div>
       {error && <div className="error-box">{error}</div>}
-      <pre className="log" ref={box}>
-        {hidden > 0 && <button className="small log-more" onClick={() => setAll(true)}
-          title="A big log renders slowly: its last lines are shown first">Show the {hidden.toLocaleString()} lines above</button>}
-        {text ? lines : error ? "" : loaded ? "(no output yet)" : <Spinner text="Loading the log…" />}
+      <pre className="log" ref={box} onScroll={onScroll}>
+        {start > 0 && <div className="log-more">{start.toLocaleString()} lines above: scroll up to show them</div>}
+        {text ? shown : error ? "" : loaded ? "(no output yet)" : <Spinner text="Loading the log…" />}
+        {end < total && <div className="log-more">{(total - end).toLocaleString()} lines below: scroll down to show them</div>}
       </pre>
     </div>
   );
