@@ -87,6 +87,63 @@ esac
 """
 
 # run-time keys of commands and steps (README section 8.3), for completion and help
+def _inline_spec(step) -> dict | None:
+    """What a step runs without a lab command (``run:``, ``wait_for:``...), as the engine reads it."""
+    try:
+        action = step.action
+    except SequencerError:
+        return None
+    if action in ("do", "uses"):
+        return None
+    return {action: step.plugin_actions[action] if action in step.plugin_actions else getattr(step, action)}
+
+
+def _step_keys(lab: Lab, needs, binding, context: dict, phase: str, params: dict, bound, spec: dict) -> dict:
+    """The keys a step's command is rendered with at run time (``engine.RunContext.keys``), with placeholder
+    values where only the run knows them (its id, folders): what matters is which names are defined."""
+    def slot_keys(slot_id: str) -> dict:
+        lc = needs.slots[slot_id]
+        return {"id": lc.id, "name": lc.name or lc.id, "type": lc.type, "role": lc.role, "stage_slot": lc.stage_slot,
+                "component": binding.slots.get(slot_id, "") if binding else "", "input_dir": "", "output_dir": "",
+                "remote_root": ""}
+    verdict = lambda step: ""                                     # noqa: E731
+    keys = dict(context)
+    keys.update({"run": {"id": "", "dir": "", "priority": 0}, "phase": {"id": phase},
+                 "slots": {c: slot_keys(c) for c in needs.slots},
+                 "stage_slots": {r: {"id": r, "stage": s} for r, s in (binding.stage_slots if binding else {}).items()},
+                 "params": params or {}, "succeeded": verdict, "failed": verdict, "errored": verdict, "skipped": verdict,
+                 "verdict": verdict})
+    if lab is not None:
+        keys.update(lab.lab_keys(bound[0] if bound else None, bound[2] if bound else None))
+    if bound is not None:
+        concrete, lc, stage = bound
+        keys["slot"] = slot_keys(lc.id)
+        keys["component"] = {"id": concrete.id, "host": concrete.host, "host_alias": concrete.host_alias,
+                             "label": concrete.label, "role": concrete.role, "extends": concrete.extends, "slot": lc.id,
+                             "stage": stage.id if stage else "", "vars": concrete.vars_in(stage), "input_dir": "",
+                             "output_dir": "", "remote_root": "", "state": ""}
+        keys["remote_root"] = ""
+    if isinstance(spec, dict) and spec.get("via"):
+        keys["via"] = {"id": "", "host": "", "host_alias": "", "role": "", "label": "", "vars": {}}
+    return keys
+
+
+def _missing_keys(value: Any, keys: dict) -> list[str]:
+    """The keys the templates of a value (strings, lists and dicts) read that ``keys`` does not define."""
+    from testsuit.datatools.datapack.templating import undefined_keys
+    found: list[str] = []
+    if isinstance(value, str):
+        if "{{" in value or "{%" in value:
+            found += undefined_keys(value, keys)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found += _missing_keys(item, keys)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            found += _missing_keys(item, keys)
+    return list(dict.fromkeys(found))
+
+
 RUNTIME_KEYS = {
     "slot.id": "the step's slot (setup configuration)",
     "slot.name": "its name",
@@ -1289,7 +1346,17 @@ class Editor:
             return [f"pipeline: {_describe(e)}"]
         lab, _ = self.lab_for(session)
         problems = [f"lab: {p}" for p in check_against_lab(SimpleNamespace(needs=needs), lab)]
-        return problems + [f"pipeline: {p}" for p in self._flatten(lab, needs, pipeline, flats)["problems"]]
+        flat = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, testdef_rel, setup_config))
+        return problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
+
+    def _datapack_keys(self, session: EditSession, testdef_rel: str, setup_config: str | None) -> dict | None:
+        """The keys a datapack of this test definition would hold (its ``context.yml``), unresolved: their
+        names are what the key checks of the pipeline need. None when the dictionaries cannot be read."""
+        try:
+            builder, _, _ = self._builder(session, testdef_rel, setup_config)
+            return builder.keys().data
+        except Exception:
+            return None
 
     def check_setup(self, session: EditSession, rel: str) -> list[dict]:
         from testsuit.datatools.datapack.datapack_tools import _find_sources
@@ -1408,10 +1475,13 @@ class Editor:
 
     # ── pipelines ────────────────────────────────────────────────────────
 
-    def _flatten(self, lab: Lab, needs, pipeline, flats) -> dict:
+    def _flatten(self, lab: Lab, needs, pipeline, flats, context: dict | None = None) -> dict:
+        """The pipeline bound to the lab. With ``context`` (the datapack keys): ``key_problems``, the keys the
+        commands of its steps read that nothing defines at run time (the step would fail on them)."""
         from testsuit.sequencer.model import phase_slots
         from testsuit.sequencer.scheduler import Availability, find_binding
         problems: list[str] = []
+        key_problems: list[str] = []
         binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
         if binding is None:
             problems += [f"cannot bind: {r}" for r in reasons]
@@ -1453,19 +1523,34 @@ class Editor:
                                                         f"({concrete.id}, role {concrete.role}) has no command '{step.do}' (it has: "
                                                         f"{', '.join(sorted(resolved.commands)) or 'none'})")
                                     entry.update(command=spec, source=resolved.command_sources.get(step.do))
+                        if context is not None and (target is None or "concrete" in entry):
+                            spec = entry.get("command") if step.action == "do" else _inline_spec(step)
+                            if spec is not None:
+                                bound = (lab.inventory.components[entry["concrete"]], needs.slots[target],
+                                         lab.inventory.stages.get(binding.stage_slots.get(needs.slots[target].stage_slot, ""))) \
+                                    if target is not None else None
+                                keys = _step_keys(lab, needs, binding, context, flat.phase.id, fs.params, bound, spec)
+                                what = (f"command '{step.do}' of slot '{target}' ({entry['concrete']})" if step.action == "do"
+                                        else f"its '{step.action}'" + (f" on slot '{target}'" if target else ""))
+                                for name in _missing_keys({"spec": spec, "env": step.env, "timeout": step.timeout}, keys):
+                                    message = (f"phase '{flat.phase.id}', step '{fs.id}': {what} reads '{name}', which no "
+                                               f"dictionary nor run-time key defines")
+                                    if message not in key_problems:
+                                        key_problems.append(message)
                         expanded.append(entry)
                     rows.append({"id": fs.id, "part": part, "group": fs.group, "needs": fs.needs, "action": step.action,
                                  "do": step.do, "params": fs.params, "targets": expanded,
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows})
-        return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems}
+        return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
+                "key_problems": key_problems}
 
     def flatten(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
         """The pipeline as the sequencer runs it: sub-pipelines expanded, every command resolved against the lab."""
         _, _, _, setup_path, needs, pipeline, flats = self._testdef_parts(session, rel, setup_config)
         lab, _ = self.lab_for(session)
-        result = self._flatten(lab, needs, pipeline, flats)
+        result = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, rel, setup_config))
         result["setup"] = self.rel(session, setup_path)
         result["logical"] = {"stage_slots": needs.stage_slots,
                              "slots": {c.id: {"type": c.type, "stage_slot": c.stage_slot, "role": c.role, "name": c.name}

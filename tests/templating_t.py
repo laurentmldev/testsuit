@@ -157,3 +157,11 @@ def test_render_text_includes_and_sources(tmp_path):
     assert keys.render_text(text, [tmp_path], sources={str(tmp_path / "part.yml"): "speed: 0\n"}) == "speed: 0\ndouble: 6\n"
     with pytest.raises(TemplateError, match="nope.yml"):
         keys.render_text('{% include "nope.yml" %}', [tmp_path], where="x")
+
+
+def test_undefined_keys():
+    from testsuit.datatools.datapack.templating import undefined_keys
+    keys = {"a": {"b": 1}, "s": "x"}
+    assert undefined_keys("{{ a.b }} {{ a.c }} {{ z }} {{ s.upper() }}", keys) == ["a.c", "z"]
+    # given a default, or tested with 'is defined': it may be undefined (the arguments of the default may not)
+    assert undefined_keys("{{ a.x | default('') }} {{ y | d(w) }} {% if v is defined %}{% endif %}", keys) == ["w"]

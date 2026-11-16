@@ -849,6 +849,11 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
         {flat.binding ? Object.entries<any>({ ...flat.binding.stage_slots, ...flat.binding.slots }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
       </p>
       {flat.problems.length > 0 && <ul className="warn-list">{flat.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
+      {(flat.key_problems || []).length > 0 && (
+        <ul className="warn-list" title="Keys that the commands of the steps read and that no dictionary nor run-time key defines: the step would fail on them">
+          {flat.key_problems.map((p: string) => <li key={p}>{p}</li>)}
+        </ul>
+      )}
       {flat.phases.map((ph: any) => (
         <Section key={ph.id} title={`phase ${ph.id}${ph.needs.length ? ` (after ${ph.needs.join(", ")})` : ""}: ${ph.slots.join(", ")}`}>
           <table className="grid compact">
