@@ -31,7 +31,39 @@ function copy(path: string) {
   navigator.clipboard?.writeText(text).then(() => notify(`${text} copied`), () => notify(text));
 }
 
-function Node({ name, path, value, filter, depth }: { name: string; path: string; value: any; filter: string; depth: number }) {
+type Origins = Record<string, { from: string; overrides?: { from: string; value: string }[] }>;
+
+/** Where a key comes from: its own entry, or the nearest one above it (a list item: the list). */
+function originOf(origins: Origins, path: string, exact: boolean) {
+  if (origins[path] || exact) return origins[path];
+  let p = path;
+  while (p) {
+    p = p.endsWith("]") ? p.slice(0, p.lastIndexOf("[")) : p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
+    if (origins[p]) return origins[p];
+  }
+  return undefined;
+}
+
+function Origin({ origins, path, exact, above }: { origins: Origins; path: string; exact: boolean; above?: string }) {
+  const o = originOf(origins, path, exact);
+  if (!o || (!origins[path] && o.from === above)) return null;     // the same as the key above it: said once
+  const over = o.overrides || [];
+  return (
+    <span className="small key-origin">
+      <span className="muted"> · {o.from}</span>
+      {over.length > 0 && (
+        <span className="warn-text" title={over.map((x) => `${x.value} from ${x.from}`).join("\n")}>
+          {" "}overrides <code>{over[0].value}</code> from {over[0].from}{over.length > 1 ? ` (and ${over.length - 1} more)` : ""}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Node({ name, path, value, filter, depth, origins, above }: {
+  name: string; path: string; value: any; filter: string; depth: number; origins: Origins; above?: string;
+}) {
+  const here = originOf(origins, path, false)?.from;
   const branch = value !== null && typeof value === "object";
   const [open, setOpen] = useState(false);
   const shown = open || (filter !== "" && branch);
@@ -46,18 +78,19 @@ function Node({ name, path, value, filter, depth }: { name: string; path: string
       {branch
         ? !shown && <span className="muted small"> {Array.isArray(value) ? `${value.length} items` : `${entries.length} keys`}</span>
         : <span className="mono small key-value"> {value === "" ? <span className="muted">(empty)</span> : JSON.stringify(value)}</span>}
+      <Origin origins={origins} path={path} exact={branch} above={above} />
       {branch && shown && (
         <ul className="key-tree">
-          {entries.map(([k, v]) => <Node key={k} name={k} path={Array.isArray(value) ? `${path}[${k}]` : `${path}.${k}`} value={v} filter={filter} depth={depth + 1} />)}
+          {entries.map(([k, v]) => <Node key={k} name={k} path={Array.isArray(value) ? `${path}[${k}]` : `${path}.${k}`} value={v} filter={filter} depth={depth + 1} origins={origins} above={here} />)}
         </ul>
       )}
     </li>
   );
 }
 
-function Tree({ keys, filter }: { keys: Record<string, any>; filter: string }) {
+function Tree({ keys, filter, origins }: { keys: Record<string, any>; filter: string; origins: Origins }) {
   const names = useMemo(() => Object.keys(keys).sort(), [keys]);
-  return <ul className="key-tree root">{names.map((k) => <Node key={k} name={k} path={k} value={keys[k]} filter={filter} depth={0} />)}</ul>;
+  return <ul className="key-tree root">{names.map((k) => <Node key={k} name={k} path={k} value={keys[k]} filter={filter} depth={0} origins={origins} />)}</ul>;
 }
 
 export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
@@ -92,9 +125,9 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
             : <p className="banner warn">{data.why_not}</p>)}
           {where === "generation" && <p className="small muted">The dictionary and built-in keys, the same in its template files (rendered when the datapack is generated) and in its commands (frozen in the datapack). Only templates have <code>slot</code> in this form (<code>slot.configuration</code>, <code>slot.input_dir</code>), <code>slots.&lt;id&gt;</code> of the slots it needs and <code>read_input()</code>; commands have the runtime-only ones instead. Values in &lt;…&gt; are known at generation. For example, a delay before switching off written in a dictionary (<code>{"{{ power.switchoff_timeout_s }}"}</code>) is fixed by the configuration: templates and commands both read it.</p>}
           {data.error && <p className="banner warn small">Some keys cannot be resolved, shown as written: {data.error}</p>}
-          {keys && <Tree keys={keys} filter={filter} />}
+          {keys && <Tree keys={keys} filter={filter} origins={(where === "run" ? data.run_origins : data.generation_origins) || {}} />}
           {functions.length > 0 && <p className="small">Functions: {functions.map((f) => <code key={f}>{f} </code>)}</p>}
-          <p className="muted small">Click <span className="mono">{"{{ }}"}</span> to copy a key as a template.</p>
+          <p className="muted small">Click <span className="mono">{"{{ }}"}</span> to copy a key as a template. After each value: where it is set, and the value it <span className="warn-text">overrides</span>, set at a lower level (a dictionary of the setup, under one of the test definition; the inventory groups, under the stage, under the host).</p>
         </div>
       )}
     </Dialog>
