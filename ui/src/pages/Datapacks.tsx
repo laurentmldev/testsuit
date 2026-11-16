@@ -16,6 +16,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
+import { KeysExplorer } from "../editor/KeysExplorer";
 import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
 import { DiffView } from "../monaco";
 import { WorkspacePicker } from "../editor/workspace";
@@ -202,7 +203,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
       {data && (
         <>
           <Baseline sid={sid} testdef={testdef} config={config} datasets={data.baseline} onChanged={load} edit={edit} />
-          <LogicalConfig data={data} edit={edit} />
+          <LogicalConfig data={data} edit={edit} sid={sid} config={config} />
           <PipelineGraph sid={sid} testdef={testdef} config={config} edit={edit} />
           <Criteria sid={sid} testdef={testdef} />
           <Inputs data={data} edit={edit} />
@@ -287,8 +288,9 @@ function PipelineGraph({ sid, testdef, config, edit }: { sid: string; testdef: s
   );
 }
 
-function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void }) {
+function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: string) => void; sid: string; config: string | null }) {
   const td = data.testdef;
+  const [keysOf, setKeysOf] = useState<string | null>(null);
   return (
     <Section title={<>Logical configuration <span className="muted small">{td.setup_config} of {data.setup?.name || data.setup?.id}</span></>}
       actions={<FileLink path={td.setup_file} edit={edit} />}>
@@ -296,7 +298,7 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
         <p className="small">Stage slots: {Object.entries(data.stage_slots).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Needs</th></tr></thead>
+        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Needs</th><th /></tr></thead>
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>
@@ -306,10 +308,13 @@ function LogicalConfig({ data, edit }: { data: any; edit: (f: string) => void })
               <td>{c.configuration}</td>
               <td>{c.stage_slot || <span className="muted small">ad hoc</span>}</td>
               <td>{c.needs.join(", ")}</td>
+              <td><button className="small" onClick={() => setKeysOf(c.id)}
+                title="Browse the keys its commands and its template files can use, with the lab component it would be bound to now">Keys…</button></td>
             </tr>
           ))}
         </tbody>
       </table>
+      {keysOf && <KeysExplorer sid={sid} testdef={td.path} config={config} slot={keysOf} onClose={() => setKeysOf(null)} />}
     </Section>
   );
 }

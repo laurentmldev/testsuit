@@ -826,3 +826,11 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .webui-nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .workspace-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 8px; padding: 6px 10px;
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; background: var(--panel); }
+.keys-explorer .row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.keys-explorer input[type="search"] { flex: 1; }
+.key-tree { list-style: none; margin: 0; padding-left: 16px; }
+.key-tree.root { padding-left: 0; max-height: 60vh; overflow: auto; }
+.key-tree li { line-height: 1.6; }
+.key-tree .key-copy { margin-left: 6px; opacity: 0.4; }
+.key-tree li:hover > .key-copy { opacity: 1; }
+.key-tree .key-value { word-break: break-all; }

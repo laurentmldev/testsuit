@@ -287,6 +287,15 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
                     "dictionary nor run-time key defines"], keys
     testdef["pipeline"]["phases"][0]["steps"] = testdef["pipeline"]["phases"][0]["steps"][:1]
     editor.write(session, "testdef/count/testdef.yml", data=testdef)
+
+    # the keys explorer of a slot: at generation, and in its commands on the lab component it would be bound to
+    explored = editor.slot_keys(session, "testdef/count/testdef.yml", "dut")
+    assert explored["generation"]["min_count"] == 3 and explored["generation"]["slot"]["id"] == "dut"
+    assert explored["component"] and explored["run"]["component"]["id"] == explored["component"]
+    assert explored["run"]["slot"]["component"] == explored["component"] and "min_count" not in explored["run"]
+    assert "lab" in explored["run"] and "succeeded('<step>')" in explored["run_functions"]
+    with pytest.raises(SequencerError, match="no slot 'nowhere'"):
+        editor.slot_keys(session, "testdef/count/testdef.yml", "nowhere")
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
     assert "dut" in {c["id"] for c in found["slots"]}
     assert any(i["files"] for c in found["slots"] for i in c["inputs"])
