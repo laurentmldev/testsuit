@@ -713,6 +713,27 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .console-out.tone-bad, .console-note.tone-bad { color: var(--bad); }
 .console-out.tone-warn, .console-note.tone-warn { color: var(--warn); }
 .console-out.tone-ok, .console-note.tone-ok { color: var(--ok); }
+/* ANSI colors of command output (ESC[3xm, ESC[9xm): readable on the log background, in both themes */
+.ansi-fg-0 { color: var(--ansi-0); } .ansi-bg-0 { background: var(--ansi-0); color: var(--code); }
+.ansi-fg-1 { color: var(--ansi-1); } .ansi-bg-1 { background: var(--ansi-1); color: var(--code); }
+.ansi-fg-2 { color: var(--ansi-2); } .ansi-bg-2 { background: var(--ansi-2); color: var(--code); }
+.ansi-fg-3 { color: var(--ansi-3); } .ansi-bg-3 { background: var(--ansi-3); color: var(--code); }
+.ansi-fg-4 { color: var(--ansi-4); } .ansi-bg-4 { background: var(--ansi-4); color: var(--code); }
+.ansi-fg-5 { color: var(--ansi-5); } .ansi-bg-5 { background: var(--ansi-5); color: var(--code); }
+.ansi-fg-6 { color: var(--ansi-6); } .ansi-bg-6 { background: var(--ansi-6); color: var(--code); }
+.ansi-fg-7 { color: var(--ansi-7); } .ansi-bg-7 { background: var(--ansi-7); color: var(--code); }
+.ansi-fg-8 { color: var(--ansi-8); } .ansi-bg-8 { background: var(--ansi-8); color: var(--code); }
+.ansi-fg-9 { color: var(--ansi-9); } .ansi-bg-9 { background: var(--ansi-9); color: var(--code); }
+.ansi-fg-10 { color: var(--ansi-10); } .ansi-bg-10 { background: var(--ansi-10); color: var(--code); }
+.ansi-fg-11 { color: var(--ansi-11); } .ansi-bg-11 { background: var(--ansi-11); color: var(--code); }
+.ansi-fg-12 { color: var(--ansi-12); } .ansi-bg-12 { background: var(--ansi-12); color: var(--code); }
+.ansi-fg-13 { color: var(--ansi-13); } .ansi-bg-13 { background: var(--ansi-13); color: var(--code); }
+.ansi-fg-14 { color: var(--ansi-14); } .ansi-bg-14 { background: var(--ansi-14); color: var(--code); }
+.ansi-fg-15 { color: var(--ansi-15); } .ansi-bg-15 { background: var(--ansi-15); color: var(--code); }
+.ansi-fg-bg { color: var(--code); } .ansi-bg-fg { background: var(--text); }
+:root { --ansi-0: #1e1e1e; --ansi-1: #c8372d; --ansi-2: #1f8a4c; --ansi-3: #a86400; --ansi-4: #2f6fde; --ansi-5: #a33ea1; --ansi-6: #127f8c; --ansi-7: #6b6b6b; --ansi-8: #7a7a7a; --ansi-9: #e0443a; --ansi-10: #2aa45e; --ansi-11: #c27d00; --ansi-12: #4a86f0; --ansi-13: #c050bd; --ansi-14: #1898a8; --ansi-15: #3a3a3a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ansi-0: #8a8a8a; --ansi-1: #f0776d; --ansi-2: #4cc27f; --ansi-3: #e3a64a; --ansi-4: #6c9ef5; --ansi-5: #d78bd5; --ansi-6: #4fc4d2; --ansi-7: #d0d0d0; --ansi-8: #a0a0a0; --ansi-9: #ff8f86; --ansi-10: #6fdb9c; --ansi-11: #f5c26b; --ansi-12: #93b8ff; --ansi-13: #eaa6e8; --ansi-14: #7ee0ea; --ansi-15: #ffffff; } }
+:root[data-theme="dark"] { --ansi-0: #8a8a8a; --ansi-1: #f0776d; --ansi-2: #4cc27f; --ansi-3: #e3a64a; --ansi-4: #6c9ef5; --ansi-5: #d78bd5; --ansi-6: #4fc4d2; --ansi-7: #d0d0d0; --ansi-8: #a0a0a0; --ansi-9: #ff8f86; --ansi-10: #6fdb9c; --ansi-11: #f5c26b; --ansi-12: #93b8ff; --ansi-13: #eaa6e8; --ansi-14: #7ee0ea; --ansi-15: #ffffff; }
 .console-comment { color: var(--ok); font-style: italic; margin-top: 2px; }
 
 /* a button opening a short list of actions */

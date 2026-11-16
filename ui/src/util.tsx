@@ -12,7 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Small helpers: hash routing, formatting, light Markdown for help texts, notifications.
-import { Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CSSProperties, Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // ── routing (#/page/arg?key=value) ─────────────────────────────────────
 
@@ -353,16 +353,112 @@ export function lineTone(line: string): string {
   return LINE_BAD.test(line) ? "bad" : LINE_WARN.test(line) ? "warn" : LINE_OK.test(line) ? "ok" : "";
 }
 
+/** ANSI escape sequences in a command's output: the colors and styles (SGR, "ESC[0;32m") are shown, the other
+ *  control sequences (cursor moves, line erasing) are dropped. */
+const ANSI = /\x1b\[([0-9;:?]*)([A-Za-z])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>]/g;
+const ANSI_TEST = /\x1b/;
+
+/** The style of ANSI-colored text: foreground and background (a class "0".."15", or a CSS color), weight... */
+interface AnsiStyle { fg?: string; bg?: string; bold?: boolean; dim?: boolean; italic?: boolean; underline?: boolean; inverse?: boolean }
+
+/** A color of the 256-color palette, as CSS (16 to 255; 0 to 15 are classes, themed). */
+function ansi256(n: number): string {
+  if (n < 232) {
+    const c = n - 16, v = [0, 95, 135, 175, 215, 255];
+    return `rgb(${v[Math.floor(c / 36)]},${v[Math.floor(c / 6) % 6]},${v[c % 6]})`;
+  }
+  const g = 8 + (n - 232) * 10;
+  return `rgb(${g},${g},${g})`;
+}
+
+/** The style after an SGR sequence's parameters ("0;32", "38;5;208", "1"...). */
+function applySgr(style: AnsiStyle, params: string): AnsiStyle {
+  const codes = params === "" ? [0] : params.split(/[;:]/).map((p) => (p === "" ? 0 : Number(p)));
+  let st = { ...style };
+  for (let i = 0; i < codes.length; i++) {
+    const c = codes[i];
+    if (c === 0) st = {};
+    else if (c === 1) st.bold = true;
+    else if (c === 2) st.dim = true;
+    else if (c === 3) st.italic = true;
+    else if (c === 4) st.underline = true;
+    else if (c === 7) st.inverse = true;
+    else if (c === 22) { st.bold = false; st.dim = false; }
+    else if (c === 23) st.italic = false;
+    else if (c === 24) st.underline = false;
+    else if (c === 27) st.inverse = false;
+    else if (c >= 30 && c <= 37) st.fg = String(c - 30);
+    else if (c >= 90 && c <= 97) st.fg = String(c - 90 + 8);
+    else if (c === 39) st.fg = undefined;
+    else if (c >= 40 && c <= 47) st.bg = String(c - 40);
+    else if (c >= 100 && c <= 107) st.bg = String(c - 100 + 8);
+    else if (c === 49) st.bg = undefined;
+    else if (c === 38 || c === 48) {                     // 38;5;n or 38;2;r;g;b
+      let color: string | undefined;
+      if (codes[i + 1] === 5 && i + 2 < codes.length) {
+        const n = codes[i + 2];
+        color = n < 16 ? String(n) : ansi256(n);
+        i += 2;
+      } else if (codes[i + 1] === 2 && i + 4 < codes.length) {
+        color = `rgb(${codes[i + 2]},${codes[i + 3]},${codes[i + 4]})`;
+        i += 4;
+      }
+      if (c === 38) st.fg = color; else st.bg = color;
+    }
+  }
+  return st;
+}
+
+/** The pieces of a line, each with the ANSI style it has, from the style the line starts with; and the style
+ *  it ends with (it goes on to the next line, as in a terminal). */
+function ansiPieces(line: string, start: AnsiStyle): { pieces: { text: string; style: AnsiStyle }[]; end: AnsiStyle } {
+  const pieces: { text: string; style: AnsiStyle }[] = [];
+  let style = start, last = 0;
+  for (const m of line.matchAll(ANSI)) {
+    if (m.index! > last) pieces.push({ text: line.slice(last, m.index), style });
+    if (m[2] === "m") style = applySgr(style, m[1] ?? "");
+    last = m.index! + m[0].length;
+  }
+  if (last < line.length) pieces.push({ text: line.slice(last), style });
+  return { pieces, end: style };
+}
+
+function AnsiSpan({ text, style }: { text: string; style: AnsiStyle }) {
+  let { fg, bg } = style;
+  if (style.inverse) [fg, bg] = [bg ?? "bg", fg ?? "fg"];
+  const isClass = (c?: string) => c !== undefined && /^(\d+|fg|bg)$/.test(c);
+  const css: CSSProperties = {};
+  if (fg && !isClass(fg)) css.color = fg;
+  if (bg && !isClass(bg)) css.background = bg;
+  if (style.bold) css.fontWeight = 700;
+  if (style.dim) css.opacity = 0.7;
+  if (style.italic) css.fontStyle = "italic";
+  if (style.underline) css.textDecoration = "underline";
+  const cls = classes(isClass(fg) && `ansi-fg-${fg}`, isClass(bg) && `ansi-bg-${bg}`);
+  return cls || Object.keys(css).length ? <span className={cls || undefined} style={css}>{text}</span> : <>{text}</>;
+}
+
 /** The output of a command as a console: each line it ran, shown as a prompt, then what that line printed; its
- *  comments where they are. The lines it printed are colored by their words (error, warning, success), and a
- *  Python traceback in red as a whole, down to its exception line. */
+ *  comments where they are. The lines it printed keep their ANSI colors (ESC[0;32m...); a line without any is
+ *  colored by its words (error, warning, success), and a Python traceback in red as a whole, down to its
+ *  exception line. */
 export function ConsoleText({ text }: { text: string }) {
   const lines = text.split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
   let traceback = false;
+  let style: AnsiStyle = {};
   return (
     <>
-      {lines.map((line, i) => {
+      {lines.map((raw, i) => {
+        const colored = ANSI_TEST.test(raw) || Object.keys(style).length > 0;
+        let content: ReactNode = null;
+        let line = raw.replace(/\r$/, "");
+        if (colored) {
+          const { pieces, end } = ansiPieces(line.slice(line.lastIndexOf("\r") + 1), style);   // a \r rewrites the line
+          style = end;
+          line = pieces.map((p) => p.text).join("");
+          content = pieces.map((p, j) => <AnsiSpan key={j} text={p.text} style={p.style} />);
+        } else line = line.slice(line.lastIndexOf("\r") + 1);
         if (TRACED.test(line)) {
           traceback = false;
           const ran = line.replace(TRACED, "");
@@ -370,15 +466,15 @@ export function ConsoleText({ text }: { text: string }) {
             ? <div key={i} className="console-comment">{commentOf(ran)}</div>
             : <div key={i} className="console-cmd"><span className="console-prompt">$ </span>{ran}</div>;
         }
-        let tone = lineTone(line);
+        let tone = colored ? "" : lineTone(line);        // colors given by the command win over its words
         if (/^Traceback \(most recent call last\)/.test(line)) traceback = true;
         else if (traceback) {
-          tone = "bad";
+          if (!colored) tone = "bad";
           if (!TRACEBACK_GOES_ON.test(line)) traceback = false;      // the exception line ends it
         }
         return NOTE.test(line)
-          ? <div key={i} className={classes("console-note", tone && `tone-${tone}`)}>{line}</div>
-          : <div key={i} className={classes("console-out", tone && `tone-${tone}`)}>{line || " "}</div>;
+          ? <div key={i} className={classes("console-note", tone && `tone-${tone}`)}>{content ?? line}</div>
+          : <div key={i} className={classes("console-out", tone && `tone-${tone}`)}>{content ?? (line || " ")}</div>;
       })}
     </>
   );
