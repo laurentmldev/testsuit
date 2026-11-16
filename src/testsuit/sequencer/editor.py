@@ -136,6 +136,8 @@ RUN_KEY_NAMES = {"run", "phase", "slots", "stage_slots", "params", "succeeded", 
                  "lab", "stage", "slot", "component", "remote_root", "via"}
 
 
+USER_KEY = "<user key>"                            # the origin of the placeholder of a key given at each generation
+
 # where the keys of a run come from (the explorer), by name
 RUN_KEY_ORIGINS = {"run": "the run", "phase": "the run (its phase)", "params": "the sub-pipeline (its parameters)",
                    "slot": "the setup, and the lab component the run binds to the slot",
@@ -1431,7 +1433,8 @@ class Editor:
             path = Path(origin)
             if origin.startswith("/") and path.resolve().is_relative_to(session.root.resolve()):
                 return self.rel(session, path)
-            return {"<datapack>": "built in", "<dataset placeholder>": "the baseline (a dataset)"}.get(origin, origin)
+            return {"<datapack>": "built in", "<dataset placeholder>": "the baseline (a dataset)",
+                    USER_KEY: "given at each generation (user_keys of the test definition)"}.get(origin, origin)
         layers: list[tuple[dict, str]] = []                # as builder.keys() merges them, lowest precedence first
         for layer in ("setup", "datasets", "testdef"):
             if layer == "datasets":
@@ -1693,10 +1696,13 @@ class Editor:
                                 what = (f"command '{step.do}' of slot '{target}' ({entry['concrete']})" if step.action == "do"
                                         else f"its '{step.action}'" + (f" on slot '{target}'" if target else ""))
                                 for name in _missing_keys({"spec": spec, "env": step.env, "timeout": step.timeout}, keys):
-                                    if name.split(".")[0] not in RUN_KEY_NAMES and name not in missing_keys:
+                                    settable = name.split(".")[0] not in RUN_KEY_NAMES
+                                    if settable and name not in missing_keys:
                                         missing_keys.append(name)
                                     message = (f"phase '{flat.phase.id}', step '{fs.id}': {what} reads '{name}', which no "
-                                               f"dictionary nor run-time key defines")
+                                               f"dictionary nor run-time key defines" + (
+                                                   ": define it in a dictionary, set it by hand when generating, or "
+                                                   "declare it in the user_keys of the test definition" if settable else ""))
                                     if message not in key_problems:
                                         key_problems.append(message)
                         expanded.append(entry)
@@ -1786,6 +1792,8 @@ class Editor:
         with self._quiet():
             builder = _Builder(self.path(session, testdef_rel), nocheck=True, setup_config=setup_config)
             testdef = builder.load_testdef()
+            for name in testdef.user_keys:           # given at each generation: placeholders until then
+                builder.dataset_keys.append(({name: f"<{name}: given at generation>"}, USER_KEY))
             setup_dir = builder.setup_file.parent
             if not builder.setup_file.is_file():
                 raise SequencerError(f"setup file not reachable: '{self.rel(session, builder.setup_file)}'")
@@ -1817,7 +1825,7 @@ class Editor:
         """Every key a template of this test definition can use, with its value and the file it comes from."""
         from testsuit.datatools.datapack.templating import TemplateError
         try:
-            builder, _, _ = self._builder(session, testdef_rel, setup_config)
+            builder, testdef, _ = self._builder(session, testdef_rel, setup_config)
             keys = builder.keys()
             try:
                 values = keys.resolve_all()
@@ -1834,6 +1842,7 @@ class Editor:
             text = value if isinstance(value, str) else json.dumps(value, default=str)
             rows.append({"key": name, "value": text[:200], "origin": origin})
         return {"keys": rows, "error": error, "runtime": RUNTIME_KEYS,
+                "user_keys": {name: spec.model_dump() for name, spec in testdef.user_keys.items()},
                 "datapack": {"slot.id": "id of the slot being generated (also slot.name, slot.type, slot.configuration)",
                              "slot.input_dir": "its input folder in the datapack",
                              "slots.<id>.input_dir": "input folder of a slot it needs",

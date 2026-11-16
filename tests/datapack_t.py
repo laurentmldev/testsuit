@@ -401,3 +401,22 @@ def test_purge_after_days_validated():
     assert DataRepository(id="r", path="p", purge_after_days="0").purge_after_days == 0   # rendered from a key
     with pytest.raises(ValidationError):
         DataRepository(id="r", path="p", purge_after_days=-1)
+
+
+def test_user_keys(tmp_path, no_git):
+    """the keys a test definition asks at each generation: required, and one of their choices when listed"""
+    raw = yaml.safe_load(TESTDEF.read_text())
+    raw["user_keys"] = {"operator.name": {"description": "who runs it"}, "bench_mode": {"choices": ["fast", "full"]}}
+    asking = TESTDEF.parent / "asking_testdef.yml"
+    asking.write_text(yaml.safe_dump(raw))
+    try:
+        with pytest.raises(DatapackError, match=r"key 'operator.name' is to be given at each generation .*who runs it") as e:
+            datapack(asking, nocheck=True, output_dir=tmp_path)
+        assert "--set bench_mode=<value>, one of fast, full" in str(e.value)
+        with pytest.raises(DatapackError, match="'slow' is not one of its choices"):
+            datapack(asking, nocheck=True, output_dir=tmp_path, manual_keys={"operator.name": "Ada", "bench_mode": "slow"})
+        datapack(asking, nocheck=True, output_dir=tmp_path, manual_keys={"operator.name": "Ada", "bench_mode": "full"})
+        context = yaml.safe_load((TESTDEF.parent / ".current_datapack" / "context.yml").read_text())
+        assert context["operator"] == {"name": "Ada"} and context["bench_mode"] == "full"
+    finally:
+        asking.unlink()

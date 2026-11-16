@@ -834,3 +834,5 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .key-tree .key-copy { margin-left: 6px; opacity: 0.4; }
 .key-tree li:hover > .key-copy { opacity: 1; }
 .key-tree .key-value { word-break: break-all; }
+.user-keys { display: flex; flex-direction: column; gap: 6px; }
+.user-key { display: grid; grid-template-columns: minmax(120px, auto) minmax(160px, 260px) 1fr auto; gap: 8px; align-items: center; }

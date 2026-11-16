@@ -107,6 +107,12 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class UserKey(_Model):
+    """A key the user gives at each generation (``--set name=value``): free text, or one of ``choices``."""
+    description: str = ""
+    choices: list[Any] | None = None
+
+
 class Testdef(_Model):
     __test__ = False  # not a pytest test class
 
@@ -116,6 +122,7 @@ class Testdef(_Model):
     setup_file: str
     setup_config: str
     dictionaries: list[str] = Field(default_factory=list)
+    user_keys: dict[str, UserKey] = Field(default_factory=dict)   # keys given at each generation, by dotted name
     pipeline: Any = None
 
 

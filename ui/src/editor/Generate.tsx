@@ -34,6 +34,8 @@ export function GenerateDialog({ onClose }: { onClose: () => void }) {
 }
 
 const GENERATE_KEYS = "tsq.generateKeys";
+const USER_KEYS = "tsq.userKeys";                       // the values given to the user_keys of each test definition
+const USER_KEY_ORIGIN = "<user key>";                   // the placeholder of such a key, before it is given
 
 /** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
 export function GenerateDatapack({ sid, workspace, repository, testdef: initial, config: initialConfig, onClose }: {
@@ -65,21 +67,51 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
     rememberKeys(GENERATE_KEYS, memory, next);
   };
   const [defined, setDefined] = useState<any[] | null>(null);
+  // the keys the test definition asks at each generation (user_keys), and the values given, remembered per test definition
+  const [userKeys, setUserKeys] = useState<Record<string, { description?: string; choices?: any[] | null }>>({});
+  const [given, setGiven] = useState<Record<string, string>>({});
+  useEffect(() => setGiven(Object.fromEntries(rememberedKeys(USER_KEYS, memory).map((r) => [r.key, r.value]))), [memory]);
+  const give = (name: string, value: string) => {
+    const next = { ...given, [name]: value };
+    setGiven(next);
+    rememberKeys(USER_KEYS, memory, Object.entries(next).map(([key, v]) => ({ key, value: v })));
+  };
   useEffect(() => {
     if (!testdef) return;
     let current = true;
     setDefined(null);
-    post(`edit/sessions/${sid}/keys`, { testdef, setup_config: config }).then((r) => current && setDefined(r.keys || [])).catch(() => current && setDefined([]));
+    post(`edit/sessions/${sid}/keys`, { testdef, setup_config: config }).then((r) => {
+      if (!current) return;
+      setDefined((r.keys || []).filter((k: any) => k.origin !== USER_KEY_ORIGIN));
+      setUserKeys(r.user_keys || {});
+    }).catch(() => current && setDefined([]));
     return () => { current = false; };
   }, [sid, testdef, config]);
   const keyStatus = defined ? statusAmong(defined, (origin) => origin === "<datapack>") : () => undefined;
-  const manual = handKeys(rows);
-  const overridden = Object.keys(manual || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked);
-  const blockedKeys = Object.keys(manual || {}).filter((k) => keyStatus(k)?.blocked);
+  const ungiven = Object.keys(userKeys).filter((k) => !String(given[k] ?? "").trim());
+  // a row with no value yet (a key proposed as undefined) is not set
+  const byHand = handKeys(rows.filter((r) => r.value !== ""));
+  const manual = Object.keys(userKeys).length
+    ? { ...(byHand || {}), ...Object.fromEntries(Object.keys(userKeys).filter((k) => given[k] !== undefined && given[k] !== "").map((k) => [k, given[k]])) }
+    : byHand;
+  const overridden = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked);
+  const blockedKeys = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.blocked);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [failed, setFailed] = useState("");            // the error of the last failed generation: its undefined keys are proposed
   const [commandKeys, setCommandKeys] = useState<string[]>([]);   // the undefined keys the commands of the steps read: proposed too
+  useEffect(() => {                                     // known before generating: their rows are there from the start
+    if (!testdef) return;
+    let current = true;
+    setCommandKeys([]);
+    post(`edit/sessions/${sid}/run_problems`, { testdef, setup_config: config }).then((r) => current && setCommandKeys(r.missing_keys || [])).catch(() => {});
+    return () => { current = false; };
+  }, [sid, testdef, config]);
+  const missingKeys = [...new Set([...undefinedIn(failed), ...commandKeys])].filter((k) => !(k in userKeys));
+  useEffect(() => {                                     // a row for each undefined key, to fill in (not remembered empty)
+    const absent = missingKeys.filter((k) => !rows.some((r) => r.key.trim() === k));
+    if (absent.length) setRecalled((r) => ({ ...r, rows: [...r.rows.filter((x) => x.key.trim() || x.value), ...absent.map((key) => ({ key, value: "" }))] }));
+  }, [missingKeys.join(" ")]);
   const [priority, setPriority] = useState("");
   const [posted, setPosted] = useState<any>(null);
 
@@ -216,7 +248,8 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   ) : (
     <>
       {busy && <button onClick={stop} disabled={!job || stopping} title="Stop the generation: at its next line of output; a command it runs is killed">{stopping ? "Stopping…" : "Stop"}</button>}
-      <button className="primary" disabled={!testdef || busy || checking || blockedKeys.length > 0} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
+      <button className="primary" disabled={!testdef || busy || checking || blockedKeys.length > 0 || ungiven.length > 0}
+        title={ungiven.length ? `Give ${ungiven.join(", ")} first` : undefined} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
     </>
   );
   return (
@@ -251,14 +284,34 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
               <Choices value={config} onChange={setConfig} allowNone={`its own (${td?.setup_config})`} choices={configs.filter((c) => c !== td?.setup_config).map((c) => ({ value: c }))} />
             </Field>
           )}
+          {Object.keys(userKeys).length > 0 && (
+            <Field label="Keys to give" help="Keys this test definition asks at each generation (its `user_keys`): no dictionary defines them. The values are remembered in this browser for the test definition.">
+              <div className="user-keys">
+                {Object.entries(userKeys).map(([name, spec]) => (
+                  <div key={name} className="user-key">
+                    <code>{name}</code>
+                    {spec.choices?.length
+                      ? <select value={given[name] ?? ""} onChange={(e) => give(name, e.target.value)}>
+                          <option value="">choose…</option>
+                          {spec.choices.map((c) => <option key={String(c)} value={String(c)}>{String(c)}</option>)}
+                        </select>
+                      : <input className="mono" value={given[name] ?? ""} placeholder="value" onChange={(e) => give(name, e.target.value)} />}
+                    {spec.description && <span className="muted small">{spec.description}</span>}
+                    {!String(given[name] ?? "").trim() && <span className="warn-text small">to give</span>}
+                  </div>
+                ))}
+              </div>
+            </Field>
+          )}
           <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
           <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text. The keys set here are remembered in this browser for each test definition (one with none remembered starts from those last set for another): check them before generating.">
             {recalled.from && rows.length > 0 && <div className="muted small">None remembered for this test definition: these are the keys last set for <code>{recalled.from}</code>.</div>}
-            <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={[...new Set([...undefinedIn(failed), ...commandKeys])]}
+            <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={missingKeys}
               known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
-              setNote="the datapack stays conform." overrideNote="the datapack will be non-conform." />
+              setNote="the datapack stays conform." overrideNote="the datapack will be non-conform."
+              emptyNote="read and not defined: give it a value (not set until then)" />
             {overridden.length > 0 && <div className="banner warn">Overriding {overridden.length === 1 ? "a defined key" : `${overridden.length} defined keys`} makes this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</div>}
           </Field>
         </>

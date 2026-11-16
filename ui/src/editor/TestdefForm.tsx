@@ -93,9 +93,48 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         <Field label="Dictionaries" help={help("dictionaries")}><Tags value={data.dictionaries} onChange={(v) => set("dictionaries", v)} choices={dictChoices}
           onOpen={setDictionary} openTitle="View or edit this key file" /></Field>
       </Section>
+      <Section title="Keys given at each generation" collapsed={!Object.keys(data.user_keys || {}).length}
+        help="Keys the user gives each time a datapack is generated (`datapack --set name=value`, or the Generate form, where each has its field): free text, or one of a list of choices. No dictionary defines them; the generation refuses to start without them.">
+        <UserKeys value={data.user_keys || {}} onChange={(v) => set("user_keys", Object.keys(v).length ? v : undefined)} />
+      </Section>
       <Section title="Pipeline">
         <Markdown text={`${(data.pipeline?.phases || []).length} phase(s): ${(data.pipeline?.phases || []).map((p: any) => `\`${p.id}\``).join(", ") || "none yet"}. Open the **Pipeline** view above to edit it as a graph.`} />
       </Section>
+    </div>
+  );
+}
+
+function UserKeys({ value, onChange }: { value: Record<string, any>; onChange: (v: Record<string, any>) => void }) {
+  const entries = Object.entries<any>(value);
+  const [name, setName] = useState("");
+  const update = (key: string, patch: any) => {
+    const spec = { ...(value[key] || {}), ...patch };
+    for (const k of Object.keys(spec)) if (spec[k] === undefined || spec[k] === "" || (Array.isArray(spec[k]) && !spec[k].length)) delete spec[k];
+    onChange({ ...value, [key]: spec });
+  };
+  const bad = name && !/^[A-Za-z_]\w*(\.\w+)*$/.test(name) ? "not a key name (name, or name.sub)" : name in value ? "already declared" : null;
+  return (
+    <div className="user-keys">
+      {entries.length > 0 && (
+        <table className="grid compact">
+          <thead><tr><th>Key</th><th>Description</th><th>Choices (none: free text)</th><th /></tr></thead>
+          <tbody>
+            {entries.map(([key, spec]) => (
+              <tr key={key}>
+                <td><code>{key}</code></td>
+                <td><Text value={spec?.description} onChange={(v) => update(key, { description: v })} /></td>
+                <td><Tags value={(spec?.choices || []).map(String)} onChange={(v) => update(key, { choices: v })} /></td>
+                <td><button className="icon" title="Remove" onClick={() => onChange(Object.fromEntries(entries.filter(([k]) => k !== key)))}>×</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row">
+        <input className="mono" placeholder="key (name.sub)" value={name} onChange={(e) => setName(e.target.value.trim())} />
+        <button className="small" disabled={!name || !!bad} onClick={() => { onChange({ ...value, [name]: {} }); setName(""); }}>Declare</button>
+        {bad && <span className="bad-text small">{bad}</span>}
+      </div>
     </div>
   );
 }

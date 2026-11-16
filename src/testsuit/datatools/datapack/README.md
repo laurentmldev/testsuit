@@ -138,6 +138,16 @@ What a key set by hand does depends on whether a dictionary or a dataset already
 
 Both are recorded in `datapack.yml` and in `baseline.yml`, under `keys_set_by_hand`: the key, its value, whether it overrides, and for an override the value it replaced and the dictionary it came from. A built-in key cannot be set by hand.
 
+**Keys given at each generation.** A test definition can declare keys that the user gives each time, instead of a dictionary: `user_keys`, by dotted name, each with a `description` and, optionally, the `choices` it can take (otherwise free text):
+
+```yaml
+user_keys:
+  operator.name: {description: who runs the test}
+  bench_mode: {description: how long the scenario runs, choices: [fast, full]}
+```
+
+The generation refuses to start until each is given (`--set operator.name="J. Doe" --set bench_mode=full`), and a value outside its `choices` is refused. They are set by hand like any other key (recorded under `keys_set_by_hand`; the datapack stays conform, since no dictionary defines them). The Editor's Generate form has a field for each (a list to pick from for `choices`), and its checks count them as defined.
+
 ### Inputs
 
 Each input of a slot type puts `source` at `target` in the slot's input folder:
