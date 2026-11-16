@@ -18,6 +18,50 @@ import { Combo, type Choice } from "./fields";
 import { classes } from "./util";
 
 export interface HandKey { key: string; value: string }
+
+/** The keys last set by hand somewhere (store: the kind of dialog; id: what they were set for), as kept in this
+ * browser: none when the browser keeps nothing (private window...). */
+export function rememberedKeys(store: string, id: string): HandKey[] {
+  return rowsOf(readStore(store)[id]);
+}
+
+/** The keys set by hand the most recently for another id starting with prefix: what a new one can start from. */
+export function latestRememberedKeys(store: string, prefix: string, except: string): { id: string; rows: HandKey[] } | null {
+  const all = readStore(store);
+  const ids = Object.keys(all).filter((k) => k !== except && k.startsWith(prefix) && rowsOf(all[k]).length);
+  if (!ids.length) return null;
+  const id = ids.reduce((a, b) => ((all[b]?.at || 0) > (all[a]?.at || 0) ? b : a));
+  return { id, rows: rowsOf(all[id]) };
+}
+
+/** Keep the keys set by hand for next time, in this browser (rows with neither key nor value are left out). */
+export function rememberKeys(store: string, id: string, rows: HandKey[]): void {
+  try {
+    const all = readStore(store);
+    const kept = rows.filter((r) => r.key.trim() || r.value);
+    if (kept.length) all[id] = { rows: kept, at: Date.now() };
+    else delete all[id];
+    window.localStorage.setItem(store, JSON.stringify(all));
+  } catch {
+    // no storage: nothing remembered
+  }
+}
+
+function readStore(store: string): Record<string, any> {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(store) || "{}");
+    return all && typeof all === "object" ? all : {};
+  } catch {
+    return {};
+  }
+}
+
+// an entry: {rows, at}, or the rows alone (as first kept)
+function rowsOf(entry: any): HandKey[] {
+  const rows = Array.isArray(entry) ? entry : entry?.rows;
+  return Array.isArray(rows) ? rows.filter((r: any) => r && typeof r.key === "string").map((r: any) => ({ key: r.key, value: String(r.value ?? "") })) : [];
+}
+
 /** What a key set by hand does: it overrides a defined key (was, origin), or cannot be set (blocked: why). */
 export interface HandKeyStatus { overrides: boolean; was?: string; origin?: string; blocked?: string }
 
