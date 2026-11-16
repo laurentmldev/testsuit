@@ -2091,3 +2091,65 @@ def test_manual_command_via_unreachable(tmp_path, no_git):
     assert "built for device0.invalid in " in build["output"] and build["via"] == "seq_host"
     assert "device0.invalid" in build["warning"]
     assert out["version"]["ok"] is False and "cannot reach device0.invalid" in out["version"]["error"]
+
+
+def test_stage_bound_with_components_out_of_service(bench):
+    """A component of a stage in maintenance, held, broken or offline does not keep the stage from a run, when
+    the slots can be given to the others: it is left out (not locked, given to no slot)."""
+    from testsuit.sequencer.lab import load_lab
+    from testsuit.sequencer.model import Phase, needs_from_setup
+    from testsuit.sequencer.scheduler import Availability, Binding, find_binding, stage_problem
+
+    lab_folder = Path(bench.config.lab.folder)
+    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"] = {
+        "counter_0": {"tsq_extends": "counter_host", "tsq_role": "dut"},
+        "counter_1": {"tsq_extends": "counter_host", "tsq_role": "dut"}}
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+    lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    setup = copy.deepcopy(SETUP)
+    config = setup["configurations"]["bench"]
+    config["slots"] = {"a": {"type": "dut_app", "configuration": "standard", "stage_slot": "bench", "role": "dut"}}
+    needs = needs_from_setup(setup, "bench")
+    phases = [Phase(id="p", stage_slots=["bench"])]
+
+    def bind(avail):
+        binding, why = find_binding(lab, needs, phases, avail, "run")
+        return binding or why
+
+    binding = bind(Availability(maintenance={("component", "counter_0")}))
+    assert binding.stage_slots == {"bench": "bench_1"} and binding.slots == {"a": "counter_1"}
+    assert binding.left_out == ["counter_0"]
+    locks = {(k, r) for k, r, _ in binding.locks(lab)}
+    assert ("component", "counter_1") in locks and ("component", "counter_0") not in locks
+    assert Binding.from_dict(binding.as_dict()) == binding
+    # broken or offline: the same
+    assert bind(Availability(states={"counter_1": "broken"})).left_out == ["counter_1"]
+    # both out of service: bench_1 cannot take the slot, bench_2 does
+    avail = Availability(maintenance={("component", "counter_0")}, states={"counter_1": "offline"})
+    assert "counter_0 in maintenance" in stage_problem(lab, needs, "bench", lab.inventory.stages["bench_1"], avail, "run")
+    binding = bind(avail)
+    assert binding.stage_slots == {"bench": "bench_2"} and binding.left_out == []
+    # a stage in maintenance (or held) as a whole still cannot be bound
+    assert "bench_1 in maintenance or held" in bind(Availability(maintenance={("stage", "bench_1"), ("stage", "bench_2")}))
+
+
+def test_run_on_a_stage_with_a_component_in_maintenance(bench):
+    """A run takes a stage one of whose components (not needed by its slots) is in maintenance: that one is left
+    out, and stays free for its maintenance."""
+    inventory = yaml.safe_load(bench.config.inventory_file.read_text())
+    hosts = inventory["all"]["children"]["bench_1"]["hosts"]
+    hosts["spare"] = {**hosts["counter_1"]}
+    write(bench.config.inventory_file, yaml.safe_dump(inventory))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.set_flag("bench_2", "maintenance", True)
+        seq.set_flag("spare", "maintenance", True)
+        run = seq.submit(bench.build())
+        [done] = await run_until_done(seq, [run["id"]])
+        await seq.close()
+        return done
+    done = asyncio.run(main())
+    assert done["verdict"] == "succeeded", done
+    assert done["binding"]["stage_slots"]["bench"] == "bench_1" and done["binding"]["left_out"] == ["spare"]

@@ -89,7 +89,7 @@ The sequencer reuses the testsuit `datapack` tool (YAML dictionaries, Jinja2 tem
 | SQ-8 | A single datapack can lock several stages and ad hoc components. | 8.1, 9 |
 | SQ-9 | Components can be of any type (computer, switch, clock...): mainly Linux based, no Windows. | 7, 12 |
 | SQ-10 | The state of each component is monitored (for example idle, configured, running, broken), and broken components are not used. | 7.5 |
-| SQ-23 | A stage or a component can be declared temporarily disabled, for example for maintenance: no new datapack is activated on it until it is enabled again. | 7.5, 9, 13 |
+| SQ-23 | A stage or a component can be declared temporarily disabled, for example for maintenance: no new datapack is activated on it until it is enabled again (a stage whose other components can take the slots needed still is, without it). | 7.5, 9, 13 |
 | SQ-11 | Visibility of the queued datapacks (with their priority and what they wait for), and of the state of stages and components. | 9, 13 |
 | SQ-25 | The folder holding the lab inventory is configurable. The sequencer expects it to be a git clone, and warns when it is not under git or not on a clean tag. | 4.1, 6.1 |
 | SQ-26 | Before each datapack, a platform self-test checks that every component involved can be reached and used properly. | 7.6, 10 |
@@ -729,7 +729,7 @@ Each component has a monitored **state**:
       probe: {run: "psu-ctl get ch1; ping -c 1 -W 1 {{ component.host }} >/dev/null && echo UP || echo DOWN"}
       states: {running: {regex: "ON[\\s\\S]*UP"}, broken: {regex: "ON[\\s\\S]*DOWN"}, idle: {regex: "OFF"}}
   ```
-- A `broken` or `offline` component is not used for new runs. A stage is unavailable while one of its components is. A component that recovers becomes available again, unless an operator put it in `maintenance`.
+- A `broken` or `offline` component is not used for new runs. A stage stays available while some of its components are not, as long as the others can take the slots a run needs (section 9: they are left out of the run). A component that recovers becomes available again, unless an operator put it in `maintenance`.
 
 This is distinct from the **lock state** (free or held by a run), shown next to it.
 
@@ -1011,6 +1011,8 @@ An input template is rendered at generation, before any run binds its slots to t
 **Scheduling.** Whenever resources are released, a run is queued, or a component recovers, the scheduler walks the queue in order. For each run it tries to bind the stage slots and ad hoc slots of its first phase to free lab stages and components (section 8.1). A resource is free when it is not `broken`, `offline` or in maintenance, and each of its components is free for its lock mode:
 - an `exclusive` component is free when no other run holds it;
 - a `shared` component is free unless another run holds it exclusively.
+
+A stage in maintenance or on hold is not used. A stage some of whose components are in maintenance, on hold, `broken` or `offline` is still used when its other components can take the slots of the stage slot: those components are left out of the run (`left_out` in its binding), neither locked, nor self-tested, nor given a slot, so they stay free for their maintenance or holder.
 
 A lower-priority run may start while a higher-priority one waits, but only on resources the waiting run cannot use (backfilling), so priority is respected without leaving the lab idle. Among several free candidates, the stage used last by the same test definition is preferred, then the least used one.
 
