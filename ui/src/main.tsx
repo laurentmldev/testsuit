@@ -79,7 +79,7 @@ function App() {
     if (!editing) document.title = title;
   }, [title, editing]);
   const nav = [
-    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"], ["exploit", "Run exploit"]] : []), ["lab", "Lab"], ["config", "Configuration"],
+    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Run exploit"]] : []), ["config", "Configuration"],
   ];
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
