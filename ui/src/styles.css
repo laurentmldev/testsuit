@@ -175,7 +175,7 @@ tr.finally-row td { color: var(--muted); }
 .frame-node.bad { border-color: var(--bad); }
 .frame-title { font-size: 12px; font-weight: 600; padding: 4px 8px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .step-node { background: var(--panel); border: 1.5px solid var(--border); border-left-width: 5px; border-radius: 7px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
-.step-node.ok { border-left-color: var(--ok); }
+.step-node.ok { border-left-color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); }
 .step-node.run { border-left-color: var(--run); border-color: var(--run); }
 /* the step running now (or one of its slots): it blinks, its background, border and halo (the text stays still and
    readable), seen even when the diagram is zoomed out. With reduced motion asked by the system: slower, still there. */
