@@ -136,6 +136,43 @@ RUN_KEY_NAMES = {"run", "phase", "slots", "stage_slots", "params", "succeeded", 
                  "lab", "stage", "slot", "component", "remote_root", "via"}
 
 
+# where the keys of a run come from (the explorer), by name
+RUN_KEY_ORIGINS = {"run": "the run", "phase": "the run (its phase)", "params": "the sub-pipeline (its parameters)",
+                   "slot": "the setup, and the lab component the run binds to the slot",
+                   "slots": "the setup, and the lab components the run binds",
+                   "stage_slots": "the lab stages the run binds", "component": "the lab component the run binds to the slot",
+                   "stage": "lab inventory: the stage of the component", "lab": "lab inventory",
+                   "remote_root": "lab inventory (tsq_remote_root)"}
+
+
+def _key_origins(layers: list[tuple[dict, str]]) -> dict:
+    """Where each key comes from: dotted name -> ``from`` (what sets its value) and ``overrides`` (the values it
+    replaces, each with where it was set), the layers given lowest precedence first."""
+    from testsuit.datatools.datapack.templating import _dotted, _leaves, expand_dotted_keys
+    found: dict[str, dict] = {}
+    for mapping, origin in layers:
+        try:
+            mapping = expand_dotted_keys(mapping)
+        except Exception:
+            continue
+        for path, value in _leaves(mapping):
+            if not path:
+                continue
+            name = _dotted(path)
+            before = found.get(name)
+            overrides = (before or {}).get("overrides", [])
+            if before and before["value"] != value:     # the same value given again: only where it is set last
+                overrides = [{"from": before["from"], "value": before["value"]}] + overrides
+            found[name] = {"from": origin, "value": value, "overrides": overrides}
+    return {name: {"from": o["from"], "overrides": [{"from": x["from"], "value": _short(x["value"])} for x in o["overrides"]]}
+            for name, o in found.items()}
+
+
+def _short(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
 def _key_tree(keys: dict) -> dict:
     """Keys as plain data to browse (functions left out: they are listed apart)."""
     def plain(value: Any) -> Any:
@@ -1368,6 +1405,7 @@ class Editor:
         keys there are also those of its commands, frozen in the datapack), and ``run``, the keys only the
         commands its steps run have, on the lab component the slot would be bound to now (``component``,
         ``stage``, ``lab``, ``run``...). Computed on demand."""
+        from testsuit.datatools.datapack.datapack_tools import load_yaml_mapping
         from testsuit.datatools.datapack.templating import TemplateError
         from testsuit.sequencer.scheduler import Availability, find_binding
         try:
@@ -1389,7 +1427,26 @@ class Editor:
                       "slot": {"id": slot, "name": comp.get("name", ""), "type": comp.get("type", ""),
                                "configuration": comp.get("configuration", ""), "input_dir": f"<{slot} input folder>"},
                       "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []}}
+        def shown(origin: str) -> str:
+            path = Path(origin)
+            if origin.startswith("/") and path.resolve().is_relative_to(session.root.resolve()):
+                return self.rel(session, path)
+            return {"<datapack>": "built in", "<dataset placeholder>": "the baseline (a dataset)"}.get(origin, origin)
+        layers: list[tuple[dict, str]] = []                # as builder.keys() merges them, lowest precedence first
+        for layer in ("setup", "datasets", "testdef"):
+            if layer == "datasets":
+                layers += [(mapping, shown(origin)) for mapping, origin in builder.dataset_keys]
+            else:
+                for file_layer, path in builder.dictionaries:
+                    if file_layer == layer:
+                        try:
+                            layers.append((load_yaml_mapping(path), shown(path.as_posix())))
+                        except Exception:              # an unreadable file: the problems of the page say so
+                            pass
+        layers.append((builder.builtin, "built in"))
+        layers.append(({"slot": generation["slot"], "slots": generation["slots"]}, "the setup (this slot)"))
         result: dict[str, Any] = {"slot": slot, "error": error, "generation": _key_tree(generation),
+                                  "generation_origins": _key_origins(layers),
                                   "generation_functions": ["read_input('<slot>/<file>')"] if comp.get("needs") else [],
                                   "run": None, "component": None, "why_not": None}
         lab, _ = self.lab_for(session)
@@ -1405,6 +1462,18 @@ class Editor:
         concrete = lab.inventory.components[binding.slots[slot]]
         stage = lab.inventory.stages.get(binding.stage_slots.get(needs.slots[slot].stage_slot, ""))
         run_keys = _step_keys(lab, needs, binding, {}, "<phase>", {}, (concrete, needs.slots[slot], stage), {})
+        from testsuit.sequencer.inventory import _own
+        def without(tree: dict, removed: dict) -> dict:     # the variables of its groups: without those of the host
+            return {k: (without(v, removed[k]) if isinstance(v, dict) and isinstance(removed.get(k), dict) else v)
+                    for k, v in tree.items() if k not in removed or isinstance(removed[k], dict) and isinstance(v, dict)}
+        var_layers = [({"component": {"vars": without(concrete.vars, concrete._host_tree)}},
+                       f"lab inventory: the groups of {concrete.id}")]
+        if stage is not None:
+            var_layers.append(({"component": {"vars": _own(stage.vars)}}, f"lab inventory: stage {stage.id}"))
+        var_layers.append(({"component": {"vars": concrete._host_tree}}, f"lab inventory: host {concrete.id}"))
+        run_origins = _key_origins(var_layers)
+        run_origins.update({name: {"from": what} for name, what in RUN_KEY_ORIGINS.items()})
+        result.update(run_origins=run_origins)
         result.update(component=concrete.id, stage=stage.id if stage else None, run=_key_tree(run_keys),
                       run_functions=["succeeded('<step>')", "failed('<step>')", "errored('<step>')", "skipped('<step>')",
                                      "verdict('<step>')"])

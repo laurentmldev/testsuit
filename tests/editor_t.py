@@ -301,6 +301,15 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert explored["component"] and explored["run"]["component"]["id"] == explored["component"]
     assert explored["run"]["slot"]["component"] == explored["component"] and "min_count" not in explored["run"]
     assert "lab" in explored["run"] and "succeeded('<step>')" in explored["run_functions"]
+    origins = explored["generation_origins"]
+    assert origins["min_count"]["from"] == "setup/globals.yml" and origins["testdef.id"]["from"] == "built in"
+    assert explored["run_origins"]["component"]["from"].startswith("the lab component")
+    editor.write(session, "testdef/count/override.yml", content="min_count: 5\n")    # a test definition dictionary
+    testdef = yaml.safe_load(editor.read(session, "testdef/count/testdef.yml")["content"])
+    editor.write(session, "testdef/count/testdef.yml", data={**testdef, "dictionaries": ["override.yml"]})
+    origins = editor.slot_keys(session, "testdef/count/testdef.yml", "dut")["generation_origins"]
+    assert origins["min_count"] == {"from": "testdef/count/override.yml", "overrides": [{"from": "setup/globals.yml", "value": "3"}]}
+    editor.write(session, "testdef/count/testdef.yml", data=testdef)
     with pytest.raises(SequencerError, match="no slot 'nowhere'"):
         editor.slot_keys(session, "testdef/count/testdef.yml", "nowhere")
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
