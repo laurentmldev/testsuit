@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
-import { handKeys, KeysByHand, type HandKey } from "../keysbyhand";
+import { handKeys, KeysByHand, rememberedKeys, rememberKeys, type HandKey } from "../keysbyhand";
 import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, offNote, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
@@ -62,29 +62,6 @@ const COMMANDS_GIVE_UP = 30000;      // ms: past this, it gives up, with a Retry
 /** The commands of a component in maintenance, each run by hand, with what it did (README section 7.6). */
 const HAND_KEYS = "tsq.manualKeys";
 
-/** The keys last set by hand for the commands of a component, in this browser. */
-function rememberedKeys(component: string): HandKey[] {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(HAND_KEYS) || "{}");
-    const rows = all?.[component];
-    return Array.isArray(rows) ? rows.filter((r: any) => r && typeof r.key === "string").map((r: any) => ({ key: r.key, value: String(r.value ?? "") })) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberKeys(component: string, rows: HandKey[]): void {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(HAND_KEYS) || "{}") || {};
-    const kept = rows.filter((r) => r.key.trim() || r.value);
-    if (kept.length) all[component] = kept;
-    else delete all[component];
-    window.localStorage.setItem(HAND_KEYS, JSON.stringify(all));
-  } catch {
-    // no storage (private window...): nothing remembered
-  }
-}
-
 function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const labelOf = useLabels();
   const [info, setInfo] = useState<any>(null);
@@ -100,10 +77,10 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
   });
   // keys set by hand for the commands run from this dialog: the commands are shown as they will run with them
   // remembered in this browser for each component: the dialog opens with the keys last set for it
-  const [rows, setRowsState] = useState<HandKey[]>(() => rememberedKeys(id));
+  const [rows, setRowsState] = useState<HandKey[]>(() => rememberedKeys(HAND_KEYS, id));
   const setRows = (next: HandKey[]) => {
     setRowsState(next);
-    rememberKeys(id, next);
+    rememberKeys(HAND_KEYS, id, next);
   };
   const [keysError, setKeysError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);                  // Retry: read them again

@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { get, post, url } from "../api";
 import { Choices, Dialog, Field, Toggle } from "../fields";
 import { FileBrowser } from "../files";
-import { handKeys, KeysByHand, statusAmong, type HandKey } from "../keysbyhand";
+import { handKeys, KeysByHand, latestRememberedKeys, rememberedKeys, rememberKeys, statusAmong, type HandKey } from "../keysbyhand";
 import { attempt, classes, Markdown, navigate, size, Spinner } from "../util";
 import { useSession } from "./state";
 import { WorkspaceTag, type Repository } from "./workspace";
@@ -33,6 +33,8 @@ export function GenerateDialog({ onClose }: { onClose: () => void }) {
   return <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} onClose={onClose} />;
 }
 
+const GENERATE_KEYS = "tsq.generateKeys";
+
 /** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
 export function GenerateDatapack({ sid, workspace, repository, testdef: initial, config: initialConfig, onClose }: {
   sid: string; workspace: any; repository?: Repository | null; testdef?: string; config?: string | null; onClose: () => void;
@@ -45,7 +47,23 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   const [config, setConfig] = useState<string | null>(initialConfig && initialConfig !== td?.setup_config ? initialConfig : null);
   const [check, setCheck] = useState(false);
   // keys set by hand for this generation (datapack --set), and the keys the dictionaries define, to say what each does
-  const [rows, setRows] = useState<HandKey[]>([]);
+  // remembered in this browser for each test definition of the repository: the last ones set for it come back
+  // (none remembered for it: those set the most recently for another test definition of the repository)
+  const memoryPrefix = `${repository?.id || ""}:`;
+  const memory = memoryPrefix + testdef;
+  const recall = (): { rows: HandKey[]; from: string | null } => {
+    const own = rememberedKeys(GENERATE_KEYS, memory);
+    if (own.length) return { rows: own, from: null };
+    const other = latestRememberedKeys(GENERATE_KEYS, memoryPrefix, memory);
+    return other ? { rows: other.rows, from: other.id.slice(memoryPrefix.length) } : { rows: [], from: null };
+  };
+  const [recalled, setRecalled] = useState(recall);
+  useEffect(() => setRecalled(recall()), [memory]);
+  const rows = recalled.rows;
+  const setRows = (next: HandKey[]) => {
+    setRecalled({ rows: next, from: null });
+    rememberKeys(GENERATE_KEYS, memory, next);
+  };
   const [defined, setDefined] = useState<any[] | null>(null);
   useEffect(() => {
     if (!testdef) return;
@@ -131,6 +149,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
     setLastLine(Date.now());
     try {
       // in the background: its log comes line by line, subprocess errors included
+      if (recalled.from) rememberKeys(GENERATE_KEYS, memory, rows);   // taken from another test definition: now its own
       const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient, keys: manual });
       setJob(job);
       let since = 0;
@@ -230,7 +249,8 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
           <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
-          <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text.">
+          <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text. The keys set here are remembered in this browser for each test definition (one with none remembered starts from those last set for another): check them before generating.">
+            {recalled.from && rows.length > 0 && <div className="muted small">None remembered for this test definition: these are the keys last set for <code>{recalled.from}</code>.</div>}
             <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={undefinedIn(failed)}
               known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
               setNote="the datapack stays conform." overrideNote="the datapack will be non-conform." />
