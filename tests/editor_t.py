@@ -268,6 +268,25 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     # the checks before generating, one at a time: the same problems as the synthesis in one go
     split = editor.synthesis(session, "testdef/count/testdef.yml", versions=False, run_checks=False)["problems"]
     assert split + editor.run_problems(session, "testdef/count/testdef.yml") == found["problems"]
+    assert not [p for p in found["problems"] if p.startswith("keys:")]
+
+    # the keys the commands of the steps read: those that nothing defines at run time are listed
+    testdef = yaml.safe_load(editor.read(session, "testdef/count/testdef.yml")["content"])
+    testdef["pipeline"]["phases"][0]["steps"] += [
+        {"id": "known", "slot": "dut", "run": "echo {{ min_count }} {{ slot.id }} {{ component.vars }} {{ params }} {{ run.id }}",
+         "env": {"WHERE": "{{ lab.hosts }}"}},
+        {"id": "unknown", "slot": "dut", "run": "echo {{ nowhere.speed }}", "env": {"X": "{{ slot.nothing }}"}},
+        {"id": "phase_wide", "run": "echo {{ slot.id }}"}]
+    editor.write(session, "testdef/count/testdef.yml", data=testdef)
+    keys = [p for p in editor.run_problems(session, "testdef/count/testdef.yml") if p.startswith("keys:")]
+    assert keys == ["keys: phase 'run', step 'unknown': its 'run' on slot 'dut' reads 'nowhere.speed', which no "
+                    "dictionary nor run-time key defines",
+                    "keys: phase 'run', step 'unknown': its 'run' on slot 'dut' reads 'slot.nothing', which no "
+                    "dictionary nor run-time key defines",
+                    "keys: phase 'run', step 'phase_wide': its 'run' reads 'slot.id', which no "
+                    "dictionary nor run-time key defines"], keys
+    testdef["pipeline"]["phases"][0]["steps"] = testdef["pipeline"]["phases"][0]["steps"][:1]
+    editor.write(session, "testdef/count/testdef.yml", data=testdef)
     assert found["testdef"]["id"] == "count" and found["testdef"]["setup_config"] == "bench"
     assert "dut" in {c["id"] for c in found["slots"]}
     assert any(i["files"] for c in found["slots"] for i in c["inputs"])

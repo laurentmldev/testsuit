@@ -1002,6 +1002,8 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 
 `input_dir` and `output_dir` are the same in `slot` and `component`: `<remote_root>/<slot>/input` and `/output` on the lab component (under `<remote_root>/.tsq/<run>/` for a shared or unlocked component). A step with no slot (a `run` or `python` on the sequencer host) has no `slot`, `component` or `stage` key. The Editor completes these keys after `{{` in every field rendered with them, with this help.
 
+Before a datapack is generated, the Datapacks page checks the keys the steps will read: for each step, on the lab component its slot would be bound to, the templates of its command (the lab's `do:` command, or its own `run:`, `env`, `wait_for`, `http`, `python`...) are read against the keys of the table above, and a key that no dictionary nor run-time key defines is listed (`keys: phase 'test_run', step 'start': command 'start' of slot 'dut' (dut_1) reads 'component.vars.port', ...`): the step would fail on it. A key given a `default` (`{{ component.vars.args | default('') }}`) or tested with `is defined` is not listed. The pipeline editor's expanded view lists the same keys.
+
 An input template is rendered at generation, before any run binds its slots to the lab, so a run-time key there (`component.*`, `stage_slots.*`, `stage.*`, `lab.*`) is an error that says so, with the way out: `slot.*` in the template, or the value passed from a pipeline step (its `env` or command). The Editor's template preview shows the same message, and completes only the generation keys in a template.
 
 ## 9. Queue, scheduling and locking

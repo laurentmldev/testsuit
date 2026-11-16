@@ -331,7 +331,8 @@ def keys_set_by_hand(defined: Mapping, values: Mapping[str, Any], origins: Mappi
 
 def undefined_keys(template: str, keys: Mapping) -> list[str]:
     """The keys a template reads that ``keys`` does not define, as dotted names (``params.speed``): the keys
-    to set by hand for it to render. Only plain names are seen (``a.b``, ``a['b']``), not computed ones."""
+    to set by hand for it to render. Only plain names are seen (``a.b``, ``a['b']``), not computed ones; a name
+    given a ``default`` or tested with ``is defined`` may be undefined."""
     from jinja2 import nodes
     try:
         tree = _environment().parse(template if has_template(template) else "{{ " + template + " }}")
@@ -353,6 +354,12 @@ def undefined_keys(template: str, keys: Mapping) -> list[str]:
     found: list[str] = []
 
     def walk(node) -> None:
+        if (isinstance(node, nodes.Filter) and node.name in ("default", "d")) or \
+                (isinstance(node, nodes.Test) and node.name in ("defined", "undefined")):
+            for child in node.iter_child_nodes():    # what it applies to may be undefined: its arguments may not
+                if child is not node.node:
+                    walk(child)
+            return
         path = chain(node) if isinstance(node, (nodes.Name, nodes.Getattr, nodes.Getitem)) else None
         if path is not None:
             if path[0] not in local:
