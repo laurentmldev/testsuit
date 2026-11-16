@@ -1192,6 +1192,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
 - a graph view of phases, sub-pipelines and steps, where `needs` are the edges: add, remove and connect steps, group steps into a new sub-pipeline, or expand a `uses` step to see its steps;
+- the phases listed in the order they run (each after the phases it needs), reordered by dragging one (or **◀ earlier** / **later ▶**): when each phase runs after the one before it, `needs` follow the new order; otherwise a move putting a phase before one it needs is refused;
 - a palette of what a step can do on each slot, built from the commands its lab role offers, with the implementation of each bound host (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `http`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's stage slots and slots;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.

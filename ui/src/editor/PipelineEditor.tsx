@@ -194,6 +194,16 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const phases: any[] = pipeline?.phases || [];
   const [scope, setScope] = useState<Scope>(isTestdef ? (phases.length ? { kind: "phase", index: 0 } : { kind: "settings" }) : { kind: "sub", name: Object.keys(subsOwn)[0] || "" });
   const [selected, setSelected] = useState<string[]>([]);
+  // drag and drop of the phases: positions in the running order
+  const [dragPhase, setDragPhase] = useState<number | null>(null);
+  const [dropPhase, setDropPhase] = useState<number | null>(null);
+  const reorderPhases = (from: number, to: number) => {
+    const r = movePhase(phases, from, to);
+    if ("error" in r) return notify(r.error, "error");
+    const keep = scope.kind === "phase" ? phases[scope.index]?.id : null;
+    write((d) => { d.pipeline.phases = r.phases; });
+    if (keep != null) setScope({ kind: "phase", index: r.phases.findIndex((p) => p.id === keep) });
+  };
   const [part, setPart] = useState<"steps" | "finally">("steps");
   const [grouping, setGrouping] = useState(false);
   const plugins: string[] = ctx.step_types || [];
@@ -280,12 +290,28 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const scopes = (
     <div className="scope-bar">
       {isTestdef && <button className={classes("scope", scope.kind === "settings" && "selected")} onClick={() => setScope({ kind: "settings" })}>Pipeline</button>}
-      {isTestdef && phases.map((ph, i) => (
-        <button key={i} className={classes("scope", scope.kind === "phase" && scope.index === i && "selected")} onClick={() => {
-          setScope({ kind: "phase", index: i });
-          setSelected([]);
-        }}>phase <strong>{ph.id}</strong>{ph.needs?.length ? <span className="muted"> after {ph.needs.join(", ")}</span> : null}</button>
-      ))}
+      {isTestdef && phaseOrder(phases).map((i, k) => {
+        const ph = phases[i];
+        return (
+          <button key={ph?.id ?? i} draggable title="Drag to change the order the phases run in"
+            className={classes("scope", scope.kind === "phase" && scope.index === i && "selected", dragPhase === k && "dragging", dropPhase === k && dragPhase !== null && dragPhase !== k && (k < dragPhase ? "drop-before" : "drop-after"))}
+            onClick={() => {
+              setScope({ kind: "phase", index: i });
+              setSelected([]);
+            }}
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(k)); setDragPhase(k); }}
+            onDragOver={(e) => { if (dragPhase !== null) { e.preventDefault(); setDropPhase(k); } }}
+            onDragEnd={() => { setDragPhase(null); setDropPhase(null); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragPhase !== null && dragPhase !== k) reorderPhases(dragPhase, k);
+              setDragPhase(null);
+              setDropPhase(null);
+            }}>
+            <span className="drag-handle">⠿</span> phase <strong>{ph.id}</strong>{ph.needs?.length ? <span className="muted"> after {ph.needs.join(", ")}</span> : null}
+          </button>
+        );
+      })}
       {isTestdef && <button className="scope add" onClick={() => write((d) => {
         d.pipeline.phases ||= [];
         const id = freeName("phase", d.pipeline.phases.map((p: any) => p.id));
@@ -332,6 +358,10 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
       {scopes}
       {paletteError && <div className="banner warn">{paletteError}: the palette has the generic steps only.</div>}
       {phase && <PhaseForm phase={phase} index={scope.kind === "phase" ? scope.index : 0} phases={phases} palette={palette} write={write}
+        onMove={(delta) => {
+          const at = phaseOrder(phases).indexOf(scope.kind === "phase" ? scope.index : 0);
+          reorderPhases(at, at + delta);
+        }}
         onDeleted={() => setScope(phases.length > 1 ? { kind: "phase", index: 0 } : { kind: "settings" })} />}
       {scope.kind === "sub" && scope.name && <SubForm name={scope.name} sub={subsOwn[scope.name] || {}} isTestdef={isTestdef} write={write} onRenamed={(n) => setScope({ kind: "sub", name: n })} />}
       <div className="pipeline-body">
@@ -634,8 +664,48 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
   );
 }
 
-function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
+/** The phases in the order they run: each after the phases it needs (`needs`), else in file order. */
+export function phaseOrder(phases: any[]): number[] {
+  const ids = phases.map((p) => p?.id);
+  const done = new Set<number>();
+  const order: number[] = [];
+  while (order.length < phases.length) {
+    // the first phase, in file order, whose needs have all run; a cycle or unknown need: file order
+    const next = phases.findIndex((p, i) => !done.has(i) && (p?.needs || []).every((n: string) => !ids.includes(n) || done.has(ids.indexOf(n))));
+    const i = next >= 0 ? next : phases.findIndex((_, j) => !done.has(j));
+    done.add(i);
+    order.push(i);
+  }
+  return order;
+}
+
+/** Moves a phase to another place of the running order. When the phases run one after the other (each needs
+ * only the one before it), the chain follows the new order; otherwise the move is refused if a phase would come
+ * before one it needs. The file lists the phases in the new order. */
+export function movePhase(phases: any[], from: number, to: number): { phases: any[] } | { error: string } {
+  const order = phaseOrder(phases).map((i) => phases[i]);
+  const chain = order.every((p, k) => k === 0 ? !(p.needs || []).length : (p.needs || []).length === 1 && p.needs[0] === order[k - 1].id);
+  const moved = order.splice(from, 1)[0];
+  order.splice(to, 0, moved);
+  if (chain) {
+    return { phases: order.map((p, k) => {
+      const q = { ...p };
+      if (k === 0) delete q.needs;
+      else q.needs = [order[k - 1].id];
+      return q;
+    }) };
+  }
+  for (let k = 0; k < order.length; k++) {
+    const later = order.slice(k + 1).map((p) => p.id);
+    const bad = (order[k].needs || []).find((n: string) => later.includes(n));
+    if (bad) return { error: `phase ${order[k].id} runs after ${bad} (After phases): change that first` };
+  }
+  return { phases: order };
+}
+
+function PhaseForm({ phase, index, phases, palette, write, onDeleted, onMove }: {
   phase: any; index: number; phases: any[]; palette: any; write: (fn: (d: any) => void) => void; onDeleted: () => void;
+  onMove: (delta: number) => void;
 }) {
   const { schemas } = useSession();
   const help = (f: string) => helpText(schemas.testdef, ["pipeline", "phases", 0, f]);
@@ -647,7 +717,9 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
   });
   const stageSlotChoices: Choice[] = Object.entries<any>(palette?.stage_slots || {}).map(([s, t]) => ({ value: s, description: `lab stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.stage_slot === s).map(([id]) => id).join(", ")}` }));
   const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.stage_slot).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
-  const earlier = phases.slice(0, index);
+  const runOrder = phaseOrder(phases);
+  const position = runOrder.indexOf(index);
+  const earlier = runOrder.slice(0, position).map((i) => phases[i]);
   const fromChoices: Choice[] = earlier.flatMap((p: any) => {
     const comps = palette ? Object.entries<any>(palette.slots).filter(([id, c]) => (c.stage_slot && (p.stage_slots || []).includes(c.stage_slot)) || (p.slots || []).includes(id)).map(([id]) => id) : [];
     return [...comps.map((c) => ({ value: `${p.id}:${c}/output/`, description: `outputs of ${c} in phase ${p.id}` })), { value: `${p.id}:*/output/`, description: `outputs of every slot of ${p.id}` }];
@@ -661,10 +733,8 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted }: {
         <input className="inline-name" key={phase.id} defaultValue={phase.id} onBlur={(e) => e.target.value && set("id", slug(e.target.value))} />
         <span className="muted small">locks {[...(phase.stage_slots || []), ...(phase.slots || [])].join(", ") || "nothing"}</span>
         <span className="spacer" />
-        <button className="small" disabled={index === 0} onClick={() => write((d) => {
-          const [ph] = d.pipeline.phases.splice(index, 1);
-          d.pipeline.phases.splice(index - 1, 0, ph);
-        })}>◀ move</button>
+        <button className="small" disabled={position <= 0} onClick={() => onMove(-1)} title="Run it one phase earlier">◀ earlier</button>
+        <button className="small" disabled={position >= phases.length - 1} onClick={() => onMove(1)} title="Run it one phase later">later ▶</button>
         <button className="small danger" onClick={() => {
           if (!window.confirm(`Delete phase ${phase.id} and its steps?`)) return;
           write((d) => {

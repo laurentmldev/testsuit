@@ -342,6 +342,10 @@ tr.finally-row td { color: var(--muted); }
 .scope-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .scope { padding: 3px 10px; font-size: 12.5px; }
 .scope.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.scope .drag-handle { color: var(--muted); cursor: grab; margin-right: 2px; }
+.scope.dragging { opacity: 0.45; }
+.scope.drop-before { box-shadow: -3px 0 0 var(--accent); }
+.scope.drop-after { box-shadow: 3px 0 0 var(--accent); }
 .scope.add { border-style: dashed; color: var(--muted); }
 .scope-sep { margin-left: 10px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
 .phase-form { padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
