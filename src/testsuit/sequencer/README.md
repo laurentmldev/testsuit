@@ -1004,6 +1004,8 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 
 Before a datapack is generated, the Datapacks page checks the keys the steps will read: for each step, on the lab component its slot would be bound to, the templates of its command (the lab's `do:` command, or its own `run:`, `env`, `wait_for`, `http`, `python`...) are read against the keys of the table above, and a key that no dictionary nor run-time key defines is listed (`keys: phase 'test_run', step 'start': command 'start' of slot 'dut' (dut_1) reads 'component.vars.port', ...`): the step would fail on it. A key given a `default` (`{{ component.vars.args | default('') }}`) or tested with `is defined` is not listed. The pipeline editor's expanded view lists the same keys.
 
+The **Keys…** button of each slot of the Datapacks page (logical configuration) opens its keys explorer, before any datapack is generated: the keys of the commands its steps run, on the lab component the slot would be bound to now (`component.vars.*`, `stage.*`, `lab.*`...), and the keys of its template files, as trees to browse and filter, each copied as `{{ key }}` with a click. They are computed only when it is opened; values only a run knows (its id, folders) are shown as `<...>`.
+
 An input template is rendered at generation, before any run binds its slots to the lab, so a run-time key there (`component.*`, `stage_slots.*`, `stage.*`, `lab.*`) is an error that says so, with the way out: `slot.*` in the template, or the value passed from a pipeline step (its `env` or command). The Editor's template preview shows the same message, and completes only the generation keys in a template.
 
 ## 9. Queue, scheduling and locking

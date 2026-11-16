@@ -104,11 +104,13 @@ def _step_keys(lab: Lab, needs, binding, context: dict, phase: str, params: dict
     def slot_keys(slot_id: str) -> dict:
         lc = needs.slots[slot_id]
         return {"id": lc.id, "name": lc.name or lc.id, "type": lc.type, "role": lc.role, "stage_slot": lc.stage_slot,
-                "component": binding.slots.get(slot_id, "") if binding else "", "input_dir": "", "output_dir": "",
-                "remote_root": ""}
-    verdict = lambda step: ""                                     # noqa: E731
+                "component": binding.slots.get(slot_id, "") if binding else "", "input_dir": "<remote root>/<slot>/input",
+                "output_dir": "<remote root>/<slot>/output", "remote_root": "<remote root>"}
+
+    def verdict(step: str) -> str:
+        return "pending"
     keys = dict(context)
-    keys.update({"run": {"id": "", "dir": "", "priority": 0}, "phase": {"id": phase},
+    keys.update({"run": {"id": "<run id>", "dir": "<run folder>", "priority": 50}, "phase": {"id": phase},
                  "slots": {c: slot_keys(c) for c in needs.slots},
                  "stage_slots": {r: {"id": r, "stage": s} for r, s in (binding.stage_slots if binding else {}).items()},
                  "params": params or {}, "succeeded": verdict, "failed": verdict, "errored": verdict, "skipped": verdict,
@@ -120,12 +122,26 @@ def _step_keys(lab: Lab, needs, binding, context: dict, phase: str, params: dict
         keys["slot"] = slot_keys(lc.id)
         keys["component"] = {"id": concrete.id, "host": concrete.host, "host_alias": concrete.host_alias,
                              "label": concrete.label, "role": concrete.role, "extends": concrete.extends, "slot": lc.id,
-                             "stage": stage.id if stage else "", "vars": concrete.vars_in(stage), "input_dir": "",
-                             "output_dir": "", "remote_root": "", "state": ""}
-        keys["remote_root"] = ""
+                             "stage": stage.id if stage else "", "vars": concrete.vars_in(stage),
+                             "input_dir": "<remote root>/<slot>/input", "output_dir": "<remote root>/<slot>/output",
+                             "remote_root": "<remote root>", "state": "<probed state>"}
+        keys["remote_root"] = "<remote root>"
     if isinstance(spec, dict) and spec.get("via"):
-        keys["via"] = {"id": "", "host": "", "host_alias": "", "role": "", "label": "", "vars": {}}
+        keys["via"] = {"id": "<via>", "host": "", "host_alias": "", "role": "", "label": "", "vars": {}}
     return keys
+
+
+def _key_tree(keys: dict) -> dict:
+    """Keys as plain data to browse (functions left out: they are listed apart)."""
+    def plain(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): plain(v) for k, v in value.items() if not callable(v)}
+        if isinstance(value, (list, tuple)):
+            return [plain(v) for v in value]
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
+    return plain(keys)
 
 
 def _missing_keys(value: Any, keys: dict) -> list[str]:
@@ -1330,6 +1346,52 @@ class Editor:
         except Exception as e:
             raise SequencerError(str(e)) from e
         return self._run_problems(session, testdef_rel, testdef.setup_config)
+
+    def slot_keys(self, session: EditSession, testdef_rel: str, slot: str, setup_config: str | None = None) -> dict:
+        """Every key a slot of a test definition can use, as trees to browse (the keys explorer of the Datapacks
+        page): in its template files, rendered at generation, and in the commands its steps run, on the lab
+        component the slot would be bound to now (``component``, ``stage``, ``lab``...). Computed on demand."""
+        from testsuit.datatools.datapack.templating import TemplateError
+        from testsuit.sequencer.scheduler import Availability, find_binding
+        try:
+            builder, testdef, raw = self._builder(session, testdef_rel, setup_config)
+            keys = builder.keys()
+        except SequencerError:
+            raise
+        except Exception as e:
+            raise SequencerError(str(e)) from e
+        try:
+            context, error = keys.resolve_all(), None
+        except TemplateError as e:                   # the names are still there, as written
+            context, error = keys.data, str(e)
+        slots = ((raw.get("configurations") or {}).get(testdef.setup_config) or {}).get("slots") or {}
+        if slot not in slots:
+            raise SequencerError(f"no slot '{slot}' in setup configuration '{testdef.setup_config}'")
+        comp = slots[slot] if isinstance(slots[slot], dict) else {}
+        generation = {**context,
+                      "slot": {"id": slot, "name": comp.get("name", ""), "type": comp.get("type", ""),
+                               "configuration": comp.get("configuration", ""), "input_dir": f"<{slot} input folder>"},
+                      "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []}}
+        result: dict[str, Any] = {"slot": slot, "error": error, "generation": _key_tree(generation),
+                                  "generation_functions": ["read_input('<slot>/<file>')"] if comp.get("needs") else [],
+                                  "run": None, "component": None, "why_not": None}
+        lab, _ = self.lab_for(session)
+        try:
+            _, _, _, _, needs, pipeline, _ = self._testdef_parts(session, testdef_rel, testdef.setup_config)
+        except Exception as e:                       # an invalid pipeline: no binding to show
+            result["why_not"] = f"the pipeline cannot be read: {_describe(e) if not isinstance(e, SequencerError) else e}"
+            return result
+        binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
+        if binding is None or slot not in binding.slots:
+            result["why_not"] = "the slot cannot be bound to the lab now" + (f": {'; '.join(reasons)}" if reasons else "")
+            return result
+        concrete = lab.inventory.components[binding.slots[slot]]
+        stage = lab.inventory.stages.get(binding.stage_slots.get(needs.slots[slot].stage_slot, ""))
+        run_keys = _step_keys(lab, needs, binding, context, "<phase>", {}, (concrete, needs.slots[slot], stage), {})
+        result.update(component=concrete.id, stage=stage.id if stage else None, run=_key_tree(run_keys),
+                      run_functions=["succeeded('<step>')", "failed('<step>')", "errored('<step>')", "skipped('<step>')",
+                                     "verdict('<step>')"])
+        return result
 
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str) -> list[str]:
         """What would make the sequencer refuse the datapack when it is posted: the pipeline against the
