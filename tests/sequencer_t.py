@@ -816,7 +816,7 @@ def test_probe_via(tmp_path, no_git):
         "status": {"via": "dut", "probe": {"run": f"cat {psu}; echo from {{{{ via.id }}}} to {{{{ component.host }}}}; "
                                            "echo {{ stage.roles.dut.id }} {{ lab.components.seq_host.vars.tsq_role }}"},
                    "states": {"running": {"regex": "^ON"}, "idle": {"regex": "^OFF"}}},
-        "selftest": [{"id": "psu", "run": f"test -f {psu}"}]}
+        "selftest": [{"id": "login", "builtin": "login"}, {"id": "psu", "run": f"test -f {psu}"}]}
     write(tmp_path / "lab" / "components" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
@@ -836,6 +836,10 @@ def test_probe_via(tmp_path, no_git):
     assert "counter_1, for obc_1" in on["steps"][-1]["action"]
     psu_check = next(c for c in result["checks"] if c["id"] == "psu")
     assert result["ok"] and psu_check["ok"] and psu_check["command"] == f"test -f {psu}"
+    # the checks of a Linux system are not run on a component probed via another: skipped, not passed
+    via_skipped = [c for c in result["checks"] if "probed via counter_1" in c["detail"]]
+    assert via_skipped and all(c["ok"] and c["skipped"] for c in via_skipped), result["checks"]
+    assert not psu_check.get("skipped")
 
     from testsuit.sequencer.engine import RunContext
     lab = bench.sequencer().lab
