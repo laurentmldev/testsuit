@@ -847,7 +847,8 @@ class RunExecution:
         concrete = sorted({self.ctx.bound[l].concrete.id for l in logical_ids if l in self.ctx.bound})
         # every component of a locked stage is checked, used by the datapack or not
         for stage_id in self.binding.stage_slots.values():
-            concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components if c not in concrete]
+            concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components
+                         if c not in concrete and c not in self.binding.left_out]
         results = await asyncio.gather(*[self.seq._selftest_one(c) for c in concrete])
         self.selftests += results
         dump_yaml(self.datapack.dir / "selftest.yml", {"attempts": self.selftests})
@@ -925,7 +926,8 @@ class RunExecution:
         """Bind and lock what a later phase needs and the run does not hold yet."""
         held = Binding(stage_slots={s: c for s, c in self.binding.stage_slots.items() if s in flat.phase.stage_slots},
                        slots={l: c for l, c in self.binding.slots.items()
-                              if self.datapack.needs.slots[l].stage_slot in flat.phase.stage_slots or l in flat.phase.slots})
+                              if self.datapack.needs.slots[l].stage_slot in flat.phase.stage_slots or l in flat.phase.slots},
+                       left_out=list(self.binding.left_out))
         missing_stages = [s for s in flat.phase.stage_slots if s not in held.stage_slots]
         missing_comps = [c for c in flat.phase.slots if c not in held.slots]
         if not missing_stages and not missing_comps:
@@ -941,6 +943,7 @@ class RunExecution:
                 if not conflicts:
                     self.binding.stage_slots.update(binding.stage_slots)
                     self.binding.slots.update(binding.slots)
+                    self.binding.left_out += [c for c in binding.left_out if c not in self.binding.left_out]
                     self.store.update_run(self.run_id, binding=self.binding.as_dict(), waiting_for="")
                     new = [l for l in binding.slots if l not in self.ctx.bound]
                     await self.bind_slots()

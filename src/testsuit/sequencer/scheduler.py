@@ -38,6 +38,9 @@ UNAVAILABLE_STATES = ("broken", "offline")
 class Binding:
     stage_slots: dict[str, str] = field(default_factory=dict)          # stage_slot -> lab stage
     slots: dict[str, str] = field(default_factory=dict)           # slot -> lab component
+    # components of the bound stages left out (in maintenance, held, broken or offline when bound): not
+    # locked, not self-tested, given to no slot
+    left_out: list[str] = field(default_factory=list)
 
     def locks(self, lab: Lab) -> list[tuple[str, str, str]]:
         """(kind, resource, mode) to take for this binding: whole stages, and the components of the ad hoc slots."""
@@ -46,6 +49,8 @@ class Binding:
         for stage_id in self.stage_slots.values():
             wanted[("stage", stage_id)] = "exclusive"
             for comp_id in inv.stages[stage_id].components:
+                if comp_id in self.left_out:
+                    continue
                 mode = inv.components[comp_id].lock
                 if mode != "none":
                     key = ("component", comp_id)
@@ -61,14 +66,18 @@ class Binding:
         return {(k, r) for k, r, _ in self.locks(lab)} | {("component", c) for c in self.slots.values()}
 
     def as_dict(self) -> dict:
-        return {"stage_slots": dict(self.stage_slots), "slots": dict(self.slots)}
+        out = {"stage_slots": dict(self.stage_slots), "slots": dict(self.slots)}
+        if self.left_out:
+            out["left_out"] = list(self.left_out)
+        return out
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Binding:
         """A binding as stored (a run recorded under former names keeps its 'realms' or 'stages', 'components')."""
         data = data or {}
         return cls(stage_slots=dict(data.get("stage_slots") or data.get("realms") or data.get("stages") or {}),
-                   slots=dict(data.get("slots") or data.get("components") or {}))
+                   slots=dict(data.get("slots") or data.get("components") or {}),
+                   left_out=list(data.get("left_out") or []))
 
 
 @dataclass
@@ -106,9 +115,28 @@ def phase_needs(phases: list[Phase]) -> tuple[list[str], list[str]]:
     return stages, adhoc
 
 
+def unusable_components(lab: Lab, stage: Stage, avail: Availability) -> dict[str, str]:
+    """The components of a stage that cannot be used now (in maintenance, held, broken, offline), with why."""
+    inv = lab.inventory
+    out = {}
+    for comp_id in stage.components:
+        why = avail.component_usable(inv.components[comp_id])
+        if why:
+            out[comp_id] = why
+    return out
+
+
+def usable_assignment(lab: Lab, stage: Stage, slots: list, avail: Availability) -> dict[str, Component] | None:
+    """The stage's components for the slots of a stage slot, among those that can be used now."""
+    left_out = unusable_components(lab, stage, avail)
+    return lab.assign(slots, [lab.inventory.components[c] for c in stage.components if c not in left_out])
+
+
 def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Availability, run_id: str,
                   avoid: set[tuple[str, str]] = frozenset(), check_free: bool = True) -> str | None:
-    """Why a lab stage cannot be bound to a stage slot now (None when it can)."""
+    """Why a lab stage cannot be bound to a stage slot now (None when it can). A component of the stage in
+    maintenance, held, broken or offline does not keep the stage from being bound, as long as the slots can be
+    given to the others: it is left out of the run."""
     inv = lab.inventory
     if ("stage", stage.id) in avail.maintenance:
         return f"{stage.id} in maintenance or held"
@@ -120,9 +148,14 @@ def stage_problem(lab: Lab, needs: Needs, logical: str, stage: Stage, avail: Ava
     slots = needs.in_stage_slot(logical)
     if lab.stage_assignment(stage, slots) is None:
         return lab.stage_shortfall(stage, slots)
+    left_out = unusable_components(lab, stage, avail)
+    if usable_assignment(lab, stage, slots, avail) is None:
+        return "; ".join(left_out.values()) + f" (the slots of {logical} need it)"
     for comp_id in stage.components:
+        if comp_id in left_out:
+            continue
         comp = inv.components[comp_id]
-        why = avail.component_usable(comp) or (avail.component_free(comp, run_id) if check_free else None)
+        why = avail.component_free(comp, run_id) if check_free else None
         if why is None and ("component", comp_id) in avoid and comp.lock == "exclusive":
             why = f"{comp_id} kept for a higher-priority run"
         if why:
@@ -205,11 +238,14 @@ def find_binding(lab: Lab, needs: Needs, phases: list[Phase], avail: Availabilit
             exclusive = [c.id for c in comp_choice if c.lock == "exclusive"]
             if len(set(exclusive)) != len(exclusive):
                 continue
-            binding = Binding(stage_slots=dict(fixed.stage_slots), slots=dict(fixed.slots))
+            binding = Binding(stage_slots=dict(fixed.stage_slots), slots=dict(fixed.slots), left_out=list(fixed.left_out))
             for logical, stage in zip(logical_stages, stage_choice):
                 binding.stage_slots[logical] = stage.id
-                for slot_id, comp in lab.stage_assignment(stage, needs.in_stage_slot(logical)).items():
+                if logical in fixed.stage_slots:        # already bound: its slots and left-out components kept
+                    continue
+                for slot_id, comp in usable_assignment(lab, stage, needs.in_stage_slot(logical), avail).items():
                     binding.slots[slot_id] = comp.id
+                binding.left_out += [c for c in unusable_components(lab, stage, avail) if c not in binding.left_out]
             for logical, comp in zip(adhoc, comp_choice):
                 binding.slots[logical] = comp.id
             return binding, []
@@ -225,10 +261,10 @@ def candidate_resources(lab: Lab, needs: Needs, phases: list[Phase], avail: Avai
     for logical in logical_stages:
         for stage in inv.stages_of_type(needs.stage_slots[logical]):
             if set(needs.stage_slot_tags.get(logical, [])) <= set(stage.tags) \
-                    and lab.stage_assignment(stage, needs.in_stage_slot(logical)) is not None:
-                if all(avail.component_usable(inv.components[c]) is None for c in stage.components):
-                    result.add(("stage", stage.id))
-                    result.update(("component", c) for c in stage.components)
+                    and usable_assignment(lab, stage, needs.in_stage_slot(logical), avail) is not None:
+                left_out = unusable_components(lab, stage, avail)
+                result.add(("stage", stage.id))
+                result.update(("component", c) for c in stage.components if c not in left_out)
     for logical in adhoc:
         lc = needs.slots[logical]
         for comp in inv.adhoc:
@@ -258,7 +294,8 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
     for logical, stage_type in needs.stage_slots.items():
         candidates = []
         for stage in inv.stages_of_type(stage_type):
-            assigned = lab.stage_assignment(stage, needs.in_stage_slot(logical)) or {}
+            assigned = usable_assignment(lab, stage, needs.in_stage_slot(logical), avail) \
+                or lab.stage_assignment(stage, needs.in_stage_slot(logical)) or {}
             roles = {lc.id: assigned[lc.id].id if lc.id in assigned else None for lc in needs.in_stage_slot(logical)}
             candidates.append({
                 "id": stage.id, "tags": stage.tags, "bound": binding.stage_slots.get(logical) == stage.id,
