@@ -362,7 +362,13 @@ function ComponentCard({ name }: { name?: string | null }) {
 
 /** A host as the lab resolves it: each command of its role with the implementation used and where it comes from,
  * the commands of its role it does not implement, and those it implements that its role does not list. */
-function HostCard({ name }: { name: string }) {
+function HostCard({ name, own, onOverride }: {
+  name: string;
+  /** its own commands (tsq_commands, as edited): those are overridden already */
+  own?: Record<string, any>;
+  /** override a command here, starting from the implementation the lab uses (none: a missing one) */
+  onOverride?: (command: string, spec: any) => void;
+}) {
   const { ctx } = useSession();
   const h = ctx.lab.components?.[name];
   if (!h) return <p className="muted small">Saved hosts are resolved here.</p>;
@@ -371,12 +377,18 @@ function HostCard({ name }: { name: string }) {
   return (
     <div className="type-card">
       <div><span className="muted small">{h.chain.join(" → ")}</span></div>
-      {h.missing?.length > 0 && <div className="error-text">Does not implement {h.missing.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {h.role}: the lab does not load.</div>}
+      {h.missing?.length > 0 && <div className="error-text">Does not implement {h.missing.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {h.role}: the lab does not load.
+        {onOverride && h.missing.filter((c: string) => !(own && c in own)).map((c: string) =>
+          <button key={c} className="small" onClick={() => onOverride(c, undefined)}>Implement {c}</button>)}</div>}
       {h.extra?.length > 0 && <div className="warning-text">Implements {h.extra.map((c: string) => <code key={c}>{c}</code>)}, which its role does not list: datapacks cannot use them.</div>}
       <table className="grid compact">
         <tbody>
           {Object.entries<any>(h.commands).map(([c, info]) => (
-            <tr key={c} title={role[c]?.description}><td><code>{c}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from}</td></tr>
+            <tr key={c} title={role[c]?.description}><td><code>{c}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from}</td>
+              {onOverride && <td>{own && c in own
+                ? <span className="muted small">overridden here</span>
+                : <button className="small" title="Give this component its own implementation, starting from this one" onClick={() => onOverride(c, info.spec)}>Override</button>}</td>}
+            </tr>
           ))}
         </tbody>
       </table>
@@ -601,11 +613,15 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
         </Field>
       )}
       <Section title="Its commands, as the lab resolves them" collapsed={false}>
-        <HostCard name={name} />
+        <HostCard name={name} own={vars.tsq_commands || {}} onOverride={(c, spec) => set("tsq_commands", {
+          ...(vars.tsq_commands || {}),
+          [c]: spec != null ? clone(spec) : inherited[c] ? clone(inherited[c].spec) : c === "stop" ? { signal: "TERM", timeout: "10s" } : { run: "" },
+        })} />
       </Section>
       <CommandsEditor title="Its own command implementations (tsq_commands)" help={help(["all", "vars", "tsq_commands"])}
         value={vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)}
-        inherited={inherited} required={role ? required : undefined} />
+        inherited={inherited} required={role ? required : undefined} ownOnly
+        empty="None: it uses the commands above. Override one there to give it its own implementation." />
       <StatusEditor value={vars.tsq_status} onChange={(v) => set("tsq_status", v)} inherited={base?.status ? { spec: base.status.spec ?? base.status, from: base.status.from ?? baseName } : undefined} />
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
       <Section title="Other variables" help="Any variable: `ansible_user`, `ansible_port`, or your own, reachable as `{{ component.vars.<name> }}` in commands. A name like `custom_grp.keyA` is a key of a group of variables, written nested in the YAML and read as `{{ component.vars.custom_grp.keyA }}`.">

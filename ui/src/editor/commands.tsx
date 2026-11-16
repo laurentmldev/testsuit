@@ -13,7 +13,7 @@
 
 // Editors of command definitions (lab components, stage and host overrides), ready checks
 // (wait_for) and expected results, used by every form that has commands.
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { CodeEditor } from "../monaco";
 import { classes, freeName, Markdown } from "../util";
@@ -457,17 +457,28 @@ function TransferDialog({ mode, name, transfer, onClose, onDone }: {
 /** Commands by name: inherited ones (read-only, can be overridden) and own ones (editable). With required (the
  * commands a role lists, with what each does), those implemented nowhere are shown as missing. With transfer,
  * an own command can be copied or moved to another component (or copied to this one under another name). */
-export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer }: {
+export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer, ownOnly, empty }: {
   value: Record<string, any> | null | undefined; onChange: (v: Record<string, any>) => void;
   inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string }>;
   title?: string; help?: string; transfer?: CommandTransfer;
+  /** only the own commands: the inherited ones are shown (and overridden) elsewhere */
+  ownOnly?: boolean; empty?: ReactNode;
 }) {
   const { schemas } = useSession();
   const own = value || {};
   const [openName, setOpenName] = useState<string | null>(null);
   const [moving, setMoving] = useState<{ mode: "copy" | "move"; name: string } | null>(null);
   const [adding, setAdding] = useState("");
-  const names = [...new Set([...Object.keys(required || {}), ...Object.keys(inherited || {}), ...Object.keys(own)])];
+  // a command added from elsewhere (an Override button of the resolved commands) opens for editing
+  const ownKeys = Object.keys(own);
+  const known = useRef<string[] | null>(null);
+  useEffect(() => {
+    const added = known.current ? ownKeys.filter((k) => !known.current!.includes(k)) : [];
+    if (added.length === 1) setOpenName(added[0]);
+    known.current = ownKeys;
+  }, [ownKeys.join("\n")]);
+  const names = ownOnly ? ownKeys
+    : [...new Set([...Object.keys(required || {}), ...Object.keys(inherited || {}), ...ownKeys])];
   const set = (name: string, spec: any) => onChange({ ...own, [name]: spec });
   const remove = (name: string) => {
     const next = clone(own);
@@ -484,6 +495,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
   const wellKnown = nameChoices(schemas, Object.keys(own));
   return (
     <Section title={title || "Commands"} help={help}>
+      {names.length === 0 && empty && <p className="muted small">{empty}</p>}
       <table className="grid compact commands">
         <tbody>
           {names.map((name) => {
