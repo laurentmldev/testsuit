@@ -268,7 +268,8 @@ def cmd_selftest(args, client: Client) -> int:
     for r in results:
         print(f"{'ok    ' if r['ok'] else 'FAILED'} {r['component']}" + (f" -> {r['state']}" if r["state"] else ""))
         for check in r["checks"]:
-            print(f"    {'ok' if check['ok'] else 'FAILED'} {check['id']}: {check['detail']}")
+            mark = ("skipped" if check["ok"] else "not run") if check.get("skipped") else "ok" if check["ok"] else "FAILED"
+            print(f"    {mark} {check['id']}: {check['detail']}")
     return 0 if all(r["ok"] for r in results) else 1
 
 

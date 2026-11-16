@@ -407,13 +407,13 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 checks.append({"id": cid, "ok": False, "detail": str(e)})
                 failed_state = failed_state or "broken"
                 continue
-        ok, detail = True, ""
+        ok, detail, skipped = True, "", False
         ran: dict = {}                                  # a run check: the command as rendered, its exit status
         builtin = check.get("builtin")
         try:
             if builtin == "status":
                 if resolved.status is None:
-                    detail = "no status probe"
+                    detail, skipped = "no status probe", True
                 else:
                     state = (await monitor.probe(comp.id, selftest=True) if monitor
                              else (await probe_component(comp, resolved, transport, via=via))[0])
@@ -421,7 +421,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                     if not ok:
                         failed_state = failed_state or state
             elif via is not None and builtin in ("login", "remote_root", "disk", "clock"):
-                detail = f"skipped: the component is probed via {via.id}"
+                detail, skipped = f"skipped: the component is probed via {via.id}", True
             elif builtin == "login":
                 r = await shell("true", 20)
                 ok, detail = r.completed and r.exit_status == 0, r.error or ""
@@ -462,7 +462,7 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 ok, detail = False, f"check '{cid}' has no 'run'"
         except Exception as e:
             ok, detail = False, f"{type(e).__name__}: {e}"
-        checks.append({"id": cid, "ok": bool(ok), "detail": detail, **ran})
+        checks.append({"id": cid, "ok": bool(ok), "detail": detail, **ran, **({"skipped": True} if skipped else {})})
         if not ok:
             failed_state = failed_state or "broken"
     return {"component": comp.id, "ok": failed_state is None, "state": failed_state, "checks": checks, "at": now()}
