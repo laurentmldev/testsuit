@@ -1164,8 +1164,8 @@ class Editor:
 
     def scan_workspace(self, folder: Path, rel_to: Path) -> dict:
         """Test definitions, setups, sub-pipelines, dictionaries and templates of a folder."""
-        result = {"testdefs": [], "setups": [], "subpipelines": {}, "subpipeline_files": [], "dictionaries": [],
-                  "templates": []}
+        result = {"testdefs": [], "setups": [], "subpipelines": {}, "subpipeline_files": [], "shared_subpipelines": {},
+                  "dictionaries": [], "templates": []}
         if not folder.is_dir():
             return result
         for dirpath, dirnames, filenames in os.walk(folder):
@@ -1201,6 +1201,8 @@ class Editor:
                     result["subpipeline_files"].append(rel)
                     for sub, spec in data["subpipelines"].items():
                         result["subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
+                        # only these can be used by another test definition (pipeline.include)
+                        result["shared_subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
                 elif "all" not in data and not (({"roles", "models", "components"} & set(data))
                                                  and not set(data) - {"roles", "models", "components"}):
                     result["dictionaries"].append(rel)
@@ -1852,7 +1854,7 @@ class Editor:
         return {"setup": self.rel(session, setup_path), "configuration": config,
                 "configurations": sorted((setup_raw.get("configurations") or {})),
                 "stage_slots": needs.stage_slots, "slots": slots, "subpipelines": subs,
-                "shared_subpipelines": (workspace.get("subpipelines") or {}),
+                "shared_subpipelines": (workspace.get("shared_subpipelines") or {}),
                 "step_types": sorted(registry.step_types), "ready_checks": sorted(registry.ready_checks)}
 
     # ── keys, template preview, datapack generation ──────────────────────

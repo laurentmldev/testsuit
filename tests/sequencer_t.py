@@ -681,6 +681,47 @@ def test_selftest_failure(tmp_path, no_git):
     assert done["verdict"] == "error" and "self-test failed 2 time(s)" in done["reason"]
 
 
+def test_bypassed_selftest_check(tmp_path, no_git):
+    """A failed self-test check bypassed for some hours: the component is available, a run on it goes on and is
+    not conform, its run.yml and selftest.yml saying why; ending the bypass breaks the component again."""
+    from testsuit.sequencer.util import SequencerError
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
+    types["models"]["counter_host"]["selftest"] = [{"id": "clock_ok", "run": "test -e /nonexistent/x"}]
+    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        [failed] = await seq.selftest("counter_1")
+        with pytest.raises(SequencerError, match="say why"):
+            await seq.bypass_check("counter_1", "clock_ok", 2, "")
+        with pytest.raises(SequencerError, match="cannot be bypassed"):
+            await seq.bypass_check("counter_1", "login", 2, "x")
+        with pytest.raises(SequencerError, match="at most 72 hours"):
+            await seq.bypass_check("counter_1", "clock_ok", 100, "x")
+        bypassed = await seq.bypass_check("counter_1", "clock_ok", 2, "clock server down", "laurent")
+        state = await seq.monitor.probe("counter_1")
+        run = seq.submit(bench.build())
+        [done] = await run_until_done(seq, [run["id"]])
+        ended = await seq.bypass_check("counter_1", "clock_ok", 0)
+        await seq.close()
+        return failed, bypassed, state, done, ended
+    failed, bypassed, state, done, ended = asyncio.run(main())
+    assert not failed["ok"] and bypassed["ok"] and bypassed["bypassed"] == ["clock_ok"] and state == "idle"
+    check = next(c for c in bypassed["checks"] if c["id"] == "clock_ok")
+    assert not check["ok"] and check["bypassed"]["by"] == "laurent" and check["bypassed"]["reason"] == "clock server down"
+    assert done["verdict"] == "succeeded" and done["conform"] is False
+    assert any("self-test check 'clock_ok' of counter_1 failed" in n and "bypassed until" in n and "clock server down" in n
+               for n in done["nonconform"]), done["nonconform"]
+    results = Path(done["results"])
+    assert "_NONCONFORM" in results.name, results
+    record = yaml.safe_load((Path(done["dir"]) / "run.yml").read_text())
+    assert record["conform"] is False and any("bypassed" in n for n in record["nonconform"])
+    attempts = yaml.safe_load((Path(done["dir"]) / "selftest.yml").read_text())["attempts"]
+    assert any(c.get("bypassed") for a in attempts for c in a["checks"])
+    assert not ended["ok"] and not ended["bypassed"]
+
+
 def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
     """A failed self-test leaves the component broken while its probe says idle; becoming idle (or being
     probed idle while kept broken) runs a self-test, and the one that passes brings it back."""

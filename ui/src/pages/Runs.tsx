@@ -14,7 +14,7 @@
 // History of runs, filtered by state.
 import { useState } from "react";
 import { useResource } from "../api";
-import { ago, Badge, duration, time } from "../util";
+import { ago, Badge, Elapsed, time } from "../util";
 
 const FILTERS: [string, string][] = [
   ["", "all"], ["queued,waiting_resources", "waiting"], ["reserved,selftest,running,cleaning", "running"],
@@ -50,7 +50,7 @@ export function RunsPage() {
               <td><Badge value={r.state} /></td>
               <td><Badge value={r.verdict} /></td>
               <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
-              <td>{r.activated_at ? duration(r.activated_at, r.ended_at) : ""}</td>
+              <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>
               <td><Badge value={r.conform ? "conform" : "non-conform"} title={(r.nonconform || []).join("\n")} /></td>
               <td className="reason">{r.reason}</td>
             </tr>
