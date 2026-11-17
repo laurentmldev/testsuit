@@ -200,6 +200,39 @@ def _key_tree(keys: dict) -> dict:
     return plain(keys)
 
 
+def _eval_expression(expression: str, keys: dict, where: str) -> dict:
+    """An expression evaluated as a template would (keys read by key first, undefined ones are errors), in a
+    sandbox, with the functions of ``where`` giving placeholders."""
+    import jinja2
+    from jinja2.sandbox import SandboxedEnvironment
+    text = expression.strip()
+    if text.startswith("{{") and text.endswith("}}"):
+        text = text[2:-2].strip()
+    if not text:
+        return {"value": None, "error": "an expression is needed"}
+
+    class Env(SandboxedEnvironment):
+        def getattr(self, obj: Any, attribute: str) -> Any:
+            if isinstance(obj, dict) and attribute in obj:
+                return obj[attribute]
+            return super().getattr(obj, attribute)
+
+    env = Env(undefined=jinja2.StrictUndefined, autoescape=False)
+    env.filters["from_yaml"] = yaml.safe_load
+    env.filters["from_json"] = json.loads
+    if where == "run":
+        functions = {name: (lambda step: "<verdict>") for name in ("succeeded", "failed", "errored", "skipped", "verdict")}
+    else:
+        functions = {"read_input": lambda path: f"<content of {path}>"}
+    try:
+        value = env.compile_expression(text, undefined_to_none=False)(**{**keys, **functions})
+        if isinstance(value, jinja2.Undefined):
+            str(value)                              # raises: says what is undefined
+        return {"value": _key_tree({"v": value})["v"], "error": None}
+    except Exception as e:                           # a syntax error, an undefined key, a type error...
+        return {"value": None, "error": f"{type(e).__name__}: {e}" if not isinstance(e, jinja2.TemplateError) else str(e)}
+
+
 def _missing_keys(value: Any, keys: dict) -> list[str]:
     """The keys the templates of a value (strings, lists and dicts) read that ``keys`` does not define."""
     from testsuit.datatools.datapack.templating import undefined_keys
@@ -1495,6 +1528,17 @@ class Editor:
                       run_functions=["succeeded('<step>')", "failed('<step>')", "errored('<step>')", "skipped('<step>')",
                                      "verdict('<step>')"])
         return result
+
+    def eval_key(self, session: EditSession, testdef_rel: str, slot: str, expression: str, where: str = "generation",
+                 setup_config: str | None = None) -> dict:
+        """The value of a key expression (``lab.components[slots.my_slot.component].host``, with or without its
+        ``{{ }}``) on the keys of a slot the explorer shows: ``where`` is ``generation`` or ``run``. Returns
+        ``value`` (plain data) or ``error``."""
+        found = self.slot_keys(session, testdef_rel, slot, setup_config)
+        keys = found["run"] if where == "run" else found["generation"]
+        if keys is None:
+            return {"value": None, "error": found.get("why_not") or "no run-time keys for this slot"}
+        return _eval_expression(expression, keys, where)
 
     def _run_problems(self, session: EditSession, testdef_rel: str, setup_config: str, by_hand: dict | None = None,
                       missing: list[str] | None = None) -> list[str]:

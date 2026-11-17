@@ -882,5 +882,9 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .key-tree .key-copy { margin-left: 6px; opacity: 0.4; }
 .key-tree li:hover > .key-copy { opacity: 1; }
 .key-tree .key-value { word-break: break-all; }
+.key-eval { border: 1px solid var(--border); border-left-width: 4px; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.key-eval.ok { border-left-color: var(--ok, #2e9d5b); }
+.key-eval.bad { border-left-color: var(--bad, #d64545); }
+.key-eval pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
 .user-keys { display: flex; flex-direction: column; gap: 6px; }
 .user-key { display: grid; grid-template-columns: minmax(120px, auto) minmax(160px, 260px) 1fr auto; gap: 8px; align-items: center; }
