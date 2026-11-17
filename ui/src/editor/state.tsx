@@ -348,7 +348,7 @@ export function stageTypeChoices(ctx: any): Choice[] {
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
       for (const [, type] of Object.entries<any>(c.stage_slots || {}))
-        if (type && !result[type]) result[type] = { value: type, description: `asked for by setup ${setup.id} (${cfg}), no such stage in the lab yet` };
+        if (type && !result[type]) result[type] = { value: type, description: `asked for by datapack setup ${setup.id} (${cfg}), no such stage in the lab yet` };
   return Object.values(result);
 }
 
@@ -368,7 +368,7 @@ export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?:
         if (!comp.role || result[comp.role]) continue;
         const stageType = comp.stage_slot ? c.stage_slots?.[comp.stage_slot] : null;
         if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.stage_slot)) continue;
-        result[comp.role] = { value: comp.role, description: `asked for by setup ${setup.id} (${cfg}), slot ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
+        result[comp.role] = { value: comp.role, description: `asked for by datapack setup ${setup.id} (${cfg}), slot ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
       }
   return Object.values(result);
 }
