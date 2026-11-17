@@ -512,8 +512,9 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 </tr>
               );
             return [
-              <tr key={name} className={classes("clickable", !mine && "inherited", openName === name && "selected")} onClick={() => setOpenName(openName === name ? null : name)}>
-                <td><code>{name}</code></td>
+              <tr key={name} className={classes("clickable", !mine && "inherited", openName === name && "selected open")} onClick={() => setOpenName(openName === name ? null : name)}
+                  title={openName === name ? "Click to close its details" : mine ? "Click to edit it" : "Click to see it"}>
+                <td><span className="disclosure" aria-hidden="true">{openName === name ? "▾" : "▸"}</span><code>{name}</code></td>
                 <td className="mono small">{summary(mine ? own[name] : from?.spec)}</td>
                 <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}{required && !role && <span className="warning-text"> · not in the role</span>}</td>
                 <td>
@@ -540,10 +541,16 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 </td>
               </tr>,
               openName === name && mine && (
-                <tr key={name + ":edit"} className="editing"><td colSpan={4}><CommandEditor name={name} spec={own[name]} onChange={(s) => set(name, s)} /></td></tr>
+                <tr key={name + ":edit"} className="editing"><td colSpan={4}>
+                  <div className="command-detail-head">Command <code>{name}</code>: its details <span className="muted">(changes are saved as you type)</span>
+                    <button className="small" onClick={() => setOpenName(null)}>Close</button></div>
+                  <CommandEditor name={name} spec={own[name]} onChange={(s) => set(name, s)} />
+                </td></tr>
               ),
               openName === name && !mine && from && (
-                <tr key={name + ":view"} className="editing"><td colSpan={4}><pre className="mono small">{JSON.stringify(from.spec, null, 1)}</pre><Markdown text={wellKnown.find((w) => w.value === name)?.description} /></td></tr>
+                <tr key={name + ":view"} className="editing"><td colSpan={4}>
+                  <div className="command-detail-head">Command <code>{name}</code>, inherited from {from.from} <span className="muted">(Override to change it here)</span>
+                    <button className="small" onClick={() => setOpenName(null)}>Close</button></div><pre className="mono small">{JSON.stringify(from.spec, null, 1)}</pre><Markdown text={wellKnown.find((w) => w.value === name)?.description} /></td></tr>
               ),
             ];
           })}

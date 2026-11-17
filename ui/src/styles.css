@@ -143,6 +143,16 @@ td .description { margin: 2px 0 0; max-width: 40ch; }
 .row-actions { margin: 0; }
 .commands .row-actions { flex-wrap: nowrap; justify-content: flex-end; }
 .commands td.mono { overflow-wrap: anywhere; }
+/* a command opened: its row and its details read as one block, the details indented under it */
+.commands .disclosure { display: inline-block; width: 1.1em; color: var(--muted); }
+.commands tr.clickable > td:first-child { white-space: nowrap; }
+.commands tr.open td { background: var(--accent-soft); border-top: 2px solid var(--accent); font-weight: 600; }
+.commands tr.open td:first-child { border-left: 3px solid var(--accent); }
+.commands tr.open .disclosure { color: var(--accent); }
+.commands tr.editing > td { border-left: 3px solid var(--accent); border-bottom: 2px solid var(--accent); background: color-mix(in srgb, var(--accent-soft) 35%, var(--panel));
+  padding: 8px 12px 12px 26px; }
+.commands .command-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+.commands .command-detail-head button { margin-left: auto; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin: 6px 0; }
 .progress > div { height: 100%; background: var(--run); }
 table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
