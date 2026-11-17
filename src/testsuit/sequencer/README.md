@@ -1050,6 +1050,12 @@ A lower-priority run may start while a higher-priority one waits, but only on re
 
 **Per phase.** At the end of a phase, the resources the next phase doesn't use are released, and those it does use stay held. Optionally, a run can pre-reserve the resources of all its phases at activation (`reserve: all`), so it isn't stuck between phases.
 
+**A phase that cannot start.** Before a later phase, the run binds and locks what the phase adds. While that is not possible, the run keeps what it holds and waits:
+- **for resources**, checked again every 2 s: the phase starts as soon as they are free;
+- **after a failed self-test** of what the phase adds (when `selftest.before_each_run`): what failed is given back (marked `broken` or `offline`, section 7.6), and the phase checks again 60 s later: with another stage or component when one is free, else once what failed passes a self-test (by itself when it turns idle again, or with Retry now). After `selftest.max_attempts` failures, the phase does not start and the run ends with the verdict `error`.
+
+The Run page says which phase waits, since when, why (one line per missing resource or failed check), and when it is checked again. **Retry now** (`POST /runs/<id>/retry`) checks at once: it tests again what failed its self-test, or walks the queue again for a run that has not started yet.
+
 **Visibility.**
 - `tsq queue` shows each waiting run with its priority and what it waits for (no free `bench` stage: `bench_1` held by run A, `bench_2` broken).
 - `tsq stages` and `tsq components` show stages and components with their monitored state, lock state and holder.
@@ -1061,7 +1067,7 @@ A lower-priority run may start while a higher-priority one waits, but only on re
    - It reads the pipeline, commands, resources needed and `context.yml` from the zip only.
    - It validates them against the lab inventory: stage types, roles, slot types, commands.
    - The run state is `queued`.
-2. **Activate**: binding and locking (section 9), a check that `storage.min_free_space` is available, then the platform self-test of every locked component (section 7.6). The run state goes `waiting_resources → reserved → selftest → running`.
+2. **Activate**: binding and locking (section 9), a check that `storage.min_free_space` is available, then the platform self-test of every locked component (section 7.6). The run state goes `waiting_resources → reserved → selftest → running`. A self-test that fails here puts the run back at the head of the queue, until `selftest.max_attempts`.
 3. **Phases**:
    - Before a phase, the kernel copies its `inputs` and binds and locks its resources if they aren't held yet.
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.

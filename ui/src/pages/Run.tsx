@@ -13,12 +13,12 @@
 
 // One run (sequencer README, section 13.1): its pipeline as a live graph of phases, sub-pipelines and steps,
 // the logs of each step, its files before, during and after the run.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
-import { getText, url, useLabels, useResource } from "../api";
+import { getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, Badge, classes, ConsoleText, Elapsed, setQuery, Spinner, STATE_COLORS, time, ViaTag } from "../util";
+import { ago, attempt, Badge, classes, ConsoleText, Elapsed, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -301,6 +301,48 @@ function logSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** In: "in 42 s", "in 2 min", or "now". */
+function inTime(iso?: string | null): string {
+  if (!iso) return "";
+  const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  return s <= 0 ? "now" : s < 90 ? `in ${s} s` : `in ${Math.round(s / 60)} min`;
+}
+
+const clock = (iso?: string | null) => (iso ? new Date(iso).toLocaleTimeString() : "");
+
+/** Why the run, or its next phase, has not started: since when, what is missing, when it is checked again, and
+ * a button to check now (README section 9). */
+function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
+  const w = run.wait;
+  useTick(true);
+  const [busy, setBusy] = useState(false);
+  const retry = async () => {
+    setBusy(true);
+    await attempt(() => post(`runs/${run.id}/retry`), "Checking again now");
+    setBusy(false);
+    window.setTimeout(onRetry, 600);
+  };
+  const what = w.phase ? <>Phase <strong>{w.phase}</strong> could not start yet</> : <>The run has not started yet</>;
+  const tries = w.max_attempts && w.attempts ? ` (failed ${w.attempts} of ${w.max_attempts} allowed times: the run ends in error at the ${w.max_attempts}${w.max_attempts === 2 ? "nd" : w.max_attempts === 3 ? "rd" : "th"})` : "";
+  let when: ReactNode;
+  if (w.cause === "selftest_running") when = <><Spinner /> Self-testing what it needs before it takes it…</>;
+  else if (w.cause === "selftest" && w.every >= 30) when = <>A self-test failed{tries}. What failed is given back and tried again at {clock(w.next_check)} ({inTime(w.next_check)}), or now with Retry.</>;
+  else if (w.cause === "selftest") when = <>A self-test failed{tries}. What failed is out of service until a self-test passes: by itself when it turns idle again (at most once a minute), or now with Retry, which tests it again. Other resources are checked every {w.every} s.</>;
+  else if (w.cause === "requeued") when = <>The self-test failed{tries}: the run is back at the head of the queue, and is checked on any lab change or every {w.every} s (next {inTime(w.next_check)}).</>;
+  else when = <>Checked again every {w.every} s, and at once when the lab changes: it starts as soon as what it needs is free.</>;
+  return (
+    <div className="banner info wait-banner">
+      <div className="wait-head">
+        <span>{what}{w.since && <span className="muted"> · waiting since {clock(w.since)} (<Elapsed from={w.since} />)</span>}</span>
+        <span className="spacer" />
+        {w.cause !== "selftest_running" && <button className="small" disabled={busy} onClick={retry} title="Check now whether it can start, instead of at the next check">{busy ? "Checking…" : "Retry now"}</button>}
+      </div>
+      {w.reasons?.length > 0 && <ul className="wait-reasons">{w.reasons.map((x: string) => <li key={x}>{x}</li>)}</ul>}
+      <div className="small">{when}{w.checked_at && <span className="muted"> Last check {clock(w.checked_at)}.</span>}</div>
+    </div>
+  );
+}
+
 export function RunPage({ id, tab }: { id: string; tab: string }) {
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
@@ -351,7 +393,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
       {r.reason && <div className="banner warn">{r.reason}</div>}
-      {r.waiting_for && <div className="banner info">Waiting for: {r.waiting_for}</div>}
+      {r.wait ? <WaitBanner run={r} onRetry={run.refresh} /> : r.waiting_for && <div className="banner info">Waiting for: {r.waiting_for}</div>}
       {(r.nonconform || []).length > 0 && <details className="small"><summary>Why it is non-conform</summary><ul>{r.nonconform.map((n: string) => <li key={n}>{n}</li>)}</ul></details>}
       {(r.warnings || []).length > 0 && <ul className="warn-list">{r.warnings.map((w: string) => <li key={w}>{w}</li>)}</ul>}
       <div className="tabs">
