@@ -27,7 +27,7 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
   subpipelines: { label: "Shared sub-pipelines", description: "steps used by several test definitions", workspace: true },
   dictionary: { label: "Key file", description: "keys for the templates and commands", workspace: true },
   template: { label: "Template", description: "an input file rendered with the keys", workspace: true },
-  library: { label: "Lab roles and components", description: "a file of the lab library: roles (the commands offered) and components (their implementations)", lab: true },
+  library: { label: "Lab roles and models", description: "a file of the lab library: roles (the commands offered) and component models (their implementations)", lab: true },
 };
 
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their
@@ -123,7 +123,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
       };
     } else if (kind === "setup") {
       data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { stage_slots: {}, slots: {} } }, slot_types: {} };
-    } else if (kind === "library") data = { roles: {}, components: {} };
+    } else if (kind === "library") data = { roles: {}, models: {} };
     else if (kind === "subpipelines") data = { subpipelines: {} };
     else if (kind === "dictionary") content = `# Keys for the templates and commands: {{ ${slug(id || name || "section")}.example }}\n${slug(id || name || "section")}:\n  example: value\n`;
     else content = "# Rendered with the datapack keys: type {{ to get them.\n";

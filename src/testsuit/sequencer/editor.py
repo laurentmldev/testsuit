@@ -265,7 +265,7 @@ RUNTIME_KEYS = {
     "component.host_alias": "the tsq_hosts name its address is given by ( when it gives the address itself)",
     "component.label": "its label",
     "component.role": "its role",
-    "component.extends": "the library component it extends (its implementation)",
+    "component.extends": "the component model it extends (its implementation)",
     "component.slot": "the slot it is bound to",
     "component.stage": "its lab stage",
     "component.vars": "every inventory variable of it (component.vars.tsq_start_args, component.vars.custom_grp.keyA...)",
@@ -439,7 +439,7 @@ class Editor:
     # ── repositories and sessions ────────────────────────────────────────
 
     def repositories(self) -> list[dict]:
-        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and components",
+        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and models",
                   "folder": str(self.seq.config.lab_folder), "git": git_state(self.seq.config.lab_folder)}]
         for i, folder in enumerate(self.seq.config.workspaces):
             git = git_state(folder) if folder.exists() else None
@@ -883,8 +883,8 @@ class Editor:
             return "testdef"
         if "configurations" in data and ({"slot_types", "component_types", "datarepositories"} & set(data)):
             return "setup"
-        if ({"roles", "components"} & set(data)) and not set(data) - {"roles", "components"}:
-            return "library"
+        if ({"roles", "models", "components"} & set(data)) and not set(data) - {"roles", "models", "components"}:
+            return "library"                 # (components: the former name of models, refused when loaded)
         if "subpipelines" in data:
             return "subpipelines"
         return "dictionary"
@@ -1001,7 +1001,7 @@ class Editor:
         if kind not in ("role", "component"):
             raise SequencerError(f"rename: 'role' or 'component', not '{kind}'")
         host_key = "tsq_role" if kind == "role" else "tsq_extends"
-        section = "roles" if kind == "role" else "components"
+        section = "roles" if kind == "role" else "models"
 
         def follow(node: Any, keys: tuple[str, ...]) -> bool:
             changed = False
@@ -1048,7 +1048,7 @@ class Editor:
             else:
                 hit = follow((data or {}).get(section), ("extends",))
                 if kind == "role":
-                    hit = follow((data or {}).get("components"), ("roles",)) or hit
+                    hit = follow((data or {}).get("models"), ("roles",)) or hit
             if hit:
                 self.write(session, f["path"], data=data)
                 changed.append(f["path"])
@@ -1201,8 +1201,8 @@ class Editor:
                     result["subpipeline_files"].append(rel)
                     for sub, spec in data["subpipelines"].items():
                         result["subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
-                elif "all" not in data and not (({"roles", "components"} & set(data))
-                                                 and not set(data) - {"roles", "components"}):
+                elif "all" not in data and not (({"roles", "models", "components"} & set(data))
+                                                 and not set(data) - {"roles", "models", "components"}):
                     result["dictionaries"].append(rel)
         return result
 

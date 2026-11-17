@@ -335,7 +335,7 @@ export function componentChoices(ctx: any, opts: { filter?: (name: string) => bo
   if (opts.hosts)
     for (const [id, h] of Object.entries<any>(ctx.lab.components || {}))
       if (!opts.filter || opts.filter(id))
-        result.push({ value: id, description: `host, role ${h.role || "?"}, extends ${h.extends}`, group: "hosts" });
+        result.push({ value: id, description: `inventory component, role ${h.role || "?"}, extends ${h.extends}`, group: "hosts" });
   return result;
 }
 

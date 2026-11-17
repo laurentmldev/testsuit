@@ -19,7 +19,7 @@ import { CodeEditor } from "../monaco";
 import { classes, freeName, Markdown } from "../util";
 import { clone, useSession, viaChoices } from "./state";
 
-const CMD_PATH = ["components", "_", "commands", "_"];
+const CMD_PATH = ["models", "_", "commands", "_"];
 
 export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "deploy", "collect", "kill"];
 
@@ -102,7 +102,7 @@ export function useCommandHelp() {
 }
 
 export function nameChoices(schemas: any, existing: string[]): Choice[] {
-  const props = schemas.library?.properties?.components?.additionalProperties?.properties?.commands?.properties || {};
+  const props = schemas.library?.properties?.models?.additionalProperties?.properties?.commands?.properties || {};
   return WELL_KNOWN.filter((n) => !existing.includes(n)).map((n) => ({ value: n, description: (props[n]?.markdownDescription || "").split("\n\n")[0] }));
 }
 

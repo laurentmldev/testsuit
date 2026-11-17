@@ -197,7 +197,7 @@ def test_workspace_session(repos):
     assert {"start", "stop", "ready", "deploy"} <= set(palette["slots"]["dut"]["commands"])
     start_cmd = palette["slots"]["dut"]["commands"]["start"]
     assert start_cmd["from"] == "role dut" and start_cmd["description"] == "Starts the counter."
-    assert start_cmd["implementations"]["counter_1"]["from"] == "component counter_host"
+    assert start_cmd["implementations"]["counter_1"]["from"] == "model counter_host"
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
@@ -742,7 +742,7 @@ def test_lab_session(repos):
     assert described["library"]["counter_host"]["used_by"] == ["counter_1", "counter_2"]
     host = described["components"]["counter_1"]
     assert host["chain"] == ["component", "linux_system", "counter_host", "counter_1"]
-    assert host["commands"]["deploy"]["from"] == "component linux_system" and host["missing"] == []
+    assert host["commands"]["deploy"]["from"] == "model linux_system" and host["missing"] == []
     assert described["library"]["counter_host"]["roles"] == ["dut"] and described["roles"]["dut"]["implemented_by"] == ["counter_host"]
     assert (host["role"], host["role_given"], host["role_choices"]) == ("dut", "", ["dut"])   # the role of its component
 
@@ -815,20 +815,20 @@ def test_renaming_roles_and_components(repos):
     editor.write(session, "other.yml", content=other)
     editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
     assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == \
-        ["components/bench.yml"]                                  # the roles its components list
-    assert editor.read(session, "components/bench.yml")["data"]["components"]["counter_host"]["roles"] == ["counter_dut"]
+        ["models/bench.yml"]                                  # the roles its components list
+    assert editor.read(session, "models/bench.yml")["data"]["models"]["counter_host"]["roles"] == ["counter_dut"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
     assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
     assert "tsq_role: dut" not in editor.read(session, "inventory.yml")["content"]
     assert editor.read(session, "other.yml")["content"] == other
 
-    components = editor.read(session, "components/bench.yml")["data"]
-    components["components"]["counter_app"] = components["components"].pop("counter_host")
-    editor.write(session, "components/bench.yml", data=components)
+    components = editor.read(session, "models/bench.yml")["data"]
+    components["models"]["counter_app"] = components["models"].pop("counter_host")
+    editor.write(session, "models/bench.yml", data=components)
     assert editor.context(session)["lab_error"]
     assert editor.rename_references(session, "component", "counter_host", "counter_app",
-                                    skip="components/bench.yml") == ["inventory.yml"]
+                                    skip="models/bench.yml") == ["inventory.yml"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None and ctx["lab"]["library"]["counter_app"]["used_by"] == ["counter_1", "counter_2"]
 

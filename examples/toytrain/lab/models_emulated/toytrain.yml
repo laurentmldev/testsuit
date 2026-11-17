@@ -1,4 +1,4 @@
-# Lab components of the emulated toy train (sequencer README, sections 7.2 and 6.2): they implement the
+# Component models of the emulated toy train (sequencer README, sections 7.2 and 6.2): they implement the
 # same roles as the lab (roles/toytrain.yml), so the datapack setup binds to them unchanged, but every
 # component is a process on the dev host, started and stopped by the sequencer itself.
 #
@@ -11,7 +11,7 @@
 #   - AU's GPIO inputs: UDP datagrams from the piezo simulation (--gpio-backend udp://...);
 # - no switch: the loopback interface is the train network.
 
-components:
+models:
 
   emulated_app:
     # a toy-train application run as a local process

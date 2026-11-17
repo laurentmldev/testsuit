@@ -274,20 +274,20 @@ SELFTEST = h(
                                                                    "timeout": "20s"}}]})
 
 COMPONENT = h(
-    "A lab component: how it implements the commands of a role, how its state is monitored, its self-test and its "
-    "transport. A component `extends` another one and redefines only what differs (section 7.2). Inventory hosts "
-    "extend a component with `tsq_extends`.",
+    "A component model: how it implements the commands of a role, how its state is monitored, its self-test and its "
+    "transport. A model `extends` another one and redefines only what differs (section 7.2). The lab components of "
+    "the inventory extend a model with `tsq_extends`.",
     type="object", additionalProperties=False,
     properties={
-        "extends": h("The parent component: `linux_system` for anything reachable over SSH (deploy, collect and "
+        "extends": h("The parent model: `linux_system` for anything reachable over SSH (deploy, collect and "
                      "kill built in), `component` for something that is not a Linux system (a switch, an instrument "
-                     "driven through its own API), or another component of the library.", type="string"),
+                     "driven through its own API), or another model of the library.", type="string"),
         "roles": h("The roles it supports (section 7.2): it must implement every command each lists. Inherited by "
-                   "the components extending it, unless they list their own. A host extending a component with "
+                   "the models extending it, unless they list their own. A host extending a model with "
                    "one role has that role; with several, it picks one with `tsq_role`. Leave out for a base "
-                   "component (`rpi5` hardware) whose hosts give their role.", type="array",
+                   "model (`rpi5` hardware) whose hosts give their role.", type="array",
                    items={"type": "string"}),
-        "description": h("What this component is: shown in the Editor when a host extends it.", type="string"),
+        "description": h("What this model is: shown in the Editor when a lab component extends it.", type="string"),
         "transport": h("How the sequencer talks to this component: `ssh` (default), `local` (on the "
                        "sequencer host), or a plugin transport. The inventory variable `tsq_transport` overrides it.",
                        type="string"),
@@ -335,7 +335,7 @@ ROLE = h(
                             "description": h("What it is and how to make it (Markdown, as long as needed): shown in "
                                              "the Editor next to the datapack input.", type="string")})),
         "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
-                      "components.", type="object",
+                      "models.", type="object",
                       properties={name: h(f"**{name}**: {text}", type=["string", "null"])
                                   for name, text in COMMAND_NAMES.items()},
                       additionalProperties=h("What the command does.", type=["string", "null"])),
@@ -348,12 +348,12 @@ ROLE = h(
 LIBRARY_FILE = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Lab library file",
     **h("A file of the lab library (the `tsq_library` folders of the inventory): `roles` (abstract: the commands "
-        "offered) and/or `components` (concrete: their implementations), by name."),
-    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["components"]}],
+        "offered) and/or `models` (component models, concrete: their implementations), by name."),
+    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["models"]}],
     "properties": {"roles": h("Lab roles, by name. The built-in `component` and `linux_system` cannot be redefined.",
                               type="object", additionalProperties=ROLE),
-                   "components": h("Lab components, by name. The built-in `component` and `linux_system` cannot be "
-                                   "redefined.", type="object", additionalProperties=COMPONENT)},
+                   "models": h("Component models, by name. The built-in `component` and `linux_system` cannot be "
+                               "redefined.", type="object", additionalProperties=COMPONENT)},
 }
 
 # ── lab inventory ──────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ VARS = {
                   "role (`role: pilot` binds a host with role pilot, or a role extending it, in the stage). Several "
                   "components of a stage can have the same role: each slot gets its own.",
                   type="string"),
-    "tsq_extends": h("The lab component this host is (section 7.2): a component of the library, or another host. "
+    "tsq_extends": h("The component model this host is (section 7.2): a model of the library, or another host. "
                      "It gives the implementations of the commands, the status probe and the self-test "
                      "(default `linux_system`).", type="string"),
     "tsq_lock": LOCK,
@@ -475,9 +475,9 @@ INVENTORY = {
                                **_group(0)["properties"],
                                "vars": h("Variables of every host (defaults).", type=["object", "null"],
                                          properties={**VARS, "tsq_library": h(
-                                             "Folders of the lab library (roles and components), relative to "
+                                             "Folders of the lab library (roles and component models), relative to "
                                              "this file.", type=["array", "string"], items={"type": "string"},
-                                             examples=[["roles/", "components/"]]),
+                                             examples=[["roles/", "models/"]]),
                                              "tsq_hosts": h(
                                              "The lab's host names: a table `name: address` (an IP address or a "
                                              "DNS name). A component's address (`ansible_host`) can be one of "

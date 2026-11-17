@@ -32,7 +32,7 @@ import { NewFileDialog } from "./wizards";
 
 const KIND_LABELS: [string, string, string][] = [
   ["inventory", "Lab inventory", "Stages, ad hoc components and their variables (Ansible YAML inventory)."],
-  ["library", "Lab roles and components", "Roles: the commands a component offers. Components: how they implement them, status probe and self-test."],
+  ["library", "Lab roles and models", "Roles: the commands a component offers. Models: how they implement them, status probe and self-test."],
   ["testdef", "Test definitions", "A test: its setup configuration, key files and pipeline."],
   ["setup", "Setups", "Slots and their inputs, slot types, and the configurations tests choose from."],
   ["subpipelines", "Shared sub-pipelines", "Groups of steps used by several test definitions (pipeline.include)."],
@@ -48,7 +48,7 @@ const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "li
 
 // what one file of a kind is called, shown on the header of the open file
 const KIND_NAME: Record<string, string> = {
-  inventory: "Lab inventory", library: "Roles and components", testdef: "Test definition", setup: "Setup",
+  inventory: "Lab inventory", library: "Roles and models", testdef: "Test definition", setup: "Setup",
   subpipelines: "Sub-pipelines", dictionary: "Key file", template: "Template", yaml: "YAML", other: "File",
   criteria: "Criteria", utests: "Unit tests of criteria",
 };
@@ -213,10 +213,25 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const [dialog, setDialog] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const api = useDoc(id, path, (saved) => {
-    setAllProblems((all) => [...all.filter((p) => p.file !== saved.path), ...(saved.problems || [])]);
-    if (["inventory", "library", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
+    const touched = new Set([saved.path, ...(saved.problems || []).map((p: Problem) => p.file)]);
+    setAllProblems((all) => [...all.filter((p) => !touched.has(p.file)), ...(saved.problems || [])]);
+    if (["inventory", "library", "setup", "testdef", "subpipelines"].includes(saved.kind)) {
+      session?.refreshContext();
+      recheckOthers(saved.path);
+    }
     session?.refreshFiles();
   });
+  // a file refers to others (a host to its model, a test definition to its setup...): once one is saved, the
+  // problems listed for the other files are checked again, so that those it fixed (or caused) show at once
+  const allRef = useRef(allProblems);
+  allRef.current = allProblems;
+  const recheckOthers = (savedPath: string) => {
+    const others = [...new Set(allRef.current.map((p) => p.file).filter((f) => !!f && f !== savedPath))];
+    for (const file of others)
+      post(`edit/sessions/${id}/validate`, { path: file })
+        .then((v) => setAllProblems((all) => [...all.filter((p) => p.file !== file), ...(v.problems || [])]))
+        .catch(() => {});
+  };
   // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo the form and pipeline edits; the YAML and text
   // editors keep their own undo.
   const keys = useRef(api);
@@ -254,7 +269,9 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
       notify(result.ok ? `no error${result.problems.length ? `, ${result.problems.length} warning(s)` : ""}` : `${result.problems.filter((p: Problem) => p.severity === "error").length} error(s)`, result.ok ? "ok" : "error");
     }
   };
-  const problems = doc ? [...doc.problems, ...allProblems.filter((p) => p.file !== doc.path)] : allProblems;
+  // the problems of the open file, then the others (once: saving a file can report problems of another one)
+  const problems = doc ? [...doc.problems, ...allProblems.filter((p) => p.file !== doc.path
+    && !doc.problems.some((d) => d.file === p.file && d.line === p.line && d.message === p.message))] : allProblems;
   const info = session.info;
   // where a session belongs: the Lab page for the lab, the Datapacks page (on its repository) for tests
   const back = info.repo === "lab" ? { path: "lab", label: "Lab" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };
@@ -338,8 +355,8 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
 }
 
 const KIND_HELP: Record<string, string> = {
-  inventory: "**Lab inventory.** Stages are groups with `tsq_stage_type`: datapacks ask for a stage by type and get any free one. Each component extends a lab component (`tsq_extends`), which implements the commands of a lab role; it has the role of that component, or picks one of its roles with `tsq_role`. Datapacks bind by role. Hosts directly under `all` are **ad hoc** components (simulations, the sequencer host). Pick an item on the left of the form to edit it.",
-  library: "**Lab roles and components.** A **role** is abstract: the commands a component offers (`do: <command>` in pipelines), each with what it does; datapacks bind to it. A **component** is concrete: the roles it supports, how it implements their commands, its status probe and its self-test; hosts extend one (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`). Both `extend` another and redefine only what differs: start from `linux_system` for anything reachable over SSH.",
+  inventory: "**Lab inventory.** Stages are groups with `tsq_stage_type`: datapacks ask for a stage by type and get any free one. Each component extends a component model (`tsq_extends`, from the lab library), which implements the commands of a lab role; it has the role of that model, or picks one of its roles with `tsq_role`. Datapacks bind by role. Hosts directly under `all` are **ad hoc** components (simulations, the sequencer host). Pick an item on the left of the form to edit it.",
+  library: "**Lab roles and models.** A **role** is abstract: the commands a lab component offers (`do: <command>` in pipelines), each with what it does; datapacks bind to it. A **model** (component model) is concrete: the roles it supports, how it implements their commands, its status probe and its self-test; the lab components of the inventory extend one (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`). Both `extend` another and redefine only what differs: start from `linux_system` for anything reachable over SSH.",
   setup: "**Setup.** A configuration lists the slots a test needs, each bound at run time to a lab component of its role (a lab role, which gives its commands), and the stage slots that group slots in one lab stage (by stage type). A slot's type says which input files it gets. Use **Add from the lab** to create slots for every role of a lab stage type.",
   testdef: "**Test definition.** It picks a setup configuration and gives the pipeline: phases that lock stage slots and slots, and steps linked by `needs`. Open the **Pipeline** view to edit it as a graph.",
   subpipelines: "**Shared sub-pipelines.** Steps grouped under a name, used with `uses: <name>` by several test definitions that list this file in `pipeline.include`.",
@@ -363,7 +380,7 @@ function SessionWelcome({ session }: { session: Session }) {
           <p>This session edits {session.info.local ? <>the lab folder in place (<code>{session.info.source}</code>)</> : "a clone of the lab repository"}. Start with:</p>
           <ul>
             {inventory && <li><button className="link" onClick={() => open(inventory)}>the inventory ({inventory})</button>: stages, components, roles</li>}
-            {files.filter((f) => f.kind === "library").map((f) => <li key={f.path}><button className="link" onClick={() => open(f.path)}>{f.path}</button>: lab roles and components</li>)}
+            {files.filter((f) => f.kind === "library").map((f) => <li key={f.path}><button className="link" onClick={() => open(f.path)}>{f.path}</button>: lab roles and models</li>)}
           </ul>
         </>
       ) : (
