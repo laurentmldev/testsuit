@@ -79,7 +79,6 @@ export function DatapacksPage({ route }: { route: Route }) {
       {repos.length > 0 && <WorkspacePicker repositories={repos} value={repo} onChange={(id) => navigate("datapacks", { repo: id })} />}
       {current && (
         <div className="workspace-actions" title={`What these act on: the workspace '${current.id}' only`}>
-          <span className="muted small">Workspace <strong>{current.id}</strong>:</span>
           <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
              title="Download this workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>
           {current.added
