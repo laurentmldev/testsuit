@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS locks (
 );
 CREATE TABLE IF NOT EXISTS resources (
     kind TEXT, id TEXT, state TEXT, expected TEXT, probed_at TEXT, detail TEXT,
-    maintenance INTEGER DEFAULT 0, hold INTEGER DEFAULT 0, note TEXT, selftest_failed TEXT,
+    maintenance INTEGER DEFAULT 0, hold INTEGER DEFAULT 0, note TEXT, selftest_failed TEXT, bypass TEXT,
     PRIMARY KEY (kind, id)
 );
 CREATE TABLE IF NOT EXISTS usage (
@@ -72,6 +72,8 @@ class Store:
             columns = {r["name"] for r in self._db.execute("PRAGMA table_info(resources)")}
             if "selftest_failed" not in columns:         # a database from an older version
                 self._db.execute("ALTER TABLE resources ADD COLUMN selftest_failed TEXT")
+            if "bypass" not in columns:
+                self._db.execute("ALTER TABLE resources ADD COLUMN bypass TEXT")
 
     def close(self) -> None:
         self._db.close()
@@ -209,6 +211,12 @@ class Store:
         self._exec("UPDATE resources SET selftest_failed = ? WHERE kind = 'component' AND id = ?",
                    [json.dumps(failure) if failure else None, resource])
 
+    def set_bypass(self, resource: str, bypass: dict) -> None:
+        """Record the self-test checks of a component bypassed for a while: check id -> {until, by, reason, at}."""
+        self._ensure("component", resource)
+        self._exec("UPDATE resources SET bypass = ? WHERE kind = 'component' AND id = ?",
+                   [json.dumps(bypass) if bypass else None, resource])
+
     def set_expected(self, resource: str, state: str) -> None:
         self._ensure("component", resource)
         self._exec("UPDATE resources SET expected = ? WHERE kind = 'component' AND id = ?", [state, resource])
@@ -226,6 +234,7 @@ class Store:
         rows = {(r["kind"], r["id"]): dict(r) for r in self._exec(sql, args)}
         for row in rows.values():
             row["selftest_failed"] = json.loads(row["selftest_failed"]) if row.get("selftest_failed") else None
+            row["bypass"] = json.loads(row["bypass"]) if row.get("bypass") else {}
         return rows
 
     # ── usage, events ─────────────────────────────────────────────────────

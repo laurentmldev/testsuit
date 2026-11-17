@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 
 from testsuit.sequencer.logbuffer import install as install_log_buffer
 from testsuit.sequencer.sequencer import Sequencer
-from testsuit.sequencer.util import SequencerError, parse_duration
+from testsuit.sequencer.util import SequencerError, now, parse_duration
 
 STEP_FILES = ("datapack.yml", "context.yml", "baseline.yml", "run.yml", "selftest.yml")
 
@@ -243,7 +243,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 row.update(role=item.role, extends=item.extends, host=item.host, host_alias=item.host_alias, lock=item.lock, stages=item.stages,
                            label=item.label, description=item.description, adhoc=item.adhoc, state=res.get("state") or "unknown",
                            expected=res.get("expected"), detail=res.get("detail"), probed_at=res.get("probed_at"),
-                           selftest_failed=res.get("selftest_failed"), probing=item.id in seq.monitor.running)
+                           selftest_failed=res.get("selftest_failed"), probing=item.id in seq.monitor.running,
+                           bypass={c: b for c, b in (res.get("bypass") or {}).items() if b.get("until", "") > now()})
             rows.append(row)
         return rows
 
@@ -264,7 +265,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                 "expected": res.get("expected"), "probed_at": res.get("probed_at"),
                 "probe": probe and {**probe, "steps": [dict(st) for st in probe.get("steps") or []]},
                 "selftest": seq.monitor.selftests.get(name),
-                "selftest_failed": res.get("selftest_failed")}
+                "selftest_failed": res.get("selftest_failed"), "bypass": seq.bypasses(name)}
 
     @app.get("/components/{name}/probe")
     async def component_probe(name: str):
@@ -326,8 +327,17 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             if action == "probe" and kind == "components":
                 await seq.monitor.probe(name)
                 return probe_report(name)
+            if action == "bypass" and kind == "components":
+                # bypass a failed self-test check for some hours (hours 0 or none: end it), then test it again
+                b = body or {}
+                try:
+                    hours = float(b["hours"]) if b.get("hours") not in (None, "") else None
+                    return await seq.bypass_check(name, str(b.get("check") or ""), hours, str(b.get("reason") or ""),
+                                                  str(b.get("by") or ""))
+                except (SequencerError, ValueError) as e:
+                    raise HTTPException(400, str(e)) from e
             raise HTTPException(404, f"unknown action '{action}' (hold, release, maintenance, resume"
-                                     + (", probe)" if kind == "components" else ")"))
+                                     + (", probe, bypass)" if kind == "components" else ")"))
         return endpoint
 
     for kind in ("stages", "components"):

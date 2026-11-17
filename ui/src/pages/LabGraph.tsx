@@ -136,6 +136,7 @@ function ComponentNode({ data }: NodeProps) {
         {running && <span className={classes("pulse", running.state === "running" ? "run" : "wait")} />}
         {comp.hold && <Badge value="hold" title={comp.note || ""} />}
         {comp.maintenance && <Badge value="maintenance" title={comp.note || ""} />}
+        {Object.keys(comp.bypass || {}).length > 0 && <span className="badge warn" title={`Self-test check bypassed: ${Object.keys(comp.bypass).join(", ")}. Runs that use it are not conform.`}>bypass</span>}
       </div>
       {note && <div className="lab-note" title={note}>{note}</div>}
       {/* the detailed card, floating beside it while it is pointed at (not scaled with the diagram) */}
@@ -154,6 +155,7 @@ function ComponentNode({ data }: NodeProps) {
           {comp.expected && comp.expected !== comp.state && <span className="warning-text">expected {comp.expected}</span>}
           {comp.hold && <Badge value="hold" />}
           {comp.maintenance && <Badge value="maintenance" />}
+          {Object.keys(comp.bypass || {}).length > 0 && <span className="badge warn">bypassed: {Object.keys(comp.bypass).join(", ")}</span>}
           {comp.lock !== "exclusive" && <span className="chip">lock {comp.lock}</span>}
           {shared && <span className="chip">in {shared.length} stages</span>}
         </div>

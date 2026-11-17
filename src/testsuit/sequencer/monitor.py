@@ -378,8 +378,11 @@ def _not_run(selftest: list[dict], done: set[str], why: str) -> list[dict]:
 
 async def selftest_component(comp: Component, resolved: Resolved, transport: Transport,
                              monitor: Monitor | None = None, timeout: float = 60.0,
-                             via: Component | None = None) -> dict:
+                             via: Component | None = None, bypass: dict | None = None) -> dict:
     """Run a component's self-test checks; a failure tells which state to mark it.
+
+    :param bypass: the checks bypassed now (check id -> {until, by, reason}): one that fails is reported, with its
+        bypass, but does not fail the self-test (``bypassed`` lists them; a run then is not conform)
 
     :param via: the component its status probe goes through (``status.via``), transport being its own: the
         ``run`` checks run there too, and the checks of a Linux system (login, remote root, disk, clock) are skipped
@@ -462,7 +465,10 @@ async def selftest_component(comp: Component, resolved: Resolved, transport: Tra
                 ok, detail = False, f"check '{cid}' has no 'run'"
         except Exception as e:
             ok, detail = False, f"{type(e).__name__}: {e}"
-        checks.append({"id": cid, "ok": bool(ok), "detail": detail, **ran, **({"skipped": True} if skipped else {})})
-        if not ok:
+        bypassed = (bypass or {}).get(cid) if not ok and not skipped else None
+        checks.append({"id": cid, "ok": bool(ok), "detail": detail, **ran, **({"skipped": True} if skipped else {}),
+                       **({"bypassed": bypassed} if bypassed else {})})
+        if not ok and not bypassed:
             failed_state = failed_state or "broken"
-    return {"component": comp.id, "ok": failed_state is None, "state": failed_state, "checks": checks, "at": now()}
+    return {"component": comp.id, "ok": failed_state is None, "state": failed_state, "checks": checks, "at": now(),
+            "bypassed": [c["id"] for c in checks if c.get("bypassed")]}

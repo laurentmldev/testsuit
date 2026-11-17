@@ -396,7 +396,7 @@ When the sequencer produces the results zip (section 10), it extends the baselin
 - by the sequencer at submission (`tsq submit --baseline expected.yml`, or `pipeline.baseline` in the test definition);
 - before the first phase for the `run` part (component versions).
 
-A non-conform datapack is **accepted but flagged**, never rejected. This covers both kinds: a datapack that is not conform in itself (`conform: false`), and one that does not match its expected baseline. The run proceeds normally, and its verdict is unchanged, but:
+A non-conform datapack is **accepted but flagged**, never rejected. This covers both kinds: a datapack that is not conform in itself (`conform: false`), and one that does not match its expected baseline. A run is also non-conform when its self-test relied on a bypassed check (section 7.6). The run proceeds normally, and its verdict is unchanged, but:
 - the run is flagged `non-conform` in the queue, in `tsq runs` and `tsq show`, in the REST API and the UI, and in the GitLab job trace;
 - the differences are listed, one line per mismatch, kept in the run record and written to the results baseline (`run.conform: false` with the mismatches);
 - the results zip is named with a `_NONCONFORM` suffix, like the `_DRAFT` suffix the datapack tool already gives to `--nocheck` datapacks.
@@ -760,6 +760,12 @@ models:
 - `tsq selftest [<stage | component>]` runs the same checks on demand, for example after maintenance, without any datapack.
 - A component whose self-test failed **stays** `broken` (or `offline`) even when its probe says it is healthy, until a self-test passes. Its detail tells which check failed.
 - With `selftest.when_idle` (default `true`), a self-test also runs when a component becomes `idle` (it was offline, broken, running...), except for a component an active run holds. A component kept broken by its self-test is tested again when its probe says it is idle, at most once a minute, and comes back once a test passes.
+
+**Bypassing a failed check for a while.** A check can fail for a reason that does not matter to the tests, for example a clock offset over `max_clock_offset` on a host whose clock cannot be fixed now. A failed check can then be **bypassed** for some hours, from the Lab page (Bypass… beside the failed check, in the self-test or state dialog) or with `POST /components/<id>/bypass` `{check, hours, reason, by}`:
+- the bypass needs a reason and lasts at most 72 hours, and it ends by itself (or with End bypass, `hours: 0`). The `login` and `status` checks cannot be bypassed: nothing could run without them;
+- the self-test runs again at once: while only bypassed checks fail, it passes and the component is usable. The check still runs every time, and its failure is still reported, as bypassed;
+- every run whose self-test relies on a bypassed check is **not conform** (section 5.3): its results zip ends in `_NONCONFORM`, and the run record, `run.yml` and the results baseline list the check, its failure, the end of the bypass, who set it and why. `selftest.yml` keeps the check with its `bypassed` entry;
+- the Lab page shows a `bypass` badge on the component while a bypass lasts.
 
 ### 7.7 Commands run by hand, in maintenance
 

@@ -390,13 +390,57 @@ class Sequencer:
         self.notify("selftest", {"target": name or "lab", "ok": all(r["ok"] for r in results)})
         return list(results)
 
+    # ── bypassing a failed self-test check for a while ───────────────────
+    MAX_BYPASS_HOURS = 72
+    NOT_BYPASSABLE = ("login", "status")              # nothing else can run / the probe keeps it broken anyway
+
+    def bypasses(self, comp_id: str) -> dict:
+        """The self-test checks of a component bypassed now (check id -> {until, by, reason, at}); expired ones go."""
+        stored = (self.store.resources("component").get(("component", comp_id)) or {}).get("bypass") or {}
+        active = {cid: b for cid, b in stored.items() if b.get("until", "") > now()}
+        if active != stored:
+            self.store.set_bypass(comp_id, active)
+        return active
+
+    async def bypass_check(self, comp_id: str, check: str, hours: float | None, reason: str = "", by: str = "") -> dict:
+        """Bypass a self-test check of a component for some hours (None or 0: end its bypass), then test it again:
+        while bypassed, the check failing does not make the component broken, and every run that tests it then
+        is not conform, its results saying why. Returns the self-test."""
+        if comp_id not in self.lab.inventory.components:
+            raise SequencerError(f"no component '{comp_id}'")
+        comp = self.lab.inventory.components[comp_id]
+        stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
+        specs = {c["id"]: c for c in self.lab.resolve(comp, stage).selftest}
+        bypass = self.bypasses(comp_id)
+        if hours:
+            if check not in specs:
+                raise SequencerError(f"{comp_id} has no self-test check '{check}' ({', '.join(specs) or 'none'})")
+            if check in self.NOT_BYPASSABLE or specs[check].get("builtin") in self.NOT_BYPASSABLE:
+                raise SequencerError(f"check '{check}' cannot be bypassed: "
+                                     + ("nothing else runs without a login" if "login" in (check, specs[check].get("builtin"))
+                                        else "the status probe keeps the component broken anyway"))
+            if not 0 < hours <= self.MAX_BYPASS_HOURS:
+                raise SequencerError(f"a bypass lasts more than 0 and at most {self.MAX_BYPASS_HOURS} hours, not {hours}")
+            if not reason.strip():
+                raise SequencerError("say why the check is bypassed (reason): the results of the runs show it")
+            until = datetime.fromtimestamp(time.time() + hours * 3600, timezone.utc).replace(microsecond=0).isoformat()
+            bypass[check] = {"until": until, "by": by.strip(), "reason": reason.strip(), "at": now()}
+            log.warning(f"{comp_id}: self-test check '{check}' bypassed until {until} by {by or '?'}: {reason}")
+        elif bypass.pop(check, None) is not None:
+            log.info(f"{comp_id}: self-test check '{check}' no longer bypassed")
+        self.store.set_bypass(comp_id, bypass)
+        self.notify("resource", {"kind": "component", "id": comp_id, "bypass": bypass})
+        result = await self._selftest_one(comp_id)
+        self.wake()
+        return result
+
     async def _selftest_one(self, comp_id: str) -> dict:
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
         resolved = self.lab.resolve(comp, stage)
         via = self.lab.via(comp, stage, resolved.status)     # a probe through another component: its checks too
         result = await selftest_component(comp, resolved, self.transport_for(via.id if via else comp_id), self.monitor,
-                                          self.config.selftest.timeout, via)
+                                          self.config.selftest.timeout, via, self.bypasses(comp_id))
         specs = {check["id"]: check for check in resolved.selftest}
         for check in result["checks"]:                  # what each check tested, for the Lab page
             if check["id"] in specs:
@@ -852,6 +896,16 @@ class RunExecution:
         results = await asyncio.gather(*[self.seq._selftest_one(c) for c in concrete])
         self.selftests += results
         dump_yaml(self.datapack.dir / "selftest.yml", {"attempts": self.selftests})
+        # a check that failed but is bypassed: the run goes on, and is not conform
+        bypassed = [f"self-test check '{c['id']}' of {r['component']} failed ({c['detail']}) but was bypassed until "
+                    f"{c['bypassed'].get('until')} by {c['bypassed'].get('by') or '?'}: {c['bypassed'].get('reason')}"
+                    for r in results for c in r["checks"] if c.get("bypassed")]
+        if bypassed:
+            known = list(self.store.get_run(self.run_id)["nonconform"] or [])
+            known += [b for b in bypassed if b not in known]
+            self.store.update_run(self.run_id, conform=False, nonconform=known)
+            for b in bypassed:
+                log.warning(f"run {self.run_id}: {b}")
         failed = [r for r in results if not r["ok"]]
         for r in failed:
             bad = ", ".join(f"{c['id']}: {c['detail']}" for c in r["checks"] if not c["ok"])
@@ -1086,7 +1140,8 @@ class RunExecution:
                 await self.clean_remote()
             self.write_records(verdict, run)
             cfg = self.seq.config
-            name = f"{self.datapack.name}_results" + ("" if run["conform"] else "_NONCONFORM")
+            conform = self.store.get_run(self.run_id)["conform"]       # as write_records left it
+            name = f"{self.datapack.name}_results" + ("" if conform else "_NONCONFORM")
             results = await asyncio.to_thread(
                 pack_results, self.datapack.dir, cfg.storage_path("results") / self.run_id, name, cfg.storage.large_files.threshold,
                 cfg.storage.large_files.mode)

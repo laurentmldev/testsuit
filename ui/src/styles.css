@@ -899,3 +899,14 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .key-eval pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
 .user-keys { display: flex; flex-direction: column; gap: 6px; }
 .user-key { display: grid; grid-template-columns: minmax(120px, auto) minmax(160px, 260px) 1fr auto; gap: 8px; align-items: center; }
+
+/* a failed self-test check bypassed for a while (README section 7.6) */
+tr.bypassed td { background: var(--warn-soft); }
+.bypass-note { margin-top: 4px; font-size: 12.5px; }
+.bypass-form { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; background: var(--warn-soft); }
+.bypass-form p { margin: 0 0 8px; }
+.bypass-fields { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 8px; align-items: center; }
+.bypass-fields label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.bypass-fields label.grow { flex: 1 1 320px; }
+.bypass-fields label.grow input { flex: 1; }
+.bypass-fields input[type="number"] { width: 64px; }

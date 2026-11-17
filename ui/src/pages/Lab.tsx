@@ -205,14 +205,10 @@ function SelftestDialog({ target, onClose }: { target: string | null; onClose: (
       {!results && !error && <p className="muted">Running the checks…</p>}
       {results?.map((r) => (
         <div key={r.component} className="selftest">
-          <h4 title={r.component}>{labelOf(r.component)} <Badge value={r.ok ? "passed" : "failed"} /> {r.state && <Badge value={r.state} />}</h4>
-          <table className="grid compact">
-            <tbody>
-              {(r.checks || []).map((c: any) => (
-                <tr key={c.id}><td><code>{c.id}</code></td><td><Badge value={c.skipped ? (c.ok ? "skipped" : "not run") : c.ok ? "OK" : "FAILED"} /></td><td className="reason">{c.detail}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          <h4 title={r.component}>{labelOf(r.component)} <Badge value={r.ok ? "passed" : "failed"} /> {r.state && <Badge value={r.state} />}
+            {r.bypassed?.length > 0 && <span className="badge warn" title="Runs that use it are not conform">{r.bypassed.length} bypassed</span>}</h4>
+          <Checks checks={r.checks || []} comp={r.component} brief
+            onChanged={(fresh) => setResults((rs) => rs && rs.map((x) => (x.component === r.component ? { ...fresh, component: r.component } : x)))} />
         </div>
       ))}
     </Dialog>
@@ -246,21 +242,88 @@ function ProbeStep({ step, index, running }: { step: any; index: number; running
   );
 }
 
-function Checks({ checks }: { checks: any[] }) {
+const NOT_BYPASSABLE = ["login", "status"];        // the sequencer refuses them (README section 7.6)
+
+/** The bypass of a failed self-test check: who, until when and why, with End bypass. */
+function BypassNote({ comp, check, onChanged }: { comp: string; check: any; onChanged: (result: any) => void }) {
+  const b = check.bypassed;
+  const end = async () => {
+    if (!window.confirm(`End the bypass of ${check.id}? The component is broken again while this check fails.`)) return;
+    const result = await attempt(() => post(`components/${comp}/bypass`, { check: check.id, hours: 0 }), `${comp}: bypass of ${check.id} ended`);
+    if (result) onChanged(result);
+  };
   return (
-    <table className="grid compact">
-      <thead><tr><th>Check</th><th>Result</th><th>What it tested</th><th>Answer</th></tr></thead>
-      <tbody>
-        {checks.map((c) => (
-          <tr key={c.id}>
-            <td><code>{c.id}</code></td>
-            <td><Badge value={c.skipped ? (c.ok ? "skipped" : "not run") : c.ok ? "OK" : "FAILED"} /></td>
-            <td className="mono small">{c.command || c.spec?.run || (c.spec?.builtin ? `built-in ${c.spec.builtin}` : c.spec ? JSON.stringify(c.spec) : "")}</td>
-            <td className="reason">{c.exit !== undefined && c.exit !== null && <span className="muted small">exit status <code>{c.exit}</code></span>}<pre>{c.detail}</pre></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="bypass-note">
+      <span className="badge warn">bypassed</span> until {time(b.until)}{b.by ? <> by <strong>{b.by}</strong></> : null}: {b.reason}
+      {" "}<button className="small" onClick={end}>End bypass</button>
+    </div>
+  );
+}
+
+function BypassForm({ comp, check, onClose, onChanged }: { comp: string; check: any; onClose: () => void; onChanged: (result: any) => void }) {
+  const [hours, setHours] = useState(4);
+  const [reason, setReason] = useState("");
+  const [by, setBy] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tsq.author") || "{}").name || ""; } catch { return ""; }
+  });
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    const result = await attempt(() => post(`components/${comp}/bypass`, { check: check.id, hours, reason: reason.trim(), by: by.trim() }),
+      `${comp}: ${check.id} bypassed for ${hours} h`);
+    setBusy(false);
+    if (result) { onChanged(result); onClose(); }
+  };
+  return (
+    <div className="bypass-form">
+      <p className="small">
+        Bypass the failed check <code>{check.id}</code> of <code>{comp}</code>: the component stays usable while it fails.
+        Every run that uses it in the meantime is <strong>not conform</strong>, and its results say why.
+      </p>
+      <div className="bypass-fields">
+        <label>For <input type="number" min={1} max={72} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} /> hours</label>
+        <label>By <input value={by} onChange={(e) => setBy(e.target.value)} placeholder="your name" /></label>
+        <label className="grow">Reason <input value={reason} autoFocus onChange={(e) => setReason(e.target.value)} placeholder="why it can be ignored, e.g. clock offset of the simulator host" /></label>
+      </div>
+      <div className="row-actions">
+        <button className="small primary" disabled={busy || !reason.trim() || !(hours > 0 && hours <= 72)} onClick={submit}>{busy ? "Bypassing…" : "Bypass"}</button>
+        <button className="small" onClick={onClose}>Cancel</button>
+        <span className="muted small">At most 72 hours. It ends by itself, or with End bypass.</span>
+      </div>
+    </div>
+  );
+}
+
+/** The checks of a self-test; with `comp`, a failed check can be bypassed for a while (and its bypass ended). */
+function Checks({ checks, comp, onChanged, brief }: { checks: any[]; comp?: string; onChanged?: (result: any) => void; brief?: boolean }) {
+  const [bypassing, setBypassing] = useState<string | null>(null);
+  const can = (c: any) => comp && onChanged && !c.ok && !c.skipped && !c.bypassed && !NOT_BYPASSABLE.includes(c.id);
+  const picked = checks.find((c) => c.id === bypassing);
+  return (
+    <>
+      <table className="grid compact">
+        {!brief && <thead><tr><th>Check</th><th>Result</th><th>What it tested</th><th>Answer</th></tr></thead>}
+        <tbody>
+          {checks.map((c) => (
+            <tr key={c.id} className={classes(c.bypassed && "bypassed")}>
+              <td><code>{c.id}</code></td>
+              <td><Badge value={c.skipped ? (c.ok ? "skipped" : "not run") : c.ok ? "OK" : "FAILED"} /></td>
+              {!brief && <td className="mono small">{c.command || c.spec?.run || (c.spec?.builtin ? `built-in ${c.spec.builtin}` : c.spec ? JSON.stringify(c.spec) : "")}</td>}
+              <td className="reason">
+                {!brief && c.exit !== undefined && c.exit !== null && <span className="muted small">exit status <code>{c.exit}</code></span>}
+                {brief ? c.detail : <pre>{c.detail}</pre>}
+                {c.bypassed && comp && onChanged && <BypassNote comp={comp} check={c} onChanged={onChanged} />}
+                {can(c) && bypassing !== c.id && (
+                  <div><button className="small" title="Keep the component usable while this check fails, for some hours (runs are then not conform)"
+                    onClick={() => setBypassing(c.id)}>Bypass…</button></div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {picked && comp && onChanged && <BypassForm comp={comp} check={picked} onClose={() => setBypassing(null)} onChanged={onChanged} />}
+    </>
   );
 }
 
@@ -294,6 +357,8 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
   }, [live, probing, id]);
   const failure = !live && (p?.kept_broken || data?.selftest_failed);
   const selftest = data?.selftest;
+  const reread = () => { get(`components/${id}/probe`).then(setData).catch(() => undefined); };
+  const bypasses = Object.entries<any>(data?.bypass || {});
   return (
     <Dialog title={`State of ${labelOf(id)}`} onClose={onClose} wide
       footer={<button disabled={probing} onClick={again}>{probing ? "Probing…" : "Probe again"}</button>}>
@@ -348,13 +413,20 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
             <>
               <h4>Failed self-test ({time(failure.at)})</h4>
               <p className="muted small">It keeps the component broken whatever its probe says, until a self-test passes (one runs when it turns idle, or with Self-test).</p>
-              {failure.checks ? <Checks checks={failure.checks} /> : <pre>{failure.detail}</pre>}
+              {failure.checks ? <Checks checks={failure.checks} comp={id} onChanged={reread} /> : <pre>{failure.detail}</pre>}
             </>
+          )}
+          {bypasses.length > 0 && (
+            <div className="banner warn">
+              Bypassed self-test check{bypasses.length > 1 ? "s" : ""}: {bypasses.map(([check, b], i) => (
+                <span key={check}>{i > 0 && "; "}<code>{check}</code> until {time(b.until)}{b.by ? ` by ${b.by}` : ""} ({b.reason})</span>
+              ))}. Runs that use this component are not conform.
+            </div>
           )}
           {!live && !failure && selftest && (
             <>
               <h4>Last self-test ({time(selftest.at)}) <Badge value={selftest.ok ? "passed" : "failed"} /></h4>
-              <Checks checks={selftest.checks || []} />
+              <Checks checks={selftest.checks || []} comp={id} onChanged={reread} />
             </>
           )}
         </div>
@@ -468,6 +540,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
       <td><code>{c.extends}</code></td>
       <td><Address host={c.host} alias={c.host_alias} /></td>
       <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
+        {Object.keys(c.bypass || {}).length > 0 && <> <span className="badge warn" title={Object.entries<any>(c.bypass).map(([k, b]) => `${k} bypassed until ${time(b.until)}${b.by ? ` by ${b.by}` : ""}: ${b.reason}`).join("\n") + "\nRuns that use it are not conform."}>bypass</span></>}
         <div className="muted small" title={time(c.probed_at)}>{c.probing ? <><span className="pulse run" /> probing…</> : c.probed_at ? `probed ${ago(c.probed_at)}` : ""}</div></td>
       <td>{c.lock}{c.hold && <Badge value="hold" title={c.note || ""} />}{c.maintenance && <Badge value="maintenance" title={c.note || ""} />}
         {offNote(c) && <div className="lab-note full">{c.note}</div>}</td>
