@@ -211,7 +211,7 @@ class Library:
             self.component_chain(name)
             for role, missing in self.check_component(name).items():
                 if missing:
-                    raise SequencerError(f"component '{name}' ({components[name].source}) does not implement "
+                    raise SequencerError(f"model '{name}' ({components[name].source}) does not implement "
                                          f"{', '.join(missing)}, listed by its role '{role}'")
 
     @classmethod
@@ -331,13 +331,13 @@ class Library:
         given = str(component.vars.get("tsq_role") or "")
         if given:
             if roles and given not in roles:
-                raise SequencerError(f"role '{given}' (tsq_role) is not one its component '{component.extends}' "
+                raise SequencerError(f"role '{given}' (tsq_role) is not one its model '{component.extends}' "
                                      f"supports: {', '.join(roles)}")
             return given
         if len(roles) == 1:
             return roles[0]
         if roles:
-            raise SequencerError(f"its component '{component.extends}' supports several roles ({', '.join(roles)}): "
+            raise SequencerError(f"its model '{component.extends}' supports several roles ({', '.join(roles)}): "
                                  "pick one with tsq_role")
         raise SequencerError(f"no role: give tsq_role, or extend a component that lists its roles "
                              f"('{component.extends}' lists none)")
@@ -366,7 +366,7 @@ class Library:
         for c in chain:
             if c is own:
                 continue                                      # its own commands come after the stage's
-            label = f"host {c.name}" if c.host else f"component {c.name}"
+            label = f"host {c.name}" if c.host else f"model {c.name}"
             for cmd, spec in c.commands.items():
                 commands[cmd] = dict(spec)
                 sources[cmd] = label

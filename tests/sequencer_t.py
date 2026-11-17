@@ -352,7 +352,7 @@ def test_roles_and_components(bench):
     del components["models"]["counter_host"]["commands"]["ready"]
     components["models"]["counter_host"]["commands"]["reset"] = {"run": "true"}
     write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
-    with pytest.raises(SequencerError, match="component 'counter_host' .* does not implement ready, listed by its role 'dut'"):
+    with pytest.raises(SequencerError, match="model 'counter_host' .* does not implement ready, listed by its role 'dut'"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False, strict=False)
     assert lab.extra_commands["counter_1"] == ["reset"]
@@ -376,7 +376,7 @@ def test_roles_and_components(bench):
     write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
     del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match=r"'counter_2': its component 'counter_host' supports several roles "
+    with pytest.raises(SequencerError, match=r"'counter_2': its model 'counter_host' supports several roles "
                                              r"\(dut, spare\): pick one with tsq_role"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "spare"
@@ -386,7 +386,7 @@ def test_roles_and_components(bench):
     assert lab.extra_commands == {}            # what counter_host implements for 'dut' is no extra on a 'spare'
     inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "sequencer"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its component 'counter_host' "
+    with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its model 'counter_host' "
                                              "supports: dut, spare"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
@@ -418,7 +418,7 @@ def test_roles_and_components(bench):
     del inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"]
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "nope"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match="role 'nope' \\(tsq_role\\) is not one its component"):
+    with pytest.raises(SequencerError, match="role 'nope' \\(tsq_role\\) is not one its model"):
         load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
 
     setup = copy.deepcopy(SETUP)

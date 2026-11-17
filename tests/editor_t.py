@@ -197,7 +197,7 @@ def test_workspace_session(repos):
     assert {"start", "stop", "ready", "deploy"} <= set(palette["slots"]["dut"]["commands"])
     start_cmd = palette["slots"]["dut"]["commands"]["start"]
     assert start_cmd["from"] == "role dut" and start_cmd["description"] == "Starts the counter."
-    assert start_cmd["implementations"]["counter_1"]["from"] == "component counter_host"
+    assert start_cmd["implementations"]["counter_1"]["from"] == "model counter_host"
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
@@ -742,7 +742,7 @@ def test_lab_session(repos):
     assert described["library"]["counter_host"]["used_by"] == ["counter_1", "counter_2"]
     host = described["components"]["counter_1"]
     assert host["chain"] == ["component", "linux_system", "counter_host", "counter_1"]
-    assert host["commands"]["deploy"]["from"] == "component linux_system" and host["missing"] == []
+    assert host["commands"]["deploy"]["from"] == "model linux_system" and host["missing"] == []
     assert described["library"]["counter_host"]["roles"] == ["dut"] and described["roles"]["dut"]["implemented_by"] == ["counter_host"]
     assert (host["role"], host["role_given"], host["role_choices"]) == ("dut", "", ["dut"])   # the role of its component
 

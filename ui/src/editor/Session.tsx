@@ -213,10 +213,25 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const [dialog, setDialog] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const api = useDoc(id, path, (saved) => {
-    setAllProblems((all) => [...all.filter((p) => p.file !== saved.path), ...(saved.problems || [])]);
-    if (["inventory", "library", "setup", "testdef", "subpipelines"].includes(saved.kind)) session?.refreshContext();
+    const touched = new Set([saved.path, ...(saved.problems || []).map((p: Problem) => p.file)]);
+    setAllProblems((all) => [...all.filter((p) => !touched.has(p.file)), ...(saved.problems || [])]);
+    if (["inventory", "library", "setup", "testdef", "subpipelines"].includes(saved.kind)) {
+      session?.refreshContext();
+      recheckOthers(saved.path);
+    }
     session?.refreshFiles();
   });
+  // a file refers to others (a host to its model, a test definition to its setup...): once one is saved, the
+  // problems listed for the other files are checked again, so that those it fixed (or caused) show at once
+  const allRef = useRef(allProblems);
+  allRef.current = allProblems;
+  const recheckOthers = (savedPath: string) => {
+    const others = [...new Set(allRef.current.map((p) => p.file).filter((f) => !!f && f !== savedPath))];
+    for (const file of others)
+      post(`edit/sessions/${id}/validate`, { path: file })
+        .then((v) => setAllProblems((all) => [...all.filter((p) => p.file !== file), ...(v.problems || [])]))
+        .catch(() => {});
+  };
   // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo and redo the form and pipeline edits; the YAML and text
   // editors keep their own undo.
   const keys = useRef(api);
@@ -254,7 +269,9 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
       notify(result.ok ? `no error${result.problems.length ? `, ${result.problems.length} warning(s)` : ""}` : `${result.problems.filter((p: Problem) => p.severity === "error").length} error(s)`, result.ok ? "ok" : "error");
     }
   };
-  const problems = doc ? [...doc.problems, ...allProblems.filter((p) => p.file !== doc.path)] : allProblems;
+  // the problems of the open file, then the others (once: saving a file can report problems of another one)
+  const problems = doc ? [...doc.problems, ...allProblems.filter((p) => p.file !== doc.path
+    && !doc.problems.some((d) => d.file === p.file && d.line === p.line && d.message === p.message))] : allProblems;
   const info = session.info;
   // where a session belongs: the Lab page for the lab, the Datapacks page (on its repository) for tests
   const back = info.repo === "lab" ? { path: "lab", label: "Lab" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };

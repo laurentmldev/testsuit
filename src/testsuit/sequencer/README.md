@@ -635,7 +635,7 @@ models:
       start: {run: "sim actuator --config {{ component.input_dir }}/actuator_sim.yml", detach: true}
 ```
 
-`roles` is inherited by the models extending one, unless they list their own; a base model (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/components_emulated/`, and the datapacks bind to it unchanged (section 6.2).
+`roles` is inherited by the models extending one, unless they list their own; a base model (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/models_emulated/`, and the datapacks bind to it unchanged (section 6.2).
 
 ### 7.3 Built-ins
 
