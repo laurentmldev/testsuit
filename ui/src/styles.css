@@ -111,11 +111,11 @@ input.priority { width: 80px; }
 .dot.off { background: var(--bad); }
 
 /* app frame */
-.app { min-height: 100%; display: flex; flex-direction: column; }
+.app { min-height: 100%; display: flex; flex-direction: column; --topbar-h: 58px; }
 .app.full { height: 100%; }
-.topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: 46px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: var(--topbar-h); background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .topbar .brand { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.topbar .brand img { height: 28px; max-width: 120px; object-fit: contain; }
+.topbar .brand img { height: 46px; max-width: 220px; object-fit: contain; }
 .topbar nav, .topbar > div:not(.topbar-right) { display: flex; gap: 4px; }
 .topbar a.active { color: var(--accent); font-weight: 600; }
 .topbar a:not(.brand) { padding: 4px 8px; border-radius: 5px; color: var(--muted); }
@@ -326,7 +326,7 @@ tr.finally-row td { color: var(--muted); }
 .editor-home .repo .card-actions input { flex: 1; min-width: 0; }
 .editor-home .repo .card-actions button { flex-shrink: 0; }
 .intro { max-width: 820px; }
-.session { display: flex; flex-direction: column; height: calc(100vh - 46px); }
+.session { display: flex; flex-direction: column; height: calc(100vh - var(--topbar-h, 46px)); }
 .session-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .session-main { flex: 1; display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; min-height: 0; }
 .session-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -772,7 +772,7 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .file-keys table { margin-top: 4px; max-height: 200px; overflow: auto; display: block; }
 
 /* ── criteria editor (ui/src/criteria): mxp edit, and tsqd's Criteria page ── */
-.crit-editor { display: flex; flex-direction: column; height: calc(100vh - 46px); }
+.crit-editor { display: flex; flex-direction: column; height: calc(100vh - var(--topbar-h, 46px)); }
 .crit-editor .session-bar { flex-shrink: 0; }
 .standalone .crit-editor { height: 100vh; }
 .crit-main { flex: 1; display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; min-height: 0; }
