@@ -14,7 +14,7 @@
 // One run (sequencer README, section 13.1): its pipeline as a live graph of phases, sub-pipelines and steps,
 // the logs of each step, its files before, during and after the run.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
+import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
@@ -165,13 +165,18 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   useEffect(() => {
     const f = flow.current;
     if (!f || !focusNode || !nodes.some((n) => n.id === focusNode)) return;
-    const zoom = f.getZoom();
-    f.fitView({ nodes: [{ id: focusNode }], minZoom: zoom, maxZoom: zoom, duration: 400 });
+    const n = f.getInternalNode(focusNode);
+    if (!n?.measured.width) return;
+    const { x, y } = n.internals.positionAbsolute;
+    f.setCenter(x + n.measured.width / 2, y + (n.measured.height || 0) / 2, { zoom: f.getZoom(), duration: 400 });
   }, [focusNode, nodes]);
 
   return (
     <div className="graph-box">
-      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }} nodesConnectable={false} proOptions={{ hideAttribution: true }}
+      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }}
+        // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
+        // measured again, which does not happen when its size did not change (the graph went blank on an update)
+        onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))} nodesConnectable={false} proOptions={{ hideAttribution: true }}
         onNodeClick={(_, n) => {
           if (n.type !== "step") return;
           const { step, phase } = n.data as any;
