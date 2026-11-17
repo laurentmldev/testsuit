@@ -108,6 +108,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         execution = seq.executions.get(run["id"])
         if execution is not None and execution.ctx is not None:
             run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
+        run["wait"] = seq.wait_info(run)                 # why it, or its next phase, does not start yet
         return run
 
     def python_label(py: dict) -> str:
@@ -162,6 +163,14 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     @app.post("/runs/{run_id}/cancel")
     async def cancel(run_id: str):
         return await seq.abort(run_or_404(run_id)["id"], "cancel")
+
+    @app.post("/runs/{run_id}/retry")
+    async def retry(run_id: str):
+        """Check again now whether a waiting run, or its waiting phase, can start."""
+        try:
+            return seq.retry_now(run_or_404(run_id)["id"])
+        except SequencerError as e:
+            raise HTTPException(409, str(e)) from e
 
     @app.post("/runs/{run_id}/repost")
     async def repost(run_id: str):

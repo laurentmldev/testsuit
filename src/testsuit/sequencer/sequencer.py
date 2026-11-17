@@ -121,6 +121,7 @@ class Sequencer:
         self.executions: dict[str, "RunExecution"] = {}
         self.subscribers: set[asyncio.Queue] = set()
         self._wake: asyncio.Event | None = None
+        self.scheduled_at: str | None = None         # the last walk of the queue
         self.started_at = now()
 
     # ── events ─────────────────────────────────────────────────────────
@@ -275,6 +276,8 @@ class Sequencer:
         self.store.update_run(run_id, state=state, verdict=verdict, reason=reason, ended_at=now())
         self.notify("run", {"run": run_id, "state": state, "verdict": verdict, "reason": reason})
 
+    SCHEDULE_EVERY = 5.0                         # s: the queue is walked again at least this often (and on any change)
+
     async def scheduler_loop(self) -> None:
         self._wake = asyncio.Event()
         while True:
@@ -282,8 +285,36 @@ class Sequencer:
                 self.schedule()
             except Exception:
                 log.exception("scheduler error")
-            await wait_event(self._wake, 5.0)
+            self.scheduled_at = now()
+            await wait_event(self._wake, self.SCHEDULE_EVERY)
             self._wake.clear()
+
+    def retry_now(self, run_id: str) -> dict:
+        """Check again now whether a waiting run, or its waiting phase, can start (instead of at the next check)."""
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        if execution is not None and execution.wait is not None:
+            execution.retry.set()
+            self.notify("phase", {"run": run["id"], "phase": execution.wait.get("phase"), "state": "retry"})
+        elif run["state"] in QUEUED_STATES:
+            self.wake()
+        else:
+            raise SequencerError(f"run {run['id']} is not waiting ({run['state']})")
+        return {"run": run["id"], "retry": True}
+
+    def wait_info(self, run: dict) -> dict | None:
+        """Why a run, or its next phase, does not start yet, since when, and when it is checked again."""
+        execution = self.executions.get(run["id"])
+        if execution is not None and execution.wait is not None:
+            return dict(execution.wait)
+        if run["state"] == "waiting_resources" or (run["state"] == "queued" and run.get("waiting_for")):
+            checked = self.scheduled_at
+            return {"phase": None, "cause": "requeued" if run["state"] == "queued" else "resources",
+                    "reasons": [r for r in (run.get("waiting_for") or "").split("; ") if r],
+                    "checked_at": checked, "every": self.SCHEDULE_EVERY, "since": run.get("submitted_at"),
+                    "next_check": _later(checked, self.SCHEDULE_EVERY) if checked else None,
+                    "attempts": run.get("attempts") or 0, "max_attempts": self.config.selftest.max_attempts}
+        return None
 
     # ── operator actions ───────────────────────────────────────────────
     def set_priority(self, run_id: str, priority: int) -> dict:
@@ -766,6 +797,11 @@ class Sequencer:
         self.store.close()
 
 
+def _later(iso: str, seconds: float) -> str:
+    """An ISO time, some seconds later."""
+    return datetime.fromtimestamp(datetime.fromisoformat(iso).timestamp() + seconds, timezone.utc).isoformat(timespec="seconds")
+
+
 class RunExecution:
     """One activation of a datapack: self-test, phases, results."""
 
@@ -779,6 +815,10 @@ class RunExecution:
         self.phase_verdicts: dict[str, str] = {}
         self.reason = ""
         self.abort_mode: str | None = None
+        # a later phase that cannot start yet: why, since when, when it is checked again (GET /runs/<id>, the UI)
+        self.wait: dict | None = None
+        self.retry = asyncio.Event()                 # set by retry_now: check again at once
+        self._asked = False                          # the last wait ended with retry_now
 
     # ── helpers ─────────────────────────────────────────────────────────
     def set_state(self, state: str, **fields: Any) -> None:
@@ -893,6 +933,10 @@ class RunExecution:
         for stage_id in self.binding.stage_slots.values():
             concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components
                          if c not in concrete and c not in self.binding.left_out]
+        return not await self.selftest_components(concrete)
+
+    async def selftest_components(self, concrete: list[str]) -> list[str]:
+        """Self-test these lab components; return what failed, one line each (empty: all passed)."""
         results = await asyncio.gather(*[self.seq._selftest_one(c) for c in concrete])
         self.selftests += results
         dump_yaml(self.datapack.dir / "selftest.yml", {"attempts": self.selftests})
@@ -906,11 +950,14 @@ class RunExecution:
             self.store.update_run(self.run_id, conform=False, nonconform=known)
             for b in bypassed:
                 log.warning(f"run {self.run_id}: {b}")
-        failed = [r for r in results if not r["ok"]]
-        for r in failed:
-            bad = ", ".join(f"{c['id']}: {c['detail']}" for c in r["checks"] if not c["ok"])
+        failed = []
+        for r in results:
+            if r["ok"]:
+                continue
+            bad = ", ".join(f"{c['id']}: {c['detail']}" for c in r["checks"] if not c["ok"] and not c.get("bypassed"))
             log.warning(f"run {self.run_id}: self-test of {r['component']} failed ({bad})")
-        return not failed
+            failed.append(f"{r['component']} ({bad})")
+        return failed
 
     async def read_versions(self, logical_ids: list[str]) -> None:
         async def one(logical: str):
@@ -989,27 +1036,105 @@ class RunExecution:
             locks = {(l["kind"], l["resource"]) for l in self.store.locks(self.run_id)}
             if all(r in locks for r in {(k, r) for k, r, _ in held.locks(self.seq.lab)}):
                 return True
-        while not self.ctx.abort_mode:
-            binding, reasons = find_binding(self.seq.lab, self.datapack.needs, [flat.phase], self.seq.availability(),
-                                            self.run_id, fixed=held, testdef=self.datapack.testdef_id)
-            if binding is not None:
-                conflicts = self.store.try_lock(self.run_id, binding.locks(self.seq.lab))
-                if not conflicts:
-                    self.binding.stage_slots.update(binding.stage_slots)
-                    self.binding.slots.update(binding.slots)
-                    self.binding.left_out += [c for c in binding.left_out if c not in self.binding.left_out]
-                    self.store.update_run(self.run_id, binding=self.binding.as_dict(), waiting_for="")
-                    new = [l for l in binding.slots if l not in self.ctx.bound]
-                    await self.bind_slots()
-                    if new and self.seq.config.selftest.before_each_run and not await self.selftest(new):
-                        self.reason = f"self-test failed before phase {flat.phase.id}"
-                        return False
-                    await self.read_versions(new)
-                    return True
-                reasons = conflicts
-            self.store.update_run(self.run_id, waiting_for=f"phase {flat.phase.id}: " + "; ".join(reasons))
-            await asyncio.sleep(2)
-        return False
+        since, failures, failed_components, asked = now(), 0, [], False
+        shown, shown_cause = None, None
+        max_attempts = self.seq.config.selftest.max_attempts
+        try:
+            while not self.ctx.abort_mode:
+                if asked and failed_components:
+                    # retried by hand after a failed self-test: test those components again (a pass makes them usable)
+                    self.wait = {**(self.wait or {}), "cause": "selftest_running"}
+                    again = await asyncio.gather(*[self.seq._selftest_one(c) for c in failed_components])
+                    if any(not r["ok"] for r in again):
+                        failures += 1
+                        bad = [f"{r['component']} ({', '.join(c['id'] + ': ' + str(c['detail']) for c in r['checks'] if not c['ok'] and not c.get('bypassed'))})"
+                               for r in again if not r["ok"]]
+                        if failures >= max_attempts:
+                            self.reason = (f"phase {flat.phase.id} could not start: self-test failed {failures} time(s) "
+                                           f"({'; '.join(bad)})")
+                            return False
+                        self.wait = self._wait(flat, since, [f"self-test failed: {b}" for b in bad], "selftest",
+                                               self.SELFTEST_RETRY, failures, max_attempts)
+                        await self._pause(self.SELFTEST_RETRY)
+                        asked = self._asked
+                        continue
+                    failed_components = []
+                binding, reasons = find_binding(self.seq.lab, self.datapack.needs, [flat.phase], self.seq.availability(),
+                                                self.run_id, fixed=held, testdef=self.datapack.testdef_id)
+                cause, delay = "resources", self.RESOURCES_EVERY
+                if binding is not None:
+                    before = {(l["kind"], l["resource"]) for l in self.store.locks(self.run_id)}
+                    conflicts = self.store.try_lock(self.run_id, binding.locks(self.seq.lab))
+                    if not conflicts:
+                        new = [l for l in binding.slots if l not in self.ctx.bound]
+                        if new and self.seq.config.selftest.before_each_run:
+                            # what this phase adds is tested before the run takes it: a failure gives it back
+                            self.wait = self._wait(flat, since, ["self-test of what this phase adds"], "selftest_running",
+                                                   None, failures, max_attempts)
+                            self.seq.notify("phase", {"run": self.run_id, "phase": flat.phase.id, "state": "selftest"})
+                            added = self._added(binding, new)
+                            failed = await self.selftest_components(added)
+                            if failed:
+                                failed_components = [c for c in added if any(f.startswith(c + " (") for f in failed)]
+                                released = self.store.release(self.run_id, keep=before)
+                                if released:
+                                    self.seq.notify("release", {"run": self.run_id, "released": released})
+                                failures += 1
+                                if failures >= max_attempts:
+                                    self.reason = (f"phase {flat.phase.id} could not start: self-test failed "
+                                                   f"{failures} time(s) ({'; '.join(failed)})")
+                                    return False
+                                reasons, cause, delay = [f"self-test failed: {f}" for f in failed], "selftest", self.SELFTEST_RETRY
+                        if cause == "resources":
+                            self.binding.stage_slots.update(binding.stage_slots)
+                            self.binding.slots.update(binding.slots)
+                            self.binding.left_out += [c for c in binding.left_out if c not in self.binding.left_out]
+                            self.store.update_run(self.run_id, binding=self.binding.as_dict(), waiting_for="")
+                            await self.bind_slots()
+                            await self.read_versions(new)
+                            return True
+                    else:
+                        reasons = conflicts
+                if cause == "resources" and failed_components:
+                    cause = "selftest"                   # what failed its self-test is out of service until one passes
+                self.wait = self._wait(flat, since, reasons, cause, delay, failures, max_attempts)
+                waiting = f"phase {flat.phase.id}: " + "; ".join(reasons)
+                if waiting != shown or cause != shown_cause:  # told once per change, not at every check
+                    self.store.update_run(self.run_id, waiting_for=waiting)
+                    self.seq.notify("phase", {"run": self.run_id, "phase": flat.phase.id, "state": "waiting",
+                                              "waiting_for": waiting})
+                    shown, shown_cause = waiting, cause
+                await self._pause(delay)
+                asked = self._asked
+            return False
+        finally:
+            self.wait = None
+
+    async def _pause(self, delay: float) -> None:
+        """Wait before checking again, or less when retried by hand (self._asked tells which)."""
+        self._asked = await wait_event(self.retry, delay)
+        self.retry.clear()
+
+    RESOURCES_EVERY = 2.0                        # s: a phase waiting for resources checks them again this often
+    SELFTEST_RETRY = 60.0                        # s: after a failed self-test, before a phase tries again
+
+    def _wait(self, flat, since: str, reasons: list[str], cause: str, delay: float | None, failures: int,
+              max_attempts: int) -> dict:
+        at = datetime.now(timezone.utc)
+        return {"phase": flat.phase.id, "since": since, "reasons": list(reasons), "cause": cause,
+                "checked_at": at.isoformat(timespec="seconds"), "every": delay,
+                "next_check": _later(at.isoformat(), delay) if delay else None,
+                "attempts": failures, "max_attempts": max_attempts}
+
+    def _added(self, binding: Binding, new: list[str]) -> list[str]:
+        """The lab components a phase adds to the run: its new slots, and every component of a stage it adds."""
+        concrete = sorted({binding.slots[l] for l in new})
+        for stage_slot, stage_id in binding.stage_slots.items():
+            if stage_slot in self.binding.stage_slots:
+                continue
+            concrete += [c for c in self.seq.lab.inventory.stages[stage_id].components
+                         if c not in concrete and c not in binding.left_out]
+        return concrete
 
     def release_after(self, later: list[str]) -> None:
         if self.datapack.pipeline.reserve == "all":

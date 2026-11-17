@@ -1255,6 +1255,61 @@ def test_maintenance_blocks(bench):
     assert done["verdict"] == "succeeded" and done["binding"]["stage_slots"]["bench"] == "bench_2"
 
 
+def test_later_phase_waits_and_retries(bench):
+    """A later phase whose component is out of service waits: why, since when, the next check; retry checks now."""
+    async def main():
+        seq = bench.sequencer()
+        seq.set_flag("seq_host", "maintenance", True)
+        run = seq.submit(bench.build(duration="0s"))
+        seen = {}
+
+        async def during(seq):
+            while (wait := seq.wait_info(seq.store.get_run(run["id"]))) is None or wait["phase"] != "exploit":
+                await asyncio.sleep(0.05)
+            seen["wait"] = wait
+            seen["shown"] = seq.store.get_run(run["id"])["waiting_for"]
+            execution = seq.executions[run["id"]]
+            seq.retry_now(run["id"])
+            seen["retry"] = execution.retry.is_set()
+            seq.set_flag("seq_host", "maintenance", False)
+        [done] = await run_until_done(seq, [run["id"]], during=during)
+        after = seq.wait_info(done)
+        await seq.close()
+        return seen, done, after
+    seen, done, after = asyncio.run(main())
+    wait = seen["wait"]
+    assert wait["cause"] == "resources" and wait["every"] == 2.0 and wait["next_check"] > wait["checked_at"]
+    assert any("maintenance" in r for r in wait["reasons"]) and seen["shown"].startswith("phase exploit: ")
+    assert seen["retry"] and done["verdict"] == "succeeded" and after is None
+
+
+def test_later_phase_selftest_failure_retried(bench):
+    """A later phase whose new component fails its self-test gives it back, tries again, then gives up."""
+    inv = yaml.safe_load((bench.root / "lab" / "inventory.yml").read_text())
+    inv["all"]["hosts"]["seq_host"]["tsq_min_free_space"] = "100PB"
+    write(bench.root / "lab" / "inventory.yml", yaml.safe_dump(inv))
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build(duration="0s"))
+        seen = {}
+
+        async def during(seq):
+            while (wait := seq.wait_info(seq.store.get_run(run["id"]))) is None or wait["cause"] != "selftest":
+                await asyncio.sleep(0.05)
+            seen["wait"] = wait
+            seen["locks"] = {l["resource"] for l in seq.store.locks(run["id"])}
+            seq.retry_now(run["id"])                     # not 60 s later: now
+        [done] = await run_until_done(seq, [run["id"]], during=during, timeout=30)
+        await seq.close()
+        return seen, done
+    seen, done = asyncio.run(main())
+    wait = seen["wait"]
+    assert wait["phase"] == "exploit" and wait["attempts"] == 1 and wait["max_attempts"] == 2 and wait["every"] == 60.0
+    assert "seq_host" in wait["reasons"][0] and "disk" in wait["reasons"][0] and "seq_host" not in seen["locks"]
+    assert done["verdict"] == "error" and "phase exploit could not start: self-test failed 2 time(s)" in done["reason"]
+
+
 def test_resource_overview(bench):
     """Each logical need with the lab's candidates and why they are not available; the bound ones once running."""
     from testsuit.sequencer.intake import load_datapack
