@@ -501,8 +501,8 @@ function RepositoryBanners({ repo, onReread, slot }: { repo: string; onReread: (
           {newer
             ? <span className="chip info" title={`by ${newer.author}: “${newer.message}”`}>newer revision pushed: {newer.tag || newer.commit.slice(0, 10)}</span>
             : status.behind > 0 && <span className="chip info" title={`The upstream branch ${branch} has commits this folder does not`}>{status.behind} new upstream commit{status.behind > 1 ? "s" : ""}</span>}
-          <span className="muted small" title="The branch and revision of the workspace's folder">
-            {branch ? <><strong>{branch}</strong> at </> : <>no branch, at </>}<code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>
+          <span className="muted small" title={`The revision of the workspace's folder${branch ? ` (branch ${branch})` : " (on no branch)"}`}>
+            {!branch && <>no branch, </>}at <code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>
           </span>
           {changes.length > 0 && <button className="small" onClick={() => setShowing(true)} title="See the local changes file by file, download them as a patch, or revert them">Show changes…</button>}
           {branch && changes.length > 0 &&
