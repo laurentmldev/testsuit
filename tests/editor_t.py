@@ -568,8 +568,10 @@ def test_repository_added_by_url(repos):
     editor.write(session, "setup/globals.yml", data={"duration": "1s", "min_count": 3})
     status = editor.workspace_status("bench-tests")
     assert status["stamp"] != stamp and status["changes"] == [{"status": "M", "path": "datapack/setup/globals.yml"}]
-    with pytest.raises(SequencerError, match="local changes"):
-        editor.pull_workspace("bench-tests")
+    # a pull with local changes: they stay (nothing new upstream here)
+    pulled = editor.pull_workspace("bench-tests", CREDS)
+    assert pulled["ok"] and not pulled["updated"], pulled
+    assert editor.workspace_status("bench-tests")["changes"] == [{"status": "M", "path": "datapack/setup/globals.yml"}]
     with pytest.raises(SequencerError, match="not pushed"):
         editor.remove_workspace("bench-tests")
     assert editor.push(session, "Longer", "Ada", "ada@example.com", tag="v3", credentials=CREDS)["ok"]
@@ -581,9 +583,22 @@ def test_repository_added_by_url(repos):
     assert editor.push(scratch, "Even longer", "Bob", "bob@example.com", credentials=CREDS)["ok"]
     status = editor.workspace_status("bench-tests")
     assert status["published"]["newer"] and status["published"]["author"] == "Bob <bob@example.com>"
+    # a local change to a file upstream changed too: refused by git, nothing changed
+    globals_file = Path(repo["folder"]) / "setup/globals.yml"
+    kept = globals_file.read_text()
+    globals_file.write_text(kept + "# mine\n")
+    pulled = editor.pull_workspace("bench-tests", CREDS)
+    assert not pulled["ok"] and pulled["conflict"] and "globals.yml" in pulled["error"], pulled
+    assert globals_file.read_text() == kept + "# mine\n"
+    globals_file.write_text(kept)
+    # a local change to another file: the pull brings upstream's commits, the change stays
+    setup_file = Path(repo["folder"]) / "setup/bench_setup.yml"
+    setup_text = setup_file.read_text()
+    setup_file.write_text(setup_text + "# mine\n")
     pulled = editor.pull_workspace("bench-tests", CREDS)
     assert pulled["ok"] and pulled["updated"], pulled
-    assert "2s" in (Path(repo["folder"]) / "setup/globals.yml").read_text()
+    assert "2s" in globals_file.read_text() and setup_file.read_text() == setup_text + "# mine\n"
+    setup_file.write_text(setup_text)
     assert not editor.workspace_status("bench-tests")["published"]["newer"]
 
     # removed: its clone and its sessions; server.workspaces cannot be removed from here

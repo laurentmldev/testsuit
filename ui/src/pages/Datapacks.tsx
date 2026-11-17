@@ -508,8 +508,9 @@ function RepositoryBanners({ repo, onReread, slot }: { repo: string; onReread: (
           {branch && changes.length > 0 &&
             <button className="small" onClick={() => setPushing(true)} title="Review the changes, then commit, tag and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
           {!branch && changes.length > 0 && <span className="muted small" title="Check a branch out to push">(no branch: cannot push)</span>}
-          <button className={classes("small", (newer || status.behind > 0) && changes.length === 0 && "primary")} onClick={() => setPulling(true)} disabled={changes.length > 0}
-                  title={changes.length ? "Commit and push the local changes first" : "Fetch the repository and bring the folder to the latest commit of its branch (commits pushed from elsewhere are only known after a fetch)"}>Pull…</button>
+          <button className={classes("small", (newer || status.behind > 0) && "primary")} onClick={() => setPulling(true)}
+                  title={"Fetch the repository and bring the folder to the latest commit of its branch (commits pushed from elsewhere are only known after a fetch)"
+                    + (changes.length ? ". The local changes stay; if upstream changed one of those files, nothing is pulled: commit and push, or revert, it first" : "")}>Pull…</button>
         </>, slot)}
       {showing && <LocalChangesDialog repo={repo} onClose={() => setShowing(false)} onChanged={reread}
                                       onPush={branch ? () => { setShowing(false); setPushing(true); } : undefined} />}
