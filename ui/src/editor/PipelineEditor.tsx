@@ -241,11 +241,31 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   useEffect(loadPalette, [loadPalette, doc.data?.setup_file, doc.data?.setup_config]);
   const keyItems = useTestKeys(sid, testdefFor, ctx, `${doc.data?.setup_file}|${doc.data?.setup_config}|${(doc.data?.dictionaries || []).join(",")}`);
 
+  // every sub-pipeline a step can use, with where it comes from: "here" (this file), "included" (a shared file this
+  // test definition includes) or "library" (a shared file of the workspace not included yet: using it includes it)
   const subs: Record<string, any> = useMemo(() => {
-    const all: Record<string, any> = { ...(palette?.shared_subpipelines || {}), ...(palette?.subpipelines || {}) };
-    for (const [n, s] of Object.entries<any>(subsOwn)) all[n] = { params: s?.params || {}, steps: (s?.steps || []).map((x: any) => x.id) };
+    const all: Record<string, any> = {};
+    const included = new Set<string>((pipeline?.include || []) as string[]);     // as written, relative to this file
+    for (const [n, s] of Object.entries<any>(palette?.shared_subpipelines || {})) {
+      if (s.file !== doc.path) all[n] = { ...s, origin: isTestdef && included.has(relPath(doc.path, s.file)) ? "included" : "library" };
+    }
+    for (const [n, s] of Object.entries<any>(palette?.subpipelines || {})) {
+      if (s.file !== doc.path && s.file !== testdefFor) all[n] = { ...s, origin: "included" };
+    }
+    for (const [n, s] of Object.entries<any>(subsOwn)) all[n] = { params: s?.params || {}, steps: (s?.steps || []).map((x: any) => x.id), origin: "here", file: doc.path };
     return all;
-  }, [palette, subsOwn]);
+  }, [palette, subsOwn, doc.path, testdefFor, pipeline?.include, isTestdef]);
+  // a test definition using a sub-pipeline of a shared file it does not include yet: include it
+  const includeFor = (name: string) => {
+    const sub = subs[name];
+    if (!isTestdef || sub?.origin !== "library") return;
+    const rel = relPath(doc.path, sub.file);
+    write((d) => {
+      const inc: string[] = d.pipeline.include || [];
+      if (!inc.includes(rel)) d.pipeline.include = [...inc, rel];
+    });
+    notify(`${sub.file} added to the shared sub-pipelines this test definition includes`);
+  };
 
   // read and write the step lists of the current scope
   // several edits can come in one event (a deleted step and its arrows): each builds on the previous one
@@ -300,6 +320,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
     const id = freeName(slug(step.id), ids);
     const needs = selected.filter((s) => s.startsWith(p + ":")).map((s) => s.slice(p.length + 1)).filter((s) => ids.includes(s));
     editSteps(p, (list) => list.push({ ...step, id, ...(needs.length ? { needs } : {}) }));
+    if (step.uses) includeFor(step.uses);
     setSelected([`${p}:${id}`]);
   };
 
@@ -428,7 +449,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
         <div className="step-panel">
           {selectedStep ? (
             <StepForm key={selected[0]} step={selectedStep.step} part={selectedStep.part} siblings={current(selectedStep.part)} palette={palette} held={held} subs={subs}
-              isSub={scope.kind === "sub"} schemas={schemas}
+              isSub={scope.kind === "sub"} schemas={schemas} onUsed={includeFor}
               onChange={(next) => editSteps(selectedStep.part, (list) => {
                 const i = list.findIndex((s: any) => s.id === selectedStep.step.id);
                 if (next.id !== selectedStep.step.id) for (const s of list) if (s.needs) s.needs = s.needs.map((n: string) => (n === selectedStep.step.id ? next.id : n));
@@ -537,12 +558,46 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
           onMouseEnter={() => setHelp({ title: "python", text: "A Python script or inline code, on a slot's lab component or on the sequencer host, with the run's keys as `keys`. Exit 0 succeeds; an exception makes the step an error." })}>Python script</button>
         <button className="palette-item" onClick={() => onAdd({ id: "api", http: { url: "http://localhost:8080/api/status" } })}
           onMouseEnter={() => setHelp({ title: "http", text: "An HTTP request (a REST API call) from the sequencer host: URL, method, headers, body; it succeeds when the answer is the expected one." })}>REST API call</button>
-        {Object.keys(subs).map((n) => (
-          <button key={n} className="palette-item" onClick={() => onAdd({ id: n, uses: n, ...(Object.keys(subs[n].params || {}).length ? { with: clone(subs[n].params) } : {}) })}
-            onMouseEnter={() => setHelp({ title: `uses ${n}`, text: `Runs the sub-pipeline as one step: ${(subs[n].steps || []).join(", ")}` })}>uses {n}</button>
-        ))}
         {(ctx.step_types || []).map((t: string) => <button key={t} className="palette-item" onClick={() => onAdd({ id: t, [t]: {} })}>{t}</button>)}
       </div>
+      <SubPalette subs={subs} onAdd={onAdd} />
+    </div>
+  );
+}
+
+const ORIGIN_HELP: Record<string, string> = {
+  here: "Defined in this file (pipeline.subpipelines): only this file can use them.",
+  included: "From a shared sub-pipelines file this test definition includes (pipeline.include).",
+  library: "From a shared sub-pipelines file of the workspace that this test definition does not include yet: using one adds the file to pipeline.include.",
+};
+
+/** The sub-pipelines a step can use: those of this file on one line, then those of each shared file. */
+function SubPalette({ subs, onAdd }: { subs: Record<string, any>; onAdd: (step: any) => void }) {
+  const setHelp = useHelp();
+  const names = Object.keys(subs);
+  if (!names.length) return null;
+  const groups: [string, string, string[]][] = [];           // [origin, file, names]
+  const here = names.filter((n) => subs[n].origin === "here");
+  if (here.length) groups.push(["here", "", here]);
+  for (const origin of ["included", "library"]) {
+    const files = [...new Set(names.filter((n) => subs[n].origin === origin).map((n) => subs[n].file as string))].sort();
+    for (const f of files) groups.push([origin, f, names.filter((n) => subs[n].origin === origin && subs[n].file === f)]);
+  }
+  const item = (n: string) => (
+    <button key={n} className="palette-item" onClick={() => onAdd({ id: n, uses: n, ...(Object.keys(subs[n].params || {}).length ? { with: clone(subs[n].params) } : {}) })}
+      onMouseEnter={() => setHelp({ title: `uses ${n}`, text: `Runs the sub-pipeline as one step: ${(subs[n].steps || []).join(", ")}\n\n${subs[n].file ? `From \`${subs[n].file}\`. ` : ""}${ORIGIN_HELP[subs[n].origin] || ""}` })}>{n}</button>
+  );
+  return (
+    <div className="palette-group">
+      <div className="palette-title">sub-pipelines</div>
+      {groups.map(([origin, file, ns]) => (
+        <div key={origin + file} className={classes("palette-subs", origin)}>
+          <div className="palette-from" title={ORIGIN_HELP[origin]}>
+            {origin === "here" ? "in this file" : <><code>{file.split("/").pop()}</code>{origin === "library" && <span className="muted"> · not included</span>}</>}
+          </div>
+          {ns.map(item)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -553,9 +608,9 @@ function useStepHelp(schemas: any) {
   return (field: string) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, field]);
 }
 
-function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub }: {
+function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub, onUsed }: {
   step: any; part: string; siblings: any[]; palette: any; held: string[]; subs: Record<string, any>; isSub: boolean; schemas: any;
-  onChange: (s: any) => void; onOpenSub: (n: string) => void;
+  onChange: (s: any) => void; onOpenSub: (n: string) => void; onUsed?: (n: string) => void;
 }) {
   const { ctx } = useSession();
   const help = useStepHelp(schemas);
@@ -651,11 +706,11 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {action === "uses" && (
         <>
           <Field label="Sub-pipeline" help={help("uses")}>
-            <Combo value={step.uses} onChange={(v) => set("uses", v)} choices={Object.entries(subs).map(([n, s]) => ({ value: n, description: (s.steps || []).join(", ") }))} strict
-              onPick={(n) => onChange({ ...step, uses: n, ...(Object.keys(subs[n]?.params || {}).length ? { with: { ...clone(subs[n].params), ...(step.with || {}) } } : {}) })} />
+            <Combo value={step.uses} onChange={(v) => set("uses", v)} choices={Object.entries(subs).map(([n, s]) => ({ value: n, description: `${s.origin === "here" ? "in this file" : `${s.file}${s.origin === "library" ? " (not included yet)" : ""}`}: ${(s.steps || []).join(", ")}` }))} strict
+              onPick={(n) => { onChange({ ...step, uses: n, ...(Object.keys(subs[n]?.params || {}).length ? { with: { ...clone(subs[n].params), ...(step.with || {}) } } : {}) }); onUsed?.(n); }} />
             {step.uses && <button className="link small" onClick={() => onOpenSub(step.uses)}>open {step.uses}</button>}
           </Field>
-          {step.uses && subs[step.uses] && <div className="small muted">its steps: {(subs[step.uses].steps || []).join(" → ")}</div>}
+          {step.uses && subs[step.uses] && <div className="small muted">{subs[step.uses].origin === "here" ? "defined in this file" : <>from <code>{subs[step.uses].file}</code></>}, its steps: {(subs[step.uses].steps || []).join(" → ")}</div>}
           {Object.keys(subs[step.uses]?.params || {}).length > 0 && (
             <Field label="Parameters" help={help("with")}>
               <KeyValues value={step.with} onChange={(v) => set("with", v)} known={Object.entries<any>(subs[step.uses].params).map(([k, v]) => ({ value: k, description: `default: \`${JSON.stringify(v)}\`` }))} />

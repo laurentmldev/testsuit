@@ -910,3 +910,10 @@ tr.bypassed td { background: var(--warn-soft); }
 .bypass-fields label.grow { flex: 1 1 320px; }
 .bypass-fields label.grow input { flex: 1; }
 .bypass-fields input[type="number"] { width: 64px; }
+
+/* the step palette's sub-pipelines: one line per origin (this file, each shared file) */
+.palette-subs { display: flex; flex-wrap: wrap; gap: 2px 4px; align-items: center; padding: 3px 0 3px 6px; border-left: 2px solid var(--border); }
+.palette-subs.included, .palette-subs.library { border-left-color: var(--accent); }
+.palette-subs.library { border-left-style: dashed; }
+.palette-from { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.palette-from code { font-size: 11px; }

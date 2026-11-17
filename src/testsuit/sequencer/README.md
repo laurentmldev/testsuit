@@ -984,7 +984,7 @@ pipeline:
 - Step ids are namespaced in logs, status and the UI (`up.start_logger`), so the same sub-pipeline can be used several times.
 - `params` declares parameters with their defaults, given by `with:` on the `uses` step and read as `params.*` in the group.
 - A sub-pipeline can use other sub-pipelines. Cycles and unknown names are rejected at validation, and `tsq validate` can print the pipeline flattened.
-- Sub-pipelines shared by several test definitions can live in YAML files listed in `pipeline.include`, relative to the test definition. The datapack tool copies them into the datapack's `definition/` folder, so the datapack stays self-sufficient.
+- Sub-pipelines shared by several test definitions can live in YAML files listed in `pipeline.include`, relative to the test definition. The datapack tool copies them into the datapack's `definition/` folder, so the datapack stays self-sufficient. Sub-pipelines defined in a test definition's own `pipeline.subpipelines` are private to it. In the editor, the step palette lists the sub-pipelines on one line per origin (this file, then each shared file, marked "not included" when this test definition does not include it yet), and using one from a file not included yet adds that file to `pipeline.include`.
 
 ### 8.5 Keys overview
 
