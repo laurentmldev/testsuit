@@ -630,9 +630,10 @@ class Editor:
                               capture_output=True).returncode == 0
 
     def pull_workspace(self, repo_id: str, credentials: dict | None = None) -> dict:
-        """Fetch a tests repository's folder and bring its branch to the latest upstream commit, as the lab's
-        pull (tsq lab reload --pull) does: refused when it has changes not committed, or commits not pushed
-        (commit and push them first). The credentials are the user's, used for this fetch only (none: a public
+        """Fetch a tests repository's folder and bring its branch to the latest upstream commit (fast-forward
+        only). Local changes not committed stay as they are, unless upstream changed one of those files: git
+        then refuses, and nothing is changed (commit and push them, or revert them, first). Refused too when the
+        folder has commits not pushed. The credentials are the user's, used for this fetch only (none: a public
         repository, or one tsqd may read)."""
         credentials = credentials or {}
         repo = self._repo(repo_id)
@@ -640,8 +641,6 @@ class Editor:
             raise SequencerError(f"'{repo_id}' is not a tests repository: the lab is pulled with a reload")
         folder = Path(repo["folder"])
         root = _repo_root(folder)
-        if _git(root, "status", "--porcelain", "--untracked-files=no", check=False).strip():
-            raise SequencerError(f"'{repo_id}' has local changes: commit and push them first, then pull")
         branch = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip()
         if not branch:
             raise SequencerError(f"'{repo_id}' is on no branch (detached HEAD): nothing to pull")
@@ -655,8 +654,11 @@ class Editor:
         merged = subprocess.run(["git", "merge", "--quiet", "--ff-only", f"origin/{branch}"], cwd=root,
                                 capture_output=True, text=True)
         if merged.returncode:
-            return {"ok": False, "error": (merged.stderr or merged.stdout).strip(),
-                    "hint": "the folder has commits that are not pushed: push them first"}
+            error = (merged.stderr or merged.stdout).strip()
+            overwritten = "would be overwritten" in error
+            return {"ok": False, "error": error, "conflict": overwritten,
+                    "hint": ("upstream changed files that have local changes here: commit and push them, or revert "
+                             "them, first" if overwritten else "the folder has commits that are not pushed: push them first")}
         after = _git(root, "rev-parse", "HEAD").strip()
         return {"ok": True, "before": before, "commit": after, "updated": before != after, "git": git_state(folder)}
 

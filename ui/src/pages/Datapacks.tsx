@@ -14,6 +14,7 @@
 // Datapacks (sequencer README, section 13.2): the test definitions of the tests repositories, what each one
 // is made of (logical configuration, input files, dictionaries), its baseline, and generating its datapack.
 import { Fragment, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { KeysExplorer } from "../editor/KeysExplorer";
@@ -24,7 +25,7 @@ import { RunGraph } from "./Run";
 import { Dialog, Field, Section, Text } from "../fields";
 import { attempt, classes, Markdown, navigate, notify, openInNewTab, setQuery, Spinner, type Route } from "../util";
 
-const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit…** (under the workspace) opens them in the Editor in a new browser tab, where they can be reviewed and pushed.`;
+const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit…** (on the right of the workspace bar) opens them in the Editor in a new browser tab, where they can be reviewed and pushed.`;
 
 /** The in-place editing session of a tests repository: opened once, then reused. */
 function useWorkspace(repo: string | null) {
@@ -62,6 +63,7 @@ export function DatapacksPage({ route }: { route: Route }) {
   const current = repos.find((r) => r.id === repo);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [syncSlot, setSyncSlot] = useState<HTMLElement | null>(null);   // where the git state and actions go, in the bar
   const testdefs: any[] = ctx?.workspace?.testdefs || [];
   const selected = route.query.get("def") || testdefs[0]?.path || null;
   const [config, setConfig] = useState<string | null>(null);
@@ -77,17 +79,17 @@ export function DatapacksPage({ route }: { route: Route }) {
       {repos.length > 0 && <WorkspacePicker repositories={repos} value={repo} onChange={(id) => navigate("datapacks", { repo: id })} />}
       {current && (
         <div className="workspace-actions" title={`What these act on: the workspace '${current.id}' only`}>
-          <span className="muted small">Workspace <strong>{current.id}</strong>:</span>
           <a className="button small" href={url(`edit/repositories/${encodeURIComponent(current.id)}/archive`)} download
              title="Download this workspace's folder as it is now, local changes included, as a zip (without its git history)">Download files</a>
           {current.added
             ? <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>
             : <button className="small" disabled title="This workspace is set in the server configuration (server.workspaces of tsq.yml): remove it there. Only the repositories added with Add repository… are removed from here.">Remove…</button>}
+          <span className="repo-sync-slot" ref={setSyncSlot} />
           <button className="primary edit-workspace" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">✎ Edit…</button>
         </div>
       )}
       <Markdown text={INTRO} className="intro" />
-      {repo && sid && ctx && <RepositoryBanners key={repo} repo={repo} onReread={reread} />}
+      {repo && sid && ctx && <RepositoryBanners key={repo} repo={repo} onReread={reread} slot={syncSlot} />}
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}
       {home.data && repos.length === 0 && <p className="muted">No tests repository: <strong>Add repository…</strong> clones one from its git URL, or list its folder in <code>server.workspaces</code> in the configuration.</p>}
       {adding && <AddRepositoryDialog onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); home.refresh(); navigate("datapacks", { repo: id }); }} />}
@@ -449,7 +451,9 @@ function Baseline({ sid, testdef, config, datasets, onChanged, edit }: {
 /** What changed in the repository's folder since this page read it, asked every 2 s while shown, as the Lab page
  * does for the lab files: files changed elsewhere (another browser, a hand edit, a pull), local changes to commit and
  * push, and a newer revision upstream to pull. */
-function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => void }) {
+/** The git state of a workspace and its actions (show changes, commit and push, pull), in the workspace bar (slot);
+ *  and, as a banner, files changed since the page read them. */
+function RepositoryBanners({ repo, onReread, slot }: { repo: string; onReread: () => void; slot: HTMLElement | null }) {
   const [status, setStatus] = useState<any>(null);
   const [seen, setSeen] = useState<string | null>(null);      // the stamp of the files as this page read them
   const [pushing, setPushing] = useState(false);
@@ -486,37 +490,28 @@ function RepositoryBanners({ repo, onReread }: { repo: string; onReread: () => v
           <button className="small" onClick={reread}>Read them again</button>
         </div>
       )}
-      {(newer || status.behind > 0) && (
-        <div className="banner info">
-          <span>
-            {newer
-              ? <>A newer revision was pushed from the Editor: <strong>{newer.tag || newer.commit.slice(0, 10)}</strong> by {newer.author}, “{newer.message}”. </>
-              : <>The upstream branch <strong>{branch}</strong> has {status.behind} commit{status.behind > 1 ? "s" : ""} this folder does not. </>}
-            The folder is on <code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>.
-          </span>
-          <button className="primary small" onClick={() => setPulling(true)} disabled={changes.length > 0}
-                  title={changes.length ? "Commit and push the local changes first" : "Fetch the repository and bring the folder to the latest commit of its branch"}>Pull…</button>
-        </div>
-      )}
-      {(changes.length > 0 || status.ahead > 0) && (
-        <div className="banner warn">
-          <span>
-            {changes.length > 0 && <>This repository's folder has {changes.length} local change{changes.length > 1 ? "s" : ""} not committed{" "}
-              <span className="muted small">({changes.slice(0, 4).map((c) => c.path.split("/").pop()).join(", ")}{changes.length > 4 ? "…" : ""})</span>. </>}
-            {status.ahead > 0 && <>{status.ahead} commit{status.ahead > 1 ? "s are" : " is"} not pushed.</>}
+      {slot && createPortal(
+        <>
+          {changes.length > 0 && (
+            <span className="chip warn" title={changes.map((c) => c.path).join("\n")}>
+              {changes.length} local change{changes.length > 1 ? "s" : ""} not committed
+            </span>
+          )}
+          {status.ahead > 0 && <span className="chip warn">{status.ahead} commit{status.ahead > 1 ? "s" : ""} not pushed</span>}
+          {newer
+            ? <span className="chip info" title={`by ${newer.author}: “${newer.message}”`}>newer revision pushed: {newer.tag || newer.commit.slice(0, 10)}</span>
+            : status.behind > 0 && <span className="chip info" title={`The upstream branch ${branch} has commits this folder does not`}>{status.behind} new upstream commit{status.behind > 1 ? "s" : ""}</span>}
+          <span className="muted small" title="The branch and revision of the workspace's folder">
+            {branch ? <><strong>{branch}</strong> at </> : <>no branch, at </>}<code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>
           </span>
           {changes.length > 0 && <button className="small" onClick={() => setShowing(true)} title="See the local changes file by file, download them as a patch, or revert them">Show changes…</button>}
           {branch && changes.length > 0 &&
             <button className="small" onClick={() => setPushing(true)} title="Review the changes, then commit, tag and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
-          {!branch && <span className="muted"> The folder is on no branch: check one out to push.</span>}
-        </div>
-      )}
-      {!newer && status.behind === 0 && changes.length === 0 && (
-        <div className="repo-sync muted small">
-          {branch ? <>On <strong>{branch}</strong> at <code>{status.git?.tag || status.git?.commit?.slice(0, 10)}</code>. </> : null}
-          <button className="link" onClick={() => setPulling(true)} title="Fetch the repository: commits pushed from elsewhere are only known after a fetch">Pull…</button>
-        </div>
-      )}
+          {!branch && changes.length > 0 && <span className="muted small" title="Check a branch out to push">(no branch: cannot push)</span>}
+          <button className={classes("small", (newer || status.behind > 0) && "primary")} onClick={() => setPulling(true)}
+                  title={"Fetch the repository and bring the folder to the latest commit of its branch (commits pushed from elsewhere are only known after a fetch)"
+                    + (changes.length ? ". The local changes stay; if upstream changed one of those files, nothing is pulled: commit and push, or revert, it first" : "")}>Pull…</button>
+        </>, slot)}
       {showing && <LocalChangesDialog repo={repo} onClose={() => setShowing(false)} onChanged={reread}
                                       onPush={branch ? () => { setShowing(false); setPushing(true); } : undefined} />}
       {pushing && <RepoPushDialog repo={repo} onClose={() => { setPushing(false); reread(); }} />}
