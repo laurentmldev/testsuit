@@ -303,7 +303,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
       <Field label="SSH key" help={help(["all", "vars", "ansible_ssh_private_key_file"])}><Text mono value={vars.ansible_ssh_private_key_file} onChange={(v) => set("ansible_ssh_private_key_file", v)} /></Field>
       <Field label="Library folders" help={help(["all", "vars", "tsq_library"])}>
         <Text mono value={(Array.isArray(vars.tsq_library) ? vars.tsq_library : vars.tsq_library ? [vars.tsq_library] : []).join(", ")}
-          onChange={(v) => set("tsq_library", v ? v.split(/\s*,\s*/).filter(Boolean) : undefined)} placeholder="roles/, components/" />
+          onChange={(v) => set("tsq_library", v ? v.split(/\s*,\s*/).filter(Boolean) : undefined)} placeholder="roles/, models/" />
       </Field>
       <Field label="Host names" help={help(["all", "vars", "tsq_hosts"])} wide
         hint="names a component's Address field can use: the sequencer translates them itself">

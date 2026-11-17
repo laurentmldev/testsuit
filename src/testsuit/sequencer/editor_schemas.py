@@ -335,7 +335,7 @@ ROLE = h(
                             "description": h("What it is and how to make it (Markdown, as long as needed): shown in "
                                              "the Editor next to the datapack input.", type="string")})),
         "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
-                      "components.", type="object",
+                      "models.", type="object",
                       properties={name: h(f"**{name}**: {text}", type=["string", "null"])
                                   for name, text in COMMAND_NAMES.items()},
                       additionalProperties=h("What the command does.", type=["string", "null"])),
@@ -348,12 +348,12 @@ ROLE = h(
 LIBRARY_FILE = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Lab library file",
     **h("A file of the lab library (the `tsq_library` folders of the inventory): `roles` (abstract: the commands "
-        "offered) and/or `components` (concrete: their implementations), by name."),
-    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["components"]}],
+        "offered) and/or `models` (component models, concrete: their implementations), by name."),
+    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["models"]}],
     "properties": {"roles": h("Lab roles, by name. The built-in `component` and `linux_system` cannot be redefined.",
                               type="object", additionalProperties=ROLE),
-                   "components": h("Lab components, by name. The built-in `component` and `linux_system` cannot be "
-                                   "redefined.", type="object", additionalProperties=COMPONENT)},
+                   "models": h("Component models, by name. The built-in `component` and `linux_system` cannot be "
+                               "redefined.", type="object", additionalProperties=COMPONENT)},
 }
 
 # ── lab inventory ──────────────────────────────────────────────────────────
@@ -477,7 +477,7 @@ INVENTORY = {
                                          properties={**VARS, "tsq_library": h(
                                              "Folders of the lab library (roles and component models), relative to "
                                              "this file.", type=["array", "string"], items={"type": "string"},
-                                             examples=[["roles/", "components/"]]),
+                                             examples=[["roles/", "models/"]]),
                                              "tsq_hosts": h(
                                              "The lab's host names: a table `name: address` (an IP address or a "
                                              "DNS name). A component's address (`ansible_host`) can be one of "

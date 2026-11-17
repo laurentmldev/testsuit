@@ -815,20 +815,20 @@ def test_renaming_roles_and_components(repos):
     editor.write(session, "other.yml", content=other)
     editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
     assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == \
-        ["components/bench.yml"]                                  # the roles its components list
-    assert editor.read(session, "components/bench.yml")["data"]["components"]["counter_host"]["roles"] == ["counter_dut"]
+        ["models/bench.yml"]                                  # the roles its components list
+    assert editor.read(session, "models/bench.yml")["data"]["models"]["counter_host"]["roles"] == ["counter_dut"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
     assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
     assert "tsq_role: dut" not in editor.read(session, "inventory.yml")["content"]
     assert editor.read(session, "other.yml")["content"] == other
 
-    components = editor.read(session, "components/bench.yml")["data"]
-    components["components"]["counter_app"] = components["components"].pop("counter_host")
-    editor.write(session, "components/bench.yml", data=components)
+    components = editor.read(session, "models/bench.yml")["data"]
+    components["models"]["counter_app"] = components["models"].pop("counter_host")
+    editor.write(session, "models/bench.yml", data=components)
     assert editor.context(session)["lab_error"]
     assert editor.rename_references(session, "component", "counter_host", "counter_app",
-                                    skip="components/bench.yml") == ["inventory.yml"]
+                                    skip="models/bench.yml") == ["inventory.yml"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None and ctx["lab"]["library"]["counter_app"]["used_by"] == ["counter_1", "counter_2"]
 

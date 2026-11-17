@@ -142,7 +142,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 **UC-1 Describe the lab** (lab operator; sections 6 and 7):
 1. In the lab repository, write the inventory: each stage with its stage type and its hosts, and the ad hoc hosts. Give each host its role and the lab component it extends.
-2. Reuse or write the lab roles (`lab/roles/`) and lab components (`lab/components/`): a lab component implements every command of the roles it supports.
+2. Reuse or write the lab roles (`lab/roles/`) and component models (`lab/models/`): a model implements every command of the roles it supports.
 3. Check with `tsq lab status`, or in the Editor's lab session, whose problems list shows what is missing. Push, then `tsq lab reload --pull`.
 
 **UC-2 Monitor and maintain the lab** (lab operator; sections 7.5 to 7.7):
@@ -193,9 +193,9 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 | Term | Meaning |
 |---|---|
-| **lab library** | the lab's roles and component models, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/components/`). |
+| **lab library** | the lab's roles and component models, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/models/`). |
 | **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one; datapacks bind their slots by role and run its commands. |
-| **component model** (**model** in the UI) | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2), written under `components:` in a library file. A model `extends` another one and overrides what differs. A model lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base model lists none. |
+| **component model** (**model** in the UI) | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2), written under `models:` in a library file. A model `extends` another one and overrides what differs. A model lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base model lists none. |
 | **lab component** | a component of the inventory (an Ansible host): a real machine, instrument or emulation the runs are bound to. It extends a model (or another lab component) with `tsq_extends`, and can add its own `tsq_commands`. It must implement every command its role lists. |
 | **built-ins** | the role and model `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and model ends up extending (section 7.3). |
 | **`extends`** | the parent of a role (whose commands it offers too) or of a model or lab component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
@@ -422,7 +422,7 @@ all:
     ansible_user: tsq                              # standard names, reused by the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_lab   # key-based auth only, no password prompt
     tsq_remote_root: /opt/testrun                  # default target: <root>/<component>/{input,output}
-    tsq_library: [roles/, components/]             # lab roles and components, relative to this file (section 7)
+    tsq_library: [roles/, models/]                 # lab roles and component models, relative to this file (section 7)
 
   hosts:                                           # ad hoc components: in no stage
     lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
@@ -481,6 +481,7 @@ all:
 
   A malformed value stops the lab from loading. A value in a stage group or `all.vars` applies to all its hosts, for hosts cloned from one image.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
+- In a library file, `components:` is now `models:` (component models); a file still using `components:` is refused, with a message saying to rename the key.
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
   - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `bench_1` and `bench_2` can run two datapacks at the same time although they share `lab_switch`;
@@ -520,7 +521,7 @@ A run on an emulated lab is flagged non-conform against the campaign's expected 
 
 The lab library has two levels, each a hierarchy where one `extends` another:
 - a **lab role** is abstract: what a component is for, as the commands it offers, each with what it does. A datapack binds a slot by role, so the commands it can use are known from the role alone, whatever the hardware;
-- a **component model** (a **model** in the UI, under `components:` in the YAML) is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A model lists the roles it supports, and the library checks it implements all their commands. Each lab component of the inventory extends a model (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
+- a **component model** (a **model**, under `models:` in the YAML) is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A model lists the roles it supports, and the library checks it implements all their commands. Each lab component of the inventory extends a model (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
 
 Like classes in object-oriented programming:
 
@@ -533,7 +534,7 @@ Like classes in object-oriented programming:
 
 A datapack references roles only. When it is activated, the sequencer picks, for each slot, a free inventory component of the required role (in a free stage of the type its stage slot asks for), and runs the role's commands with that instance's implementation: the same datapack runs on any lab whose instances implement its roles, real hardware or emulation (section 6.2).
 
-Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `components:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
+Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `models:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
 
 ### 7.1 Lab roles
 
@@ -582,8 +583,8 @@ roles:
 ### 7.2 Component models
 
 ```yaml
-# lab/components/bench.yml
-components:
+# lab/models/bench.yml
+models:
   sbc:
     extends: linux_system
     roles: [logger, acquisition]           # the roles it supports: it implements their commands
@@ -634,7 +635,7 @@ components:
       start: {run: "sim actuator --config {{ component.input_dir }}/actuator_sim.yml", detach: true}
 ```
 
-`roles` is inherited by the components extending one, unless they list their own; a base component (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/components_emulated/`, and the datapacks bind to it unchanged (section 6.2).
+`roles` is inherited by the models extending one, unless they list their own; a base model (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/components_emulated/`, and the datapacks bind to it unchanged (section 6.2).
 
 ### 7.3 Built-ins
 
@@ -667,7 +668,7 @@ A `run` command can run **through another component** too, with `via` (a role of
 **REST API commands.** A command (or a pipeline step, or a status probe, or a `wait_for`) can be an HTTP request rather than a shell command, for an instrument or a service driven through a REST API:
 
 ```yaml
-components:
+models:
   power_supply:
     extends: component
     roles: [power]
@@ -744,10 +745,10 @@ A lab component gives its checks in `selftest` (a host in `tsq_selftest`), and a
 |---|---|
 | `component` | its `status` probe answers, and the state is not `broken` or `offline` |
 | `linux_system` | the above, plus: SSH login with the lab key, `<remote_root>/<component>/` writable, free disk space above `min_free_space`, clock offset with the sequencer host under `max_clock_offset` (default 1 s) |
-| lab components | anything specific, for example `app-install --check` on a controller, or a ping of the switch |
+| models | anything specific, for example `app-install --check` on a controller, or a ping of the switch |
 
 ```yaml
-components:
+models:
   mcu_board:
     extends: linux_system
     selftest:

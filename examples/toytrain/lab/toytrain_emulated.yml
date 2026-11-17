@@ -18,7 +18,7 @@ all:
     ansible_host: localhost
     tsq_transport: local                           # no SSH: commands run as the user running the sequencer
     tsq_remote_root: ~/.toytrain-emu/run           # <root>/<component>/{input,output}
-    tsq_library: [roles/, components_emulated/]    # the lab's roles, implemented by local processes
+    tsq_library: [roles/, models_emulated/]        # the lab's roles, implemented by local processes
     tsq_description: The toy-train platform emulated on one dev host, every component a local process.
 
   hosts:                                           # ad hoc components

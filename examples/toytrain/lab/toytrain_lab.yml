@@ -24,7 +24,7 @@ all:
     ansible_user: tsq                              # account created on every calculator for the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_toytrain_lab   # key-based only: no password prompt
     tsq_remote_root: /opt/testrun                  # <root>/<component>/{input,output}
-    tsq_library: [roles/, components/]             # lab roles and components (roles/, components/toytrain.yml)
+    tsq_library: [roles/, models/]                 # lab roles and component models (roles/, models/toytrain.yml)
 
   hosts:                                           # ad hoc components (no stage)
     lab_srv:                                       # the sequencer component

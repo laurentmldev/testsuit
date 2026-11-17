@@ -228,11 +228,13 @@ class Library:
                 raise SequencerError(f"lab library folder not found: '{folder}'")
             for path in sorted(list(folder.rglob("*.yml")) + list(folder.rglob("*.yaml"))):
                 data = load_yaml(path) or {}
-                if not isinstance(data, dict) or not ({"roles", "components"} & set(data)) \
-                        or set(data) - {"roles", "components"}:
-                    raise SequencerError(f"'{path}': expected 'roles' and/or 'components' (a lab library file)")
+                if isinstance(data, dict) and "components" in data:
+                    raise SequencerError(f"'{path}': 'components' is now 'models' (component models): rename the key")
+                if not isinstance(data, dict) or not ({"roles", "models"} & set(data)) \
+                        or set(data) - {"roles", "models"}:
+                    raise SequencerError(f"'{path}': expected 'roles' and/or 'models' (a lab library file)")
                 for kind, pool, builtins, make in (("roles", roles, BUILTIN_ROLES, RoleDef.from_dict),
-                                                   ("components", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
+                                                   ("models", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
                     entries = data.get(kind) or {}
                     if not isinstance(entries, dict):
                         raise SequencerError(f"'{path}': '{kind}' must be a mapping, by name")

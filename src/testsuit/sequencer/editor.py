@@ -883,8 +883,8 @@ class Editor:
             return "testdef"
         if "configurations" in data and ({"slot_types", "component_types", "datarepositories"} & set(data)):
             return "setup"
-        if ({"roles", "components"} & set(data)) and not set(data) - {"roles", "components"}:
-            return "library"
+        if ({"roles", "models", "components"} & set(data)) and not set(data) - {"roles", "models", "components"}:
+            return "library"                 # (components: the former name of models, refused when loaded)
         if "subpipelines" in data:
             return "subpipelines"
         return "dictionary"
@@ -1001,7 +1001,7 @@ class Editor:
         if kind not in ("role", "component"):
             raise SequencerError(f"rename: 'role' or 'component', not '{kind}'")
         host_key = "tsq_role" if kind == "role" else "tsq_extends"
-        section = "roles" if kind == "role" else "components"
+        section = "roles" if kind == "role" else "models"
 
         def follow(node: Any, keys: tuple[str, ...]) -> bool:
             changed = False
@@ -1048,7 +1048,7 @@ class Editor:
             else:
                 hit = follow((data or {}).get(section), ("extends",))
                 if kind == "role":
-                    hit = follow((data or {}).get("components"), ("roles",)) or hit
+                    hit = follow((data or {}).get("models"), ("roles",)) or hit
             if hit:
                 self.write(session, f["path"], data=data)
                 changed.append(f["path"])
@@ -1201,8 +1201,8 @@ class Editor:
                     result["subpipeline_files"].append(rel)
                     for sub, spec in data["subpipelines"].items():
                         result["subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
-                elif "all" not in data and not (({"roles", "components"} & set(data))
-                                                 and not set(data) - {"roles", "components"}):
+                elif "all" not in data and not (({"roles", "models", "components"} & set(data))
+                                                 and not set(data) - {"roles", "models", "components"}):
                     result["dictionaries"].append(rel)
         return result
 

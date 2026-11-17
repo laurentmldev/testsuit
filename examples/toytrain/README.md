@@ -52,9 +52,9 @@ src/toytrain/
 lab/                                   owned by the lab operators
   toytrain_lab.yml                     inventory: stage train_1, ad hoc components on lab-srv
   roles/toytrain.yml                   lab roles: the commands each offers (pilot, telemetry, propulsion_sim...)
-  components/toytrain.yml              lab components: the hardware implementing them (arduino_unoq, rpi5...)
+  models/toytrain.yml                  component models: the hardware implementing them (arduino_unoq, rpi5...)
   toytrain_emulated.yml                inventory of the emulated mode: everything on the dev host
-  components_emulated/toytrain.yml     the same roles, implemented by local processes
+  models_emulated/toytrain.yml         the same roles, implemented by local processes
 datapack/                              owned by the test authors
   setup/toytrain_setup.yml             slot types (their inputs), slots bound to lab components by role
   setup/globals.yml                    train characteristics, network plan, versions
@@ -203,7 +203,7 @@ tsq --config tsq.dev.yml run .work/datapacks/toytrain_front_contact_toytrain_set
 What changes, and what does not:
 - **The datapack** is built from the same test definitions and setup. Only the setup configuration differs: `emulated` adds the dictionary `platforms/emulated.yml`, which moves every address to the loopback interface (`127.0.0.10` to `127.0.0.30`). Linux routes all of `127.0.0.0/8` to it, multicast included, so this needs no network setup. Ports and the multicast group are unchanged.
 - **The lab** is `lab/toytrain_emulated.yml`. Its stage `train_emu` has the type `toytrain` and the roles pilot, telemetry and acquisition, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
-- **The lab components** in `lab/components_emulated/` implement the lab's roles (`lab/roles/`, shared with the lab). Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
+- **The component models** in `lab/models_emulated/` implement the lab's roles (`lab/roles/`, shared with the lab). Each application runs as a plain process started by the sequencer, from the inputs it deployed, and is stopped with a signal. There is no systemd service and no sudo.
 - **The hardware** is simplified away:
   - the CALC-Pilot microcontroller is replaced by its host stub (`--mcu host`), so flashing only checks the firmware image;
   - the AU GPIO inputs are replaced by UDP datagrams from the piezo simulation, in place of the USB GPIO adapter;
@@ -262,7 +262,7 @@ This sample also uses a few details that the sequencer README leaves open:
 - `install` and `version` are ordinary named commands;
 - `wait_for: {state: ...}` names its slot.
 
-The datapack tool keeps the sequencer fields (`stage_slots`, `stage_slot`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A slot's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the lab components (`lab/components/toytrain.yml`) implement them.
+The datapack tool keeps the sequencer fields (`stage_slots`, `stage_slot`, `role`, `pipeline`) in the datapack as written, for the sequencer to use. A slot's role is a lab role (`lab/roles/toytrain.yml`), which lists its commands; the component models (`lab/models/toytrain.yml`) implement them.
 
 ## Writing your own
 

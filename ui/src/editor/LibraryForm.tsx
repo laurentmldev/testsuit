@@ -21,10 +21,10 @@ import { CommandEditor, CommandsEditor, HttpEditor, summary, WELL_KNOWN, type Co
 import { ItemLink, ItemLinks, useItemRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
-const TP = ["components", "_"];
+const TP = ["models", "_"];
 const RP = ["roles", "_"];
 type Kind = "role" | "component";
-const SECTION: Record<Kind, string> = { role: "roles", component: "components" };
+const SECTION: Record<Kind, string> = { role: "roles", component: "models" };
 
 const STARTERS: { id: string; label: string; description: string; body: (base: string) => any }[] = [
   {
@@ -64,7 +64,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   const { ctx } = session;
   const data = doc.data || {};
   const roles: Record<string, any> = data.roles || {};
-  const components: Record<string, any> = data.components || {};
+  const components: Record<string, any> = data.models || {};
   const first: { kind: Kind; name: string } | null = Object.keys(roles).length ? { kind: "role", name: Object.keys(roles)[0] }
     : Object.keys(components).length ? { kind: "component", name: Object.keys(components)[0] } : null;
   const [sel, setSel] = useState<{ kind: Kind; name: string } | null>(first);
@@ -126,11 +126,11 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       if (spec === undefined || !file) return;
       const draft = clone(data);
       if (mode === "move") {
-        delete draft.components[self].commands[name];
-        if (!Object.keys(draft.components[self].commands).length) delete draft.components[self].commands;
+        delete draft.models[self].commands[name];
+        if (!Object.keys(draft.models[self].commands).length) delete draft.models[self].commands;
       }
       if (file === doc.path) {
-        const t = (draft.components[target] ||= {});
+        const t = ((draft.models ||= {})[target] ||= {});
         t.commands = { ...(t.commands || {}), [as]: spec };
         api.setData(draft);
         if (target !== self) notify(`${mode === "copy" ? "Copied" : "Moved"} ${name} to ${target}${as !== name ? ` as ${as}` : ""}`, "info");
@@ -139,7 +139,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       await api.flush?.();
       const done = await attempt(async () => {
         const { version } = await get(`edit/sessions/${session.sid}/files/${file}`);
-        return put(`edit/sessions/${session.sid}/files/${file}`, { data: spec, at: ["components", target, "commands", as], base: version });
+        return put(`edit/sessions/${session.sid}/files/${file}`, { data: spec, at: ["models", target, "commands", as], base: version });
       });
       if (!done) return;
       if (mode === "move") api.setData(draft);
