@@ -17,6 +17,7 @@ import "@xyflow/react/dist/style.css";
 import "./styles.css";
 import { get, post, url, useConnected, useResource } from "./api";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
+import { NavIcon } from "./navicons";
 import { QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
 import { RunPage } from "./pages/Run";
@@ -101,7 +102,7 @@ function App() {
         </a>
         <nav>
           {nav.map(([key, label]) => (
-            <a key={key} href={`#/${key}`} className={classes(page === key && "active")}>{label}</a>
+            <a key={key} href={`#/${key}`} className={classes(page === key && "active")}><NavIcon name={key} />{label}</a>
           ))}
         </nav>
         <div className="topbar-right">

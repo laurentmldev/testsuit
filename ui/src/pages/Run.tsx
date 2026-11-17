@@ -18,7 +18,7 @@ import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, R
 import { getText, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, Badge, classes, ConsoleText, duration, setQuery, Spinner, STATE_COLORS, time, ViaTag } from "../util";
+import { ago, Badge, classes, ConsoleText, Elapsed, setQuery, Spinner, STATE_COLORS, time, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -345,7 +345,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
         <span>run <code>{r.id}</code></span>
         <span title={r.name}>datapack <code>{r.name}</code></span>
         <span title={time(r.submitted_at)}>submitted {ago(r.submitted_at)}</span>
-        {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} {duration(r.activated_at, r.ended_at)}</span>}
+        {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} <Elapsed from={r.activated_at} to={r.ended_at} /></span>}
         {r.phase && <span>phase <strong>{r.phase}</strong></span>}
         {r.binding && <span title="stage slot = lab stage, slot = lab component">on {Object.entries(r.binding.stage_slots || r.binding.realms || r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
@@ -387,7 +387,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                   return (
                     <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => pick(key)}>
                       <td><code>{key}</code>{s.via && <> <ViaTag via={s.via} title={`its command ran on ${s.via}, which reaches the component of slot ${slotOf(s)}`} /></>}</td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
-                      <td>{s.started ? duration(s.started, s.ended || null) : ""}</td><td>{s.exit_status ?? ""}</td><td>{s.attempts || ""}</td>
+                      <td>{s.started ? <Elapsed from={s.started} to={s.ended || (live ? null : r.ended_at)} /> : ""}</td><td>{s.exit_status ?? ""}</td><td>{s.attempts || ""}</td>
                       <td className="reason">{s.reason}</td>
                     </tr>
                   );
@@ -426,7 +426,7 @@ function StepFacts({ record, records, onPick }: { record: any; records: any[]; o
           <Badge value={record.state} /> {record.reason}
           {record.exit_status !== null && record.exit_status !== undefined && <> · exit {record.exit_status}</>}
           {record.attempts > 1 && <> · {record.attempts} tries</>}
-          {record.started && <> · {duration(record.started, record.ended || null)}</>}
+          {record.started && <> · <Elapsed from={record.started} to={record.ended || null} /></>}
           {record.via && (
             <div className="step-via-note">
               <ViaTag via={record.via} title={`its command ran on ${record.via}, not on the component of its slot`}>run on</ViaTag>

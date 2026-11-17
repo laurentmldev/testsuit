@@ -85,6 +85,22 @@ export function ago(iso?: string | null): string {
   return `${Math.floor(s / 86400)} d ago`;
 }
 
+/** Renders again every `ms` while `on`: durations and "ago" times of what is still running keep up. */
+export function useTick(on: boolean, ms = 1000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const timer = window.setInterval(() => setTick((t) => t + 1), ms);
+    return () => window.clearInterval(timer);
+  }, [on, ms]);
+}
+
+/** A duration, counting every second while it has no end (a run or step still running): only it renders again. */
+export function Elapsed({ from, to }: { from?: string | null; to?: string | null }) {
+  useTick(!!from && !to);
+  return <>{duration(from, to)}</>;
+}
+
 export function duration(from?: string | null, to?: string | null): string {
   if (!from) return "";
   const s = ((to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()) / 1000;

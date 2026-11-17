@@ -62,8 +62,18 @@ function EditStepNode({ data, selected }: NodeProps) {
   );
 }
 
+/** A lane (the steps of a phase, or its finally steps): clicking it makes it where the palette adds steps. */
 function LaneNode({ data }: NodeProps) {
-  return <div className={classes("frame-node", (data as any).kind)}><div className="frame-title">{(data as any).label}</div></div>;
+  const d = data as any;
+  return (
+    <div className={classes("frame-node lane", d.kind, d.target && "target", d.pickable && "pickable")}
+      title={d.pickable && !d.target ? "Click to add the next steps here" : undefined}>
+      <div className="frame-title">{d.label}
+        {d.pickable && (d.target ? <span className="badge info">new steps go here</span> : <span className="lane-pick">+ add steps here</span>)}
+      </div>
+      {d.empty && <div className="lane-empty muted small">{d.target ? "empty: pick a command in the palette on the left" : "empty: click here, then pick a command in the palette"}</div>}
+    </div>
+  );
 }
 
 const nodeTypes = { step: EditStepNode, lane: LaneNode };
@@ -76,8 +86,9 @@ function label(step: any, plugins: string[]): string {
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
 }
 
-function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelete, problems, plugins, subs }: {
+function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelete, problems, plugins, subs, target, onTarget }: {
   lanes: { part: string; title: string; steps: any[] }[]; selected: string[]; onSelect: (ids: string[]) => void;
+  target?: string; onTarget?: (part: "steps" | "finally") => void;     // the lane the palette adds to (phases only)
   onConnect: (part: string, from: string, to: string) => void; onDisconnect: (part: string, from: string, to: string) => void;
   onDelete: (part: string, ids: string[]) => void; problems: Record<string, string>; plugins: string[]; subs: Record<string, any>;
 }) {
@@ -91,7 +102,7 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
     const edgeList: Edge[] = [];
     for (const lane of lanes) {
       const laneId = `lane:${lane.part}`;
-      lay.push({ id: laneId, width: 220, height: 70, lane: lane.part });
+      lay.push({ id: laneId, width: 300, height: 70, lane: lane.part });
       for (const s of lane.steps) {
         const inner = s.uses ? subs[s.uses]?.steps : null;
         lay.push({ id: `${lane.part}:${s.id}`, width: 170, height: inner?.length ? 64 + Math.min(inner.length, 8) * 15 : 56, parent: laneId, lane: lane.part });
@@ -116,7 +127,7 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
           if (!p) continue;
           if (n.id.startsWith("lane:")) {
             const lane = lanes.find((l) => `lane:${l.part}` === n.id)!;
-            list.push({ id: n.id, type: "lane", position: { x: p.x, y: p.y }, data: { label: lane.title, kind: lane.part === "finally" ? "sub" : "phase" }, style: { width: p.width, height: p.height }, selectable: false, draggable: false });
+            list.push({ id: n.id, type: "lane", position: { x: p.x, y: p.y }, data: { label: lane.title, kind: lane.part === "finally" ? "sub" : "phase" }, style: { width: p.width, height: p.height, pointerEvents: "all" }, selectable: false, draggable: false });
           } else {
             const [part, ...rest] = n.id.split(":");
             const id = rest.join(":");
@@ -132,13 +143,17 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape]);
   const live = useMemo(() => nodes.flatMap((n) => {
+    if (n.type === "lane") {
+      const lane = lanes.find((l) => `lane:${l.part}` === n.id);
+      return [{ ...n, data: { ...n.data, pickable: !!onTarget, target: !!onTarget && lane?.part === target, empty: !lane?.steps.length } }];
+    }
     if (n.type !== "step") return [n];
     const { part, id } = n.data as any;
     const step = lanes.find((l) => l.part === part)?.steps.find((s) => s.id === id);
     if (!step) return [];   // laid out for another scope, or just deleted
     return [{ ...n, selected: selected.includes(`${part}:${id}`), data: { ...n.data, step, label: label(step, plugins), action: stepAction(step, plugins), problem: problems[id], inner: step.uses ? subs[step.uses]?.steps : null } }];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [nodes, content, selected, problems, subs]);
+  }), [nodes, content, selected, problems, subs, target]);
   return (
     <>
     <div className="graph-box editable">
@@ -147,7 +162,12 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
         // measured again, which does not happen when its size did not change (the graph went blank on an update)
         onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))}
         onNodeClick={(e, node) => {
+          if (node.type === "lane") {
+            onTarget?.(node.id.slice(5) as "steps" | "finally");
+            return;
+          }
           if (node.type !== "step") return;
+          onTarget?.((node.data as any).part);
           const many = e.shiftKey || e.metaKey || e.ctrlKey;
           onSelect(many ? (selected.includes(node.id) ? selected.filter((x) => x !== node.id) : [...selected, node.id]) : [node.id]);
         }}
@@ -352,7 +372,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   if (scope.kind === "flat") return <div className="pipeline-editor">{scopes}<Flattened testdef={doc.path} config={config} /></div>;
 
   const lanes = scope.kind === "phase"
-    ? [{ part: "steps", title: `steps of ${phase?.id}`, steps: phase?.steps || [] }, { part: "finally", title: "finally: always, even on failure or cancel", steps: phase?.finally || [] }]
+    ? [{ part: "steps", title: `steps of ${phase?.id}`, steps: phase?.steps || [] }, { part: "finally", title: "finally · always runs", steps: phase?.finally || [] }]
     : [{ part: "steps", title: `sub-pipeline ${scope.kind === "sub" ? scope.name : ""}`, steps: current("steps") }];
 
   return (
@@ -371,6 +391,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
         <Palette palette={palette} held={held} subs={subs} part={part} setPart={scope.kind === "phase" ? setPart : undefined} onAdd={addStep} selected={selected.length} />
         <div className="pipeline-graph">
           <StepGraph lanes={lanes} selected={selected} onSelect={setSelected} problems={problems} plugins={plugins} subs={subs}
+            target={part} onTarget={scope.kind === "phase" ? setPart : undefined}
             onConnect={(p, from, to) => {
               if (from === to) return;
               if (hasCycle(current(p), from, to)) return notify(`${from} already waits for ${to}: that would be a cycle`, "error");
@@ -485,7 +506,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
           <button className={part === "finally" ? "selected" : ""} onClick={() => setPart("finally")}>add to finally</button>
         </div>
       )}
-      <div className="muted small">{selected ? `new steps come after the ${selected} selected` : "new steps start with the phase"}</div>
+      <div className="muted small">{setPart && <>new steps go to <strong>{part === "finally" ? "finally" : "steps"}</strong> (or click a lane of the graph), </>}{selected ? `after the ${selected} selected` : "first in it"}</div>
       {comps.length > 1 && (
         <div className="palette-group">
           <div className="palette-title" onMouseEnter={() => setHelp({ title: "for_each: slots", text: "One step that runs on every slot of the phase, in parallel." })}>every slot</div>

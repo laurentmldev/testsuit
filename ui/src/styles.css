@@ -119,6 +119,12 @@ input.priority { width: 80px; }
 .topbar nav, .topbar > div:not(.topbar-right) { display: flex; gap: 4px; }
 .topbar a.active { color: var(--accent); font-weight: 600; }
 .topbar a:not(.brand) { padding: 4px 8px; border-radius: 5px; color: var(--muted); }
+/* the top-level tabs: an icon each, apart from the brand and from one another */
+.topbar nav { gap: 6px; padding-left: 16px; border-left: 1px solid var(--border); align-self: stretch; align-items: center; }
+.topbar nav a { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 7px; }
+.topbar nav a + a::before { content: ""; position: absolute; left: -4px; top: 22%; bottom: 22%; border-left: 1px solid var(--border); }
+.topbar nav a .nav-icon { flex-shrink: 0; opacity: 0.85; }
+.topbar nav a.active .nav-icon { opacity: 1; }
 .topbar a:not(.brand):hover { background: var(--panel-2); text-decoration: none; }
 .topbar a.active:not(.brand) { color: var(--accent); background: var(--accent-soft); }
 .topbar-right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
@@ -182,6 +188,11 @@ tr.finally-row td { color: var(--muted); }
 .frame-node.run { border-color: var(--run); }
 .frame-node.bad { border-color: var(--bad); }
 .frame-title { font-size: 12px; font-weight: 600; padding: 4px 8px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.frame-node.lane.pickable { cursor: pointer; }
+.frame-node.lane.pickable:hover { border-color: var(--accent); }
+.frame-node.lane.target { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+.frame-node .lane-pick { font-weight: 500; color: var(--accent); }
+.frame-node .lane-empty { padding: 2px 8px; }
 .step-node { background: var(--panel); border: 1.5px solid var(--border); border-left-width: 5px; border-radius: 7px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
 .step-node.ok { border-left-color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); }
 .step-node.run { border-left-color: var(--run); border-color: var(--run); }
