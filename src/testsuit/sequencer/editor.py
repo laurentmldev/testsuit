@@ -1345,7 +1345,8 @@ class Editor:
                     for problem in check_against_lab(SimpleNamespace(needs=needs), lab):
                         line, column = _find_line(text, problem)
                         problems.append({"file": inv_rel, "line": line, "column": column, "severity": "warning",
-                                         "message": f"setup {setup['id']} ({cfg_name}), in {folder.name}: {problem}"})
+                                         "message": f"Datapack setup {setup['id']} ({cfg_name}, workspace "
+                                                    f"{folder.name}) does not match this lab: {problem}"})
         return [p for p in problems if only is None or p["file"] == only or only == inv_rel] if only else problems
 
     def _needs_or_none(self, setup: dict, cfg_name: str, folder: Path):

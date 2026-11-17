@@ -16,7 +16,7 @@
 // (the commands its lab role offers), a form per step, the phase resources, and the flattened pipeline.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  applyEdgeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
+  applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
@@ -143,6 +143,9 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
     <>
     <div className="graph-box editable">
       <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ maxZoom: 1.1 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
+        // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
+        // measured again, which does not happen when its size did not change (the graph went blank on an update)
+        onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))}
         onNodeClick={(e, node) => {
           if (node.type !== "step") return;
           const many = e.shiftKey || e.metaKey || e.ctrlKey;

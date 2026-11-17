@@ -140,7 +140,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         ))}
         {missing.length > 0 && (
           <div className="nav-hint">
-            <strong>The tests ask for</strong>
+            <strong>The datapack setups ask for, not in this lab</strong>
             <Markdown text={missing.map((m) => `- ${m}`).join("\n")} />
           </div>
         )}
@@ -195,16 +195,16 @@ function missingFromLab(ctx: any, inv: Inv): string[] {
   const out = new Set<string>();
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {})) {
-      for (const [, type] of Object.entries<any>(c.stages || {})) if (type && !stageTypes.has(type)) out.add(`a stage of type \`${type}\` (setup ${setup.id}, ${cfg})`);
+      for (const [, type] of Object.entries<any>(c.stages || {})) if (type && !stageTypes.has(type)) out.add(`a stage of type \`${type}\` (datapack setup ${setup.id}, ${cfg})`);
       for (const [id, comp] of Object.entries<any>(c.components || {})) {
         if (!comp.role) continue;
         if (comp.stage) {
           const type = c.stages?.[comp.stage];
           for (const name of stageTypes.get(type) || []) {
             const stage = gs.find((g) => g.name === name)!;
-            if (!roleIn(stage).includes(comp.role)) out.add(`role \`${comp.role}\` in stage ${name} (component ${id} of ${setup.id}, ${cfg})`);
+            if (!roleIn(stage).includes(comp.role)) out.add(`role \`${comp.role}\` in stage ${name} (slot ${id} of datapack setup ${setup.id}, ${cfg})`);
           }
-        } else if (!adhocRoles.includes(comp.role)) out.add(`an ad hoc component with role \`${comp.role}\` (component ${id} of ${setup.id}, ${cfg})`);
+        } else if (!adhocRoles.includes(comp.role)) out.add(`an ad hoc component with role \`${comp.role}\` (slot ${id} of datapack setup ${setup.id}, ${cfg})`);
       }
     }
   return [...out];
