@@ -311,6 +311,15 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     origins = explored["generation_origins"]
     assert origins["min_count"]["from"] == "setup/globals.yml" and origins["testdef.id"]["from"] == "built in"
     assert explored["run_origins"]["component"]["from"].startswith("the lab component")
+    # an expression on those keys, as a template would read it
+    td = "testdef/count/testdef.yml"
+    assert editor.eval_key(session, td, "dut", "min_count + 1") == {"value": 4, "error": None}
+    host = explored["run"]["lab"]["components"][explored["component"]]["host"]
+    assert editor.eval_key(session, td, "dut", "{{ lab.components[slots.dut.component].host }}", "run")["value"] == host
+    assert "min_count" in editor.eval_key(session, td, "dut", "min_count", "run")["error"]
+    assert editor.eval_key(session, td, "dut", "succeeded('x')", "run")["value"] == "<verdict>"
+    assert editor.eval_key(session, td, "dut", "slot.id |")["error"]
+    assert editor.eval_key(session, td, "dut", "slot.__class__.__mro__")["value"] is None     # sandboxed
     editor.write(session, "testdef/count/override.yml", content="min_count: 5\n")    # a test definition dictionary
     testdef = yaml.safe_load(editor.read(session, "testdef/count/testdef.yml")["content"])
     editor.write(session, "testdef/count/testdef.yml", data={**testdef, "dictionaries": ["override.yml"]})
