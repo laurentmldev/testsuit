@@ -345,7 +345,7 @@ function ComponentCard({ name }: { name?: string | null }) {
   if (!c) return null;
   return (
     <div className="type-card">
-      <div><strong>component {name}</strong> <span className="muted small">{c.chain.join(" → ")}</span></div>
+      <div><strong>model {name}</strong> <span className="muted small">{c.chain.join(" → ")}</span></div>
       {c.description && <Markdown text={c.description} />}
       <table className="grid compact">
         <tbody>
@@ -583,9 +583,9 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
           onPick={(v) => setHelp({ title: v, text: ctx.lab.library?.[v]?.description, extra: <ComponentCard name={v} /> })} />
       </Field>
       <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}
-        hint={<>{role && <>edit <ItemLink kind="role" name={role} />{" · "}</>}{supported.length === 1 ? `the role of its component: no tsq_role needed` : supported.length > 1 ? `its component supports ${supported.join(", ")}: pick one` : "its component lists no role: give one"}</>}>
+        hint={<>{role && <>edit <ItemLink kind="role" name={role} />{" · "}</>}{supported.length === 1 ? `the role of its model: no tsq_role needed` : supported.length > 1 ? `its model supports ${supported.join(", ")}: pick one` : "its model lists no role: give one"}</>}>
         <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={supported.length ? roleChoices(ctx).filter((r) => supported.includes(r.value)) : roleChoices(ctx)} strict
-          placeholder={role ? `${role} (${supported.length === 1 ? "from its component" : "inherited"})` : undefined}
+          placeholder={role ? `${role} (${supported.length === 1 ? "from its model" : "inherited"})` : undefined}
           onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
@@ -770,7 +770,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Combo value={role} onChange={setRole} choices={roles} strict />
         <RoleCard name={role} />
       </Field>
-      <Field name="tsq_extends" label="Extends" help="The lab component it is: it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the host needs no tsq_role.">
+      <Field name="tsq_extends" label="Extends" help="The component model it is (from the lab library, or another component of the inventory): it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the component needs no tsq_role.">
         <Combo value={ext} onChange={setExt} choices={componentChoices(ctx, { hosts: true })} strict placeholder="linux_system (default)" />
         <ComponentCard name={ext} />
       </Field>

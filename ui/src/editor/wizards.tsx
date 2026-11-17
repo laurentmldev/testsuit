@@ -27,7 +27,7 @@ const KINDS: Record<Kind, { label: string; description: string; lab?: boolean; w
   subpipelines: { label: "Shared sub-pipelines", description: "steps used by several test definitions", workspace: true },
   dictionary: { label: "Key file", description: "keys for the templates and commands", workspace: true },
   template: { label: "Template", description: "an input file rendered with the keys", workspace: true },
-  library: { label: "Lab roles and components", description: "a file of the lab library: roles (the commands offered) and components (their implementations)", lab: true },
+  library: { label: "Lab roles and models", description: "a file of the lab library: roles (the commands offered) and component models (their implementations)", lab: true },
 };
 
 /** A starting pipeline for a setup configuration: deploy and start the components in the order of their

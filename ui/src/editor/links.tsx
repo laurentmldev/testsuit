@@ -47,7 +47,7 @@ export function ItemLink({ kind, name, label }: { kind: ItemKind; name: string; 
   const file = itemFile(session, kind, name);
   if (!file) return <code>{text}</code>;
   return (
-    <button type="button" className="link item-link" title={`Edit the ${kind === "host" ? "inventory component" : kind} ${name} (${file})`}
+    <button type="button" className="link item-link" title={`Edit the ${kind === "host" ? "inventory component" : kind === "component" ? "model" : kind} ${name} (${file})`}
       onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code>{text}</code></button>
   );
 }

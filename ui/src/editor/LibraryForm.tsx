@@ -56,7 +56,7 @@ const STARTERS: { id: string; label: string; description: string; body: (base: s
       status: { probe: { run: "ping -c 1 -W 1 {{ component.host }}" }, states: { running: { exit: 0 }, offline: { exit: "nonzero" } } },
     }),
   },
-  { id: "derived", label: "Variant of an existing component", description: "Extends a component of the library and redefines only what differs.", body: (base) => ({ extends: base, description: "" }) },
+  { id: "derived", label: "Variant of an existing model", description: "Extends a model of the library and redefines only what differs.", body: (base) => ({ extends: base, description: "" }) },
 ];
 
 export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void; flush?: () => Promise<void> } }) {
@@ -159,7 +159,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
             {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of <ItemLinks kind="host" names={ctx.lab.roles[name].used_by} /></div> : null}
           </div>
         ))}
-        <div className="nav-title">Components <button className="small" onClick={() => setCreating("component")}>+ Component</button></div>
+        <div className="nav-title">Models <button className="small" onClick={() => setCreating("component")}>+ Model</button></div>
         {Object.entries(components).map(([name, c]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
             <strong>{name}</strong> <span className="muted small">{c?.extends}</span>
@@ -168,14 +168,14 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
           </div>
         ))}
         <div className="nav-hint">
-          <Markdown text={"Roles are abstract: the commands a component offers, with what each does. Components are concrete: the roles they support, and how they implement their commands. Inventory hosts extend a component (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`).\n\nEvery role: " + Object.keys(ctx.lab.roles || {}).map((t) => `\`${t}\``).join(", ") + "\n\nEvery component: " + Object.keys(ctx.lab.library || {}).map((t) => `\`${t}\``).join(", ")} />
+          <Markdown text={"Roles are abstract: the commands a lab component offers, with what each does. Models (component models) are concrete: the roles they support, and how they implement their commands. The lab components of the inventory extend a model (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`).\n\nEvery role: " + Object.keys(ctx.lab.roles || {}).map((t) => `\`${t}\``).join(", ") + "\n\nEvery model: " + Object.keys(ctx.lab.library || {}).map((t) => `\`${t}\``).join(", ")} />
         </div>
       </div>
       <div className="form-main">
         {sel && item !== undefined ? (sel.kind === "role"
           ? <RoleForm key={"r:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("role", sel.name, v)} onRename={(to) => rename("role", sel.name, to)} onDelete={() => remove("role", sel.name)} />
           : <ComponentForm key={"c:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("component", sel.name, v)} onRename={(to) => rename("component", sel.name, to)} onDelete={() => remove("component", sel.name)} transfer={commandTransfer(sel.name)} />)
-          : <p className="muted">Pick a role or a component, or add one.</p>}
+          : <p className="muted">Pick a role or a model, or add one.</p>}
       </div>
       {creating === "component" && <NewComponent taken={[...new Set([...Object.keys(known("component")), ...Object.keys(components)])]} onClose={() => setCreating(null)} onCreate={(name, body) => {
         setItem("component", name, body);
@@ -214,9 +214,9 @@ function NewComponent({ taken, onClose, onCreate }: { taken: string[]; onClose: 
   const [name, setName] = useState(freeName("my_component", taken));
   const s = STARTERS.find((x) => x.id === starter)!;
   return (
-    <Dialog title="New lab component" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
+    <Dialog title="New component model" onClose={onClose} footer={<button className="primary" disabled={!name || taken.includes(name)} onClick={() => onCreate(name, s.body(base))}>Create</button>}>
       <Field label="Start from"><Choices value={starter} onChange={(v) => v && setStarter(v)} choices={STARTERS.map((x) => ({ value: x.id, label: x.label, description: x.description }))} /></Field>
-      {starter === "derived" && <Field label="Component to extend"><Combo value={base} onChange={setBase} choices={componentChoices(ctx)} strict /></Field>}
+      {starter === "derived" && <Field label="Model to extend"><Combo value={base} onChange={setBase} choices={componentChoices(ctx)} strict /></Field>}
       <Field label="Name" help="The kind of hardware or software (`rpi5`, `arduino_unoq`): inventory hosts extend it (`tsq_extends`)." error={labIdProblem(name, taken)}>
         <Text value={name} onChange={(v) => setName(labIdInput(v))} />
       </Field>
@@ -267,7 +267,7 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
       </Field>
       <RelatedItems groups={[
         ["extended by the roles", "role", Object.keys(ctx.lab.roles || {}).filter((n) => ctx.lab.roles[n]?.extends === name)],
-        ["implemented by the components", "component", described?.implemented_by || []],
+        ["implemented by the models", "component", described?.implemented_by || []],
       ]} />
       <Field label="Description" help={help(["description"])}><Text multiline value={r.description} onChange={(v) => set("description", v)} placeholder="What components with this role are for" /></Field>
       <Section title="Commands offered" help={help(["commands"])}>
@@ -294,10 +294,10 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
           <Combo value={adding} onChange={setAdding} choices={WELL_KNOWN.filter((n) => !(n in own) && !(n in inherited)).map((n) => ({ value: n }))} placeholder="add a command: start, stop, ready…" onPick={add} />
           {adding && <button className="small" onClick={() => add(adding)}>Add</button>}
         </div>
-        <p className="muted small">A role lists commands only: the lab components implement them, and every host with this role must implement them all.</p>
+        <p className="muted small">A role lists commands only: the models implement them, and every lab component with this role must implement them all.</p>
       </Section>
       <RoleInputs value={r.inputs} onChange={(v) => set("inputs", v.length ? v : undefined)} inherited={(parent?.inputs || []) as any[]} help={help(["inputs"])} />
-      {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the components {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
+      {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the models {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
       {described?.used_by?.length > 0 && <div className="hint-box small">Role of <ItemLinks kind="host" names={described.used_by} /></div>}
     </div>
   );
@@ -373,7 +373,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer }: 
   return (
     <div>
       <div className="form-title">
-        <h3>Component {nameInput}</h3>
+        <h3>Model {nameInput}</h3>
         <button className="small danger" onClick={onDelete}>Delete</button>
       </div>
       <Field label="Extends" help={help(["extends"])} hint={t.extends ? <>edit <ItemLink kind="component" name={t.extends} /></> : null}>
@@ -390,10 +390,10 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer }: 
         <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {r}: the lab does not load.</div>
       ))}
       <RelatedItems groups={[
-        ["extended by the components", "component", Object.keys(ctx.lab.library || {}).filter((n) => ctx.lab.library[n]?.extends === name)],
+        ["extended by the models", "component", Object.keys(ctx.lab.library || {}).filter((n) => ctx.lab.library[n]?.extends === name)],
       ]} />
       {parent && <div className="hint-box small">Inherits from {parent.chain.map((c: string, i: number) => <span key={c}>{i > 0 && " → "}<ItemLink kind="component" name={c} /></span>)}: {Object.keys(parent.commands).map((c) => <code key={c}>{c}</code>)}{parent.status && <>, status from {parent.status.from}</>}{parent.selftest.length > 0 && <>, self-test {parent.selftest.map((c: any) => c.spec.id).join(", ")}</>}</div>}
-      <Field label="Description" help={help(["description"])}><Text multiline value={t.description} onChange={(v) => set("description", v)} placeholder="What kind of component this is" /></Field>
+      <Field label="Description" help={help(["description"])}><Text multiline value={t.description} onChange={(v) => set("description", v)} placeholder="What kind of lab component this model is" /></Field>
       <Field label="Transport" help={help(["transport"])}>
         <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} 
           inherit={parent?.transport ? { value: parent.transport, from: `inherited from ${t.extends}` } : { value: "ssh", from: "default" }} />

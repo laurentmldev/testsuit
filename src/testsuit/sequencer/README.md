@@ -193,11 +193,12 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 | Term | Meaning |
 |---|---|
-| **lab library** | the lab's roles and components, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/components/`). |
+| **lab library** | the lab's roles and component models, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/components/`). |
 | **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one; datapacks bind their slots by role and run its commands. |
-| **lab component** | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2). A component `extends` another one and overrides what differs. A component lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base component lists none. An inventory host is itself a component: it extends one with `tsq_extends`, and can add its own `tsq_commands`. A host must implement every command its role lists. |
-| **built-ins** | the roles and components `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and component ends up extending (section 7.3). |
-| **`extends`** | the parent of a role (whose commands it offers too) or of a component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
+| **component model** (**model** in the UI) | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2), written under `components:` in a library file. A model `extends` another one and overrides what differs. A model lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base model lists none. |
+| **lab component** | a component of the inventory (an Ansible host): a real machine, instrument or emulation the runs are bound to. It extends a model (or another lab component) with `tsq_extends`, and can add its own `tsq_commands`. It must implement every command its role lists. |
+| **built-ins** | the role and model `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and model ends up extending (section 7.3). |
+| **`extends`** | the parent of a role (whose commands it offers too) or of a model or lab component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a role adds (`install`, `feed`...). Its implementation is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | the role lists it; its implementation is resolved in this order, last wins: the host's component chain, the stage `tsq_commands`, the host's own `tsq_commands`, and an inline `run:` in a step (section 7.4). The Editor shows the source of each command. |
 | **role** | the job of a component (`controller`, `logger`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role: a slot of a role takes a component of that role or of a role extending it. Several components of a stage can have the same role. |
@@ -459,7 +460,7 @@ all:
 - `tsq_icon` is how the Lab diagram (section 13.1) draws a component: one of its built-in pictures (`server`, `workstation`, `switch`, `router`, `tap`, `embedded`, `board`, `sensor`, `instrument`, `power`, `simulator`, `storage`, `network`, `camera`, `generic`), or an image of the lab repository (`.png`, `.jpg`, `.gif`, `.svg`, `.webp`), relative to the inventory, such as `icons/front_board.png`; the editor uploads one there. Without it, a plain box. Set on a group, it applies to its hosts. An unknown picture or a missing file is an editor warning, never a reason for the lab not to load.
 - `tsq_links` lists the components a component is wired to when its configuration does not say so (a tap between a board and a switch, a serial cable): a host, a list of hosts, or a mapping host: label (`{au: USB GPIO adapter}`). The Lab diagram draws them, with the links it deduces itself: a status probe or a command running `via` another component, and the commands, probe, self-test or variables naming another one (`{{ stage.roles.<role>... }}`, `{{ stage.components.<id>... }}`, `{{ lab.components.<id>... }}`). They are for the diagram only: no command, probe, lock or binding uses them. A host that is not in the inventory stops the lab from loading.
 - `tsq_tags` lists tags, on a host or a stage group: a datapack slot or stage slot asking for `tags` only binds to a component or stage having them all (section 8.1). The id of a component or stage is always one of its tags. Tags on another group apply to its hosts.
-- `tsq_extends` is the lab component each host is (section 7.2): a component of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
+- `tsq_extends` is the component model each host is (section 7.2): a model of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
 - Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Several components of a stage can have the same role (two loggers): each slot of that role gets its own.
 - `tsq_shell` is the shell the commands of a component run under, on the component (`bash`, `/bin/bash`, `"bash -l"` to read the login profile). By default, steps and commands run under `/bin/sh` (dash on Debian and Ubuntu), whatever the user's login shell, while short checks (probes, self-tests) run under the login shell; with `tsq_shell`, both use it. A POSIX shell is expected: the sequencer's own helpers (pid files, kill) run under it too.
 - `tsq_ssh_host_key` pins the SSH key of a component: its public key (`ssh-ed25519 AAAA...`) or its `SHA256:` fingerprint, or a list of them. The server must then present one of them, and no `known_hosts` file is read for that host, so a changed or spoofed key fails the login loudly. Without it, the `known_hosts` of the user running the sequencer is checked: in a container it is usually empty, and every login fails with *Host key is not trusted*. Declaring the keys in the inventory needs no `known_hosts` mounted in the container, and keeps the lab definition the one source of truth. The sequencer never trusts a key just because the server sent it. To get a key:
@@ -515,19 +516,19 @@ The [toy-train example](../../../examples/toytrain/README.md#emulated-mode-on-a-
 
 A run on an emulated lab is flagged non-conform against the campaign's expected baseline, whose lab tag it does not match (section 5.3).
 
-## 7. Lab roles, lab components and state monitoring
+## 7. Lab roles, component models and state monitoring
 
 The lab library has two levels, each a hierarchy where one `extends` another:
 - a **lab role** is abstract: what a component is for, as the commands it offers, each with what it does. A datapack binds a slot by role, so the commands it can use are known from the role alone, whatever the hardware;
-- a **lab component** is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A component lists the roles it supports, and the library checks it implements all their commands. Each inventory host is a component too: it extends a component (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
+- a **component model** (a **model** in the UI, under `components:` in the YAML) is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A model lists the roles it supports, and the library checks it implements all their commands. Each lab component of the inventory extends a model (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
 
 Like classes in object-oriented programming:
 
 | Lab | Object-oriented parallel | Example |
 |---|---|---|
 | lab role | abstract class (an interface): the commands offered, each with what it does, and no implementation | `controller`: `install`, `start`, `stop`, `ready`, `version` |
-| lab component | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `mcu_board`, extending `linux_system`, supports `controller` |
-| inventory component (host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `controller_1: {tsq_extends: mcu_board, ansible_host: 10.0.0.21}` |
+| component model | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `mcu_board`, extending `linux_system`, supports `controller` |
+| lab component (inventory host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `controller_1: {tsq_extends: mcu_board, ansible_host: 10.0.0.21}` |
 | datapack slot | a variable typed by the abstract class: it uses only the commands of the role | `controller: {type: controller_app, stage_slot: bench, role: controller}` in the setup |
 
 A datapack references roles only. When it is activated, the sequencer picks, for each slot, a free inventory component of the required role (in a free stage of the type its stage slot asks for), and runs the role's commands with that instance's implementation: the same datapack runs on any lab whose instances implement its roles, real hardware or emulation (section 6.2).
@@ -578,7 +579,7 @@ roles:
       - {name: notes.txt, optional: true}
 ```
 
-### 7.2 Lab components
+### 7.2 Component models
 
 ```yaml
 # lab/components/bench.yml

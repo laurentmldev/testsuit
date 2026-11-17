@@ -265,7 +265,7 @@ RUNTIME_KEYS = {
     "component.host_alias": "the tsq_hosts name its address is given by ( when it gives the address itself)",
     "component.label": "its label",
     "component.role": "its role",
-    "component.extends": "the library component it extends (its implementation)",
+    "component.extends": "the component model it extends (its implementation)",
     "component.slot": "the slot it is bound to",
     "component.stage": "its lab stage",
     "component.vars": "every inventory variable of it (component.vars.tsq_start_args, component.vars.custom_grp.keyA...)",
@@ -439,7 +439,7 @@ class Editor:
     # ── repositories and sessions ────────────────────────────────────────
 
     def repositories(self) -> list[dict]:
-        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and components",
+        repos = [{"id": "lab", "kind": "lab", "label": "Lab inventory, roles and models",
                   "folder": str(self.seq.config.lab_folder), "git": git_state(self.seq.config.lab_folder)}]
         for i, folder in enumerate(self.seq.config.workspaces):
             git = git_state(folder) if folder.exists() else None

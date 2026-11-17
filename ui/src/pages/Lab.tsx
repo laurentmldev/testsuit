@@ -489,7 +489,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
         ]} />
         <button disabled={probing} onClick={probeNow} title="Probe the state of every component now (they are also probed periodically, and when this page opens)">{probing ? "Probing…" : "Probe now"}</button>
         <button onClick={() => setSelftest(null)}>Self-test the lab</button>
-        {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and components in the Editor (in place), in a new browser tab">Edit lab config</button>}
+        {editor && <button onClick={() => editLab()} title="Open the lab inventory, roles and models in the Editor (in place), in a new browser tab">Edit lab config</button>}
         <button onClick={() => setLogs(true)} title="The events of the sequencer, its warnings and errors">Logs</button>
       </div>
       {logs && <LogsDialog onClose={() => setLogs(false)} />}
