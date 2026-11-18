@@ -903,6 +903,8 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .key-eval pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
 .user-keys { display: flex; flex-direction: column; gap: 6px; }
 .user-key { display: grid; grid-template-columns: minmax(120px, auto) minmax(160px, 260px) 1fr auto; gap: 8px; align-items: center; }
+/* the values the user gives at each generation stand out with a light green background (a darker green in dark mode) */
+.user-key input, .user-key select { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
 
 /* a failed self-test check bypassed for a while (README section 7.6) */
 tr.bypassed td { background: var(--warn-soft); }
