@@ -114,12 +114,15 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
       .finally(() => setEvaluating(false));
   };
   const changeWhere = (w: "run" | "generation") => { setWhere(w); if (evaluate && result) run(text, w); };
-  const toggleEvaluate = () => {
-    const on = !evaluate;
-    setEvaluate(on);
-    setFilter(on ? "" : text.toLowerCase());
+  // Evaluate evaluates the text, every time it is clicked; Filter goes back to filtering the trees with it.
+  const startEvaluate = () => {
+    if (!evaluate) { setEvaluate(true); setFilter(""); setResult(null); }
+    run(text);
+  };
+  const stopEvaluate = () => {
+    setEvaluate(false);
+    setFilter(text.toLowerCase());
     setResult(null);
-    if (on && text.trim()) run(text);
   };
   useEffect(() => {
     post(`edit/sessions/${sid}/slot_keys`, { testdef, slot, setup_config: config }).then(setData).catch((e) => setError(e.message));
@@ -143,10 +146,10 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
               placeholder={evaluate ? "Key expression, e.g. lab.components[slots.my_slot.component].host" : "Filter names and values"}
               onChange={(e) => { setText(e.target.value); if (!evaluate) setFilter(e.target.value.toLowerCase()); }}
               onKeyDown={(e) => { if (evaluate && e.key === "Enter") run(); }} />
-            <button className={classes(evaluate && "primary")} onClick={toggleEvaluate}
-              title={evaluate ? "Back to filtering the keys with the text" : "Evaluate the text as a key expression, as {{ … }} in a template or a command would"}>
-              {evaluate ? "Evaluating" : "Evaluate"}</button>
-            {evaluate && <button onClick={() => run()} disabled={evaluating || !text.trim()}>Run</button>}
+            <button className="primary" onClick={startEvaluate} disabled={evaluating || (evaluate && !text.trim())}
+              title="Evaluate the text as a key expression, as {{ … }} in a template or a command would (Enter does it too)">
+              {evaluating ? "Evaluating…" : "Evaluate"}</button>
+            {evaluate && <button onClick={stopEvaluate} title="Back to filtering the keys with the text">Filter</button>}
           </div>
           {evaluate && (evaluating ? <Spinner text="Evaluating…" />
             : result ? (
