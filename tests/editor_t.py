@@ -311,6 +311,13 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     origins = explored["generation_origins"]
     assert origins["min_count"]["from"] == "setup/globals.yml" and origins["testdef.id"]["from"] == "built in"
     assert explored["run_origins"]["component"]["from"].startswith("the lab component")
+    # the lab stage and component it is bound to can be chosen, among those that fit the slot
+    assert explored["stages"] == ["bench_1", "bench_2"] and explored["components"] == [explored["component"]]
+    other = editor.slot_keys(session, "testdef/count/testdef.yml", "dut", stage="bench_2")
+    assert other["stage"] == "bench_2" and other["run"]["stage"]["id"] == "bench_2"
+    assert other["component"] in other["components"] and other["component"] != explored["component"]
+    assert editor.slot_keys(session, "testdef/count/testdef.yml", "dut", stage="nope")["stage"] == explored["stage"]
+    assert editor.eval_key(session, "testdef/count/testdef.yml", "dut", "component.id", "run", stage="bench_2")["value"] == other["component"]
     # an expression on those keys, as a template would read it
     td = "testdef/count/testdef.yml"
     assert editor.eval_key(session, td, "dut", "min_count + 1") == {"value": 4, "error": None}

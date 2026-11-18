@@ -887,6 +887,7 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .workspace-actions .repo-sync-slot { display: contents; }
 .keys-explorer .row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .keys-explorer input[type="search"] { flex: 1; }
+.keys-binding select { width: auto; padding: 1px 4px; font-family: var(--mono); font-size: 12px; }
 .key-tree { list-style: none; margin: 0; padding-left: 16px; }
 .key-tree.root { padding-left: 0; max-height: 60vh; overflow: auto; }
 .key-tree li { line-height: 1.6; }
