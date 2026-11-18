@@ -29,7 +29,6 @@ export function RunsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h2>Runs</h2>
         <div className="segmented">
           {FILTERS.map(([value, label]) => (
             <button key={label} className={state === value ? "selected" : ""} onClick={() => setState(value)}>{label}</button>

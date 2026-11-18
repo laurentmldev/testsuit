@@ -113,7 +113,6 @@ export function QueuePage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h2>Queue</h2>
         <button className="primary" onClick={() => setPosting(true)}>Post a datapack</button>
       </div>
       {runs.error && <div className="error-box">{runs.error}</div>}

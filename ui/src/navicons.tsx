@@ -14,7 +14,6 @@
 // The icons of the top-level tabs: line drawings on a 24 px grid, in the text color.
 
 const PATHS: Record<string, string> = {
-  queue: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
   runs: "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM10 8.5l5.5 3.5l-5.5 3.5z",
   datapacks: "M3 7.5l9-4.5l9 4.5l-9 4.5zM3 7.5v9l9 4.5l9-4.5v-9M12 12v9",
   lab: "M5 2h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM4 8h16M4 14h16M7.5 5h.01M7.5 11h.01M7.5 17h.01M11 5h5.5M11 11h5.5M11 17h5.5M7 20v2M17 20v2",   // a rack of computers
