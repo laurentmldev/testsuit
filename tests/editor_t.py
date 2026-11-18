@@ -320,6 +320,10 @@ def test_datapacks_synthesis_and_baseline(repos, tmp_path):
     assert editor.eval_key(session, td, "dut", "succeeded('x')", "run")["value"] == "<verdict>"
     assert editor.eval_key(session, td, "dut", "slot.id |")["error"]
     assert editor.eval_key(session, td, "dut", "slot.__class__.__mro__")["value"] is None     # sandboxed
+    # a text holding {{ elsewhere than around it all: a template, rendered as a string
+    assert editor.eval_key(session, td, "dut", "/tmp/{{ min_count + 1 }}-img") == {"value": "/tmp/4-img", "error": None, "template": True}
+    assert editor.eval_key(session, td, "dut", "{{ min_count }}-{{ min_count }}")["value"] == "3-3"
+    assert "nope" in editor.eval_key(session, td, "dut", "/tmp/{{ nope }}")["error"]
     editor.write(session, "testdef/count/override.yml", content="min_count: 5\n")    # a test definition dictionary
     testdef = yaml.safe_load(editor.read(session, "testdef/count/testdef.yml")["content"])
     editor.write(session, "testdef/count/testdef.yml", data={**testdef, "dictionaries": ["override.yml"]})

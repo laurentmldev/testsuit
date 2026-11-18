@@ -13,7 +13,8 @@
 
 // The keys explorer of a slot (Datapacks page): every key its template files and the commands of its steps can
 // use, as trees to browse, filter and copy as {{ key }}. Asked from the server only when it is opened. Its text
-// field filters the trees as it is typed; Evaluate (or Enter) gives the value of the text as a key expression.
+// field filters the trees as it is typed; Evaluate (or Enter) gives the value of the text as a key expression, or
+// renders it as a template when it holds {{ … }} among other text.
 
 import { useEffect, useMemo, useState } from "react";
 import { post } from "../api";
@@ -102,7 +103,7 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
   const [where, setWhere] = useState<"run" | "generation">("generation");
   const [text, setText] = useState("");
   const filter = text.toLowerCase();
-  const [result, setResult] = useState<{ expression: string; where: string; value?: any; error?: string | null } | null>(null);
+  const [result, setResult] = useState<{ expression: string; where: string; value?: any; error?: string | null; template?: boolean } | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   // Typing filters the trees; Evaluate (or Enter) evaluates the text as a key expression.
   const run = (expression = text, w = where) => {
@@ -143,14 +144,14 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
           {evaluating ? <Spinner text="Evaluating…" />
             : result ? (
               <div className={classes("key-eval", result.error ? "bad" : "ok")}>
-                <code>{`{{ ${result.expression.trim().replace(/^\{\{\s*|\s*\}\}$/g, "")} }}`}</code>
+                <code>{result.template ? result.expression.trim() : `{{ ${result.expression.trim().replace(/^\{\{\s*|\s*\}\}$/g, "")} }}`}</code>
                 <span className="muted small"> {result.where === "run" ? "in the commands" : "at generation"}</span>
                 <button className="link small" style={{ float: "right" }} onClick={() => setResult(null)} title="Hide this result">×</button>
                 {result.error
                   ? <pre className="error-box">{result.error}</pre>
                   : <pre className="mono small">{typeof result.value === "string" ? result.value : JSON.stringify(result.value, null, 2)}</pre>}
               </div>)
-            : <p className="small muted">Type to filter the keys below, or click Evaluate (or press Enter) to get the value of the text as a key expression, without or with its <code>{"{{ }}"}</code>, {where === "run" ? "in the commands of its steps" : "at generation"} (switch on the left). Filters work too: <code>{"slot.id | upper"}</code>.</p>}
+            : <p className="small muted">Type to filter the keys below, or click Evaluate (or press Enter) to get the value of the text as a key expression, without or with its <code>{"{{ }}"}</code>, or of a text holding keys in <code>{"{{ }}"}</code> (<code>{"/tmp/{{ run.id }}-img"}</code>), {where === "run" ? "in the commands of its steps" : "at generation"} (switch on the left). Filters work too: <code>{"slot.id | upper"}</code>.</p>}
           {where === "run" && (data.component
             ? <p className="small muted">Only in the commands of its steps (and their <code>env</code>, <code>wait_for</code>…), rendered when the run executes them: the slot is then bound to a lab component, now <strong>{data.component}</strong>{data.stage ? <> of stage <strong>{data.stage}</strong></> : <>, ad hoc: the slot has no <code>stage_slot</code>, so its <code>stage.*</code> keys are empty, at run time too (the other components are under <code>lab.components.*</code>)</>} (it may be another one when it runs). Values in &lt;…&gt; are known then. <code>slot</code> here is its run-time form; a template file cannot use these keys. For example, the address of the host the slot runs on is <code>{"{{ component.host }}"}</code>: it depends on the lab component the run is given, so a command can read it, a template cannot. The host bound to another slot, <code>my_slot</code>: <code>{"{{ lab.components[slots.my_slot.component].host }}"}</code>.</p>
             : <p className="banner warn">{data.why_not}</p>)}

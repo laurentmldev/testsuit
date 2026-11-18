@@ -202,11 +202,15 @@ def _key_tree(keys: dict) -> dict:
 
 def _eval_expression(expression: str, keys: dict, where: str) -> dict:
     """An expression evaluated as a template would (keys read by key first, undefined ones are errors), in a
-    sandbox, with the functions of ``where`` giving placeholders."""
+    sandbox, with the functions of ``where`` giving placeholders. A text holding ``{{`` or ``{%`` other than one
+    ``{{ … }}`` around it all is a template (``/tmp/{{ run.id }}-img``): rendered as a string, with
+    ``template`` true; any other text is an expression, as within ``{{ }}``."""
     import jinja2
     from jinja2.sandbox import SandboxedEnvironment
     text = expression.strip()
-    if text.startswith("{{") and text.endswith("}}"):
+    whole = text.startswith("{{") and text.endswith("}}") and "{{" not in text[2:-2] and "}}" not in text[2:-2]
+    template = not whole and ("{{" in text or "{%" in text)
+    if whole:
         text = text[2:-2].strip()
     if not text:
         return {"value": None, "error": "an expression is needed"}
@@ -224,13 +228,17 @@ def _eval_expression(expression: str, keys: dict, where: str) -> dict:
         functions = {name: (lambda step: "<verdict>") for name in ("succeeded", "failed", "errored", "skipped", "verdict")}
     else:
         functions = {"read_input": lambda path: f"<content of {path}>"}
+    extra = {"template": True} if template else {}
     try:
+        if template:
+            return {"value": env.from_string(text).render(**{**keys, **functions}), "error": None, **extra}
         value = env.compile_expression(text, undefined_to_none=False)(**{**keys, **functions})
         if isinstance(value, jinja2.Undefined):
             str(value)                              # raises: says what is undefined
         return {"value": _key_tree({"v": value})["v"], "error": None}
     except Exception as e:                           # a syntax error, an undefined key, a type error...
-        return {"value": None, "error": f"{type(e).__name__}: {e}" if not isinstance(e, jinja2.TemplateError) else str(e)}
+        return {"value": None, "error": f"{type(e).__name__}: {e}" if not isinstance(e, jinja2.TemplateError) else str(e),
+                **extra}
 
 
 def _missing_keys(value: Any, keys: dict) -> list[str]:
