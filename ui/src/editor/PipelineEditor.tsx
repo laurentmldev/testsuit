@@ -736,7 +736,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           </>
         )}
         <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>
-        <Field label="Environment" help={help("env")}><KeyValues value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
+        <Field label="Environment" help={help("env")}><KeyValues keys value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
       </Section>
       {part === "finally" && <p className="muted small">A finally step runs at the end of the phase in every case, cancel included.</p>}
     </div>

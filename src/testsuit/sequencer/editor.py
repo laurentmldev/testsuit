@@ -202,11 +202,15 @@ def _key_tree(keys: dict) -> dict:
 
 def _eval_expression(expression: str, keys: dict, where: str) -> dict:
     """An expression evaluated as a template would (keys read by key first, undefined ones are errors), in a
-    sandbox, with the functions of ``where`` giving placeholders."""
+    sandbox, with the functions of ``where`` giving placeholders. A text holding ``{{`` or ``{%`` other than one
+    ``{{ … }}`` around it all is a template (``/tmp/{{ run.id }}-img``): rendered as a string, with
+    ``template`` true; any other text is an expression, as within ``{{ }}``."""
     import jinja2
     from jinja2.sandbox import SandboxedEnvironment
     text = expression.strip()
-    if text.startswith("{{") and text.endswith("}}"):
+    whole = text.startswith("{{") and text.endswith("}}") and "{{" not in text[2:-2] and "}}" not in text[2:-2]
+    template = not whole and ("{{" in text or "{%" in text)
+    if whole:
         text = text[2:-2].strip()
     if not text:
         return {"value": None, "error": "an expression is needed"}
@@ -224,13 +228,17 @@ def _eval_expression(expression: str, keys: dict, where: str) -> dict:
         functions = {name: (lambda step: "<verdict>") for name in ("succeeded", "failed", "errored", "skipped", "verdict")}
     else:
         functions = {"read_input": lambda path: f"<content of {path}>"}
+    extra = {"template": True} if template else {}
     try:
+        if template:
+            return {"value": env.from_string(text).render(**{**keys, **functions}), "error": None, **extra}
         value = env.compile_expression(text, undefined_to_none=False)(**{**keys, **functions})
         if isinstance(value, jinja2.Undefined):
             str(value)                              # raises: says what is undefined
         return {"value": _key_tree({"v": value})["v"], "error": None}
     except Exception as e:                           # a syntax error, an undefined key, a type error...
-        return {"value": None, "error": f"{type(e).__name__}: {e}" if not isinstance(e, jinja2.TemplateError) else str(e)}
+        return {"value": None, "error": f"{type(e).__name__}: {e}" if not isinstance(e, jinja2.TemplateError) else str(e),
+                **extra}
 
 
 def _missing_keys(value: Any, keys: dict) -> list[str]:
@@ -1451,15 +1459,16 @@ class Editor:
         problems = self._run_problems(session, testdef_rel, testdef.setup_config, by_hand, missing)
         return {"problems": problems, "missing_keys": missing}
 
-    def slot_keys(self, session: EditSession, testdef_rel: str, slot: str, setup_config: str | None = None) -> dict:
+    def slot_keys(self, session: EditSession, testdef_rel: str, slot: str, setup_config: str | None = None,
+                  stage: str | None = None, component: str | None = None) -> dict:
         """Every key a slot of a test definition can use, as trees to browse (the keys explorer of the Datapacks
         page): ``generation``, those of its template files, rendered at generation (the dictionary and built-in
         keys there are also those of its commands, frozen in the datapack), and ``run``, the keys only the
         commands its steps run have, on the lab component the slot would be bound to now (``component``,
-        ``stage``, ``lab``, ``run``...). Computed on demand."""
+        ``stage``, ``lab``, ``run``...). Computed on demand. ``stage`` and ``component`` choose the lab stage and
+        component it is bound to, among ``stages`` and ``components``, those that fit it (any of them by default)."""
         from testsuit.datatools.datapack.datapack_tools import load_yaml_mapping
         from testsuit.datatools.datapack.templating import TemplateError
-        from testsuit.sequencer.scheduler import Availability, find_binding
         try:
             builder, testdef, raw = self._builder(session, testdef_rel, setup_config)
             keys = builder.keys()
@@ -1501,14 +1510,14 @@ class Editor:
         result: dict[str, Any] = {"slot": slot, "error": error, "generation": _key_tree(generation),
                                   "generation_origins": _key_origins(layers),
                                   "generation_functions": ["read_input('<slot>/<file>')"] if comp.get("needs") else [],
-                                  "run": None, "component": None, "why_not": None}
+                                  "run": None, "component": None, "stages": [], "components": [], "why_not": None}
         lab, _ = self.lab_for(session)
         try:
             _, _, _, _, needs, pipeline, _ = self._testdef_parts(session, testdef_rel, testdef.setup_config)
         except Exception as e:                       # an invalid pipeline: no binding to show
             result["why_not"] = f"the pipeline cannot be read: {_describe(e) if not isinstance(e, SequencerError) else e}"
             return result
-        binding, reasons = find_binding(lab, needs, pipeline.phases, Availability(), "editor", check_free=False)
+        binding, reasons = self._slot_binding(lab, needs, pipeline.phases, slot, stage, component, result)
         if binding is None or slot not in binding.slots:
             result["why_not"] = "the slot cannot be bound to the lab now" + (f": {'; '.join(reasons)}" if reasons else "")
             return result
@@ -1532,12 +1541,55 @@ class Editor:
                                      "verdict('<step>')"])
         return result
 
+    @staticmethod
+    def _slot_binding(lab, needs, phases, slot: str, stage: str | None, component: str | None, result: dict):
+        """A binding of the run's needs to the lab (locks ignored), with the slot on the chosen lab stage and
+        component when they fit it. Puts in result the ``stages`` (of its stage slot) and ``components`` (of the
+        stage, or ad hoc) the slot can be bound to."""
+        from testsuit.sequencer.scheduler import (Availability, Binding, find_binding, unusable_components,
+                                                  usable_assignment)
+        inv = lab.inventory
+        lc = needs.slots.get(slot)
+        def bind(fixed: Binding | None = None):
+            binding, reasons = find_binding(lab, needs, phases, Availability(), "editor", fixed=fixed, check_free=False)
+            for logical, stage_id in (fixed.stage_slots.items() if fixed and binding else []):
+                stage_ = inv.stages[stage_id]           # a stage given: find_binding keeps it as it is, slots left to give
+                avail = Availability()
+                for slot_id, comp in (usable_assignment(lab, stage_, needs.in_stage_slot(logical), avail) or {}).items():
+                    binding.slots[slot_id] = comp.id
+                binding.left_out += [c for c in unusable_components(lab, stage_, avail) if c not in binding.left_out]
+            return binding, reasons
+        if lc is None:
+            return bind()
+        if lc.stage_slot:
+            stages = [s.id for s in inv.stages_of_type(needs.stage_slots[lc.stage_slot])
+                      if bind(Binding(stage_slots={lc.stage_slot: s.id}))[0] is not None]
+            result["stages"] = stages
+            binding, reasons = bind(Binding(stage_slots={lc.stage_slot: stage}) if stage in stages else None)
+            if binding is None or slot not in binding.slots:
+                return binding, reasons
+            chosen = inv.stages[binding.stage_slots[lc.stage_slot]]
+            fitting = [c for c in chosen.components if c in inv.components and c not in binding.left_out
+                       and lab.fits(inv.components[c], lc.role, lc.tags)]
+            result["components"] = fitting
+            if component in fitting and component != binding.slots[slot]:
+                before = binding.slots[slot]
+                for other, comp in binding.slots.items():        # the slot that had it gets the one it leaves
+                    if comp == component:
+                        binding.slots[other] = before
+                binding.slots[slot] = component
+            return binding, reasons
+        comps = [c.id for c in inv.adhoc if lab.fits(c, lc.role, lc.tags)
+                 and bind(Binding(slots={slot: c.id}))[0] is not None]
+        result["components"] = comps
+        return bind(Binding(slots={slot: component}) if component in comps else None)
+
     def eval_key(self, session: EditSession, testdef_rel: str, slot: str, expression: str, where: str = "generation",
-                 setup_config: str | None = None) -> dict:
+                 setup_config: str | None = None, stage: str | None = None, component: str | None = None) -> dict:
         """The value of a key expression (``lab.components[slots.my_slot.component].host``, with or without its
         ``{{ }}``) on the keys of a slot the explorer shows: ``where`` is ``generation`` or ``run``. Returns
         ``value`` (plain data) or ``error``."""
-        found = self.slot_keys(session, testdef_rel, slot, setup_config)
+        found = self.slot_keys(session, testdef_rel, slot, setup_config, stage, component)
         keys = found["run"] if where == "run" else found["generation"]
         if keys is None:
             return {"value": None, "error": found.get("why_not") or "no run-time keys for this slot"}

@@ -230,13 +230,15 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     @app.post("/edit/sessions/{sid}/slot_keys")
     async def slot_keys(sid: str, body: dict):
         """The keys explorer of a slot: its keys at generation and in the commands of its steps."""
-        return await run(editor.slot_keys, session(sid), str(body["testdef"]), str(body["slot"]), body.get("setup_config"))
+        return await run(editor.slot_keys, session(sid), str(body["testdef"]), str(body["slot"]), body.get("setup_config"),
+                         body.get("stage"), body.get("component"))
 
     @app.post("/edit/sessions/{sid}/eval_key")
     async def eval_key(sid: str, body: dict):
         """The keys explorer of a slot: the value of a key expression on its keys."""
         return await run(editor.eval_key, session(sid), str(body["testdef"]), str(body["slot"]), str(body["expression"]),
-                         str(body.get("where") or "generation"), body.get("setup_config"))
+                         str(body.get("where") or "generation"), body.get("setup_config"),
+                         body.get("stage"), body.get("component"))
 
     @app.post("/edit/sessions/{sid}/preview")
     async def preview(sid: str, body: dict):

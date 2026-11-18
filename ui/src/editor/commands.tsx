@@ -185,8 +185,8 @@ export function HttpEditor({ value, onChange, help, withSave }: {
       <Field label="URL" help={help("url")}>
         <Text keys mono value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
       </Field>
-      <Field label="Headers" help={help("headers")}><KeyValues value={v.headers} onChange={(x) => set("headers", x)} /></Field>
-      <Field label="Query parameters" help={help("params")}><KeyValues value={v.params} onChange={(x) => set("params", x)} /></Field>
+      <Field label="Headers" help={help("headers")}><KeyValues keys value={v.headers} onChange={(x) => set("headers", x)} /></Field>
+      <Field label="Query parameters" help={help("params")}><KeyValues keys value={v.params} onChange={(x) => set("params", x)} /></Field>
       <Field label="Body" help={help("json")}>
         <Choices value={bodyKind} onChange={(k) => {
           if (!k || k === bodyKind) return;
