@@ -160,8 +160,8 @@ A test never names a host: the same datapack runs on any stage of the right type
 - Check it with `datapack --verify <zip>` (checksums), `datapack --check-baseline baseline_expected.yml <zip>` (conformity) and `tsq validate <zip>` (binding and every command, against the lab).
 
 **UC-5 Run a test and follow it** (test author; sections 9 and 10):
-- Post it with `tsq submit <zip> --priority 70 --follow`, or from the **Queue** page.
-- See it waiting with `tsq queue` (change its priority with `tsq priority <run> 90`), then running with `tsq show <run>` and `tsq logs <run>`, or on the **Runs** page with its pipeline graph and live logs.
+- Post it with `tsq submit <zip> --priority 70 --follow`, or from the **Queue** subtab of the **Runs** tab.
+- See it waiting with `tsq queue` (change its priority with `tsq priority <run> 90`), then running with `tsq show <run>` and `tsq logs <run>`, or on its page (**Runs** tab) with its pipeline graph and live logs.
 
 **UC-6 Stop a run** (section 11): `tsq cancel <run>` stops the commands, then kills them; `tsq kill <run>` kills at once. Either way the `finally` steps still run and collect the outputs. `tsq repost <run>` puts an ended run back in the queue.
 
@@ -1463,7 +1463,7 @@ tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from anothe
 (cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run e2e)   # every page and editor view rendered in a headless Chrome (CHROMIUM=<path> if needed)
 ```
 
-- **Queue**, **Runs** and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
+- **Runs** (subtabs **Queue** and **All runs**) and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
 - **Editor** (`server.editor: true`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, lab roles and components, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
 
 **Lab operations:**

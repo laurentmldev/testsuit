@@ -64,6 +64,22 @@ function LabBanner({ editor }: { editor: boolean }) {
   );
 }
 
+// The subtabs of the Runs tab: what is queued and running now, and the history of every run.
+const RUNS_SUBTABS: [string, string, string][] = [
+  ["queue", "Queue", "Runs waiting and running now: post a datapack, change priorities, cancel or kill"],
+  ["runs", "All runs", "Every run, past and present, filtered by state"],
+];
+
+function RunsSubtabs({ page }: { page: string }) {
+  return (
+    <div className="page subtabs-row"><div className="tabs subtabs">
+      {RUNS_SUBTABS.map(([key, label, title]) => (
+        <a key={key} href={`#/${key}`} title={title} className={classes(page === key && "selected")}>{label}</a>
+      ))}
+    </div></div>
+  );
+}
+
 function App() {
   const route = useRoute();
   const connected = useConnected();
@@ -80,8 +96,11 @@ function App() {
     if (!editing) document.title = title;
   }, [title, editing]);
   const nav = [
-    ["queue", "Queue"], ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Run exploit"]] : []), ["config", "Configuration"],
+    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Run exploit"]] : []), ["config", "Configuration"],
   ];
+  // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
+  // are kept as they were, so existing links still work
+  const tabOf = (key: string) => (key === "queue" ? "runs" : key);
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
   else if (page === "runs") content = <RunsPage />;
@@ -102,7 +121,7 @@ function App() {
         </a>
         <nav>
           {nav.map(([key, label]) => (
-            <a key={key} href={`#/${key}`} className={classes(page === key && "active")}><NavIcon name={key} />{label}</a>
+            <a key={key} href={key === "runs" ? "#/queue" : `#/${key}`} className={classes(tabOf(page) === key && "active")}><NavIcon name={key} />{label}</a>
           ))}
         </nav>
         <div className="topbar-right">
@@ -117,7 +136,10 @@ function App() {
         </div>
       </header>
       <LabBanner editor={editor} />
-      <main>{content}</main>
+      <main>
+        {(page === "queue" || (page === "runs" && !route.parts[1])) && <RunsSubtabs page={page} />}
+        {content}
+      </main>
       <Toasts />
     </div>
   );
