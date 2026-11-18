@@ -20,7 +20,7 @@ One request description everywhere::
       method: POST                              # default GET
       headers: {Authorization: "Bearer {{ component.vars.token }}"}
       params: {verbose: 1}                      # query string
-      json: {mode: run}                         # or body: "raw text" (not both)
+      json: {mode: run}                         # or body: "raw text", or body_file: path (only one of them)
       timeout: 10s                              # of the request (default 30 s)
       verify: true                              # TLS certificate check (false for a self-signed lab server)
       extract: .jobs[0].state                   # jq-style path: what the expectations and states see
@@ -29,6 +29,10 @@ One request description everywhere::
 
 The request is sent from the sequencer host, or with ``via`` from another component (with ``curl`` there),
 for an API only reachable from inside a stage.
+
+``body_file`` sends a file's bytes as they are (like ``curl --data-binary @file``), read where the request is
+sent from: on the sequencer host (a relative path is in the run folder, and refused outside a run), or with
+``via`` on that component (curl reads it there).
 """
 from __future__ import annotations
 
@@ -41,11 +45,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from testsuit.sequencer.util import SequencerError, parse_duration
 
-HTTP_KEYS = ("url", "method", "headers", "params", "json", "body", "timeout", "verify", "extract", "expect", "save")
+HTTP_KEYS = ("url", "method", "headers", "params", "json", "body", "body_file", "timeout", "verify", "extract", "expect", "save")
+BODY_KEYS = ("json", "body", "body_file")
 EXPECT_KEYS = ("status", "regex", "json")
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 SECRET = re.compile(r"auth|token|key|secret|password|cookie", re.IGNORECASE)
@@ -148,8 +154,11 @@ def normalize(spec: Any, where: str) -> dict:
         raise SequencerError(f"{where}: unknown 'http' key(s) {', '.join(unknown)} (known: {', '.join(HTTP_KEYS)})")
     if not spec.get("url"):
         raise SequencerError(f"{where}: 'http' needs a 'url'")
-    if "json" in spec and "body" in spec:
-        raise SequencerError(f"{where}: 'http' takes 'json' or 'body', not both")
+    bodies = [k for k in BODY_KEYS if k in spec]
+    if len(bodies) > 1:
+        raise SequencerError(f"{where}: 'http' takes one of 'json', 'body' or 'body_file', not {' and '.join(bodies)}")
+    if "body_file" in spec and (not isinstance(spec["body_file"], str) or not spec["body_file"].strip()):
+        raise SequencerError(f"{where}: 'http.body_file' takes the path of the file to send")
     method = str(spec.get("method") or "GET").upper()
     if method not in METHODS and "{{" not in method:
         raise SequencerError(f"{where}: 'http' method '{method}' is not one of {', '.join(METHODS)}")
@@ -181,33 +190,57 @@ def _url(spec: dict) -> str:
     return url
 
 
-def _payload(spec: dict) -> tuple[bytes | None, dict]:
+def _headers(spec: dict) -> dict:
     headers = {str(k): str(v) for k, v in (spec.get("headers") or {}).items()}
+    kind = "application/json" if "json" in spec else "application/octet-stream" if "body_file" in spec else None
+    if kind and not any(k.lower() == "content-type" for k in headers):
+        headers["Content-Type"] = kind
+    return headers
+
+
+def body_path(spec: dict, base: Path | None) -> Path:
+    """The file ``body_file`` names, on the sequencer host: a relative path is in ``base`` (the run folder)."""
+    path = Path(str(spec["body_file"]).strip()).expanduser()
+    if path.is_absolute():
+        return path
+    if base is None:
+        raise ValueError("a relative path is only read in a run (from the run folder): give an absolute path")
+    return Path(base) / path
+
+
+def _payload(spec: dict, base: Path | None = None) -> bytes | None:
+    """The body to send from this host (reads ``body_file``: OSError or ValueError when it cannot)."""
     if "json" in spec:
-        if not any(k.lower() == "content-type" for k in headers):
-            headers["Content-Type"] = "application/json"
-        return json.dumps(spec["json"]).encode(), headers
+        return json.dumps(spec["json"]).encode()
     if "body" in spec:
         body = spec["body"]
-        return (body if isinstance(body, str) else json.dumps(body)).encode(), headers
-    return None, headers
+        return (body if isinstance(body, str) else json.dumps(body)).encode()
+    if "body_file" in spec:
+        return body_path(spec, base).read_bytes()
+    return None
 
 
 def describe(spec: dict) -> str:
     """The request in one line, header values that look secret hidden."""
-    _, headers = _payload(spec)
-    shown = " ".join(f"-H '{k}: {'***' if SECRET.search(k) else v}'" for k, v in headers.items())
-    return f"{str(spec.get('method') or 'GET').upper()} {_url(spec)}" + (f" {shown}" if shown else "")
+    shown = " ".join(f"-H '{k}: {'***' if SECRET.search(k) else v}'" for k, v in _headers(spec).items())
+    if "body_file" in spec:
+        shown += f" --data-binary @{spec['body_file']}"
+    return f"{str(spec.get('method') or 'GET').upper()} {_url(spec)}" + (f" {shown.strip()}" if shown.strip() else "")
 
 
 def timeout_of(spec: dict, default: float = 30.0) -> float:
     return parse_duration(spec["timeout"]) if spec.get("timeout") is not None else default
 
 
-def send(spec: dict, timeout: float | None = None) -> Answer:
-    """Send the request from this host (blocking: run it in a thread)."""
-    data, headers = _payload(spec)
-    request = urllib.request.Request(_url(spec), data=data, headers=headers,
+def send(spec: dict, timeout: float | None = None, base: Path | None = None) -> Answer:
+    """Send the request from this host (blocking: run it in a thread); ``base``: the run folder, where a
+    relative ``body_file`` is."""
+    try:
+        data = _payload(spec, base)
+    except (OSError, ValueError) as e:
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
+        return Answer(None, "", f"cannot read the body file '{spec.get('body_file')}': {reason}")
+    request = urllib.request.Request(_url(spec), data=data, headers=_headers(spec),
                                      method=str(spec.get("method") or "GET").upper())
     context = None
     if spec.get("verify") is False:
@@ -229,16 +262,21 @@ def send(spec: dict, timeout: float | None = None) -> Answer:
 
 
 def curl_command(spec: dict, timeout: float | None = None) -> str:
-    """The same request as a curl command, for another component (``via``): the answer then its status."""
-    data, headers = _payload(spec)
+    """The same request as a curl command, for another component (``via``): the answer then its status; curl
+    reads ``body_file`` on that component."""
+    headers = _headers(spec)
     args = ["curl", "-sS", "-X", str(spec.get("method") or "GET").upper(), "--max-time", f"{timeout or timeout_of(spec):g}",
             "-w", STATUS_MARK.replace("\n", "\\n") + "%{http_code}"]
     if spec.get("verify") is False:
         args.append("-k")
     for k, v in headers.items():
         args += ["-H", f"{k}: {v}"]
-    if data is not None:
-        args += ["--data-binary", data.decode()]
+    if "body_file" in spec:
+        args += ["--data-binary", "@" + str(spec["body_file"]).strip()]
+    else:
+        data = _payload(spec)
+        if data is not None:
+            args += ["--data-binary", data.decode()]
     args.append(_url(spec))
     return " ".join(shlex.quote(a) for a in args)
 
@@ -251,11 +289,12 @@ def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
     return Answer(int(status), body[:-1] if body.endswith("\n") else body)
 
 
-async def request(spec: dict, transport=None, timeout: float | None = None) -> Answer:
+async def request(spec: dict, transport=None, timeout: float | None = None, base: Path | None = None) -> Answer:
     """Send the request: from the sequencer host, or through a component's transport (curl there); with
-    ``extract``, the answer's body is that part of it (the whole answer in ``raw``)."""
+    ``extract``, the answer's body is that part of it (the whole answer in ``raw``). ``base``: the run folder,
+    where a relative ``body_file`` is read on the sequencer host."""
     if transport is None:
-        return apply_extract(spec, await asyncio.to_thread(send, spec, timeout))
+        return apply_extract(spec, await asyncio.to_thread(send, spec, timeout, base))
     limit = timeout or timeout_of(spec)
     result = await transport.shell(curl_command(spec, limit), timeout=limit + 5)
     if not result.completed:

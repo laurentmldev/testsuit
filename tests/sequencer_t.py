@@ -2104,8 +2104,8 @@ def test_same_role_and_tags(bench):
 
 
 class _Api:
-    """A small REST API on a free local port: GET /status, POST /jobs (echoes its JSON, 201), GET /fail (500).
-    It records the requests it got."""
+    """A small REST API on a free local port: GET /status, POST /jobs (echoes its JSON, 201), POST /upload (any
+    bytes, answers their size, 201), GET /fail (500). It records the requests it got."""
 
     def __init__(self):
         import json
@@ -2134,7 +2134,12 @@ class _Api:
                     self.answer(500, {"error": "boom"})
 
             def do_POST(self):
-                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path.startswith("/upload"):          # any bytes: kept as they came
+                    api.requests.append(("POST", self.path, dict(self.headers), data))
+                    self.answer(201, {"size": len(data)})
+                    return
+                body = data.decode()
                 api.requests.append(("POST", self.path, dict(self.headers), body))
                 self.answer(201, {"job": 7, **json.loads(body or "{}")})
 
@@ -2197,7 +2202,10 @@ def test_http_checked():
     for spec, message in ((7, "takes a URL or a mapping"), ({"method": "GET"}, "needs a 'url'"),
                           ({"url": "x", "status": 200}, r"'http' status is now 'expect: \{status\}'"),
                           ({"url": "x", "data": 1}, "unknown 'http' key"),
-                          ({"url": "x", "json": {}, "body": ""}, "'json' or 'body'"),
+                          ({"url": "x", "json": {}, "body": ""}, "one of 'json', 'body' or 'body_file', not json and body"),
+                          ({"url": "x", "body": "", "body_file": "f"}, "not body and body_file"),
+                          ({"url": "x", "body_file": ""}, "'http.body_file' takes the path"),
+                          ({"url": "x", "body_file": ["f"]}, "'http.body_file' takes the path"),
                           ({"url": "x", "method": "FETCH"}, "not one of"),
                           ({"url": "x", "expect": {"code": 1}}, "unknown 'http.expect' key")):
         with pytest.raises(SequencerError, match=message):
@@ -2208,6 +2216,30 @@ def test_http_checked():
     assert judge({"expect": {"status": 404}}, Answer(404, ""))[0]
     assert judge({"expect": {"json": {"a": [1, 2]}}}, Answer(200, '{"a": [1, 2], "b": 0}'))[0]
     assert not judge({"expect": {"json": {"a": 1}}}, Answer(200, "<html>"))[0]
+
+
+def test_http_body_file(tmp_path, api):
+    """'body_file' sends a file's bytes as they are (curl --data-binary @file): read on the sequencer host, a
+    relative path in the run folder; through a component, curl reads it there."""
+    from testsuit.sequencer.httpcall import curl_command, describe, normalize, send
+    data = bytes(range(256)) * 3
+    write_bytes = (tmp_path / "in" / "payload.bin")
+    write_bytes.parent.mkdir()
+    write_bytes.write_bytes(data)
+    spec = normalize({"url": f"{api.url}/upload", "method": "POST", "body_file": "in/payload.bin"}, "here")
+    answer = send(spec, 5, tmp_path)                                   # relative: in the run folder
+    assert answer.status == 201 and answer.body == '{"size": 768}'
+    _, _, headers, sent = api.requests[-1]
+    assert sent == data and headers["Content-Type"] == "application/octet-stream"
+    typed = {**spec, "body_file": str(write_bytes), "headers": {"content-type": "image/png"}}
+    assert send(typed, 5).status == 201 and api.requests[-1][2]["Content-Type"] == "image/png"   # absolute, header kept
+    outside = send(spec, 5)                                            # no run folder: a relative path is refused
+    assert outside.status is None and "only read in a run" in outside.error
+    missing = send({**spec, "body_file": str(tmp_path / "nope.bin")}, 5)
+    assert missing.status is None and "cannot read the body file" in missing.error and len(api.requests) == 2
+    assert describe(spec).endswith("-H 'Content-Type: application/octet-stream' --data-binary @in/payload.bin")
+    command = curl_command({**spec, "body_file": "/data/my file.bin"}, 5)
+    assert "--data-binary '@/data/my file.bin'" in command and "Content-Type: application/octet-stream" in command
 
 
 def test_http_extract():
@@ -2287,18 +2319,25 @@ def test_http_command_via(tmp_path, no_git, api):
     """A lab component's command can be an HTTP request, sent through another component with curl (via)."""
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    (tmp_path / "upload.bin").write_bytes(b"\x00\xffbin\n")
+    inventory["all"].setdefault("vars", {})["payload"] = str(tmp_path / "upload.bin")
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"version": {
         "http": {"url": f"{api.url}/status", "headers": {"X-Api-Key": "k3y"}, "expect": {"json": {"version": "1.2"}},
-                 "save": "version.json"}, "via": "seq_host"}}
+                 "save": "version.json"}, "via": "seq_host"},
+        "upload": {"http": {"url": f"{api.url}/upload", "method": "POST", "body_file": "{{ component.vars.payload }}",
+                            "expect": {"json": {"size": 6}}}, "via": "seq_host"}}       # curl reads the file there
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
     pipeline = copy.deepcopy(PIPELINE)
     pipeline["phases"][0]["steps"].append({"id": "version", "slot": "dut", "do": "version", "needs": ["ready"]})
+    pipeline["phases"][0]["steps"].append({"id": "upload", "slot": "dut", "do": "upload", "needs": ["version"]})
     run = run_one(bench, bench.build("via_http", pipeline=pipeline))
     assert run["verdict"] == "succeeded", run["reason"]
     log = read_member(run, "logs/test_run/version[dut].log")
     assert "through seq_host" in log and "X-Api-Key: ***" in log and "k3y" not in log
     assert yaml.safe_load(read_member(run, "data/dut/http/version.json"))["version"] == "1.2"
-    assert api.requests[-1][2]["X-Api-Key"] == "k3y"
+    assert api.requests[-2][2]["X-Api-Key"] == "k3y"
+    assert api.requests[-1][3] == b"\x00\xffbin\n" and api.requests[-1][2]["Content-Type"] == "application/octet-stream"
+    assert f"--data-binary @{tmp_path / 'upload.bin'}" in read_member(run, "logs/test_run/upload[dut].log")
     version = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "version")
     assert version["lab_command"] == {"name": "version", "component": "counter_1", "source": "host counter_1"}
 

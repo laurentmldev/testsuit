@@ -389,7 +389,7 @@ class StepRunner:
             self.note(f"through {via.id} ({via.host}), with curl")
         limit = timeout if timeout is not None else httpcall.timeout_of(request)
         self.note(f"HTTP {httpcall.describe(request)}")
-        answer = await httpcall.request(request, transport, limit)
+        answer = await httpcall.request(request, transport, limit, self.ctx.bag)
         if answer.status is None:
             self.note(f"no answer: {answer.error}")
             return ERROR, f"no answer: {answer.error}"
@@ -700,7 +700,7 @@ class StepRunner:
             spec = httpcall.normalize(value, f"step '{self.fs.id}': wait_for")
 
             async def check():
-                answer = await httpcall.request(spec, None, min(httpcall.timeout_of(spec, 3), 10))
+                answer = await httpcall.request(spec, None, min(httpcall.timeout_of(spec, 3), 10), self.ctx.bag)
                 return httpcall.judge(spec, answer)
             return check
         if kind in ("file", "log", "cmd"):
