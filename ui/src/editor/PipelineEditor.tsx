@@ -541,7 +541,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
           <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
-              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})`).join("")}` })}>
+              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})${typeof i.spec?.comments === "string" && i.spec.comments.trim() ? `: ${i.spec.comments.trim().replace(/\s*\n\s*/g, " ")}` : ""}`).join("")}` })}>
               {cmd}
             </button>
           ))}
@@ -736,7 +736,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           </>
         )}
         <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>
-        <Field label="Environment" help={help("env")}><KeyValues value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
+        <Field label="Environment" help={help("env")}><KeyValues keys value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
       </Section>
       {part === "finally" && <p className="muted small">A finally step runs at the end of the phase in every case, cancel included.</p>}
     </div>

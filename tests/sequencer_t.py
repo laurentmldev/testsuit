@@ -1146,6 +1146,50 @@ def test_manual_command_keys_set_by_hand(tmp_path, no_git):
     assert out["events"][1]["keys"][1]["was"] == host
 
 
+def test_comments_are_never_run(tmp_path, no_git):
+    """A command and a status probe can carry comments (notes for the people): checked as text, kept for the
+    Editor and the Lab page, and never run nor rendered (a key they name is not read, a component not linked)."""
+    from testsuit.sequencer.editor_schemas import schemas
+    from testsuit.sequencer.labview import lab_links, templates
+    from testsuit.sequencer.library import ComponentDef, without_comments
+    from testsuit.sequencer.transports import untraced
+    from testsuit.sequencer.util import SequencerError
+    note = "Why: {{ params.nowhere }} would fail here; {{ lab.components.seq_host.host }} is not used. {% if %}"
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
+    types["models"]["counter_host"]["commands"]["say"] = {"run": "echo said", "comments": note}
+    types["models"]["counter_host"]["status"] = {"probe": {"run": "echo RUN"}, "states": {"running": {"regex": "^RUN"}},
+                                                 "comments": note}
+    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        seq.set_flag("counter_1", "maintenance", True)
+        out = {"listed": await seq.manual_commands("counter_1"), "said": await seq.manual_command("counter_1", "say")}
+        await seq.monitor.probe("counter_1")
+        out["report"] = seq.monitor.reports["counter_1"]
+        out["links"] = lab_links(seq.lab)
+        await seq.close()
+        return out
+    out = asyncio.run(main())
+    say = next(c for c in out["listed"]["commands"] if c["name"] == "say")
+    assert say["spec"]["comments"] == note and out["listed"]["missing"] == []      # shown, not read for keys
+    assert out["said"]["ok"] and untraced(out["said"]["output"]).strip() == "said"
+    assert out["report"]["state"] == "running" and out["report"]["status"]["comments"] == note
+    assert not [lk for lk in out["links"] if lk["source"] == "seq_host" and lk["target"] == "counter_1" and lk["kind"] == "cmd"]
+    assert templates({"run": "x", "comments": "y"}) == ["x"] and templates({"myplugin": 1, "comments": "y"}) == ["myplugin 1"]
+    assert without_comments({"run": "x", "comments": "y"}) == {"run": "x"} and without_comments(None) is None
+    with pytest.raises(SequencerError, match="command 'start': 'comments' must be text"):
+        ComponentDef.from_dict("t", {"commands": {"start": {"run": "x", "comments": ["a"]}}}, "models.yml")
+    with pytest.raises(SequencerError, match="status: 'comments' must be text"):
+        ComponentDef.from_dict("t", {"status": {"probe": {"run": "x"}, "comments": {"a": 1}}}, "models.yml")
+    library = schemas({})["library"]
+    model = library["properties"]["models"]["additionalProperties"]["properties"]
+    assert model["commands"]["additionalProperties"]["properties"]["comments"]["type"] == "string"
+    assert model["status"]["properties"]["comments"]["type"] == "string"
+
+
 def test_manual_commands_do_not_wait_for_a_component_that_does_not_answer(tmp_path, no_git):
     """The Commands dialog lists the commands within a few seconds even when the component's remote root cannot
     be resolved (an ssh login that hangs): the root as configured is used, with a note, and the next call reuses

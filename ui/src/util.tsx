@@ -155,6 +155,17 @@ export function Spinner({ text, className }: { text?: string; className?: string
   );
 }
 
+/** The comments of a command or a status probe (notes for the people, never run), read-only. */
+export function CommentsNote({ text, compact }: { text?: string | null; compact?: boolean }) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  return (
+    <div className={classes("comments-note", compact && "compact")}>
+      <span className="comments-label">Comments</span>
+      <Markdown text={text} />
+    </div>
+  );
+}
+
 export function Markdown({ text, className }: { text?: string | null; className?: string }) {
   if (!text) return null;
   const blocks: ReactNode[] = [];
@@ -348,6 +359,11 @@ export function ViaRoute({ via, viaHost, target, targetHost }: {
 const TRACED = /^\++tsq\$ /;
 /** A note of the sequencer in a step log ("[tsq <time>] …"). */
 const NOTE = /^\[tsq [^\]]*\] /;
+/** The notes that say what a step executes: the lab command it runs and on which component, then the command and
+ *  where it runs ("run on <host>: …", its next lines indented); they stand out from the other notes. */
+const NOTE_LAB_COMMAND = /^\[tsq [^\]]*\] lab command /;
+const NOTE_EXEC = /^\[tsq [^\]]*\] (run|start \(detached\)) on /;
+const NOTE_GOES_ON = /^\[tsq [^\]]*\]   /;
 
 /** A comment line of a traced command, made a no-op (": '# …'") to show where it is; null for another line. */
 function commentOf(ran: string): string | null {
@@ -462,6 +478,7 @@ export function ConsoleText({ text }: { text: string }) {
   const lines = text.split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
   let traceback = false;
+  let exec = false;                       // in the lines of a "run on <host>:" note
   let style: AnsiStyle = {};
   return (
     <>
@@ -488,6 +505,15 @@ export function ConsoleText({ text }: { text: string }) {
           if (!colored) tone = "bad";
           if (!TRACEBACK_GOES_ON.test(line)) traceback = false;      // the exception line ends it
         }
+        if (NOTE_LAB_COMMAND.test(line)) {
+          exec = false;
+          return <div key={i} className="console-note console-labcmd">{line.replace(NOTE, "")}<span className="console-stamp">{line.match(NOTE)![0]}</span></div>;
+        }
+        if (NOTE_EXEC.test(line) || (exec && NOTE_GOES_ON.test(line))) {
+          exec = true;
+          return <div key={i} className="console-note console-exec">{line.replace(NOTE, "")}</div>;
+        }
+        exec = false;
         return NOTE.test(line)
           ? <div key={i} className={classes("console-note", tone && `tone-${tone}`)}>{content ?? line}</div>
           : <div key={i} className={classes("console-out", tone && `tone-${tone}`)}>{content ?? (line || " ")}</div>;

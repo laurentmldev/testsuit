@@ -658,6 +658,8 @@ A datapack does not redefine commands: what a test runs that the role does not o
 
 **Its output reads line by line.** A step's `run`, and a command run by hand, are traced (`set -x`): each line they run is written to their output, after `+tsq$ `, just before what it prints. Their comment lines (`# ...` alone on a line) show there too, where they are (the sequencer makes each a no-op command, `: '# ...'`), except in a here-document, a `case`, or after a line that goes on (`|`, `&&`, `\`). The step log and the Commands dialog of the Lab page show those lines as a prompt, the dialog as they come. They show the ANSI colors and styles the command prints (`\e[0;32m`, bold, 256 colors and true colors; the other control sequences are dropped, and a `\r` rewrites its line as a terminal does). A line without any is colored by its words: red for an error or a failure (`error`, `fail`, `exception`, a non-zero `exit status`...), with a Python traceback in red down to its exception line, orange for a warning (`warn`, `deprecated`), green for a success (`ok`, `success`, `done`, `passed`). A step's `expect` (`stdout`, `stderr`) is matched against what the command printed, without those lines. Status probes and self-tests are not traced: their answer is what their command prints.
 
+**Its log says what it executes.** Before a `do:` step runs, its log names the lab command and where it comes from: `[tsq <time>] lab command 'deploy' of web-01 (slot node09, role webserver, from role webserver)`, then `run on <host>: <command>` with the command as rendered, its lines kept (indented after the first). The Run page shows both lines highlighted at the top of the step log, apart from the other notes of the sequencer.
+
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
 `via` only moves where the shell runs: the inputs are not copied to the `via` component. The built-in `deploy` (and `collect`) always go straight from the sequencer to the component itself, into `<remote_root>/<slot>/input`, and `{{ component.input_dir }}` still names that folder on the component, not on the `via` one (there is no `via.input_dir`). So:
@@ -702,6 +704,23 @@ The commands, status probes and self-test checks of a component can use the **ot
 - `{{ lab.components.<host>.host }}`: any host of the inventory (its address, a name of `tsq_hosts` translated; `.host_alias`: that name); `{{ lab.hosts.<name> }}`: the address of a name of `tsq_hosts`; `{{ lab.stages.<stage>.components }}`: the hosts of a stage.
 
 A component's own variables (`{{ component.vars }}`) include those of its stage group in its status probe and self-test too.
+
+**Comments.** A command, and a status probe (section 7.5), can carry `comments`: free notes for the people who maintain it (Markdown, as long as needed), such as why it is done this way, what to beware of, or what was tried before. They never change what runs: the sequencer neither runs nor renders them (a `{{ ... }}` in them stays as written and reads no key), and a component that overrides a command or a probe brings its own comments, or none.
+
+```yaml
+    commands:
+      start:
+        run: "sudo systemctl start app-{{ component.role }}"
+        comments: |
+          Through systemd rather than detached: the unit restarts the app after a watchdog reset,
+          which a detached process would not survive.
+    status:
+      probe: {run: "systemctl is-active app"}
+      states: {running: {regex: "^active"}, idle: {regex: "^inactive"}}
+      comments: "`activating` is matched by nothing on purpose: unknown until the unit settles."
+```
+
+The Editor gives them a Comments field in the command and status probe forms, and shows them where a command or a probe is shown read-only: an inherited command or probe, the hover help of a slot's commands in the pipeline, and the Commands and State dialogs of the Lab page.
 
 ### 7.5 State monitoring
 

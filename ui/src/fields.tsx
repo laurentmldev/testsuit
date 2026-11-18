@@ -475,10 +475,11 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
 
 /** Variables as a key/value table; known keys are proposed with their help; values are YAML scalars.
  *  `nested`: a variable holding keys of its own shows one row per key, named by its dotted path (`custom_grp.keyA`),
- *  and a dotted name typed in the table writes nested keys. `tsq_` variables are kept whole. */
-export function KeyValues({ value, onChange, known, exclude, valueChoices, nested }: {
+ *  and a dotted name typed in the table writes nested keys. `tsq_` variables are kept whole.
+ *  `keys`: the values are rendered with keys, typing {{ in one proposes them. */
+export function KeyValues({ value, onChange, known, exclude, valueChoices, nested, keys }: {
   value?: Record<string, any> | null; onChange: (v: Record<string, any>) => void; known?: Choice[]; exclude?: string[];
-  valueChoices?: (key: string) => Choice[] | undefined; nested?: boolean;
+  valueChoices?: (key: string) => Choice[] | undefined; nested?: boolean; keys?: boolean;
 }) {
   const data = value || {};
   const entries = keyRows(data, nested).filter(([path]) => !(exclude || []).includes(path[0]));
@@ -521,6 +522,8 @@ export function KeyValues({ value, onChange, known, exclude, valueChoices, neste
               <span className="muted mono kv-value">{JSON.stringify(v)}</span>
             ) : valueChoices?.(k) ? (
               <div className="kv-value"><Combo value={v === null ? "" : String(v)} onChange={(x) => set(path, scalar(x))} choices={valueChoices(k)!} mono /></div>
+            ) : keys ? (
+              <div className="kv-value"><Text keys mono value={v === null ? "" : String(v)} onChange={(x) => set(path, scalar(x))} /></div>
             ) : (
               <input className="mono kv-value" value={v === null ? "" : String(v)} onChange={(e) => set(path, scalar(e.target.value))} />
             )}

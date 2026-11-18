@@ -37,7 +37,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
 from testsuit.sequencer.transports import Result, Transport, strict, traced, untraced
-from testsuit.sequencer.library import Resolved
+from testsuit.sequencer.library import Resolved, without_comments
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
 log = logging.getLogger("testsuit.sequencer")
@@ -255,7 +255,11 @@ class StepRunner:
         self.ctx.notify("log", {"run": self.ctx.run_id, "step": self.record.key, "text": data.decode("utf-8", "replace")})
 
     def note(self, text: str) -> None:
-        self.write(f"[tsq {now()}] {text}\n")
+        """A line of the sequencer in the step log; a text of several lines (a command) keeps its lines there, each
+        a note too, indented after the first."""
+        stamp = f"[tsq {now()}] "
+        first, *rest = str(text).split("\n")
+        self.write(stamp + first + "\n" + "".join(f"{stamp}  {line}\n" for line in rest))
 
     def close(self) -> None:
         self._log.close()
@@ -320,7 +324,10 @@ class StepRunner:
         if spec is None:
             raise SequencerError(f"slot '{self.slot.id}' (lab component {self.slot.concrete.id}, role {self.slot.concrete.role}) has no "
                                  f"command '{name}' (has: {', '.join(sorted(self.slot.resolved.commands)) or 'none'})")
-        return dict(spec)
+        # said in its log first, so it reads which command of the lab ran, on which component, and where it is defined
+        self.note(f"lab command '{name}' of {self.slot.concrete.id} (slot {self.slot.id}, role {self.slot.concrete.role}, "
+                  f"from {self.slot.resolved.command_sources.get(name, '?')})")
+        return dict(without_comments(spec))           # its comments are notes for the people: never run
 
     async def command_spec(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
         """Run a command definition: run, wait_for, signal, builtin, or a plugin step type."""
