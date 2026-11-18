@@ -57,7 +57,9 @@ that is defined makes it non-conform. Both are recorded in ``datapack.yml`` and 
 The version of a dataset can be **set by hand** too, for one generation (``datapack --dataset-version
 id=version``, the ``dataset_versions`` argument): it is imported in that version instead of the one the setup
 writes, and ``{{ <id>.version }}`` gives it; nothing is written to the files. A version other than the written one
-makes the datapack non-conform. Both are recorded in ``datapack.yml`` and ``baseline.yml`` (``versions_set_by_hand``).
+keeps the datapack conform when it is a tag of the source (the importer confirms the imported data is that tag: a git
+tag, a release), and makes it non-conform otherwise (a branch, a commit). Both are recorded in ``datapack.yml`` and
+``baseline.yml`` (``versions_set_by_hand``).
 """
 from __future__ import annotations
 
@@ -513,10 +515,26 @@ class _Builder:
         entry = {"dataset": dataset.id, "version": version, "overrides": overrides}
         if overrides:
             entry["was"] = str(dataset.version)
-            _warn(f"dataset '{dataset.id}' set by hand to version {version!r} instead of {dataset.version!r}: "
-                  "the datapack is non-conform")
         self.versions_by_hand.append(entry)
         return dataset.model_copy(update={"version": version})
+
+    def _check_version_by_hand(self, datasource, record: dict) -> None:
+        """Once imported, whether a version set by hand is a tag of its source (its importer confirms the
+        imported data is that tag): it keeps the datapack conform; anything else (a branch, a commit) does not."""
+        entry = next(e for e in self.versions_by_hand if e["dataset"] == record["id"])
+        if not entry["overrides"]:
+            return
+        try:
+            importer = create_data_importer(datasource.importer, record["path"], datasource.source, record["version"])
+            entry["tag"] = bool(importer.checkVersion(record["version"]))
+        except Exception:                                # an importer that cannot tell: not a tag
+            entry["tag"] = False
+        if entry["tag"]:
+            _info(Fore.LIGHTBLACK_EX + f"     dataset '{record['id']}' set by hand to tag {entry['version']!r} instead of "
+                  f"{entry['was']!r} (a tag: the datapack stays conform)")
+        else:
+            _warn(f"dataset '{record['id']}' set by hand to version {entry['version']!r} instead of {entry['was']!r}: "
+                  "not a tag of its source, the datapack is non-conform")
 
     def _load_dictionaries(self, layer: str, files: list[str], base: Path) -> None:
         for name in files:
@@ -585,6 +603,8 @@ class _Builder:
                     record = import_dataset(repo_path, datasource, dataset, setup_dir, self.nocheck)
                     if record is None:
                         continue
+                    if dataset.id in self.dataset_versions:
+                        self._check_version_by_hand(datasource, record)
                     self.datasets.append(record)
                     keys_file = Path(record["path"]) / DATASET_KEYS_FILE
                     if keys_file.is_file():
@@ -810,7 +830,7 @@ class _Builder:
                    and all(s.get("clean") and s.get("tag") for s in sources if s["role"] != "dataset")
                    and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset")
                    and not any(k["overrides"] for k in self.set_by_hand)
-                   and not any(v["overrides"] for v in self.versions_by_hand))
+                   and not any(v["overrides"] and not v.get("tag") for v in self.versions_by_hand))
         return {"datapack": {"name": name, "format": FORMAT_VERSION, "conform": conform},
                 "sources": sources,
                 **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
@@ -889,9 +909,9 @@ class _Builder:
         overridden = [k["key"] for k in self.set_by_hand if k["overrides"]]
         if overridden:
             _warn(f"{len(overridden)} defined key(s) overridden by hand ({', '.join(overridden)}): this datapack is non-conform.")
-        versions = [v["dataset"] for v in self.versions_by_hand if v["overrides"]]
+        versions = [v["dataset"] for v in self.versions_by_hand if v["overrides"] and not v.get("tag")]
         if versions:
-            _warn(f"{len(versions)} dataset version(s) set by hand ({', '.join(versions)}): this datapack is non-conform.")
+            _warn(f"{len(versions)} dataset version(s) set by hand that are not tags ({', '.join(versions)}): this datapack is non-conform.")
         return zip_path
 
 
@@ -912,7 +932,7 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
     :param manual_keys: keys set by hand, dotted name -> value, over the dictionaries: setting a key no
         dictionary defines keeps the datapack conform, overriding a defined one makes it non-conform
     :param dataset_versions: dataset versions set by hand for this generation, dataset id -> version, instead of
-        the one the setup writes: a version other than the written one makes the datapack non-conform
+        the one the setup writes: a tag of the source keeps the datapack conform, anything else makes it non-conform
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """

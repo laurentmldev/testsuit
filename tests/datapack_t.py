@@ -423,8 +423,8 @@ def test_user_keys(tmp_path, no_git):
 
 
 def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
-    """a dataset version set for one generation is imported instead of the written one, recorded, and makes the
-    datapack non-conform; nothing is written to the setup"""
+    """a dataset version set for one generation is imported instead of the written one and recorded; a tag of the
+    source keeps the datapack conform, anything else (a branch) makes it non-conform; nothing is written to the setup"""
     from testsuit.datatools.datapack import importers
     from testsuit.datatools.datapack.baseline import nonconform_reasons
     from testsuit.datatools.datapack.datapack_tools import read_baseline
@@ -443,17 +443,27 @@ def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
     testdef = root / "testdef" / "t.yml"
     testdef.write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml", "setup_config": "c",
                                        "dictionaries": []}))
-    importers.register_data_importer("dir", _DirImporter)
+
+    class TagsOnly(_DirImporter):                     # a version starting with 'branch-' is not a tag
+        def checkVersion(self, expected):
+            return super().checkVersion(expected) and not expected.startswith("branch-")
+
+    importers.register_data_importer("dir", TagsOnly)
     try:
         zip_path = datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v2"})
         baseline = read_baseline(zip_path)
         assert (repo / "sw" / "v2" / "VERSION").read_text() == "v2" and not (repo / "sw" / "v1").exists()
-        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v2", "overrides": True, "was": "v1"}]
+        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v2", "overrides": True, "was": "v1",
+                                                     "tag": True}]
         assert next(s for s in baseline["sources"] if s["role"] == "dataset")["version"] == "v2"
-        assert baseline["datapack"]["conform"] is False
-        assert nonconform_reasons(baseline) == ["dataset 'sw' set by hand to version 'v2' instead of 'v1'"]
-        assert "this datapack is non-conform" in capsys.readouterr().out
+        assert baseline["datapack"]["conform"] is True and nonconform_reasons(baseline) == []
         assert setup_file.read_text() == written
+
+        # not a tag (a branch): non-conform
+        baseline = read_baseline(datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "branch-x"}))
+        assert baseline["versions_set_by_hand"][0]["tag"] is False and baseline["datapack"]["conform"] is False
+        assert nonconform_reasons(baseline) == ["dataset 'sw' set by hand to version 'branch-x' instead of 'v1', not a tag of its source"]
+        assert "this datapack is non-conform" in capsys.readouterr().out
 
         # the version written, given by hand: recorded, still conform
         baseline = read_baseline(datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v1"}))

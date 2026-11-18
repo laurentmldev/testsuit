@@ -341,12 +341,12 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             </div>
           )}
           {result.datapack?.versions_set_by_hand?.length > 0 && (
-            <div className={classes("banner list", result.datapack.versions_set_by_hand.some((v: any) => v.overrides) ? "warn" : "info")}>
-              {result.datapack.versions_set_by_hand.some((v: any) => v.overrides)
-                ? <><strong>Non-conform</strong>: dataset versions were set for this generation.</>
-                : <>Dataset versions set for this generation (each is the one written: this does not make the datapack non-conform).</>}
+            <div className={classes("banner list", result.datapack.versions_set_by_hand.some((v: any) => v.overrides && !v.tag) ? "warn" : "info")}>
+              {result.datapack.versions_set_by_hand.some((v: any) => v.overrides && !v.tag)
+                ? <><strong>Non-conform</strong>: a dataset version set for this generation is not a tag of its source.</>
+                : <>Dataset versions set for this generation (each is a tag of its source, or the version written: the datapack stays conform).</>}
               <ul className="problems">{result.datapack.versions_set_by_hand.map((v: any) => (
-                <li key={v.dataset}><code>{v.dataset} {v.version}</code>{v.overrides ? <> instead of <code>{v.was}</code></> : <> (the version written)</>}</li>
+                <li key={v.dataset}><code>{v.dataset} {v.version}</code>{v.overrides ? <> instead of <code>{v.was}</code>{v.tag ? " (a tag)" : " (not a tag)"}</> : <> (the version written)</>}</li>
               ))}</ul>
             </div>
           )}
@@ -418,20 +418,19 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
   if (datasets && datasets.length === 0 && !error) return null;
   const changed = (datasets || []).filter((d) => (versions[d.id] ?? "").trim() && versions[d.id].trim() !== d.version);
   return (
-    <Field label="Baseline versions" help="The version of each dataset the datapack is built from. A version picked here is used **for this generation only** (`datapack --dataset-version`): nothing is written to the files, and a version other than the one written makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. To change a version in the files, edit them in the Editor.">
+    <Field label="Baseline versions" help="The version of each dataset the datapack is built from. A version picked here is used **for this generation only** (`datapack --dataset-version`): nothing is written to the files, and a version other than the one written keeps the datapack conform when it is a **tag** of its source (a git tag, a release), and makes it **non-conform** otherwise (a branch, a commit). Both are recorded in its `datapack.yml` and `baseline.yml`. To change a version in the files, edit them in the Editor.">
       {error && <pre className="error-box">{error}</pre>}
       {!datasets && !error && <Spinner text="Reading the baseline…" />}
       {datasets && datasets.length > 0 && (
         <table className="grid compact baseline">
-          <thead><tr><th>Dataset</th><th>From</th><th>Version for this generation</th></tr></thead>
+          <thead><tr><th>Dataset</th><th>Version for this generation</th></tr></thead>
           <tbody>
             {datasets.map((d) => {
               const value = versions[d.id] ?? "";
               const overrides = value.trim() !== "" && value.trim() !== d.version;
               return (
                 <tr key={d.id}>
-                  <td><strong>{d.id}</strong>{d.name && <div className="muted small">{d.name}</div>}</td>
-                  <td className="small"><span className="badge">{d.importer}</span> <code title={d.source}>{d.source}</code>
+                  <td><strong>{d.id}</strong>{d.name && <div className="muted small">{d.name}</div>}
                     {d.versions_pending && <div className="muted small"><Spinner text="listing its versions…" /></div>}
                     {d.versions_error && <div className="muted small" title={d.versions_error}>versions not listed: {d.versions_error}</div>}</td>
                   <td>
@@ -453,7 +452,7 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
           </tbody>
         </table>
       )}
-      {changed.length > 0 && <div className="banner warn"><span>{changed.length === 1 ? "A dataset version" : `${changed.length} dataset versions`} other than the one written {changed.length === 1 ? "makes" : "make"} this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</span></div>}
+      {changed.length > 0 && <div className="banner info"><span>{changed.length === 1 ? "A dataset version" : `${changed.length} dataset versions`} other than the one written: the datapack stays conform if {changed.length === 1 ? "it is a tag" : "each is a tag"} of its source (a git tag, a release); otherwise (a branch, a commit) it is <strong>non-conform</strong>. Checked when the dataset is imported.</span></div>}
     </Field>
   );
 }

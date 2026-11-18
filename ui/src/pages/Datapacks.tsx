@@ -416,7 +416,7 @@ function Baseline({ datasets, edit, onChange }: { datasets: any[]; edit: (f: str
           </tbody>
         </table>
       )}
-      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only, and the datapack is non-conform. To change a version in the files, open them in the Editor (<strong>Edit…</strong>, or the file under <em>Written in</em>).</p>
+      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only; the datapack stays conform when each is a tag of its source. To change a version in the files, open them in the Editor (<strong>Edit…</strong>, or the file under <em>Written in</em>).</p>
     </Section>
   );
 }

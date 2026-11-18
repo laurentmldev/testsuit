@@ -46,7 +46,7 @@ Return 1 if something went wrong, 0 otherwise
     parser.add_argument('--setup-config','-c',help="setup configuration to use instead of the test definition's 'setup_config'")
     parser.add_argument('--lenient',action='store_true',help="Skip, with a warning, the inputs whose source is missing or empty, or whose target is empty (implies --nocheck).")
     parser.add_argument('--set',dest='set_keys',action='append',default=[],metavar='KEY=VALUE',help="set a key by hand, over the dictionaries (repeatable; nested: a.b=value; the value is read as YAML).\nSetting a key no dictionary defines keeps the datapack conform; overriding a defined key makes it non-conform.")
-    parser.add_argument('--dataset-version',dest='dataset_versions',action='append',default=[],metavar='DATASET=VERSION',help="import a dataset in this version, for this generation only, instead of the one the setup writes (repeatable).\nA version other than the written one makes the datapack non-conform.")
+    parser.add_argument('--dataset-version',dest='dataset_versions',action='append',default=[],metavar='DATASET=VERSION',help="import a dataset in this version, for this generation only, instead of the one the setup writes (repeatable).\nA tag of the source keeps the datapack conform; anything else (a branch, a commit) makes it non-conform.")
     parser.add_argument('--verify',action='store_true',help="check the checksums of the given datapack zip")
     parser.add_argument('--baseline',help="expected baseline YAML file: report how the new datapack differs from it")
     parser.add_argument('--check-baseline',metavar='EXPECTED',help="check the baseline of the given datapack zip against this expected baseline")
