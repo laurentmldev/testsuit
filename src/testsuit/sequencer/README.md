@@ -1107,13 +1107,14 @@ During the run, the outputs are already in the run folder as they are collected,
 
 - **`tsq cancel <run>`**: a queued run leaves the queue. On a running one, pending steps are cancelled and running steps get their `stop` command; after a grace period, the kill below follows.
 - **`tsq kill <run>`**: no grace. The `kill` command of every running step, then the `finally` steps (at least `collect`, to keep the logs), then the locks are released.
+- **Wherever the run is**: an abort answers at once, and its `stop` and `kill` commands are each bounded in time (`stop` by the grace period, `kill` likewise). A phase waiting to start stops waiting. The `finally` steps running when a cancel arrives go on (they are the cleanup); a kill stops them, so a `finally` step that hangs cannot keep a run `running`. A kill of a run already killed that still has not ended stops its execution at once (its results are still packed), and a run that nothing runs any more (its execution died, or was lost) is ended by a cancel or kill, its locks released. A step that hits an internal sequencer error ends in `error` instead of staying `running`.
 - **Remote processes** on `linux_system` components start in a process group of their own, recorded in a pid file:
   - `setsid -w sh -c ...` (ssh) or a new session (local), the group id written to `<remote_root>/.tsq/<run>/<component>/<step>.pid`;
   - `kill -KILL -<pgid>` for each pid file kills whole process trees, even when the ssh session is gone, and a group is alive while `ps` lists a member that is not a zombie;
   - it needs nothing on the target but a POSIX shell, `setsid` and `ps`; a component that prefers systemd units overrides `start` and `kill`.
 - **Other lab components** override `kill`: stop the actuator controller through its own protocol, `virsh destroy` a VM, reload a switch configuration.
 - **`tsq repost <run>`** (or Re-post in the run view of the UI): an ended run (done or cancelled) goes back to the queue under the same run id, with the same priority. Its outputs are removed (the run folder and the results zip) and the datapack is unpacked again from the zip that was posted, after the same check against the lab as a new post.
-- **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. `tsq release <stage | component>` is the audited manual escape hatch.
+- **Daemon restart**: runs found `running` are marked `error`, then their `kill` and `finally` steps run, then their locks are released. This runs in the background: tsqd serves the API and the UI meanwhile, the `finally` steps are bounded by the phase `timeout` (10 minutes without one), and a kill ends such a run at once. `tsq release <stage | component>` is the audited manual escape hatch.
 
 ## 12. Extension points
 

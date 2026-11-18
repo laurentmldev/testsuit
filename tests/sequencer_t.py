@@ -1415,6 +1415,146 @@ def test_kill(tmp_path, no_git):
     assert {s["id"]: s["state"] for s in record["steps"]}["tsq_kill"] == "succeeded"
 
 
+
+def _rejecting_api():
+    """A REST API that answers every request with 406 Not Acceptable."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            data = json.dumps({"error": "not acceptable"}).encode()
+            self.send_response(406)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        do_POST = do_GET
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def hanging_finally(url: str) -> dict:
+    """The bench pipeline whose REST step gets a 406, and whose finally has a step that never ends."""
+    pipeline = copy.deepcopy(PIPELINE)
+    steps = pipeline["phases"][0]["steps"]
+    steps.insert(3, {"id": "api", "http": {"url": f"{url}/jobs", "method": "POST", "json": {"mode": "run"}},
+                     "needs": ["ready"]})
+    steps[4]["needs"] = ["api"]
+    pipeline["phases"][0]["finally"].append({"id": "hang", "run": "sleep 600"})
+    return pipeline
+
+
+def test_kill_stops_hanging_finally(tmp_path, no_git):
+    """A failed REST step (406) ends its phase; a finally step that hangs then keeps the run running: a cancel
+    lets it run, a kill stops it and the run ends (it stayed 'running' for ever, cancel and kill did nothing)."""
+    server, url = _rejecting_api()
+    bench = Bench(tmp_path, stages=1)
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build(pipeline=hanging_finally(url), duration="1s"))
+
+        async def abort(seq):
+            await running_step(seq, run["id"], "test_run:hang")
+            assert (await seq.abort(run["id"], "cancel"))["state"] == "running"   # answers at once
+            await asyncio.sleep(1)
+            assert seq.store.get_run(run["id"])["state"] == "running"            # the finally goes on
+            started = time.monotonic()
+            await seq.abort(run["id"], "kill")
+            while seq.store.get_run(run["id"])["state"] != "done":
+                await asyncio.sleep(0.05)
+            assert time.monotonic() - started < 10
+        [done] = await run_until_done(seq, [run["id"]], timeout=40, during=abort)
+        await seq.close()
+        return done
+    try:
+        run = asyncio.run(main())
+    finally:
+        server.shutdown()
+    assert run["verdict"] == "error" and run["reason"] == "killed"
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    steps = {s["id"]: s for s in record["steps"] if s["phase"] == "test_run"}
+    assert (steps["api"]["state"], steps["api"]["reason"]) == ("failed", "status 406")
+    assert (steps["hang"]["state"], steps["hang"]["reason"]) == ("error", "killed")
+    assert steps["collect"]["state"] == "succeeded"                            # the finally before it ran
+    assert record["phases"]["exploit"] == "skipped"
+
+
+def test_kill_ends_a_run_nothing_runs(tmp_path, no_git):
+    """A run left 'running' with no live execution behind it (its task died without ending it, or it is not
+    known to this sequencer at all) is ended by a kill, its locks released."""
+    bench = Bench(tmp_path, stages=1)
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build(duration="30s"))
+        seq.schedule()
+        await running_step(seq, run["id"], "test_run:run")
+        execution = seq.executions[run["id"]]
+        execution.finish = lambda verdict: asyncio.sleep(0)     # dies without ending the run
+        execution.task.cancel()
+        await asyncio.gather(execution.task, return_exceptions=True)
+        assert seq.store.get_run(run["id"])["state"] == "running"
+        dead = await seq.abort(run["id"], "kill")
+
+        other = seq.submit(bench.build(duration="30s"))           # in the store only, as after a lost execution
+        seq.store.update_run(other["id"], state="running")
+        seq.store.try_lock(other["id"], [("stage", "bench_1", "exclusive")])
+        lost = await seq.abort(other["id"], "kill")
+        locks = seq.store.locks()
+        await seq.transport_for("counter_1").signal_dir(str(tmp_path / "remote" / "counter_1" / ".tsq"), "KILL")
+        await seq.close()
+        return dead, lost, locks
+    dead, lost, locks = asyncio.run(main())
+    assert (dead["state"], dead["verdict"]) == ("done", "error") and "killed" in dead["reason"]
+    assert (lost["state"], lost["verdict"]) == ("done", "error") and "lost" in lost["reason"]
+    assert locks == []
+
+
+def test_restart_recovery_does_not_block(tmp_path, no_git):
+    """At startup, a run left running is recovered in the background: tsqd serves while its finally steps run,
+    and a kill ends it even when a finally step hangs (tsqd did not start, the UI did not load)."""
+    server, url = _rejecting_api()
+    bench = Bench(tmp_path, stages=1)
+
+    async def first():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build(pipeline=hanging_finally(url), duration="1s"))
+        seq.schedule()
+        await running_step(seq, run["id"], "test_run:hang")
+        task = seq.executions[run["id"]].task                    # the daemon dies
+        seq.executions[run["id"]].finish = lambda verdict: asyncio.sleep(0)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return run["id"]
+
+    async def second(run_id):
+        seq = bench.sequencer()
+        await asyncio.wait_for(seq.recover(background=True), 5)
+        await running_step(seq, run_id, "test_run:hang")
+        assert seq.store.get_run(run_id)["state"] == "running"
+        await seq.abort(run_id, "kill")
+        await asyncio.wait_for(seq.executions[run_id].task, 10) if run_id in seq.executions else None
+        run = seq.store.get_run(run_id)
+        await seq.close()
+        return run
+    try:
+        run_id = asyncio.run(first())
+        run = asyncio.run(second(run_id))
+    finally:
+        server.shutdown()
+    assert run["state"] == "done" and run["verdict"] == "error" and "restarted" in run["reason"]
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    assert {s["id"]: s["state"] for s in record["steps"]}["collect"] == "succeeded"
+
+
 # ── daemon, REST API and tsq ─────────────────────────────────────────────────
 
 @pytest.fixture

@@ -51,7 +51,7 @@ def build(config_path: str | None = None):
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
-        await seq.recover()
+        await seq.recover(background=True)               # runs left active: their finally steps run meanwhile
         tasks = [asyncio.ensure_future(seq.scheduler_loop()), asyncio.ensure_future(seq.monitor.loop()),
                  asyncio.ensure_future(housekeeping(seq))]
         log.info(f"tsqd: lab {seq.lab.folder} ({(seq.lab.git or {}).get('commit') or 'no git'}), "

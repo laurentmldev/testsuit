@@ -185,6 +185,7 @@ class RunContext:
     max_output: int | None = None
     detached: list = field(default_factory=list)  # processes started with detach, still running
     main_task: asyncio.Task | None = None         # the steps of the current phase (cancelled on abort)
+    finally_task: asyncio.Task | None = None      # the finally steps of the current phase (cancelled on kill)
     phase: str = ""
     lab: Any = None                               # lab.Lab: the keys of the other lab components (lab, stage)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
@@ -801,6 +802,11 @@ class PhaseRunner:
             rec = self.record(fs, None)
             self.set_state(rec, ERROR, str(e))
             verdicts[fs.id] = ERROR
+        except Exception as e:                     # a sequencer bug: the step is in error, the run goes on
+            log.exception(f"run {self.ctx.run_id}: step {self.id}:{fs.id}")
+            rec = self.record(fs, None)
+            self.set_state(rec, ERROR, f"internal error: {type(e).__name__}: {e}")
+            verdicts[fs.id] = ERROR
         finally:
             events[fs.id].set()
 
@@ -821,7 +827,14 @@ class PhaseRunner:
             if lock is not None:
                 await lock.acquire()
             self.set_state(rec, "running")
-            verdict, reason = await runner.execute()
+            try:
+                verdict, reason = await runner.execute()
+            except (asyncio.CancelledError, SequencerError):
+                raise
+            except Exception as e:                 # a sequencer bug: the step ends in error, never stays running
+                log.exception(f"run {self.ctx.run_id}: step {rec.key}")
+                runner.note(f"internal error: {type(e).__name__}: {e}")
+                verdict, reason = ERROR, f"internal error: {type(e).__name__}: {e}"
             self.set_state(rec, verdict, reason)
             return verdict
         except asyncio.CancelledError:
@@ -829,6 +842,10 @@ class PhaseRunner:
             self.set_state(rec, ERROR, "killed" if self.ctx.abort_mode == "kill" else
                            ("cancelled" if self.ctx.abort_mode else "timeout"))
             raise
+        except SequencerError as e:
+            runner.note(f"error: {e}")
+            self.set_state(rec, ERROR, str(e))
+            return ERROR
         finally:
             if lock is not None and lock.locked():
                 lock.release()
@@ -883,10 +900,19 @@ class PhaseRunner:
             log.info(f"run {self.ctx.run_id}: phase {self.id}: {main_error}")
         final = {}
         if self.flat.finally_:
+            # a task of its own, so that a kill sent while they run stops finally steps that hang (a cancel lets them run)
+            task = asyncio.ensure_future(self.run_dag(self.flat.finally_, True))
+            self.ctx.finally_task = task
             try:
-                final = await asyncio.wait_for(self.run_dag(self.flat.finally_, True), timeout or 3600)
+                final = await asyncio.wait_for(task, timeout or 3600)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 final = {fs.id: ERROR for fs in self.flat.finally_}
+                why = "killed" if self.ctx.abort_mode == "kill" else "timeout"
+                for fs in self.flat.finally_:
+                    if not any(r.phase == self.id and r.id == fs.id for r in self.ctx.records.values()):
+                        self.set_state(self.record(fs, None), SKIPPED, why)
+            finally:
+                self.ctx.finally_task = None
         step_verdicts = [r.state for r in self.ctx.records.values() if r.phase == self.id
                          and not self._continue_on_error(r.id)]
         verdict = worst(step_verdicts + list(final.values()) + ([ERROR] if main_error else []))
