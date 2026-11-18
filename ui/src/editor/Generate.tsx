@@ -99,6 +99,27 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   const [versions, setVersions] = useState<Record<string, string>>({});
   useEffect(() => setVersions({}), [testdef, config]);
   const versionsByHand = Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  // the baseline datasets (versions and tags their importer lists), shared with the Baseline versions field
+  const [datasets, setDatasets] = useState<any[] | null>(null);
+  // the git state of the workspace: uncommitted changes or no tag make the datapack non-conform
+  const [gitStatus, setGitStatus] = useState<any>(null);
+  useEffect(() => {
+    if (!repository?.id) return;
+    get(`edit/repositories/${encodeURIComponent(repository.id)}/status`).then(setGitStatus).catch(() => setGitStatus(null));
+  }, [repository?.id]);
+  // why the datapack will be non-conform, as known before generating (the tool checks again)
+  const nonconform: string[] = [
+    ...(!check ? ["generated without the checks (Check against the lab is off): a draft"] : []),
+    ...(gitStatus?.changes?.length ? [`${gitStatus.changes.length} uncommitted change(s) in the workspace`] : []),
+    ...(gitStatus?.git && !gitStatus.git.tag ? ["the workspace is not on a git tag"] : []),
+    ...(datasets || []).flatMap((d) => {
+      const v = (versions[d.id] ?? "").trim();
+      const why = v && v !== d.version ? versionProblem(d, v) : null;
+      return why ? [`dataset ${d.id} ${v}: ${why}`] : [];
+    }),
+    ...Object.keys(byHand || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked)
+      .map((k) => `key ${k} overrides its defined value`),
+  ];
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [failed, setFailed] = useState("");            // the error of the last failed generation: its undefined keys are proposed
@@ -251,6 +272,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   ) : (
     <>
       {busy && <button onClick={stop} disabled={!job || stopping} title="Stop the generation: at its next line of output; a command it runs is killed">{stopping ? "Stopping…" : "Stop"}</button>}
+      <ConformBadge reasons={nonconform} />
       <button className="primary" disabled={!testdef || busy || checking || blockedKeys.length > 0 || ungiven.length > 0}
         title={ungiven.length ? `Give ${ungiven.join(", ")} first` : undefined} onClick={request}>{busy ? "Generating…" : checking ? "Checking…" : "Generate"}</button>
     </>
@@ -306,7 +328,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
               </div>
             </Field>
           )}
-          {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} versions={versions} onChange={setVersions} />}
+          {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} versions={versions} onChange={setVersions} datasets={datasets} setDatasets={setDatasets} />}
           <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
@@ -314,7 +336,6 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             {recalled.from && rows.length > 0 && <div className="muted small">None remembered for this test definition: these are the keys last set for <code>{recalled.from}</code>.</div>}
             <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={missingKeys}
               known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
-              overrideNote="non-conform"
               emptyNote="read and not defined: give it a value (not set until then)" />
           </Field>
         </>
@@ -384,10 +405,10 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
 
 /** The versions of the baseline of a test definition, to change for one generation (datapack --dataset-version):
  *  nothing is written to the files (that is done in the Editor). */
-function BaselineVersions({ sid, testdef, config, versions, onChange }: {
+function BaselineVersions({ sid, testdef, config, versions, onChange, datasets, setDatasets }: {
   sid: string; testdef: string; config: string | null; versions: Record<string, string>; onChange: (v: Record<string, string>) => void;
+  datasets: any[] | null; setDatasets: (f: any[] | null | ((cur: any[] | null) => any[] | null)) => void;
 }) {
-  const [datasets, setDatasets] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
@@ -425,7 +446,7 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
             {datasets.map((d) => {
               const value = versions[d.id] ?? "";
               const overrides = value.trim() !== "" && value.trim() !== d.version;
-              const tag = overrides && (d.tags || []).includes(value.trim());   // a tag of the source: stays conform
+              const why = overrides ? versionProblem(d, value.trim()) : null;
               return (
                 <tr key={d.id}>
                   <td><strong>{d.id}</strong>{d.name && <div className="muted small">{d.name}</div>}
@@ -442,7 +463,7 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
                       {value && <button className="small" onClick={() => onChange({ ...versions, [d.id]: "" })} title="Use the version written">×</button>}
                     </div>
                     <div className="small">{overrides ? <>instead of <code>{d.version ?? d.written}</code></> : <>written <code>{d.version ?? d.written}</code></>}
-                      {overrides && !tag && <span className="warn-text" title="Only a tag of the source (a git tag, a release) keeps the datapack conform"> · not a tag: <strong>non-conform</strong></span>}
+                      {why && <span className="warn-text" title="Only a tag of the source (a git tag, a release) keeps the datapack conform"> · {why}: datapack will be <strong>non-conform</strong></span>}
                       {d.versions && <span className="muted"> · {d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</span>}</div>
                   </td>
                 </tr>
@@ -453,6 +474,19 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
       )}
     </Field>
   );
+}
+
+/** Why a version set by hand makes the datapack non-conform (null: a tag of its source, it stays conform). */
+function versionProblem(d: any, version: string): string | null {
+  if (d.versions && !d.versions.includes(version)) return "not listed by its source";
+  return (d.tags || []).includes(version) ? null : "not a tag";
+}
+
+/** Conform or non-conform, as known before generating; the reasons on hover. */
+function ConformBadge({ reasons }: { reasons: string[] }) {
+  return reasons.length
+    ? <span className="badge warn" title={"The datapack will be non-conform:\n" + reasons.map((r) => `• ${r}`).join("\n")}>non-conform</span>
+    : <span className="badge ok" title="Nothing found that makes it non-conform (the datapack tool checks again as it generates)">conform</span>;
 }
 
 const text = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value);

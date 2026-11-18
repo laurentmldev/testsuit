@@ -88,7 +88,7 @@ export function KeysByHand({ rows, onChange, status, known, missing, overrideNot
   status: (key: string) => HandKeyStatus | undefined;      // undefined: not known yet
   known?: Choice[];                                         // the keys proposed for a new row
   missing?: string[];                                       // undefined keys that are read: proposed first
-  overrideNote: string;                                     // what overriding a defined key means here
+  overrideNote?: string;                                    // what overriding a defined key means here (none: shown as info)
   setNote?: string;                                         // and setting an undefined one (none: nothing said)
   emptyNote?: string;                                       // a row with no value yet, when it is then not set
 }) {
@@ -108,9 +108,9 @@ export function KeysByHand({ rows, onChange, status, known, missing, overrideNot
             <span className="muted">=</span>
             <input className="mono kbh-value" value={row.value} placeholder="value" onChange={(e) => set(i, { value: e.target.value })} />
             <button type="button" className="icon" title="Remove: back to the defined value" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
-            <div className={classes("kbh-status small", (bad || st?.blocked) ? "bad-text" : st?.overrides ? "warn-text" : "muted")}>
+            <div className={classes("kbh-status small", (bad || st?.blocked) ? "bad-text" : st?.overrides && overrideNote ? "warn-text" : "muted")}>
               {bad || st?.blocked || (emptyNote && name && row.value === "" ? <span className="warn-text">{emptyNote}</span> : !st ? "" : st.overrides
-                ? <><strong>overrides</strong> <code title={st.was}>{shown(st.was)}</code>{st.origin && <> from {st.origin}</>}: {overrideNote}</>
+                ? <><strong>overrides</strong> <code title={st.was}>{shown(st.was)}</code>{st.origin && <> from {st.origin}</>}{overrideNote && <>: {overrideNote}</>}</>
                 : setNote ? <>not defined elsewhere: {setNote}</> : "")}
             </div>
           </div>
