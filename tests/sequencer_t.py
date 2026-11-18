@@ -1194,6 +1194,48 @@ def test_comments_are_never_run(tmp_path, no_git):
     assert model["status"]["properties"]["comments"]["type"] == "string"
 
 
+def test_comment_cards_are_never_run(bench):
+    """A phase and a sub-pipeline can carry comment cards (notes on the graph of the Editor): checked, kept with
+    their place on the graph, never run nor rendered (a template in them reads no key), and given to the run graph."""
+    from testsuit.sequencer.editor_schemas import schemas
+    from testsuit.sequencer.model import load_pipeline
+    from testsuit.sequencer.util import SequencerError
+    note = "Why: {{ params.nowhere }} would fail here. {% if %}"
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["subpipelines"] = {"settle": {"steps": [{"id": "pause", "delay": "0.1s"}],
+                                           "comments": [{"text": note, "x": 10, "y": -80}]}}
+    pipeline["phases"][0]["comments"] = [{"text": note, "x": 40.5, "y": 220, "width": 300}, "just a **line**", {"text": ""}]
+    pipeline["phases"][0]["steps"].append({"id": "settle", "uses": "settle", "needs": ["stop"]})
+
+    loaded = load_pipeline(pipeline)
+    cards = loaded.phases[0].comments
+    assert [(c.text, c.x, c.y, c.width) for c in cards] == [(note, 40.5, 220, 300), ("just a **line**", None, None, None),
+                                                            ("", None, None, None)]
+    assert loaded.subpipelines["settle"].comments[0].text == note and loaded.phases[1].comments == []
+    with pytest.raises(SequencerError, match="color"):
+        load_pipeline({"phases": [{"id": "p", "comments": [{"text": "a", "color": "red"}]}]})
+    with pytest.raises(SequencerError, match="comments"):
+        load_pipeline({"phases": [{"id": "p", "comments": "a note"}]})
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(bench.build(pipeline=pipeline))
+        [run] = await run_until_done(seq, [run["id"]])
+        await seq.close()
+        return run
+    run = asyncio.run(main())
+    assert (run["verdict"], run["reason"]) == ("succeeded", "")
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    assert {s["id"] for s in record["steps"] if s["phase"] == "test_run"} >= {"settle.pause", "stop"}
+
+    testdef = schemas({})["testdef"]
+    phase = testdef["properties"]["pipeline"]["properties"]["phases"]["items"]["properties"]
+    card = phase["comments"]["items"]["anyOf"][1]["properties"]
+    assert set(card) == {"text", "x", "y", "width"}
+    sub = testdef["properties"]["pipeline"]["properties"]["subpipelines"]["additionalProperties"]["properties"]
+    assert sub["comments"]["type"] == "array"
+
+
 def test_manual_commands_do_not_wait_for_a_component_that_does_not_answer(tmp_path, no_git):
     """The Commands dialog lists the commands within a few seconds even when the component's remote root cannot
     be resolved (an ssh login that hangs): the root as configured is used, with a note, and the next call reuses

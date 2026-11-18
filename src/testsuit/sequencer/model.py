@@ -131,9 +131,25 @@ class Step(BaseModel):
             raise SequencerError(f"step '{self.id}': a 'uses' step has no slot")
 
 
+class Comment(_Model):
+    """A comment card of the pipeline editor (a sticky note on the graph of a phase or a sub-pipeline): free text
+    for the people who read the pipeline (Markdown). Never run nor rendered; ``x``, ``y`` and ``width`` only say
+    where the editor draws it (graph coordinates, pixels), and a card without ``x``/``y`` is placed by the editor."""
+    text: str = ""
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _plain(cls, data):
+        return {"text": data} if isinstance(data, str) else data      # a card given as its text only
+
+
 class SubPipeline(_Model):
     params: dict[str, Any] = Field(default_factory=dict)
     steps: list[Step]
+    comments: list[Comment] = Field(default_factory=list)
 
 
 class PhaseInput(_Model):
@@ -150,6 +166,7 @@ class Phase(_Model):
     steps: list[Step] = Field(default_factory=list)
     finally_: list[Step] = Field(default_factory=list, alias="finally")
     timeout: str | float | None = None
+    comments: list[Comment] = Field(default_factory=list)      # comment cards: notes, never run
 
     @model_validator(mode="before")
     @classmethod

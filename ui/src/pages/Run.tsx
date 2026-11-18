@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { get, getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
+import { COMMENT_WIDTH, CommentNode } from "../comments";
 import { layout } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
@@ -90,7 +91,7 @@ function FrameNode({ data }: NodeProps) {
   );
 }
 
-const nodeTypes = { step: StepNode, frame: FrameNode };
+const nodeTypes = { step: StepNode, frame: FrameNode, comment: CommentNode };
 
 export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   pipeline: any; records: any[]; selected: string | null; onSelect: (key: string, step: any, phase: string) => void;
@@ -157,6 +158,15 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
           list.push({ ...base, type: "step", data: { step, phase: phaseId }, style: { width: p.width } });
         }
       }
+      // the comment cards of each phase (notes, never run), side by side under its frame
+      for (const phase of pipeline.phases) {
+        const p = placed[`phase:${phase.id}`];
+        if (!p) continue;
+        (phase.comments || []).forEach((text: string, i: number) => list.push({
+          id: `comment:${phase.id}:${i}`, type: "comment", position: { x: p.x + i * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
+          data: { text }, style: { width: COMMENT_WIDTH }, draggable: false, selectable: false,
+        }));
+      }
       setNodes(list);
       setEdges(edgeList.map((e) => ({
         ...e, markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
@@ -170,6 +180,7 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   }, [structure, slotNames]);
 
   const live = nodes.map((n) => {
+    if (n.type === "comment") return n;
     if (n.type === "frame") {
       const phase = (n.data as any).phase;
       if ((n.data as any).kind !== "phase") return n;

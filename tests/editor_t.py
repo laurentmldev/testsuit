@@ -179,7 +179,9 @@ def test_workspace_session(repos):
                "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
                    {"id": "start", "slot": "dut", "do": "start"},
                    {"id": "wait", "delay": "{{ duration }}", "needs": ["start"]},
-                   {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}]}]}}
+                   {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}],
+                   # comment cards: notes, checked as such and never read for keys
+                   "comments": [{"text": "Why **wait**: {{ nowhere }}", "x": 10, "y": 200}, "short note", {"text": " "}]}]}}
     written = editor.write(session, "testdef/count/testdef.yml", data=testdef)
     assert written["kind"] == "testdef"
     # its criteria: a kind of their own, and the criteria editor's services on the session's folder
@@ -201,6 +203,7 @@ def test_workspace_session(repos):
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
+    assert flat["phases"][0]["comments"] == ["Why **wait**: {{ nowhere }}", "short note"] and not flat["key_problems"]
 
     keys = {k["key"]: k for k in editor.keys(session, "testdef/count/testdef.yml")["keys"]}
     assert keys["min_count"]["value"] == "3" and keys["min_count"]["origin"].endswith("globals.yml")
@@ -943,6 +946,7 @@ def test_api(repos, tmp_path):
         start = next(s for s in pipeline["phases"][0]["steps"] if s["id"] == "start")
         assert start["needs"] == ["deploy"] and start["do"] == "start" and start["part"] == "steps"
         assert pipeline["slots"]["dut"]["role"] == "dut"
+        assert pipeline["phases"][0]["comments"] == []                 # the phase's comment cards (none here)
 
         # the UI, when it is built, or its placeholder
         assert requests.get(f"{url}/ui/").status_code == 200

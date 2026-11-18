@@ -950,3 +950,16 @@ tr.bypassed td { background: var(--warn-soft); }
 .wait-head { display: flex; align-items: center; gap: 8px; }
 .wait-head .spacer { flex: 1; }
 .wait-reasons { margin: 0; padding-left: 20px; }
+
+/* comment cards of a pipeline: sticky notes on the graph, never run */
+:root { --note: #fff6c7; --note-border: #e6d27a; --note-text: #4a3f12; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --note: #3a3520; --note-border: #6b6030; --note-text: #efe6bf; } }
+:root[data-theme="dark"] { --note: #3a3520; --note-border: #6b6030; --note-text: #efe6bf; }
+.comment-node { background: var(--note); color: var(--note-text); border: 1px solid var(--note-border); border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.4; box-shadow: 0 2px 6px rgba(20, 30, 50, 0.12); overflow-wrap: anywhere; }
+.comment-node p { margin: 0 0 4px; }
+.comment-node p:last-child, .comment-node ul:last-child { margin-bottom: 0; }
+.comment-node ul { margin: 0 0 4px; padding-left: 16px; }
+.comment-node code { background: color-mix(in srgb, var(--note-border) 35%, transparent); }
+.comment-node.editable { cursor: grab; }
+.comment-node.selected { outline: 2px solid var(--accent); }
+.comment-node.empty { font-style: italic; }

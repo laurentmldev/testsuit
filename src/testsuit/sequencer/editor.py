@@ -1837,7 +1837,8 @@ class Editor:
                                  "do": step.do, "params": fs.params, "targets": expanded,
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
-                           "slots": held, "groups": flat.groups, "steps": rows})
+                           "slots": held, "groups": flat.groups, "steps": rows,
+                           "comments": [c.text for c in flat.phase.comments if c.text.strip()]})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
                 "key_problems": key_problems, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
 

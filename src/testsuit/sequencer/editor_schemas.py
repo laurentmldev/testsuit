@@ -41,6 +41,17 @@ COMMENTS = h("Free notes for the people who maintain it (Markdown, as long as ne
              "what to beware of, what was tried. Shown in the Editor and on the Lab page; never run nor rendered "
              "(templates in it stay as written).", type="string")
 
+COMMENT_CARDS = h(
+    "Comment cards: notes on the graph of the Editor, like sticky notes (Markdown), for the people who read the "
+    "pipeline. Never run nor rendered (templates in them stay as written). `x`, `y` and `width` place the card on "
+    "the graph (pixels); without `x`/`y` the Editor places it. A card can also be given as its text only.",
+    type="array", items={"anyOf": [{"type": "string"}, {
+        "type": "object", "additionalProperties": False, "properties": {
+            "text": h("The note (Markdown).", type="string"),
+            "x": h("Horizontal place on the graph (pixels).", type="number"),
+            "y": h("Vertical place on the graph (pixels).", type="number"),
+            "width": h("Width of the card (pixels, default 220).", type="number")}}]})
+
 STRICT_NOTE = ("Its lines run in one shell (a `cd` or `export` holds for the next lines) and it stops at the first "
                "line that fails (`set -e`); `|| true` lets a line fail.")
 
@@ -693,13 +704,15 @@ PHASE = h("A phase: the resources it locks (`stage_slots`, `slots`), its inputs 
               "finally": h("Steps that always run at the end of the phase, even on failure, cancel or kill: stop "
                            "leftovers, collect outputs.", type="array", items=STEP),
               "timeout": DURATION,
+              "comments": COMMENT_CARDS,
           })
 
 SUBPIPELINE = h("A sub-pipeline: named steps used as one step with `uses` (section 8.4). Inside, steps keep their "
                 "own `needs`.", type="object", required=["steps"], additionalProperties=False,
                 properties={"params": h("Parameters with their defaults, given by `with:` and read as `params.*`.",
                                         type="object"),
-                            "steps": h("Steps of the sub-pipeline.", type="array", items=STEP)})
+                            "steps": h("Steps of the sub-pipeline.", type="array", items=STEP),
+                            "comments": COMMENT_CARDS})
 
 PIPELINE = h("The pipeline run by the sequencer (section 8.3), kept as written in the datapack.", type="object",
              additionalProperties=False,
