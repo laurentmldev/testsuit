@@ -186,7 +186,7 @@ export function HttpEditor({ value, onChange, help, withSave }: {
     if (x === "" || x === undefined || (Array.isArray(x) && !x.length)) delete next[k];
     set("expect", Object.keys(next).length ? next : undefined);
   };
-  const bodyKind = "json" in v ? "json" : "body" in v ? "body" : "none";
+  const bodyKind = "json" in v ? "json" : "body" in v ? "body" : "body_file" in v ? "body_file" : "none";
   const statuses: string[] = (Array.isArray(expect.status) ? expect.status : expect.status !== undefined ? [expect.status] : []).map(String);
   return (
     <>
@@ -202,12 +202,13 @@ export function HttpEditor({ value, onChange, help, withSave }: {
       <Field label="Body" help={help("json")}>
         <Choices value={bodyKind} onChange={(k) => {
           if (!k || k === bodyKind) return;
-          const { json: _j, body: _b, ...rest } = v;
-          onChange(k === "json" ? { ...rest, json: {} } : k === "body" ? { ...rest, body: "" } : rest);
-        }} choices={[{ value: "none", label: "none" }, { value: "json", label: "JSON" }, { value: "body", label: "raw text" }]} />
+          const { json: _j, body: _b, body_file: _f, ...rest } = v;
+          onChange(k === "json" ? { ...rest, json: {} } : k === "body" ? { ...rest, body: "" } : k === "body_file" ? { ...rest, body_file: "" } : rest);
+        }} choices={[{ value: "none", label: "none" }, { value: "json", label: "JSON" }, { value: "body", label: "raw text" }, { value: "body_file", label: "file path" }]} />
       </Field>
       {bodyKind === "json" && <Field label="JSON body" help={help("json")} wide><JsonField value={v.json} onChange={(x) => onChange({ ...v, json: x ?? {} })} placeholder='{"mode": "run"}' /></Field>}
       {bodyKind === "body" && <Field label="Raw body" help={help("body")} wide><Text keys mono multiline value={v.body} onChange={(x) => onChange({ ...v, body: x })} /></Field>}
+      {bodyKind === "body_file" && <Field label="File to send" help={help("body_file")} wide><Text keys mono value={v.body_file} onChange={(x) => onChange({ ...v, body_file: x })} placeholder="{{ component.input_dir }}/payload.bin" /></Field>}
       <Field label="Extract (jq path)" help={help("extract")}>
         <Text keys mono value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
       </Field>

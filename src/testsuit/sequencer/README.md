@@ -680,7 +680,7 @@ models:
           url: "{{ component.vars.api }}/outputs/1"            # a plain string is a GET of that URL
           method: PUT                                           # default GET
           headers: {Authorization: "Bearer {{ component.vars.token }}"}
-          json: {enabled: true, voltage: "{{ component.vars.voltage }}"}   # or body: "raw text"; params: query string
+          json: {enabled: true, voltage: "{{ component.vars.voltage }}"}   # or body: "raw text", or body_file: a path; params: query string
           expect: {status: [200, 204], json: {enabled: true}}  # default: a status below 400
           save: start_answer.json                               # the answer, in data/<slot>/http/ of the results
           timeout: 10s                                          # default 30 s
@@ -692,11 +692,12 @@ models:
 ```
 
 - **Result**: the step succeeds when the answer is the expected one: every `expect` given (status codes, `regex` on the body, `json` values the answer must contain, other fields ignored), else a status below 400. A wrong answer makes the step `failed`; no answer (refused, timeout) makes it `error`. The answer goes to the step's log.
+- **Body**: `json` (sets `Content-Type: application/json`), `body` (raw text, as written) or `body_file`, only one of them. `body_file` is the path of a file whose bytes are sent as they are, like `curl --data-binary @file` (`Content-Type: application/octet-stream` unless a header gives it); the path can hold keys (`{{ component.input_dir }}/firmware.bin`). It is read where the request is sent from: on the sequencer host, a relative path is in the run folder (`{{ run.dir }}`, the datapack's files) and only an absolute path works outside a run (a command run by hand from the Lab page, a status probe); with `via`, on that component, where curl reads it. A file that cannot be read makes the request unanswered (`error`).
 - **Extract**: `extract` takes a part of a JSON answer with a jq-style path before it is checked: `.state`, `.jobs[0].state`, `.jobs[-1]` (the last), `.jobs[].id` (the list of every job's id), `."a key".x` or `.["a key"]`, `.` (all of it). A missing key or index gives `null`, as with jq. The `expect` rules, a probe's states and the logs see that part: a string as is (like `jq -r`), anything else as JSON. `save` keeps the whole answer. An answer that is not JSON, or a path that does not apply to it (a key of a list), makes the answer unexpected.
 - **Where**: from the sequencer host. With `via` (a role of the stage, or a host), from that component with `curl`, for an API only reachable from inside a stage.
 - **Secrets**: templates take tokens from variables (`{{ component.vars.token }}`). Headers whose name looks secret (`Authorization`, `X-Api-Key`, `token`, `cookie`...) are shown as `***` in the logs and the Lab page.
 - **A status probe**: its states match the answer's body; an `exit` rule sees 0 when the answer is the expected one, else the HTTP status. A `wait_for: {http: ...}` takes the same request and polls until the answer is the expected one. The former `wait_for` `http` keys `status` and `regex` are now under `expect`, and refused at their old place.
-- **In the Editor**: **REST API** is a command kind and a step action, next to shell command and Python script, with fields for the method, URL, headers, query, body, extract path, expected answer and the file the answer is saved in; the step palette offers **REST API call**.
+- **In the Editor**: **REST API** is a command kind and a step action, next to shell command and Python script, with fields for the method, URL, headers, query, body (none, JSON, raw text or a file path, with key completion), extract path, expected answer and the file the answer is saved in; the step palette offers **REST API call**.
 
 The commands, status probes and self-test checks of a component can use the **other components of the lab** in their keys, with their id, host, role, label and variables (as seen in their stage):
 - `{{ stage.roles.<role>.host }}`: the component of that role in the component's stage (the first one when the stage has several), for a lab component that works in any stage (`{{ stage.roles.stage_server.vars.psu_address }}`);

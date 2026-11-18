@@ -74,6 +74,13 @@ HTTP = h(
         "params": h("Query string parameters.", type="object", additionalProperties={"type": ["string", "number", "boolean"]}),
         "json": h("JSON body (sets `Content-Type: application/json`).", type=["object", "array", "string", "number", "boolean"]),
         "body": h("Raw body, as written.", type="string"),
+        "body_file": h("Send a file's bytes as the body, as they are (like `curl --data-binary @file`; sets "
+                       "`Content-Type: application/octet-stream` unless a header gives it). The path can hold keys. "
+                       "It is read where the request is sent from: on the sequencer host, a relative path is in the "
+                       "run folder (`{{ run.dir }}`: the datapack's files), and only an absolute one works outside a "
+                       "run (by hand, status probes); with `via`, on that component (curl reads it there). Only one of "
+                       "`json`, `body` and `body_file`.", type="string",
+                       examples=["payload.bin", "{{ component.input_dir }}/firmware.bin"]),
         "timeout": DURATION,
         "verify": h("Check the server's TLS certificate (default true; false for a self-signed lab server).",
                     type="boolean"),
@@ -93,7 +100,9 @@ HTTP = h(
     },
     defaultSnippets=[{"label": "GET", "body": {"url": "${1:http://localhost:8080/api/status}"}},
                      {"label": "POST JSON", "body": {"url": "${1:http://localhost:8080/api/jobs}", "method": "POST",
-                                                     "json": {}, "expect": {"status": [200, 201]}}}])
+                                                     "json": {}, "expect": {"status": [200, 201]}}},
+                     {"label": "POST a file", "body": {"url": "${1:http://localhost:8080/api/upload}", "method": "POST",
+                                                       "body_file": "${2:payload.bin}"}}])
 
 WAIT_KINDS = {
     "state": h("The monitored state of the component (section 7.5): `running`, `idle`, `configured`, `broken`, "
