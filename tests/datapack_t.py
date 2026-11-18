@@ -492,3 +492,33 @@ def test_git_importer_lists_tags(tmp_path):
     importer = create_data_importer("git", str(tmp_path / "out"), str(repo), "v1.0")
     assert importer.listTags() == ["v1.0"]
     assert set(importer.listVersions()) == {"v1.0", "dev", "main"}
+
+
+class _UnconfirmedImporter:
+    """An importer whose data is there but not the expected version: it says so as an error."""
+
+    def checkVersion(self, version):
+        print("ERROR: Given folder has local modifs: 'somewhere'")
+        print(" M data.csv")
+        return False
+
+    def getChanges(self):
+        return []
+
+
+def test_unconfirmed_dataset_is_a_warning_with_nocheck(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    monkeypatch.setattr(datapack_tools, "create_data_importer", lambda *args: _UnconfirmedImporter())
+    datasource = SimpleNamespace(id="src", importer="git", source="nowhere")
+    dataset = SimpleNamespace(id="ds", version="v1.0")
+    (tmp_path / "ds" / "v1.0").mkdir(parents=True)
+
+    datapack_tools.import_dataset(tmp_path, datasource, dataset, tmp_path, nocheck=True)
+    out = capsys.readouterr().out
+    assert "ERROR" not in out
+    assert "WARNING: Given folder has local modifs: 'somewhere'" in out and " M data.csv" in out
+    assert "could not confirm it matches version 'v1.0', ignored (nocheck)" in out
+
+    with pytest.raises(DatapackError, match="could not confirm"):
+        datapack_tools.import_dataset(tmp_path, datasource, dataset, tmp_path, nocheck=False)
+    assert "ERROR: Given folder has local modifs" in capsys.readouterr().out
