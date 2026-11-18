@@ -1615,6 +1615,30 @@ def test_failed_http_via_runs_finally(tmp_path, no_git):
     assert "phase phase=test_run state=done verdict=failed" in runlog
 
 
+def test_finally_order_never_waits_for_itself(tmp_path, no_git):
+    """A finally step without needs runs after the one written before it, unless that one already waits for it:
+    'collect' (no needs) after 'kill_leftovers', which needs 'turn_off' which needs 'collect', waited for ever
+    (the run stayed 'running', no step started, until the phase timeout). It now runs first."""
+    from testsuit.sequencer.model import FlatStep, Step, finally_order
+    flat = [FlatStep(id=i, step=Step(id=i, delay="0s"), needs=n, params={}) for i, n in
+            (("kill_leftovers", ["turn_off"]), ("collect", []), ("turn_off", ["collect"]), ("report", []))]
+    assert {fs.id: fs.needs for fs in finally_order(flat)} == {
+        "kill_leftovers": ["turn_off"], "collect": [], "turn_off": ["collect"], "report": ["turn_off"]}
+    bench = Bench(tmp_path, stages=1)
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][0]["finally"] = [
+        {"id": "kill_leftovers", "for_each": "slots", "do": "kill", "needs": ["turn_off"]},
+        {"id": "collect", "for_each": "slots", "do": "collect"},
+        {"id": "turn_off", "slot": "dut", "do": "stop", "needs": ["collect"]}]
+    run = run_one(bench, bench.build("finally_loop", pipeline=pipeline))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    finals = [s for s in record["steps"] if s["phase"] == "test_run" and s["id"] in ("kill_leftovers", "collect", "turn_off")]
+    runlog = read_member(run, "logs/sequencer.log")
+    started = [runlog.index(f"step test_run:{i}[dut] state=running") for i in ("collect", "turn_off", "kill_leftovers")]
+    assert started == sorted(started), runlog
+    assert all(s["state"] == "succeeded" for s in finals), finals
+
+
 def test_kill_ends_a_run_nothing_runs(tmp_path, no_git):
     """A run left 'running' with no live execution behind it (its task died without ending it, or it is not
     known to this sequencer at all) is ended by a kill, its locks released."""

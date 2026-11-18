@@ -388,6 +388,31 @@ def flatten_steps(steps: list[Step], subpipelines: dict[str, SubPipeline], prefi
     return flat
 
 
+def finally_order(steps: list[FlatStep]) -> list[FlatStep]:
+    """The finally steps as they run: one without needs waits for the one written before it (in the order
+    written), unless that one already waits for it, directly or not (it then runs first, with no needs)."""
+    needs = {fs.id: list(fs.needs) for fs in steps}
+
+    def waits_for(start: str, target: str) -> bool:
+        seen, todo = set(), [start]
+        while todo:
+            current = todo.pop()
+            if current == target:
+                return True
+            if current not in seen:
+                seen.add(current)
+                todo.extend(needs.get(current, []))
+        return False
+
+    ordered = []
+    for i, fs in enumerate(steps):
+        if not fs.needs and i and not waits_for(steps[i - 1].id, fs.id):
+            needs[fs.id] = [steps[i - 1].id]
+            fs = FlatStep(id=fs.id, step=fs.step, needs=[steps[i - 1].id], params=fs.params, group=fs.group)
+        ordered.append(fs)
+    return ordered
+
+
 def flatten_phase(phase: Phase, pipeline: Pipeline) -> FlatPhase:
     groups: dict[str, list[str]] = {}
     steps = flatten_steps(phase.steps, pipeline.subpipelines, groups=groups)

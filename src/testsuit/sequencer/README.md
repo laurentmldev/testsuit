@@ -1413,7 +1413,7 @@ Where the code differs from this document, and why:
 | Results | `storage.results/<run>/<datapack>_results.zip` | the same datapack can be submitted several times |
 | Pid files | `<remote_root>/.tsq/<run>/<concrete component>/` | components sharing a remote root (emulated mode) keep their states apart |
 | Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: sequencer`) |
-| `finally` steps without `needs` | run in the order written | a `kill` before a `collect` is the usual intent |
+| `finally` steps without `needs` | run in the order written: each after the one before it, unless that one already waits for it (through its `needs`), then it runs first | a `kill` before a `collect` is the usual intent; a step never waits for a step that waits for it |
 | Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
 | Editor saves | every change is saved in the session's clone as typed, valid or not, with its problems listed; an invalid lab is refused at push | a half-typed file is a normal state while editing; the clone never reaches the running lab |
 | Editor forms | written for each file kind, not generated from the schemas (react-jsonschema-form) | the help needs the lab's names in context: types with their commands, roles per stage type, commands per component |
