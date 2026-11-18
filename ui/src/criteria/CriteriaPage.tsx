@@ -19,6 +19,7 @@ import { ExploitPage } from "../exploit/ExploitPage";
 import { classes, navigate, setQuery, Toasts, type Route } from "../util";
 import { restAdapter, type Overview } from "./adapter";
 import { CriteriaEditor } from "./CriteriaEditor";
+import { useTabTitle } from "../title";
 
 function GitTag({ ov }: { ov: Overview | null }) {
   if (!ov?.git) return null;
@@ -36,7 +37,7 @@ export function SessionCriteriaPage({ sid, route }: { sid: string; route: Route 
   const [session, setSession] = useState<any>(null);
   useEffect(() => { get(`edit/sessions/${sid}`).then(setSession).catch(() => setSession(null)); }, [sid]);
   const onFile = useCallback((p: string | null) => setQuery("file", p), []);
-  useEffect(() => { document.title = `Criteria${scope ? ` · ${scope.split("/").pop()}` : ""}`; }, [scope]);
+  useTabTitle(`Criteria${scope ? ` · ${scope.split("/").pop()}` : ""}`);
   return (
     <CriteriaEditor adapter={adapter} file={file} onFile={onFile} scope={scope} bar={(ov) => (
       <div className="session-bar">
@@ -72,7 +73,10 @@ export function StandaloneCriteriaApp({ mode }: { mode: { folder: string; testsu
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
-  useEffect(() => { if (where.page === "criteria") document.title = `Criteria · ${mode.folder.split("/").pop()}`; }, [mode.folder, where.page]);
+  // `mxp webui` has no app name of its own: its tabs are named after the page and the folder
+  useEffect(() => {
+    document.title = `${where.page === "exploit" ? "Exploit" : "Criteria"} · ${mode.folder.split("/").pop()}`;
+  }, [mode.folder, where.page]);
   const onFile = useCallback((p: string | null) => {
     if (!window.location.hash.startsWith("#/criteria")) window.location.hash = "#/criteria";
     setQuery("file", p);
