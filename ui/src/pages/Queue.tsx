@@ -20,6 +20,22 @@ import { ago, attempt, Badge, Elapsed, navigate } from "../util";
 
 export const ACTIVE = ["reserved", "selftest", "running", "cleaning"];
 
+/** What a run's state badge says: "waiting for lab resources" in place of its state while the run (or its next
+ *  phase, the run then still "running" with no step running) waits for what it needs in the lab. */
+export const WAITING_RESOURCES = "waiting for lab resources";
+export function runState(run: any): string {
+  if (!run) return "";
+  if (run.state === "waiting_resources" || (ACTIVE.includes(run.state) && (run.wait || run.waiting_for))) return WAITING_RESOURCES;
+  return run.state;
+}
+
+/** A run's state badge: the reasons it waits as its tooltip. */
+export function RunStateBadge({ run }: { run: any }) {
+  const state = runState(run);
+  const why = run?.wait?.reasons?.length ? run.wait.reasons.join("\n") : run?.waiting_for || "";
+  return <Badge value={state} title={state === WAITING_RESOURCES ? `${run.state === "waiting_resources" ? "The run" : `Phase ${run.wait?.phase || run.phase || ""}`.trim()} waits for:\n${why}` : undefined} />;
+}
+
 export function PriorityInput({ run, onDone }: { run: any; onDone?: () => void }) {
   const [value, setValue] = useState<string>(String(run.priority));
   const save = async () => {
@@ -160,7 +176,7 @@ function ActiveCard({ run }: { run: any }) {
     <div className="card run-card">
       <div className="card-head">
         <a href={`#/runs/${run.id}`}><strong>{run.testdef}</strong></a>
-        <Badge value={run.state} />
+        <RunStateBadge run={detail.data || run} />
       </div>
       <div className="muted small">{run.id} · priority {run.priority} · started {ago(run.activated_at)} · <Elapsed from={run.activated_at} /></div>
       {run.binding && <div className="small">on {Object.values(run.binding.stage_slots || run.binding.realms || run.binding.stages || {}).join(", ")} {Object.values(run.binding.slots || run.binding.components || {}).length} slots</div>}

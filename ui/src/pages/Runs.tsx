@@ -15,6 +15,7 @@
 import { useState } from "react";
 import { useResource } from "../api";
 import { ago, Badge, Elapsed, time } from "../util";
+import { RunStateBadge } from "./Queue";
 
 const FILTERS: [string, string][] = [
   ["", "all"], ["queued,waiting_resources", "waiting"], ["reserved,selftest,running,cleaning", "running"],
@@ -24,7 +25,7 @@ const FILTERS: [string, string][] = [
 export function RunsPage() {
   const [state, setState] = useState("");
   const [text, setText] = useState("");
-  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run"]);
+  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase"]);
   const list = (runs.data || []).filter((r) => !text || `${r.id} ${r.name} ${r.testdef}`.toLowerCase().includes(text.toLowerCase()));
   return (
     <div className="page">
@@ -46,7 +47,7 @@ export function RunsPage() {
             <tr key={r.id}>
               <td><a href={`#/runs/${r.id}`}>{r.id}</a></td>
               <td title={r.name}>{r.testdef}</td>
-              <td><Badge value={r.state} /></td>
+              <td><RunStateBadge run={r} /></td>
               <td><Badge value={r.verdict} /></td>
               <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
               <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>

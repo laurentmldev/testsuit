@@ -1112,6 +1112,7 @@ The Run page says which phase waits, since when, why (one line per missing resou
    - Before a phase, the kernel copies its `inputs` and binds and locks its resources if they aren't held yet.
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.
    - Each step's output goes to `runs/<id>/logs/<phase>/<step>[<component>].log` and to the event bus.
+   - What the sequencer does with the run goes to `runs/<id>/logs/sequencer.log`, written as it goes: the run's states (queued, waiting for lab resources, running...), each phase started, waiting or ended, each step's state with its slot, reason and via, and the sequencer's warnings and errors about the run (tracebacks included). A run that seems stuck says there where it is, without the tsqd log.
 4. **Finally**: the `finally` steps of each phase always run, with their own timeout. The phase's resources are released afterwards, unless the next phase uses them.
 5. **Verdict**, one of three, computed from the steps (those with `continue_on_error` excepted):
    - `succeeded`: every step gave its expected result;
@@ -1130,7 +1131,7 @@ State machines:
 Everything retrieved from the components becomes part of the datapack contents. The **results datapack** is the run folder, packed with the same layout as the datapack it came from:
 - `data/<slot>/input/`: the inputs, unchanged;
 - `data/<slot>/output/`: everything `collect` retrieved, whatever its size or format (logs, CSV, binary records, pcap files...);
-- `logs/`: the log of every step;
+- `logs/`: the log of every step, and `logs/sequencer.log`, what the sequencer did with the run;
 - `selftest.yml`, `run.yml` (states, verdict, step statuses) and the completed `baseline.yml`.
 
 The BagIt manifests are recomputed over all of it, so `datapack --verify` checks the outputs too. It is written to `storage.results` as `<run>/<datapack>_results.zip`, with the `_NONCONFORM` suffix when flagged (section 5.3); the run folder keeps the same datapack submitted several times apart.
@@ -1412,7 +1413,7 @@ Where the code differs from this document, and why:
 | Results | `storage.results/<run>/<datapack>_results.zip` | the same datapack can be submitted several times |
 | Pid files | `<remote_root>/.tsq/<run>/<concrete component>/` | components sharing a remote root (emulated mode) keep their states apart |
 | Steps without a component | run on the sequencer host, in the run folder | used for checks between steps; the analysis itself stays a component (`role: sequencer`) |
-| `finally` steps without `needs` | run in the order written | a `kill` before a `collect` is the usual intent |
+| `finally` steps without `needs` | run in the order written: each after the one before it, unless that one already waits for it (through its `needs`), then it runs first | a `kill` before a `collect` is the usual intent; a step never waits for a step that waits for it |
 | Abort | `cancel` runs `stop` on every component with a live process of the run, then `kill`; `kill` runs `kill` at once; then the current phase's `finally` | a detached process counts as running even when its step is done |
 | Editor saves | every change is saved in the session's clone as typed, valid or not, with its problems listed; an invalid lab is refused at push | a half-typed file is a normal state while editing; the clone never reaches the running lab |
 | Editor forms | written for each file kind, not generated from the schemas (react-jsonschema-form) | the help needs the lab's names in context: types with their commands, roles per stage type, commands per component |

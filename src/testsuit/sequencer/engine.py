@@ -35,7 +35,7 @@ from typing import Any, Callable
 
 from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
-from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
+from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, finally_order, phase_slots
 from testsuit.sequencer.transports import Result, Transport, strict, traced, untraced
 from testsuit.sequencer.library import Resolved, without_comments
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
@@ -866,12 +866,7 @@ class PhaseRunner:
     async def run_dag(self, steps: list[FlatStep], in_finally: bool) -> dict[str, str]:
         verdicts: dict[str, str] = {}
         if in_finally:                     # finally steps without needs run in the order written
-            ordered = []
-            for i, fs in enumerate(steps):
-                if not fs.needs and i:
-                    fs = FlatStep(id=fs.id, step=fs.step, needs=[steps[i - 1].id], params=fs.params, group=fs.group)
-                ordered.append(fs)
-            steps = ordered
+            steps = finally_order(steps)
         events = {fs.id: asyncio.Event() for fs in steps}
         tasks = [asyncio.ensure_future(self.run_step(fs, events, verdicts, in_finally)) for fs in steps]
         self.ctx._running[self.id + (":finally" if in_finally else "")] = asyncio.current_task()

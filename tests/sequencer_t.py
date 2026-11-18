@@ -1585,6 +1585,60 @@ def test_kill_stops_hanging_finally(tmp_path, no_git):
     assert record["phases"]["exploit"] == "skipped"
 
 
+def test_failed_http_via_runs_finally(tmp_path, no_git):
+    """A lab command sent through another component (via, curl there) that gets a 406 fails its step; the steps
+    after it are skipped, the phase's finally steps run and the run ends."""
+    server, url = _rejecting_api()
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"api": {
+        "http": {"url": f"{url}/jobs", "method": "POST", "json": {"mode": "run"}}, "via": "seq_host"}}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    pipeline = copy.deepcopy(PIPELINE)
+    steps = pipeline["phases"][0]["steps"]
+    steps.insert(3, {"id": "api", "slot": "dut", "do": "api", "needs": ["ready"]})
+    steps[4]["needs"] = ["api"]
+    try:
+        run = run_one(bench, bench.build("via_406", pipeline=pipeline))
+    finally:
+        server.shutdown()
+    assert run["state"] == "done" and run["verdict"] == "failed"
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    steps = {s["id"]: s for s in record["steps"] if s["phase"] == "test_run"}
+    assert (steps["api"]["state"], steps["api"]["reason"], steps["api"]["via"]) == ("failed", "status 406", "seq_host")
+    assert steps["run"]["state"] == "skipped" and steps["collect"]["state"] == "succeeded"
+    # the run's own log, in its folder: where the run went, step by step
+    runlog = read_member(run, "logs/sequencer.log")
+    assert "step test_run:api[dut] state=failed reason=status 406 via=seq_host" in runlog
+    assert "step test_run:collect[dut] state=succeeded" in runlog
+    assert runlog.index("state=failed reason=status 406") < runlog.index("step test_run:collect[dut] state=running")
+    assert "phase phase=test_run state=done verdict=failed" in runlog
+
+
+def test_finally_order_never_waits_for_itself(tmp_path, no_git):
+    """A finally step without needs runs after the one written before it, unless that one already waits for it:
+    'collect' (no needs) after 'kill_leftovers', which needs 'turn_off' which needs 'collect', waited for ever
+    (the run stayed 'running', no step started, until the phase timeout). It now runs first."""
+    from testsuit.sequencer.model import FlatStep, Step, finally_order
+    flat = [FlatStep(id=i, step=Step(id=i, delay="0s"), needs=n, params={}) for i, n in
+            (("kill_leftovers", ["turn_off"]), ("collect", []), ("turn_off", ["collect"]), ("report", []))]
+    assert {fs.id: fs.needs for fs in finally_order(flat)} == {
+        "kill_leftovers": ["turn_off"], "collect": [], "turn_off": ["collect"], "report": ["turn_off"]}
+    bench = Bench(tmp_path, stages=1)
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][0]["finally"] = [
+        {"id": "kill_leftovers", "for_each": "slots", "do": "kill", "needs": ["turn_off"]},
+        {"id": "collect", "for_each": "slots", "do": "collect"},
+        {"id": "turn_off", "slot": "dut", "do": "stop", "needs": ["collect"]}]
+    run = run_one(bench, bench.build("finally_loop", pipeline=pipeline))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    finals = [s for s in record["steps"] if s["phase"] == "test_run" and s["id"] in ("kill_leftovers", "collect", "turn_off")]
+    runlog = read_member(run, "logs/sequencer.log")
+    started = [runlog.index(f"step test_run:{i}[dut] state=running") for i in ("collect", "turn_off", "kill_leftovers")]
+    assert started == sorted(started), runlog
+    assert all(s["state"] == "succeeded" for s in finals), finals
+
+
 def test_kill_ends_a_run_nothing_runs(tmp_path, no_git):
     """A run left 'running' with no live execution behind it (its task died without ending it, or it is not
     known to this sequencer at all) is ended by a kill, its locks released."""

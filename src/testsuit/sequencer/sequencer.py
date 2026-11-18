@@ -46,6 +46,7 @@ from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resou
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport, strict, traced
 from testsuit.sequencer.results import pack_results
+from testsuit.sequencer.runlog import RunLog
 from testsuit.sequencer.util import SequencerError, deep_merge, dump_yaml, now, parse_duration, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
@@ -124,9 +125,20 @@ class Sequencer:
         self._wake: asyncio.Event | None = None
         self.scheduled_at: str | None = None         # the last walk of the queue
         self.started_at = now()
+        # each run's own log in its folder (logs/sequencer.log): its events, and the sequencer's lines about it
+        self.run_log = RunLog(self._run_folder)
+        logging.getLogger("testsuit").addHandler(self.run_log)
 
     # ── events ─────────────────────────────────────────────────────────
+    def _run_folder(self, run_id: str) -> str | None:
+        execution = self.executions.get(run_id)
+        if execution is not None:
+            return str(execution.datapack.dir)
+        run = self.store.get_run(run_id)
+        return run["dir"] if run else None
+
     def notify(self, kind: str, data: dict) -> None:
+        self.run_log.event(kind, data)
         if kind not in ("log", "probe", "manual_output"):   # a probe is not an event worth keeping: every few seconds
             self.store.add_event(kind, data)
         if kind not in ("log", "step", "probe", "manual_output"):   # the events in the log of tsqd too (Lab page, Logs)
@@ -808,6 +820,7 @@ class Sequencer:
                     shutil.rmtree(folder, ignore_errors=True)
 
     async def close(self) -> None:
+        logging.getLogger("testsuit").removeHandler(self.run_log)
         for _, lookup in self._root_lookups.values():
             lookup.cancel()
         for transport in self._transports.values():
