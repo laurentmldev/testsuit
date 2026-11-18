@@ -18,7 +18,7 @@ import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text, T
 import { get, post, put } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, CommentsField, CommentsNote, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
-import { ItemLink, ItemLinks, useItemRequest } from "./links";
+import { ItemLink, ItemLinks, useItemRequest, type CommandRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
 const TP = ["models", "_"];
@@ -69,8 +69,12 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
     : Object.keys(components).length ? { kind: "component", name: Object.keys(components)[0] } : null;
   const [sel, setSel] = useState<{ kind: Kind; name: string } | null>(first);
   const [creating, setCreating] = useState<Kind | null>(null);
-  useItemRequest(doc.path, (kind, name) => {
-    if ((kind === "role" && name in roles) || (kind === "component" && name in components)) setSel({ kind, name });
+  const [focusCommand, setFocusCommand] = useState<CommandRequest>(null);
+  useItemRequest(doc.path, (kind, name, command) => {
+    if ((kind === "role" && name in roles) || (kind === "component" && name in components)) {
+      setSel({ kind, name });
+      setFocusCommand(command);
+    }
   });
   const known = (kind: Kind): Record<string, any> => (kind === "role" ? ctx.lab.roles : ctx.lab.library) || {};
   const setItem = (kind: Kind, name: string, value: any) => {
@@ -174,7 +178,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       <div className="form-main">
         {sel && item !== undefined ? (sel.kind === "role"
           ? <RoleForm key={"r:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("role", sel.name, v)} onRename={(to) => rename("role", sel.name, to)} onDelete={() => remove("role", sel.name)} />
-          : <ComponentForm key={"c:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("component", sel.name, v)} onRename={(to) => rename("component", sel.name, to)} onDelete={() => remove("component", sel.name)} transfer={commandTransfer(sel.name)} />)
+          : <ComponentForm key={"c:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("component", sel.name, v)} onRename={(to) => rename("component", sel.name, to)} onDelete={() => remove("component", sel.name)} transfer={commandTransfer(sel.name)} focusCommand={focusCommand} />)
           : <p className="muted">Pick a role or a model, or add one.</p>}
       </div>
       {creating === "component" && <NewComponent taken={[...new Set([...Object.keys(known("component")), ...Object.keys(components)])]} onClose={() => setCreating(null)} onCreate={(name, body) => {
@@ -350,8 +354,9 @@ function RoleInputs({ value, onChange, inherited, help }: { value?: any[]; onCha
   );
 }
 
-function ComponentForm({ name, value, onChange, onRename, onDelete, transfer }: {
+function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, focusCommand }: {
   name: string; value: any; onChange: (v: any) => void; onRename: (to: string) => void; onDelete: () => void; transfer?: CommandTransfer;
+  focusCommand?: CommandRequest;
 }) {
   const { ctx, schemas } = useSession();
   const help = (path: string[]) => helpText(schemas.library, [...TP, ...path]);
@@ -398,7 +403,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer }: 
         <Choices value={t.transport} onChange={(v) => set("transport", v ?? undefined)} choices={transportChoices(ctx)} 
           inherit={parent?.transport ? { value: parent.transport, from: `inherited from ${t.extends}` } : { value: "ssh", from: "default" }} />
       </Field>
-      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} transfer={transfer} />
+      <CommandsEditor title="Command implementations" value={t.commands} onChange={(v) => set("commands", v)} inherited={inherited} required={roles.length ? required : undefined} help={help(["commands"])} transfer={transfer} focus={focusCommand} />
       <StatusEditor value={t.status} onChange={(v) => set("status", v)} inherited={parent?.status} />
       <SelftestEditor value={t.selftest} onChange={(v) => set("selftest", v)} inherited={parent?.selftest || []} />
       <Section title="Collect filters" help={help(["collect"])} collapsed={!t.collect}>
