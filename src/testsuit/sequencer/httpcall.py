@@ -45,7 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 from testsuit.sequencer.util import SequencerError, parse_duration
@@ -157,8 +157,13 @@ def normalize(spec: Any, where: str) -> dict:
     bodies = [k for k in BODY_KEYS if k in spec]
     if len(bodies) > 1:
         raise SequencerError(f"{where}: 'http' takes one of 'json', 'body' or 'body_file', not {' and '.join(bodies)}")
-    if "body_file" in spec and (not isinstance(spec["body_file"], str) or not spec["body_file"].strip()):
-        raise SequencerError(f"{where}: 'http.body_file' takes the path of the file to send")
+    if "body_file" in spec:
+        path = spec["body_file"]
+        if isinstance(path, (PurePath, int, float)) and not isinstance(path, bool):
+            spec = {**spec, "body_file": str(path)}             # a key giving a path or a number
+        elif not isinstance(path, str) or not path.strip():
+            raise SequencerError(f"{where}: 'http.body_file' takes the path of the file to send, "
+                                 f"not {_shown(path)}")
     method = str(spec.get("method") or "GET").upper()
     if method not in METHODS and "{{" not in method:
         raise SequencerError(f"{where}: 'http' method '{method}' is not one of {', '.join(METHODS)}")
@@ -180,6 +185,19 @@ def normalize(spec: Any, where: str) -> dict:
         if spec.get(key) is not None and not isinstance(spec[key], dict):
             raise SequencerError(f"{where}: 'http.{key}' takes a mapping")
     return dict(spec)
+
+
+def _shown(value: Any) -> str:
+    """What a field got instead of a string, said so it can be fixed."""
+    from jinja2 import Undefined
+    if isinstance(value, Undefined):
+        return f"an undefined key ({getattr(value, '_undefined_name', None) or '?'} is not defined)"
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "an empty value (a key that gives nothing?)"
+    if isinstance(value, dict):
+        return (f"a mapping {json.dumps(value, default=str)} (in YAML, quote a value that starts with a key: "
+                "body_file: \"{{ ... }}\")")
+    return f"a {type(value).__name__} {json.dumps(value, default=str)}"
 
 
 def _url(spec: dict) -> str:
@@ -278,7 +296,14 @@ def curl_command(spec: dict, timeout: float | None = None) -> str:
         if data is not None:
             args += ["--data-binary", data.decode()]
     args.append(_url(spec))
-    return " ".join(shlex.quote(a) for a in args)
+    command = " ".join(shlex.quote(a) for a in args)
+    if "body_file" in spec:                      # curl alone would not say which file it could not read
+        path = shlex.quote(str(spec["body_file"]).strip())
+        reason = shlex.quote(f"cannot read the body file '{str(spec['body_file']).strip()}' on this component: ")
+        command = (f"if [ ! -e {path} ]; then echo {reason}'no such file'; exit 66; "
+                   f"elif [ ! -f {path} ] || [ ! -r {path} ]; then echo {reason}'not a readable file'; exit 66; fi; "
+                   + command)
+    return command
 
 
 def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
