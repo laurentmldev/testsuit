@@ -43,11 +43,14 @@ COMMENTS = h("Free notes for the people who maintain it (Markdown, as long as ne
 
 COMMENT_CARDS = h(
     "Comment cards: notes on the graph of the Editor, like sticky notes (Markdown), for the people who read the "
-    "pipeline. Never run nor rendered (templates in them stay as written). `x`, `y` and `width` place the card on "
-    "the graph (pixels); without `x`/`y` the Editor places it. A card can also be given as its text only.",
+    "pipeline. Never run nor rendered (templates in them stay as written). A card is free, or pinned to a step "
+    "(`step`): it then follows that step on the graph. `x` and `y` place it (pixels: on the graph for a free card, "
+    "from its step for a pinned one); without them the Editor places it. A card can also be given as its text only.",
     type="array", items={"anyOf": [{"type": "string"}, {
         "type": "object", "additionalProperties": False, "properties": {
             "text": h("The note (Markdown).", type="string"),
+            "step": h("The step it is pinned to (an id of this phase or sub-pipeline); none: a free card.",
+                      type="string"),
             "x": h("Horizontal place on the graph (pixels).", type="number"),
             "y": h("Vertical place on the graph (pixels).", type="number"),
             "width": h("Width of the card (pixels, default 220).", type="number")}}]})

@@ -135,7 +135,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                                   "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else s.action)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": flat.phase.slots, "groups": flat.groups, "steps": steps,
-                           "comments": [c.text for c in flat.phase.comments if c.text.strip()]})
+                           "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
         return {"phases": phases, "stage_slots": dp.needs.stage_slots,
                 "slots": {c.id: {"type": c.type, "role": c.role, "stage_slot": c.stage_slot, "name": c.name}
                           for c in dp.needs.slots.values()}}

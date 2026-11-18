@@ -133,9 +133,12 @@ class Step(BaseModel):
 
 class Comment(_Model):
     """A comment card of the pipeline editor (a sticky note on the graph of a phase or a sub-pipeline): free text
-    for the people who read the pipeline (Markdown). Never run nor rendered; ``x``, ``y`` and ``width`` only say
-    where the editor draws it (graph coordinates, pixels), and a card without ``x``/``y`` is placed by the editor."""
+    for the people who read the pipeline (Markdown). Never run nor rendered. A card is free, or pinned to a step of
+    its phase or sub-pipeline (``step``, a step id as written there), when it follows that step on the graph.
+    ``x`` and ``y`` only say where the editor draws it (pixels): on the graph for a free card, from the step for a
+    pinned one; a card without them is placed by the editor. ``width`` is its width."""
     text: str = ""
+    step: str | None = None
     x: float | None = None
     y: float | None = None
     width: float | None = None
@@ -144,6 +147,20 @@ class Comment(_Model):
     @classmethod
     def _plain(cls, data):
         return {"text": data} if isinstance(data, str) else data      # a card given as its text only
+
+
+def comment_problems(pipeline: Pipeline) -> list[str]:
+    """Comment cards pinned to a step their phase or sub-pipeline does not have: shown free, said as a warning
+    (a note never stops a run)."""
+    problems = []
+    holders = [(f"phase '{p.id}'", p.comments, p.steps + p.finally_) for p in pipeline.phases]
+    holders += [(f"sub-pipeline '{n}'", s.comments, s.steps) for n, s in pipeline.subpipelines.items()]
+    for where, comments, steps in holders:
+        ids = {s.id for s in steps}
+        for i, c in enumerate(comments, 1):
+            if c.step and c.step not in ids:
+                problems.append(f"{where}: comment {i} is pinned to unknown step '{c.step}' (it is shown free)")
+    return problems
 
 
 class SubPipeline(_Model):

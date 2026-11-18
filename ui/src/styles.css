@@ -963,3 +963,5 @@ tr.bypassed td { background: var(--warn-soft); }
 .comment-node.editable { cursor: grab; }
 .comment-node.selected { outline: 2px solid var(--accent); }
 .comment-node.empty { font-style: italic; }
+.comment-pin { font-size: 10.5px; font-weight: 600; opacity: 0.75; margin-bottom: 2px; font-family: var(--mono); }
+.comment-pin.lost { color: var(--bad); text-decoration: line-through; }

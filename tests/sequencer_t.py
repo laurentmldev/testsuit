@@ -1198,20 +1198,28 @@ def test_comment_cards_are_never_run(bench):
     """A phase and a sub-pipeline can carry comment cards (notes on the graph of the Editor): checked, kept with
     their place on the graph, never run nor rendered (a template in them reads no key), and given to the run graph."""
     from testsuit.sequencer.editor_schemas import schemas
-    from testsuit.sequencer.model import load_pipeline
+    from testsuit.sequencer.model import comment_problems, load_pipeline
     from testsuit.sequencer.util import SequencerError
     note = "Why: {{ params.nowhere }} would fail here. {% if %}"
     pipeline = copy.deepcopy(PIPELINE)
     pipeline["subpipelines"] = {"settle": {"steps": [{"id": "pause", "delay": "0.1s"}],
-                                           "comments": [{"text": note, "x": 10, "y": -80}]}}
-    pipeline["phases"][0]["comments"] = [{"text": note, "x": 40.5, "y": 220, "width": 300}, "just a **line**", {"text": ""}]
+                                           "comments": [{"text": note, "x": 10, "y": -80, "step": "pause"}]}}
+    pipeline["phases"][0]["comments"] = [{"text": note, "x": 40.5, "y": 220, "width": 300}, "just a **line**", {"text": ""},
+                                         {"text": "pinned", "step": "collect", "x": 0, "y": -60}]
     pipeline["phases"][0]["steps"].append({"id": "settle", "uses": "settle", "needs": ["stop"]})
 
     loaded = load_pipeline(pipeline)
     cards = loaded.phases[0].comments
-    assert [(c.text, c.x, c.y, c.width) for c in cards] == [(note, 40.5, 220, 300), ("just a **line**", None, None, None),
-                                                            ("", None, None, None)]
-    assert loaded.subpipelines["settle"].comments[0].text == note and loaded.phases[1].comments == []
+    assert [(c.text, c.step, c.x, c.y, c.width) for c in cards] == [
+        (note, None, 40.5, 220, 300), ("just a **line**", None, None, None, None), ("", None, None, None, None),
+        ("pinned", "collect", 0, -60, None)]                    # pinned to a finally step of its phase
+    assert loaded.subpipelines["settle"].comments[0].step == "pause" and loaded.phases[1].comments == []
+    assert comment_problems(loaded) == []
+    # pinned to a step its phase or sub-pipeline does not have: a warning, shown free, never an error
+    loaded.phases[1].comments = load_pipeline({"phases": [{"id": "p", "comments": [{"text": "a", "step": "gone"}]}]}).phases[0].comments
+    loaded.subpipelines["settle"].comments[0].step = "start"           # a step of the phase, not of the sub-pipeline
+    assert comment_problems(loaded) == ["phase 'exploit': comment 1 is pinned to unknown step 'gone' (it is shown free)",
+                                        "sub-pipeline 'settle': comment 1 is pinned to unknown step 'start' (it is shown free)"]
     with pytest.raises(SequencerError, match="color"):
         load_pipeline({"phases": [{"id": "p", "comments": [{"text": "a", "color": "red"}]}]})
     with pytest.raises(SequencerError, match="comments"):
@@ -1231,7 +1239,7 @@ def test_comment_cards_are_never_run(bench):
     testdef = schemas({})["testdef"]
     phase = testdef["properties"]["pipeline"]["properties"]["phases"]["items"]["properties"]
     card = phase["comments"]["items"]["anyOf"][1]["properties"]
-    assert set(card) == {"text", "x", "y", "width"}
+    assert set(card) == {"text", "step", "x", "y", "width"}
     sub = testdef["properties"]["pipeline"]["properties"]["subpipelines"]["additionalProperties"]["properties"]
     assert sub["comments"]["type"] == "array"
 

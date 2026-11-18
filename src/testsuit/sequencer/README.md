@@ -915,7 +915,12 @@ pipeline:
 
 Phase fields: `id`, `needs`, `stage_slots` (stage slots, each with the lab stage bound to it), `slots` (ad hoc slots), `inputs`, `steps`, `finally`, `timeout`, `comments`.
 
-**Comment cards.** A phase, and a sub-pipeline (section 8.4), can carry `comments`: notes on its graph in the Editor, like sticky notes, for the people who read the pipeline (Markdown). They never change what runs: the sequencer neither runs nor renders them (a `{{ ... }}` in them stays as written and reads no key). Each card has its `text` and, optionally, its place on the graph, `x` and `y` (pixels, written by the Editor when the card is dragged), and its `width` (default 220); a card without `x`/`y` is placed under the steps, and a card can be given as its text only. They belong to the phase or sub-pipeline as a whole, not to a step: free-floating on its graph.
+**Comment cards.** A phase, and a sub-pipeline (section 8.4), can carry `comments`: notes on its graph in the Editor, like sticky notes, for the people who read the pipeline (Markdown). They never change what runs: the sequencer neither runs nor renders them (a `{{ ... }}` in them stays as written and reads no key). Each card has its `text`, and optionally:
+- `step`: the step it is pinned to, an id of its phase (`steps` or `finally`) or sub-pipeline; without it the card is free;
+- `x` and `y`: its place in pixels, written by the Editor when the card is dragged: on the graph for a free card, from its step for a pinned one, so that a pinned card follows its step when the graph is laid out again. Without them, a free card goes under the steps and a pinned one above its step;
+- `width` (default 220).
+
+A card can also be given as its text only. A card pinned to a step that its phase or sub-pipeline does not have is shown free, with a warning in the Editor (never an error: a note does not stop a run).
 
 ```yaml
     - id: test_run
@@ -925,7 +930,9 @@ Phase fields: `id`, `needs`, `stage_slots` (stage slots, each with the lab stage
           x: 430
           y: -110
           width: 320
-        - "`kill_leftovers` only when `down` failed"     # its text only: placed by the Editor
+        - text: "only when `down` failed"
+          step: kill_leftovers                # pinned: follows the step; x, y (if any) are from it
+        - "Check the logger first"            # its text only: free, placed by the Editor
 ```
 
 Step fields:
@@ -1261,7 +1268,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - the phases listed in the order they run (each after the phases it needs), reordered by dragging one (or **◀ earlier** / **later ▶**): when each phase runs after the one before it, `needs` follow the new order; otherwise a move putting a phase before one it needs is refused;
 - a palette of what a step can do on each slot, built from the commands its lab role offers, with the implementation of each bound host (`deploy`, `start`, `ready`, `install`...), plus `run`, `python`, `http`, `delay`, `wait_for` and the plugin step types; the resources of each phase are proposed from the setup's stage slots and slots;
 - a form per step for its options (`timeout`, `expect`, `if`, `retries`...), with the YAML view kept in sync;
-- comment cards (section 8.3), like sticky notes on the graph of a phase or a sub-pipeline: **comment** in the palette (*anywhere*) adds one in the middle of the graph shown; a click selects it and edits its text (Markdown) and width in the panel on the right; dragging it moves it (its `x`/`y` are written in the file); Delete, or **Delete** in its panel, removes it. They are never run, and the run page (and the pipeline preview of the Datapacks tab) shows the cards of each phase under its frame, read-only;
+- comment cards (section 8.3), like sticky notes on the graph of a phase or a sub-pipeline: **comment** in the palette (*anywhere*) adds one in the middle of the graph shown; a click selects it and edits its text (Markdown), its width and the step it is pinned to (**Pinned to**, or nothing for a free card; the card stays where it is) in the panel on the right; dragging it moves it (its `x`/`y` are written in the file, from its step when it is pinned); Delete, or **Delete** in its panel, removes it. A card pinned to a step that is deleted stays, free, where it was; one pinned to a step that is renamed follows the new id, and one pinned to steps grouped into a sub-pipeline is pinned to the `uses` step that replaces them. They are never run, and the run page (and the pipeline preview of the Datapacks tab) shows the cards of each phase under its frame, read-only, a pinned one naming its step;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
 
 **Criteria.** The criteria of a test definition (its mexploit scenarios, `criteria/<name>/*.mexploit.yml`) and their unit tests (`criteria_utests/<name>/utests.yml`) open in the criteria editor, the same one `mxp webui` serves on its own ([exploit README](../exploit/README.md#the-web-ui-mxp-webui-and-in-tsqd)): **open the criteria editor** in the **Criteria** section of a test definition on the Datapacks tab (with the last result of their unit tests), or **Open in the criteria editor** on such a file in the Editor. It completes and checks the scenarios as they are typed, with the keys of the test definition, and runs their unit tests on the tsqd host (one `mxp` process per case). Its changes are saved in the session and pushed with the rest.

@@ -1391,7 +1391,7 @@ class Editor:
     def check_testdef(self, session: EditSession, rel: str) -> list[dict]:
         from testsuit.datatools.datapack.model import Testdef
         from testsuit.sequencer.intake import check_against_lab
-        from testsuit.sequencer.model import Pipeline
+        from testsuit.sequencer.model import Pipeline, comment_problems
         text = self.path(session, rel).read_text(encoding="utf-8")
         raw = yaml.safe_load(text) or {}
         problems = []
@@ -1417,6 +1417,9 @@ class Editor:
         for problem in flat["problems"]:
             line, column = _find_line(text, problem)
             problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
+        for problem in comment_problems(pipeline):
+            line, column = _find_line(text, problem)
+            problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
         return problems
 
     def _mismatches(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
@@ -1729,14 +1732,18 @@ class Editor:
         return problems
 
     def check_subpipelines(self, session: EditSession, rel: str, text: str) -> list[dict]:
-        from testsuit.sequencer.model import SubPipeline
+        from testsuit.sequencer.model import Pipeline, SubPipeline, comment_problems
         raw = yaml.safe_load(text) or {}
         problems = []
+        subs = {}
         for name, sub in (raw.get("subpipelines") or {}).items():
             try:
-                SubPipeline.model_validate(sub)
+                subs[name] = SubPipeline.model_validate(sub)
             except ValidationError as e:
                 problems += _pydantic_problems(e, rel, text, ["subpipelines", name])
+        for problem in comment_problems(Pipeline(subpipelines=subs)):
+            line, column = _find_line(text, problem)
+            problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
         return problems
 
     def validate(self, session: EditSession) -> dict:
@@ -1838,7 +1845,7 @@ class Editor:
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows,
-                           "comments": [c.text for c in flat.phase.comments if c.text.strip()]})
+                           "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
                 "key_problems": key_problems, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
 

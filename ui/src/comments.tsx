@@ -12,8 +12,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 // Comment cards of a pipeline (sequencer README, section 8.3): notes on the graph of a phase or a sub-pipeline,
-// like sticky notes, in Markdown. Never run: the Editor draws them where they were put, the run graph under
-// their phase.
+// like sticky notes, in Markdown, free or pinned to a step. Never run: the Editor draws them where they were put
+// (a pinned one follows its step), the run graph under their phase.
 import type { NodeProps } from "@xyflow/react";
 import { classes, Markdown } from "./util";
 
@@ -21,6 +21,7 @@ export const COMMENT_WIDTH = 220;
 
 export interface CommentCard {
   text: string;
+  step?: string;            // the step it is pinned to (x, y then from that step); none: a free card
   x?: number;
   y?: number;
   width?: number;
@@ -34,11 +35,12 @@ export function commentCard(value: any): CommentCard {
 
 /** A comment card on a graph: its Markdown, or a hint when it is empty (the Editor only). */
 export function CommentNode({ data, selected }: NodeProps) {
-  const d = data as { text: string; editable?: boolean };
+  const d = data as { text: string; editable?: boolean; pin?: string; lost?: boolean };
   const empty = !d.text.trim();
   return (
-    <div className={classes("comment-node", selected && "selected", d.editable && "editable", empty && "empty")}
-      title={d.editable ? "Comment: drag it to move it, click it to edit it" : "Comment (never run)"}>
+    <div className={classes("comment-node", selected && "selected", d.editable && "editable", empty && "empty", d.pin && "pinned")}
+      title={d.editable ? `Comment${d.pin ? ` pinned to ${d.pin}${d.lost ? " (no such step: shown free)" : ""}` : ""}: drag it to move it, click it to edit it` : "Comment (never run)"}>
+      {d.pin && <div className={classes("comment-pin", d.lost && "lost")}>📌 {d.pin}</div>}
       {empty ? <span className="muted small">empty comment: write it in the panel on the right</span> : <Markdown text={d.text} />}
     </div>
   );

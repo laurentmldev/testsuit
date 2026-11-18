@@ -162,9 +162,10 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
       for (const phase of pipeline.phases) {
         const p = placed[`phase:${phase.id}`];
         if (!p) continue;
-        (phase.comments || []).forEach((text: string, i: number) => list.push({
+        // (a card pinned to a step says which: the run graph is laid out otherwise than the Editor's)
+        (phase.comments || []).forEach((c: any, i: number) => list.push({
           id: `comment:${phase.id}:${i}`, type: "comment", position: { x: p.x + i * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
-          data: { text }, style: { width: COMMENT_WIDTH }, draggable: false, selectable: false,
+          data: typeof c === "string" ? { text: c } : { text: c.text, pin: c.step || undefined }, style: { width: COMMENT_WIDTH }, draggable: false, selectable: false,
         }));
       }
       setNodes(list);
