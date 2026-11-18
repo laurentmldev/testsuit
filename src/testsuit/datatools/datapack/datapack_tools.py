@@ -68,6 +68,7 @@ import getpass
 import glob
 import graphlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -108,6 +109,24 @@ def _info(text: str) -> None:
 
 def _warn(text: str) -> None:
     print(Fore.YELLOW + "WARNING: " + text + Style.RESET_ALL)
+
+
+def _check_version(importer, version: str, errors_as_warnings: bool) -> bool:
+    """``importer.checkVersion(version)``, its messages passed on. When a mismatch is tolerated (nocheck, or a
+    version set by hand that only makes the datapack non-conform), the lines the importer writes as errors are
+    written as warnings: they do not stop the generation."""
+    if not errors_as_warnings:
+        return importer.checkVersion(version)
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            return importer.checkVersion(version)
+    finally:
+        for line in out.getvalue().splitlines():
+            if line.startswith("ERROR:"):
+                _warn(line.removeprefix("ERROR:").strip())
+            else:
+                print(line)
 
 
 def _validate(model, data: Any, what: str):
@@ -226,7 +245,7 @@ def import_dataset(repo_path: Path, datasource, dataset, scripts_folder: Path, n
     confirmed = True
     if local_path.is_dir():
         _info(label + " [" + Fore.GREEN + "found" + Style.RESET_ALL + "]")
-        if not importer.checkVersion(dataset.version):
+        if not _check_version(importer, dataset.version, errors_as_warnings=nocheck):
             confirmed = False
             message = f"dataset '{dataset.id}': could not confirm it matches version '{dataset.version}'"
             if not nocheck:
@@ -526,7 +545,7 @@ class _Builder:
             return
         try:
             importer = create_data_importer(datasource.importer, record["path"], datasource.source, record["version"])
-            entry["tag"] = bool(importer.checkVersion(record["version"]))
+            entry["tag"] = bool(_check_version(importer, record["version"], errors_as_warnings=True))
         except Exception:                                # an importer that cannot tell: not a tag
             entry["tag"] = False
         if entry["tag"]:

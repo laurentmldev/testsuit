@@ -396,7 +396,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             </div>
           )}
           <div className="dialog-browser"><FileBrowser base={`edit/sessions/${sid}/datapack/${result.name}/files`} initial="datapack.yml" /></div>
-          <details><summary>Log of the datapack tool</summary><pre className="log">{result.log}</pre></details>
+          <details><summary>Log of the datapack tool{logWarnings(result.log)}</summary><LiveLog lines={result.log.split("\n")} /></details>
         </>
       )}
     </Dialog>
@@ -529,6 +529,20 @@ function Elapsed({ started, lastLine }: { started: number; lastLine: number }) {
   );
 }
 
+/** " (N warnings)" for the summary of a log that has any. */
+function logWarnings(log: string): string {
+  const n = (log || "").split("\n").filter((line) => logLevel(line) === "log-warn").length;
+  return n ? ` (${n} warning${n === 1 ? "" : "s"})` : "";
+}
+
+/** How a line of the datapack tool's log stands out. A line the tool writes as a warning stays one, even when
+ *  it quotes an error (a dataset not confirmed with --nocheck: the generation goes on). */
+function logLevel(line: string): "log-error" | "log-warn" | undefined {
+  if (/^\s*WARNING\b/.test(line)) return "log-warn";
+  if (/\b(ERROR|Error|error:|fatal:|Traceback|failed)\b/.test(line)) return "log-error";
+  return /WARNING|warning:/.test(line) ? "log-warn" : undefined;
+}
+
 /** The log of the datapack tool, scrolled to its last line while it grows; error lines stand out. */
 function LiveLog({ lines }: { lines: string[] }) {
   const box = useRef<HTMLPreElement>(null);
@@ -539,7 +553,7 @@ function LiveLog({ lines }: { lines: string[] }) {
   return (
     <pre className="log live-log" ref={box}>
       {lines.length === 0 ? <span className="muted">Starting…</span> : lines.map((line, i) => (
-        <div key={i} className={/\b(ERROR|Error|error:|fatal:|Traceback|failed)\b/.test(line) ? "log-error" : /WARNING|warning:/.test(line) ? "log-warn" : undefined}>{line || "\u00a0"}</div>
+        <div key={i} className={logLevel(line)}>{line || "\u00a0"}</div>
       ))}
     </pre>
   );
