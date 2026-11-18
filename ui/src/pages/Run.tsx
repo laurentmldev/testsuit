@@ -15,10 +15,10 @@
 // the logs of each step, its files before, during and after the run.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
-import { getText, post, url, useLabels, useResource } from "../api";
+import { get, getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { layout } from "../graph";
-import { ago, attempt, Badge, classes, ConsoleText, Elapsed, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
+import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -373,7 +373,7 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
   );
 }
 
-export function RunPage({ id, tab }: { id: string; tab: string }) {
+export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?: boolean }) {
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
@@ -442,6 +442,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                 {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
                 {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
+                {editor && logRecord && <EditLabCommand record={logRecord} />}
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
@@ -469,6 +470,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
             {records.length === 0 && <p className="muted">No step has started yet.</p>}
           </div>
           <div className="split-side">
+            {editor && logRecord && <EditLabCommand record={logRecord} />}
             {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
           </div>
         </div>
@@ -476,6 +478,42 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
       {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} />}
       {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
       {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" />}
+    </div>
+  );
+}
+
+/** Where a lab command is defined, as the editor opens it: the file, its item, and the command to open there. The
+ *  sources are those of the lab's resolution ("model M", "host H", "stage S"); a command its component lacks, or
+ *  defined in a file this lab session cannot edit, opens its component in the inventory. */
+function commandPlace(ctx: any, lc: { name: string; component: string; source: string }) {
+  const [kind, ...rest] = String(lc.source || "").split(" ");
+  const name = rest.join(" ");
+  if (kind === "model" && ctx?.lab?.library?.[name]?.source)
+    return { file: ctx.lab.library[name].source, item: `component:${name}`, command: lc.name };
+  if (kind === "stage" && ctx?.inventory) return { file: ctx.inventory, item: `stage:${name}`, command: lc.name };
+  if (kind === "host" && ctx?.inventory) return { file: ctx.inventory, item: `host:${name}`, command: lc.name };
+  return ctx?.inventory ? { file: ctx.inventory, item: `host:${lc.component}`, command: lc.name } : {};
+}
+
+/** The lab command a failed 'do:' step ran, and a button opening the lab editor (in a new tab) on it, where it is
+ *  defined: its model, its stage's or its own overrides in the inventory, or a host it extends. */
+function EditLabCommand({ record }: { record: any }) {
+  const lc = record?.lab_command;
+  if (!lc || !["failed", "error"].includes(record.state)) return null;
+  const where = lc.source ? `defined in ${lc.source}` : `not defined for ${lc.component}`;
+  const edit = () => openInNewTab((async () => {
+    const s = await attempt(() => post("edit/sessions", { repo: "lab", local: true }));
+    if (!s) return null;
+    const ctx = await get<any>(`edit/sessions/${s.id}/context`).catch(() => null);
+    return { path: `edit/${s.id}`, query: commandPlace(ctx, lc) };
+  })());
+  return (
+    <div className="edit-lab-command small">
+      <span>lab command <code>{lc.name}</code> of <code>{lc.component}</code> <span className="muted">({where})</span></span>
+      <button className="small" onClick={edit}
+        title={`Open the lab config in the Editor (in place), in a new browser tab, on the command '${lc.name}' ${lc.source ? `of ${lc.source}` : `(to implement it on ${lc.component})`}`}>
+        Edit the command
+      </button>
     </div>
   );
 }

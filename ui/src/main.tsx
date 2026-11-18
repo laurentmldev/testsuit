@@ -102,7 +102,7 @@ function App() {
   // are kept as they were, so existing links still work
   const tabOf = (key: string) => (key === "queue" ? "runs" : key);
   let content;
-  if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} />;
+  if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor} />;
   else if (page === "runs") content = <RunsPage />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;

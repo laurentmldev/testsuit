@@ -20,7 +20,7 @@ import { Address, attempt, classes, freeName, labId, labIdInput, labIdProblem, M
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
-import { ItemLink, ItemLinks, extendsKind, useItemRequest } from "./links";
+import { ItemLink, ItemLinks, extendsKind, useItemRequest, type CommandRequest } from "./links";
 import { IconPicker, LinksEditor } from "./LabPicture";
 
 type Inv = any;
@@ -96,10 +96,14 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
   const inv = doc.data || {};
   const [sel, setSel] = useState<Selection>({ kind: "defaults" });
   const [wizard, setWizard] = useState<null | { kind: "stage" } | { kind: "adhoc" } | { kind: "member"; stage: string }>(null);
-  useItemRequest(doc.path, (kind, name) => {
-    if (kind === "host" && allHosts(inv).includes(name)) setSel({ kind: "host", name });
-  });
+  const [focusCommand, setFocusCommand] = useState<CommandRequest>(null);
   const gs = groups(inv);
+  useItemRequest(doc.path, (kind, name, command) => {
+    if (kind === "host" && allHosts(inv).includes(name)) setSel({ kind: "host", name });
+    else if (kind === "stage" && gs.some((g) => g.name === name)) setSel({ kind: "group", name });
+    else return;
+    setFocusCommand(command);
+  });
   const stages = gs.filter((g) => g.stage);
   const plain = gs.filter((g) => !g.stage);
   const staged = new Set(stages.flatMap((s) => s.hosts));
@@ -148,10 +152,10 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
       <div className="form-main">
         {sel.kind === "defaults" && <DefaultsForm inv={inv} update={update} />}
         {sel.kind === "group" && gs.find((g) => g.name === sel.name) && (
-          <GroupForm inv={inv} group={gs.find((g) => g.name === sel.name)!} update={update} onSelect={setSel}
+          <GroupForm inv={inv} group={gs.find((g) => g.name === sel.name)!} update={update} onSelect={setSel} focusCommand={focusCommand}
             onAdd={() => setWizard({ kind: "member", stage: sel.name })} />
         )}
-        {sel.kind === "host" && allHosts(inv).includes(sel.name) && <HostForm inv={inv} name={sel.name} update={update} onRenamed={(n) => setSel({ kind: "host", name: n })} onDeleted={() => setSel({ kind: "defaults" })} />}
+        {sel.kind === "host" && allHosts(inv).includes(sel.name) && <HostForm inv={inv} name={sel.name} update={update} focusCommand={focusCommand} onRenamed={(n) => setSel({ kind: "host", name: n })} onDeleted={() => setSel({ kind: "defaults" })} />}
       </div>
       {wizard?.kind === "stage" && <NewStage inv={inv} onClose={() => setWizard(null)} onCreate={(draft, name) => {
         api.setData(draft);
@@ -398,8 +402,9 @@ function HostCard({ name, own, onOverride }: {
   );
 }
 
-function GroupForm({ inv, group, update, onSelect, onAdd }: {
+function GroupForm({ inv, group, update, onSelect, onAdd, focusCommand }: {
   inv: Inv; group: GroupInfo; update: (fn: (d: Inv) => void) => void; onSelect: (s: Selection) => void; onAdd: () => void;
+  focusCommand?: CommandRequest;
 }) {
   const { ctx, schemas } = useSession();
   const help = useInvHelp();
@@ -473,7 +478,7 @@ function GroupForm({ inv, group, update, onSelect, onAdd }: {
         )}
       </Section>
       <CommandsEditor title="Command overrides for the whole stage (tsq_commands)" help={help(["all", "vars", "tsq_commands"])}
-        value={group.vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)} />
+        value={group.vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)} focus={focusCommand} />
       <Section title="Stage variables" help="Variables of every component of the group (host variables win, key by key for a group of variables like `custom_grp.keyA`).">
         <KeyValues nested value={group.vars} onChange={(v) => update((d) => setAt(d, varsPath, v))} known={knownVars(schemas, ["all", "children", "_", "vars"], ["tsq_stage_type", "tsq_commands"])}
           exclude={["tsq_stage_type", "tsq_commands", "tsq_description", "tsq_tags"]} />
@@ -490,8 +495,9 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
   return <input className={classes("inline-name", labIdProblem(v) && "invalid")} value={v} onChange={(e) => setV(labIdInput(e.target.value))} onBlur={done} onKeyDown={(e) => e.key === "Enter" && done()} key={value} />;
 }
 
-function HostForm({ inv, name, update, onRenamed, onDeleted }: {
+function HostForm({ inv, name, update, onRenamed, onDeleted, focusCommand }: {
   inv: Inv; name: string; update: (fn: (d: Inv) => void) => void; onRenamed: (n: string) => void; onDeleted: () => void;
+  focusCommand?: CommandRequest;
 }) {
   const { ctx, schemas } = useSession();
   const help = useInvHelp();
@@ -620,7 +626,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted }: {
       </Section>
       <CommandsEditor title="Its own command implementations (tsq_commands)" help={help(["all", "vars", "tsq_commands"])}
         value={vars.tsq_commands} onChange={(v) => set("tsq_commands", Object.keys(v).length ? v : undefined)}
-        inherited={inherited} required={role ? required : undefined} ownOnly
+        inherited={inherited} required={role ? required : undefined} ownOnly focus={focusCommand}
         empty="None: it uses the commands above. Override one there to give it its own implementation." />
       <StatusEditor value={vars.tsq_status} onChange={(v) => set("tsq_status", v)} inherited={base?.status ? { spec: base.status.spec ?? base.status, from: base.status.from ?? baseName } : undefined} />
       <SelftestEditor value={vars.tsq_selftest} onChange={(v) => set("tsq_selftest", v.length ? v : undefined)} inherited={(base?.selftest || []).map((c: any) => (typeof c === "string" ? { spec: { id: c }, from: baseName } : c))} />
