@@ -22,6 +22,8 @@ import { ago, attempt, Badge, classes, ConsoleText, Elapsed, setQuery, Spinner, 
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
+/** The id of a phase's finally lane in the graph (after "phase:<id>/"), a name no step or sub-pipeline can take. */
+const FINALLY_LANE = "~finally";
 
 function worst(states: string[]): string {
   for (const s of ["error", "failed", "running", "ready", "pending", "skipped", "succeeded"]) if (states.includes(s)) return s;
@@ -61,6 +63,7 @@ function FrameNode({ data }: NodeProps) {
   const d = data as any;
   return (
     <div className={classes("frame-node", d.kind, d.state && STATE_COLORS[d.state])}>
+      {d.kind === "finally" && <Handle type="target" position={Position.Left} />}
       <div className="frame-title">{d.label}{d.state && <Badge value={d.state} />}</div>
     </div>
   );
@@ -91,10 +94,14 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
       lay.push({ id: pid, width: 200, height: 80 });
       for (const need of phase.needs) edgeList.push({ id: `${need}->${phase.id}`, source: `phase:${need}`, target: pid, className: "phase-edge" });
       const groups = new Set<string>();
+      // the finally steps in a lane of their own, after the steps of the phase: they run in the end whatever
+      // happened (cancel and kill included), their states shown live like the other steps
+      const lane = `${pid}/${FINALLY_LANE}`;
+      if (phase.steps.some((s: any) => s.part === "finally")) lay.push({ id: lane, width: 170, height: 60, parent: pid, minWidth: 170 });
       for (const s of phase.steps) {
         // nested sub-pipeline frames: 'up', then 'up.inner'...
         const parts = s.group ? s.group.split(".") : [];
-        let parent = pid;
+        let parent = s.part === "finally" ? lane : pid;
         for (let i = 1; i <= parts.length; i++) {
           const g = `${pid}/${parts.slice(0, i).join(".")}/${s.part}`;
           if (!groups.has(g)) {
@@ -106,10 +113,11 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
         lay.push({ id: `${pid}/${s.id}`, width: 150, height: 56, parent });
         for (const n of s.needs) edgeList.push({ id: `${phase.id}:${n}->${s.id}`, source: `${pid}/${n}`, target: `${pid}/${s.id}` });
       }
-      // finally steps after every step of the phase
-      const finals = phase.steps.filter((s: any) => s.part === "finally" && !s.needs.length);
-      const lasts = phase.steps.filter((s: any) => s.part === "steps" && !phase.steps.some((o: any) => o.needs.includes(s.id)));
-      for (const f of finals) for (const l of lasts) edgeList.push({ id: `${phase.id}:${l.id}~>${f.id}`, source: `${pid}/${l.id}`, target: `${pid}/${f.id}`, className: "finally-edge" });
+      // the finally lane after every last step of the phase
+      if (phase.steps.some((s: any) => s.part === "finally")) {
+        const lasts = phase.steps.filter((s: any) => s.part === "steps" && !phase.steps.some((o: any) => o.needs.includes(s.id)));
+        for (const l of lasts) edgeList.push({ id: `${phase.id}:${l.id}~>finally`, source: `${pid}/${l.id}`, target: lane, className: "finally-edge" });
+      }
     }
     const crossPhase = edgeList.filter((e) => e.className === "phase-edge");
     layout(lay, edgeList.filter((e) => e.className !== "phase-edge").concat(crossPhase).map((e) => ({ id: e.id, source: e.source, target: e.target }))).then((placed) => {
@@ -121,7 +129,9 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
         const isFrame = n.id.startsWith("phase:") && (n.id.split("/").length === 1 || n.id.endsWith("/steps") || n.id.endsWith("/finally"));
         const [phaseId, rest] = [n.id.split("/")[0].slice(6), n.id.split("/").slice(1)];
         const base = { id: n.id, position: { x: p.x, y: p.y }, ...(n.parent ? { parentId: n.parent, extent: "parent" as const } : {}), draggable: false };
-        if (isFrame) {
+        if (rest.length === 1 && rest[0] === FINALLY_LANE) {
+          list.push({ ...base, type: "frame", data: { label: "finally · always runs", kind: "finally", phase: phaseId }, style: { width: p.width, height: p.height }, selectable: false });
+        } else if (isFrame) {
           const label = rest.length ? `${rest[0]} (sub-pipeline${rest[1] === "finally" ? ", finally" : ""})` : `phase ${phaseId}`;
           list.push({ ...base, type: "frame", data: { label, kind: rest.length ? "sub" : "phase", phase: phaseId }, style: { width: p.width, height: p.height }, selectable: false });
         } else {
@@ -143,8 +153,14 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
 
   const live = nodes.map((n) => {
     if (n.type === "frame") {
-      const phase = (n.data as any).phase;
-      if ((n.data as any).kind !== "phase") return n;
+      const { phase, kind } = n.data as any;
+      if (kind === "finally") {
+        // the state of the finally steps once one has started, running while one runs
+        const finals = new Set(pipeline.phases.find((ph: any) => ph.id === phase)?.steps.filter((s: any) => s.part === "finally").map((s: any) => s.id));
+        const states = records.filter((r) => r.phase === phase && finals.has(r.id)).map((r) => r.state);
+        return { ...n, data: { ...n.data, state: states.length ? worst(states) : undefined } };
+      }
+      if (kind !== "phase") return n;
       const states = records.filter((r) => r.phase === phase).map((r) => r.state);
       return { ...n, data: { ...n.data, state: states.length ? worst(states) : undefined } };
     }
@@ -362,6 +378,8 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   useEffect(() => {
     if (!pinned && runningKey && runningKey !== selected) setSelected(runningKey);
   }, [runningKey, pinned]);
+  // the finally steps of each phase ('phase:step'), marked as such in the list of steps
+  const finals = useMemo(() => new Set<string>((pipeline.data?.phases || []).flatMap((ph: any) => ph.steps.filter((s: any) => s.part === "finally").map((s: any) => `${ph.id}:${s.id}`))), [pipeline.data]);
   const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, slotOf(s)) === key);
   // the log to show: the selected record, or the first slot of a step run on several; none before it starts
   const logRecord = selected ? recordFor(selected) || records.find((s) => selected === `${s.phase}:${s.id}`) : null;
@@ -414,7 +432,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                 <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={pick} />
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
-            ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
+            ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; the finally steps, in their dashed lane after the steps, always run at the end, cancel and kill included.</p>}
           </div>
         </div>
       )}
@@ -428,7 +446,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
                   const key = stepKey(s.phase, s.id, slotOf(s));
                   return (
                     <tr key={key} className={classes("clickable", selected === key && "selected")} onClick={() => pick(key)}>
-                      <td><code>{key}</code>{s.via && <> <ViaTag via={s.via} title={`its command ran on ${s.via}, which reaches the component of slot ${slotOf(s)}`} /></>}</td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
+                      <td><code>{key}</code>{finals.has(`${s.phase}:${s.id}`) && <> <span className="chip finally-tag" title="a finally step: it runs at the end of its phase whatever happened">finally</span></>}{s.via && <> <ViaTag via={s.via} title={`its command ran on ${s.via}, which reaches the component of slot ${slotOf(s)}`} /></>}</td><td><Badge value={s.state} /></td><td>{s.started ? time(s.started) : ""}</td>
                       <td>{s.started ? <Elapsed from={s.started} to={s.ended || (live ? null : r.ended_at)} /> : ""}</td><td>{s.exit_status ?? ""}</td><td>{s.attempts || ""}</td>
                       <td className="reason">{s.reason}</td>
                     </tr>

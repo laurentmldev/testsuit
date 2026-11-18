@@ -197,6 +197,11 @@ tr.finally-row td { color: var(--muted); }
 .frame-node.lane.target { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
 .frame-node .lane-pick { font-weight: 500; color: var(--accent); }
 .frame-node .lane-empty { padding: 2px 8px; }
+.frame-node.finally { border: 1.5px dashed var(--wait); background: color-mix(in srgb, var(--wait) 7%, var(--panel)); }
+.frame-node.finally.ok { border-color: var(--ok); }
+.frame-node.finally.run { border-color: var(--run); border-style: solid; }
+.frame-node.finally.bad { border-color: var(--bad); }
+.chip.finally-tag { font-size: 11px; border: 1px dashed var(--muted); }
 .step-node { background: var(--panel); border: 1.5px solid var(--border); border-left-width: 5px; border-radius: 7px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
 .step-node.ok { border-left-color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); }
 .step-node.run { border-left-color: var(--run); border-color: var(--run); }
