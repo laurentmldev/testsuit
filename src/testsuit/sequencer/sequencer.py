@@ -710,8 +710,11 @@ class Sequencer:
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
             keys = self._manual_keys(comp, stage, root, via, by_hand)
             request = httpcall.normalize(render(spec["http"], keys, f"{comp_id}.{name}"), f"command '{name}'")
-            limit = timeout or (parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
-                                if spec.get("timeout") is not None else httpcall.timeout_of(request))
+            if request.get("timeout") is not None:     # the request's own timeout wins over the command's
+                limit = httpcall.timeout_of(request)
+            else:
+                limit = timeout or (parse_duration(render(spec["timeout"], keys, f"{comp_id}.{name}"))
+                                    if spec.get("timeout") is not None else httpcall.timeout_of(request))
             answer = await httpcall.request(request, self.transport_for(via.id) if via else None, limit)
             ok, why = httpcall.judge(request, answer)
             result.update(ok=ok, run=httpcall.describe(request), via=via.id if via else None,

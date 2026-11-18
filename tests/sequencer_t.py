@@ -2360,6 +2360,37 @@ def test_http_body_file(tmp_path, api):
     assert parse_curl(sent.stdout, sent.returncode).status == 201 and api.requests[-1][3] == data
 
 
+def test_http_upload_progress(tmp_path, api):
+    """An upload tells its progress: from the sequencer host as the file is read and sent, through via from
+    curl's progress meter; the answer is not mixed with the meter."""
+    from testsuit.sequencer.httpcall import UploadMeter, parse_curl, request
+    path = tmp_path / "big.bin"
+    path.write_bytes(b"x" * (3 << 20))
+    told = []
+
+    async def main():
+        return await request({"url": f"{api.url}/upload", "method": "POST", "body_file": str(path)}, None, 10,
+                             None, lambda sent, total: told.append((sent, total)))
+    answer = asyncio.run(main())
+    assert answer.status == 201 and answer.body == '{"size": 3145728}' and len(api.requests[-1][3]) == 3 << 20
+    assert told[0] == (0, 3 << 20) and told[-1] == (3 << 20, 3 << 20)
+
+    seen = []
+    meter = UploadMeter(lambda sent, total: seen.append((sent, total)))
+    output = ("__tsq_upload_size__ 52428800\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n"
+              "                                 Dload  Upload   Total   Spent    Left  Speed\n"
+              "\r  0 50.0M    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0"
+              "\r 25 50.0M    0     0   25 12.5M      0  12.4M  0:00:04  0:00:01  0:00:03 12.4M"
+              "\r100 50.0M  100    11  100 50.0M      5  12.4M  0:00:04  0:00:04 --:--:-- 12.4M"
+              "\n__tsq_http_status__ 201\n__tsq_http_body__\n{\"ok\": 1}")
+    for i in range(0, len(output), 7):                       # in pieces, as a transport gives it
+        meter.feed(output[i:i + 7].encode())
+    assert seen == [(0, 50 << 20), (0, 50 << 20), (int(12.5 * (1 << 20)), 50 << 20), (50 << 20, 50 << 20)]
+    assert parse_curl(output, 0).body == '{"ok": 1}' and parse_curl(output, 0).status == 201
+    refused = output.replace("__tsq_http_status__ 201", "curl: (7) Failed to connect\n__tsq_http_status__ 000")
+    assert parse_curl(refused, 7).error == "curl: (7) Failed to connect"
+
+
 def test_http_extract():
     """'extract' takes a part of the JSON answer with a jq-style path; the expectations see that part."""
     from testsuit.sequencer.httpcall import Answer, apply_extract, extract, judge, normalize
@@ -2443,7 +2474,8 @@ def test_http_command_via(tmp_path, no_git, api):
         "http": {"url": f"{api.url}/status", "headers": {"X-Api-Key": "k3y"}, "expect": {"json": {"version": "1.2"}},
                  "save": "version.json"}, "via": "seq_host"},
         "upload": {"http": {"url": f"{api.url}/upload", "method": "POST", "body_file": "{{ component.vars.payload }}",
-                            "expect": {"json": {"size": 6}}}, "via": "seq_host"}}       # curl reads the file there
+                            "expect": {"json": {"size": 6}}, "timeout": "300s"}, "via": "seq_host",   # curl reads the file there
+                   "timeout": "30s"}}                       # the request's own timeout wins
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
     pipeline = copy.deepcopy(PIPELINE)
     pipeline["phases"][0]["steps"].append({"id": "version", "slot": "dut", "do": "version", "needs": ["ready"]})
@@ -2455,7 +2487,12 @@ def test_http_command_via(tmp_path, no_git, api):
     assert yaml.safe_load(read_member(run, "data/dut/http/version.json"))["version"] == "1.2"
     assert api.requests[-2][2]["X-Api-Key"] == "k3y"
     assert api.requests[-1][3] == b"\x00\xffbin\n" and api.requests[-1][2]["Content-Type"] == "application/octet-stream"
-    assert f"--data-binary @{tmp_path / 'upload.bin'}" in read_member(run, "logs/test_run/upload[dut].log")
+    upload_log = read_member(run, "logs/test_run/upload[dut].log")
+    assert f"--data-binary @{tmp_path / 'upload.bin'}" in upload_log
+    assert "sent 0 B of 6 B (0%)" in upload_log and "sent 6 B of 6 B (100%)" in upload_log     # curl's meter, read live
+    upload = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "upload")
+    assert "progress" not in upload                                                        # only while it runs
+    assert "(timeout 300 s)" in upload_log
     version = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "version")
     assert version["lab_command"] == {"name": "version", "component": "counter_1", "source": "host counter_1"}
 

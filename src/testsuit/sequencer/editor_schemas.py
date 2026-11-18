@@ -93,9 +93,10 @@ HTTP = h(
                        "It is read where the request is sent from: on the sequencer host, a relative path is in the "
                        "run folder (`{{ run.dir }}`: the datapack's files), and only an absolute one works outside a "
                        "run (by hand, status probes); with `via`, on that component (curl reads it there). Only one of "
-                       "`json`, `body` and `body_file`.", type="string",
+                       "`json`, `body` and `body_file`. The Run page shows the upload's progress.", type="string",
                        examples=["payload.bin", "{{ component.input_dir }}/firmware.bin"]),
-        "timeout": DURATION,
+        "timeout": h("How long the request may take (default 30 s): `30s`, `5m`. When given, it is the request's "
+                     "limit, over the command's or step's `timeout`.", type=["string", "number"], examples=["30s", "5m"]),
         "verify": h("Check the server's TLS certificate (default true; false for a self-signed lab server).",
                     type="boolean"),
         "extract": h("Take a part of the JSON answer, with a jq-style path: `.state`, `.jobs[0].state`, `.jobs[-1]`, "
