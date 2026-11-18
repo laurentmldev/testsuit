@@ -18,6 +18,7 @@ import "./styles.css";
 import { get, post, url, useConnected, useResource } from "./api";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
 import { NavIcon } from "./navicons";
+import { setAppName, useTabTitle } from "./title";
 import { QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
 import { RunPage } from "./pages/Run";
@@ -92,15 +93,16 @@ function App() {
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
   const page = route.parts[0] || "queue";
   const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
-  useEffect(() => {
-    if (!editing) document.title = title;
-  }, [title, editing]);
+  useEffect(() => { setAppName(title); }, [title]);
   const nav = [
     ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
   ];
   // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
   // are kept as they were, so existing links still work
   const tabOf = (key: string) => (key === "queue" ? "runs" : key);
+  // the browser tab follows the selected top-level tab: "Lab · Test sequencer"
+  const tabLabel = page === "edit" ? "Editor" : nav.find(([key]) => key === tabOf(page))?.[1] ?? "Runs";
+  useTabTitle(editing ? undefined : tabLabel);
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor} />;
   else if (page === "runs") content = <RunsPage />;

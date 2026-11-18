@@ -18,6 +18,7 @@ import { del, post, put, useResource } from "../api";
 import { HelpPanel, HelpProvider, KeysProvider } from "../fields";
 import { CodeEditor, yamlSections } from "../monaco";
 import { attempt, classes, Markdown, navigate, notify, setQuery, Spinner, type Route } from "../util";
+import { useTabTitle } from "../title";
 import { runtimeKeyItems, SessionContext, useDoc, useSession, useSessionData, type Doc, type FileInfo, type Problem, type Session } from "./state";
 import { InventoryForm } from "./InventoryForm";
 import { LibraryForm } from "./LibraryForm";
@@ -252,12 +253,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   }, []);
   // the browser tab says what it edits (the Lab page and the Datapacks page open the Editor in a tab of its own)
   const repoOf = session?.info.repo;
-  useEffect(() => {
-    if (!repoOf) return;
-    const before = document.title;
-    document.title = repoOf === "lab" ? "Edit Lab" : `Edit Datapacks · ${repoOf}`;
-    return () => { document.title = before; };
-  }, [repoOf]);
+  useTabTitle(!repoOf ? "Editor" : repoOf === "lab" ? "Edit Lab" : `Edit Datapacks · ${repoOf}`);
   if (!session) return <div className="page"><Spinner className="block" text="Opening the session: reading its files, the lab and the schemas…" /></div>;
   const doc = api.doc;
   const validateAll = async () => {
