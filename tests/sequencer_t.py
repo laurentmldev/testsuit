@@ -1585,6 +1585,30 @@ def test_kill_stops_hanging_finally(tmp_path, no_git):
     assert record["phases"]["exploit"] == "skipped"
 
 
+def test_failed_http_via_runs_finally(tmp_path, no_git):
+    """A lab command sent through another component (via, curl there) that gets a 406 fails its step; the steps
+    after it are skipped, the phase's finally steps run and the run ends."""
+    server, url = _rejecting_api()
+    bench = Bench(tmp_path, stages=1)
+    inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
+    inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"api": {
+        "http": {"url": f"{url}/jobs", "method": "POST", "json": {"mode": "run"}}, "via": "seq_host"}}
+    write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
+    pipeline = copy.deepcopy(PIPELINE)
+    steps = pipeline["phases"][0]["steps"]
+    steps.insert(3, {"id": "api", "slot": "dut", "do": "api", "needs": ["ready"]})
+    steps[4]["needs"] = ["api"]
+    try:
+        run = run_one(bench, bench.build("via_406", pipeline=pipeline))
+    finally:
+        server.shutdown()
+    assert run["state"] == "done" and run["verdict"] == "failed"
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    steps = {s["id"]: s for s in record["steps"] if s["phase"] == "test_run"}
+    assert (steps["api"]["state"], steps["api"]["reason"], steps["api"]["via"]) == ("failed", "status 406", "seq_host")
+    assert steps["run"]["state"] == "skipped" and steps["collect"]["state"] == "succeeded"
+
+
 def test_kill_ends_a_run_nothing_runs(tmp_path, no_git):
     """A run left 'running' with no live execution behind it (its task died without ending it, or it is not
     known to this sequencer at all) is ended by a kill, its locks released."""

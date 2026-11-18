@@ -20,7 +20,7 @@ import { FileBrowser } from "../files";
 import { COMMENT_WIDTH, CommentNode } from "../comments";
 import { layout } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
-import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
+import { abort, ACTIVE, PriorityInput, repost, RunStateBadge } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
 /** The id of a phase's finally lane in the graph (after "phase:<id>/"), a name no step or sub-pipeline can take. */
@@ -434,7 +434,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
     <div className="page run-page">
       <div className="page-head">
         <h2>{r.testdef}</h2>
-        <Badge value={r.state} />
+        <RunStateBadge run={r} />
         <Badge value={r.verdict} />
         <span className="spacer" />
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
