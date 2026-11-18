@@ -153,6 +153,9 @@ class StepRecord:
     attempts: int = 0
     log: str = ""
     via: str = ""                                 # the component its command ran through (a command's via)
+    # the lab command a 'do:' step runs: {name, component (lab component id), source ("model M", "host H",
+    # "stage S", "" when its component has none)}, so the Run page opens where it is defined
+    lab_command: dict | None = None
 
     @property
     def key(self) -> str:
@@ -321,6 +324,8 @@ class StepRunner:
         if self.slot is None:
             raise SequencerError(f"step '{self.fs.id}': 'do: {name}' needs a slot")
         spec = self.slot.resolved.commands.get(name)
+        self.record.lab_command = {"name": name, "component": self.slot.concrete.id,
+                                   "source": self.slot.resolved.command_sources.get(name, "") if spec is not None else ""}
         if spec is None:
             raise SequencerError(f"slot '{self.slot.id}' (lab component {self.slot.concrete.id}, role {self.slot.concrete.role}) has no "
                                  f"command '{name}' (has: {', '.join(sorted(self.slot.resolved.commands)) or 'none'})")

@@ -472,18 +472,28 @@ function TransferDialog({ mode, name, transfer, onClose, onDone }: {
 /** Commands by name: inherited ones (read-only, can be overridden) and own ones (editable). With required (the
  * commands a role lists, with what each does), those implemented nowhere are shown as missing. With transfer,
  * an own command can be copied or moved to another component (or copied to this one under another name). */
-export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer, ownOnly, empty }: {
+export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer, ownOnly, empty, focus }: {
   value: Record<string, any> | null | undefined; onChange: (v: Record<string, any>) => void;
   inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string }>;
   title?: string; help?: string; transfer?: CommandTransfer;
   /** only the own commands: the inherited ones are shown (and overridden) elsewhere */
   ownOnly?: boolean; empty?: ReactNode;
+  /** a command to open and scroll to (asked by a link, as the Run page's "Edit the command" of a failed step) */
+  focus?: { name: string } | null;
 }) {
   const { schemas } = useSession();
   const own = value || {};
   const [openName, setOpenName] = useState<string | null>(null);
   const [moving, setMoving] = useState<{ mode: "copy" | "move"; name: string } | null>(null);
   const [adding, setAdding] = useState("");
+  const table = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    setOpenName(focus.name);
+    // once open, its row is brought into view (the form may be long: a host's resolved commands come first)
+    requestAnimationFrame(() => table.current?.querySelector(`tr[data-command="${CSS.escape(focus.name)}"]`)
+      ?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }, [focus]);
   // a command added from elsewhere (an Override button of the resolved commands) opens for editing
   const ownKeys = Object.keys(own);
   const known = useRef<string[] | null>(null);
@@ -511,7 +521,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
   return (
     <Section title={title || "Commands"} help={help}>
       {names.length === 0 && empty && <p className="muted small">{empty}</p>}
-      <table className="grid compact commands">
+      <table className="grid compact commands" ref={table}>
         <tbody>
           {names.map((name) => {
             const mine = name in own;
@@ -519,7 +529,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
             const role = required?.[name];
             if (!mine && !from)
               return (
-                <tr key={name} className="missing" title={role?.description}>
+                <tr key={name} data-command={name} className="missing" title={role?.description}>
                   <td><code>{name}</code></td>
                   <td className="error-text small">not implemented{role?.description ? `: ${role.description}` : ""}</td>
                   <td className="muted small">{role?.from ? `listed by role ${role.from}` : ""}</td>
@@ -527,7 +537,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 </tr>
               );
             return [
-              <tr key={name} className={classes("clickable", !mine && "inherited", openName === name && "selected open")} onClick={() => setOpenName(openName === name ? null : name)}
+              <tr key={name} data-command={name} className={classes("clickable", !mine && "inherited", openName === name && "selected open")} onClick={() => setOpenName(openName === name ? null : name)}
                   title={openName === name ? "Click to close its details" : mine ? "Click to edit it" : "Click to see it"}>
                 <td><span className="disclosure" aria-hidden="true">{openName === name ? "▾" : "▸"}</span><code>{name}</code>
                   {String((mine ? own[name] : from?.spec)?.comments ?? "").trim() && <span className="comments-mark" title={String((mine ? own[name] : from?.spec).comments)}>💬</span>}</td>

@@ -457,6 +457,10 @@ def test_run_succeeded(bench):
     baseline = yaml.safe_load(read_member(run, "baseline.yml"))
     concrete = record["binding"]["slots"]["dut"]
     assert baseline["run"]["components"][concrete]["version"] == "counter-1.2.0"
+    # a 'do:' step says which lab command it ran and where it is defined: the Run page opens the editor there
+    start = next(s for s in record["steps"] if s["phase"] == "test_run" and s["id"] == "start")
+    assert start["lab_command"] == {"name": "start", "component": concrete, "source": start["lab_command"]["source"]}
+    assert start["lab_command"]["source"].startswith("model ")
     selftest = yaml.safe_load(read_member(run, "selftest.yml"))
     assert all(r["ok"] for r in selftest["attempts"])
     seq_store = Store(bench.config.storage_path("database"))
@@ -2334,6 +2338,8 @@ def test_http_command_via(tmp_path, no_git, api):
     assert api.requests[-2][2]["X-Api-Key"] == "k3y"
     assert api.requests[-1][3] == b"\x00\xffbin\n" and api.requests[-1][2]["Content-Type"] == "application/octet-stream"
     assert f"--data-binary @{tmp_path / 'upload.bin'}" in read_member(run, "logs/test_run/upload[dut].log")
+    version = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "version")
+    assert version["lab_command"] == {"name": "version", "component": "counter_1", "source": "host counter_1"}
 
 
 def test_http_manual_command(tmp_path, no_git, api):

@@ -742,6 +742,8 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .step-via { margin-top: 3px; }
 .step-via .via-tag { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .step-via-note { margin-top: 4px; }
+.edit-lab-command { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; padding: 4px 8px; border-left: 3px solid var(--bad); background: var(--bad-soft); border-radius: 3px; }
+.edit-lab-command button { margin-left: auto; }
 
 /* a command's output as a console: the lines it ran (prompt) between what they printed */
 .console-cmd { color: var(--accent); font-weight: 600; margin-top: 2px; }
