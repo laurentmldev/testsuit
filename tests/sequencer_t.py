@@ -2474,7 +2474,8 @@ def test_http_command_via(tmp_path, no_git, api):
         "http": {"url": f"{api.url}/status", "headers": {"X-Api-Key": "k3y"}, "expect": {"json": {"version": "1.2"}},
                  "save": "version.json"}, "via": "seq_host"},
         "upload": {"http": {"url": f"{api.url}/upload", "method": "POST", "body_file": "{{ component.vars.payload }}",
-                            "expect": {"json": {"size": 6}}}, "via": "seq_host"}}       # curl reads the file there
+                            "expect": {"json": {"size": 6}}, "timeout": "300s"}, "via": "seq_host",   # curl reads the file there
+                   "timeout": "30s"}}                       # the request's own timeout wins
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
     pipeline = copy.deepcopy(PIPELINE)
     pipeline["phases"][0]["steps"].append({"id": "version", "slot": "dut", "do": "version", "needs": ["ready"]})
@@ -2491,6 +2492,7 @@ def test_http_command_via(tmp_path, no_git, api):
     assert "sent 0 B of 6 B (0%)" in upload_log and "sent 6 B of 6 B (100%)" in upload_log     # curl's meter, read live
     upload = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "upload")
     assert "progress" not in upload                                                        # only while it runs
+    assert "(timeout 300 s)" in upload_log
     version = next(s for s in yaml.safe_load(read_member(run, "run.yml"))["steps"] if s["id"] == "version")
     assert version["lab_command"] == {"name": "version", "component": "counter_1", "source": "host counter_1"}
 

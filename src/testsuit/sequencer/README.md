@@ -683,7 +683,7 @@ models:
           json: {enabled: true, voltage: "{{ component.vars.voltage }}"}   # or body: "raw text", or body_file: a path; params: query string
           expect: {status: [200, 204], json: {enabled: true}}  # default: a status below 400
           save: start_answer.json                               # the answer, in data/<slot>/http/ of the results
-          timeout: 10s                                          # default 30 s
+          timeout: 10s                                          # of the request, over the command's timeout (default 30 s)
           verify: false                                         # a self-signed lab server
       stop: {http: {url: "{{ component.vars.api }}/outputs/1", method: PUT, json: {enabled: false}}}
     status:

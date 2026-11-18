@@ -415,8 +415,9 @@ class StepRunner:
         if spec.get("via"):
             via, transport, _ = self.via_place(str(render(spec["via"], keys, self.fs.id)))
             self.note(f"through {via.id} ({via.host}), with curl")
-        limit = timeout if timeout is not None else httpcall.timeout_of(request)
-        self.note(f"HTTP {httpcall.describe(request)}")
+        # the request's own timeout when it has one, else the command's or step's, else 30 s
+        limit = httpcall.timeout_of(request) if request.get("timeout") is not None or timeout is None else timeout
+        self.note(f"HTTP {httpcall.describe(request)} (timeout {limit:g} s)")
         progress = self.upload_progress() if "body_file" in request else None
         try:
             answer = await httpcall.request(request, transport, limit, self.ctx.bag, progress)
