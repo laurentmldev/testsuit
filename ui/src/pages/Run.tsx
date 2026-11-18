@@ -18,13 +18,16 @@ import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, R
 import { get, getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
 import { COMMENT_WIDTH, CommentNode } from "../comments";
-import { layout } from "../graph";
+import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { abort, ACTIVE, PriorityInput, repost } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
 /** The id of a phase's finally lane in the graph (after "phase:<id>/"), a name no step or sub-pipeline can take. */
 const FINALLY_LANE = "~finally";
+/** The id of the frame around the other steps of a phase that has finally steps: their arrows to the finally lane
+ *  merge into one from it. */
+const STEPS_LANE = "~steps";
 
 function worst(states: string[]): string {
   for (const s of ["error", "failed", "running", "ready", "pending", "skipped", "succeeded"]) if (states.includes(s)) return s;
@@ -88,8 +91,10 @@ function FrameNode({ data }: NodeProps) {
   const d = data as any;
   return (
     <div className={classes("frame-node", d.kind, d.state && STATE_COLORS[d.state])}>
-      {d.kind === "finally" && <Handle type="target" position={Position.Left} />}
+      {(d.kind === "finally" || d.kind === "sub" || d.kind === "steps") && <Handle type="target" position={Position.Left} />}
       <div className="frame-title">{d.label}{d.state && <Badge value={d.state} />}</div>
+      {/* a sub-pipeline's arrows, merged into one when they all go to the same place (mergeGroupEdges) */}
+      {(d.kind === "sub" || d.kind === "steps") && <Handle type="source" position={Position.Right} />}
     </div>
   );
 }
@@ -116,7 +121,9 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   useEffect(() => {
     let cancelled = false;
     const lay: any[] = [];
-    const edgeList: Edge[] = [];
+    let edgeList: Edge[] = [];
+    // the steps inside each sub-pipeline frame, at any depth: their arrows are merged into one from or to the frame
+    const members: Record<string, string[]> = {};
     const slots: Record<string, string[]> = JSON.parse(slotNames);
     for (const phase of pipeline.phases) {
       const pid = `phase:${phase.id}`;
@@ -126,28 +133,39 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
       // the finally steps in a lane of their own, after the steps of the phase: they run in the end whatever
       // happened (cancel and kill included), their states shown live like the other steps
       const lane = `${pid}/${FINALLY_LANE}`;
-      if (phase.steps.some((s: any) => s.part === "finally")) lay.push({ id: lane, width: 170, height: 60, parent: pid, minWidth: 170 });
+      const hasFinally = phase.steps.some((s: any) => s.part === "finally");
+      // and the other steps in a frame of their own then, beside it: one arrow from it to the lane
+      const stepsLane = `${pid}/${STEPS_LANE}`;
+      if (hasFinally) {
+        lay.push({ id: stepsLane, width: 170, height: 60, parent: pid, minWidth: 170 });
+        lay.push({ id: lane, width: 170, height: 60, parent: pid, minWidth: 170 });
+        members[stepsLane] = phase.steps.filter((s: any) => s.part === "steps").map((s: any) => `${pid}/${s.id}`);
+      }
       for (const s of phase.steps) {
         // nested sub-pipeline frames: 'up', then 'up.inner'...
         const parts = s.group ? s.group.split(".") : [];
-        let parent = s.part === "finally" ? lane : pid;
+        let parent = s.part === "finally" ? lane : hasFinally ? stepsLane : pid;
         for (let i = 1; i <= parts.length; i++) {
           const g = `${pid}/${parts.slice(0, i).join(".")}/${s.part}`;
           if (!groups.has(g)) {
             groups.add(g);
             lay.push({ id: g, width: 160, height: 60, parent });
           }
+          (members[g] ||= []).push(`${pid}/${s.id}`);
           parent = g;
         }
         lay.push({ id: `${pid}/${s.id}`, width: 150, height: 56 + slotRows(slots[`${phase.id}:${s.id}`]) * SLOT_ROW, parent });
         for (const n of s.needs) edgeList.push({ id: `${phase.id}:${n}->${s.id}`, source: `${pid}/${n}`, target: `${pid}/${s.id}` });
       }
       // the finally lane after every last step of the phase
-      if (phase.steps.some((s: any) => s.part === "finally")) {
+      if (hasFinally) {
         const lasts = phase.steps.filter((s: any) => s.part === "steps" && !phase.steps.some((o: any) => o.needs.includes(s.id)));
         for (const l of lasts) edgeList.push({ id: `${phase.id}:${l.id}~>finally`, source: `${pid}/${l.id}`, target: lane, className: "finally-edge" });
       }
     }
+    // one arrow from a sub-pipeline rather than one from each of its last steps (to the finally lane, or to the
+    // steps after it), and one into it rather than one to each of its first steps
+    edgeList = mergeGroupEdges(edgeList, members);
     const crossPhase = edgeList.filter((e) => e.className === "phase-edge");
     layout(lay, edgeList.filter((e) => e.className !== "phase-edge").concat(crossPhase).map((e) => ({ id: e.id, source: e.source, target: e.target }))).then((placed) => {
       if (cancelled) return;
@@ -158,7 +176,9 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
         const isFrame = n.id.startsWith("phase:") && (n.id.split("/").length === 1 || n.id.endsWith("/steps") || n.id.endsWith("/finally"));
         const [phaseId, rest] = [n.id.split("/")[0].slice(6), n.id.split("/").slice(1)];
         const base = { id: n.id, position: { x: p.x, y: p.y }, ...(n.parent ? { parentId: n.parent, extent: "parent" as const } : {}), draggable: false };
-        if (rest.length === 1 && rest[0] === FINALLY_LANE) {
+        if (rest.length === 1 && rest[0] === STEPS_LANE) {
+          list.push({ ...base, type: "frame", data: { label: "steps", kind: "steps", phase: phaseId }, style: { width: p.width, height: p.height }, selectable: false });
+        } else if (rest.length === 1 && rest[0] === FINALLY_LANE) {
           list.push({ ...base, type: "frame", data: { label: "finally · always runs", kind: "finally", phase: phaseId }, style: { width: p.width, height: p.height }, selectable: false });
         } else if (isFrame) {
           const label = rest.length ? `${rest[0]} (sub-pipeline${rest[1] === "finally" ? ", finally" : ""})` : `phase ${phaseId}`;

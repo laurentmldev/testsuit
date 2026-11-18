@@ -143,16 +143,16 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
             {keysError && <div className="error-box">{keysError}</div>}
           </details>
-          <table className="grid compact">
+          <table className="grid compact manual-commands">
             <tbody>
               {info.commands.map((c: any) => (
-                <tr key={c.name} className={c.spec.via ? "via-row" : undefined}>
+                <tr key={c.name} className={classes(c.spec.via && "via-row", running === c.name && "running")}>
                   <td><code>{c.name}</code>{c.spec.via && <div>{c.via
                     ? <ViaTag via={c.via.id} label={labelOf(c.via.id)} host={c.via.host_alias || c.via.host}
                       title={`${c.name} runs on ${c.via.id} (${c.via.host}), which reaches ${id}: not on ${id} itself`} />
                     : <span className="via-tag" title={c.via_error || ""}>↪ via <strong>{c.spec.via}</strong> <span className="bad-text">(not found)</span></span>}</div>}</td>
                   <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.detach && <span className="muted"> (detached)</span>}<CommentsNote text={c.spec.comments} compact /></td>
-                  <td>{c.manual
+                  <td className="manual-run">{c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
                     : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>
                 </tr>
