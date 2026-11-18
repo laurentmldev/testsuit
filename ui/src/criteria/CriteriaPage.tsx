@@ -57,7 +57,7 @@ function WebuiNav({ page }: { page: "criteria" | "exploit" }) {
   return (
     <nav className="webui-nav">
       <a href="#/criteria" className={classes(page === "criteria" && "active")}>Criteria</a>
-      <a href="#/exploit" className={classes(page === "exploit" && "active")}>Run exploit</a>
+      <a href="#/exploit" className={classes(page === "exploit" && "active")}>Exploit</a>
     </nav>
   );
 }

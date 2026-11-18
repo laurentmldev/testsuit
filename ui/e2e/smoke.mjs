@@ -92,7 +92,7 @@ if (process.env.MXP_WEBUI_URL) {
     await page.waitForSelector(".data-plot", { timeout: 20000 });
     if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui-data.png` });
   }
-  // its Run exploit page
+  // its Exploit page
   await page.goto(`${mxp}/ui/#/exploit`);
   await page.waitForSelector("text=Run exploit_runner", { timeout: 20000 });
   await page.waitForTimeout(1500);

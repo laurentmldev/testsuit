@@ -96,7 +96,7 @@ function App() {
     if (!editing) document.title = title;
   }, [title, editing]);
   const nav = [
-    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Run exploit"]] : []), ["config", "Configuration"],
+    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
   ];
   // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
   // are kept as they were, so existing links still work
