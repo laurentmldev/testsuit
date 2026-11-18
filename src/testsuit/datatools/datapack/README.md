@@ -19,6 +19,7 @@ datapack testdef/max_speed/testdef.yml
 | `-c, --setup-config NAME` | Use another configuration of the setup than the test definition's `setup_config`, for example to build the same test for another platform (`--setup-config emulated`). |
 | `--lenient` | Skip, with a warning, the inputs whose source is missing or empty (implies `--nocheck`). The skipped inputs are listed in `datapack.yml`. |
 | `--set KEY=VALUE` | Set a key by hand for this build, over the dictionaries (repeatable; `a.b=value` for a nested key). Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes it non-conform (section [Keys set by hand](#keys-set-by-hand)). |
+| `--dataset-version DATASET=VERSION` | Import a dataset in this version for this build, instead of the one the setup writes (repeatable). Nothing is written to the files. A version other than the written one makes the datapack non-conform; it is recorded under `versions_set_by_hand` in `datapack.yml` and `baseline.yml` (`dataset_versions={...}` from Python, **Baseline versions** in the Generate dialog). |
 | `--baseline EXPECTED` | Compare the new datapack with an expected baseline and report each difference (section [Baseline](#baseline)). |
 
 The contents are also left unzipped in `.current_datapack/` next to the test definition, to look at them.

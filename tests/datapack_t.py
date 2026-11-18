@@ -420,3 +420,47 @@ def test_user_keys(tmp_path, no_git):
         assert context["operator"] == {"name": "Ada"} and context["bench_mode"] == "full"
     finally:
         asking.unlink()
+
+
+def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
+    """a dataset version set for one generation is imported instead of the written one, recorded, and makes the
+    datapack non-conform; nothing is written to the setup"""
+    from testsuit.datatools.datapack import importers
+    from testsuit.datatools.datapack.baseline import nonconform_reasons
+    from testsuit.datatools.datapack.datapack_tools import read_baseline
+    monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
+    root = tmp_path / "dp"
+    (root / "setup").mkdir(parents=True)
+    (root / "testdef").mkdir()
+    repo = tmp_path / "datarepo"
+    setup = {"id": "s", "datarepositories": [{"id": "r", "path": str(repo), "datasources": [
+                 {"id": "src", "importer": "dir", "source": "nowhere", "datasets": [{"id": "sw", "version": "v1"}]}]}],
+             "slot_types": {"t": {"configurations": {"std": {"inputs": []}}}},
+             "configurations": {"c": {"slots": {"a": {"type": "t", "configuration": "std"}}}}}
+    setup_file = root / "setup" / "setup.yml"
+    setup_file.write_text(yaml.safe_dump(setup, sort_keys=False))
+    written = setup_file.read_text()
+    testdef = root / "testdef" / "t.yml"
+    testdef.write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml", "setup_config": "c",
+                                       "dictionaries": []}))
+    importers.register_data_importer("dir", _DirImporter)
+    try:
+        zip_path = datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v2"})
+        baseline = read_baseline(zip_path)
+        assert (repo / "sw" / "v2" / "VERSION").read_text() == "v2" and not (repo / "sw" / "v1").exists()
+        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v2", "overrides": True, "was": "v1"}]
+        assert next(s for s in baseline["sources"] if s["role"] == "dataset")["version"] == "v2"
+        assert baseline["datapack"]["conform"] is False
+        assert nonconform_reasons(baseline) == ["dataset 'sw' set by hand to version 'v2' instead of 'v1'"]
+        assert "this datapack is non-conform" in capsys.readouterr().out
+        assert setup_file.read_text() == written
+
+        # the version written, given by hand: recorded, still conform
+        baseline = read_baseline(datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v1"}))
+        assert baseline["datapack"]["conform"] is True
+        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v1", "overrides": False}]
+
+        with pytest.raises(DatapackError, match="no dataset 'nope'"):
+            datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"nope": "v1"})
+    finally:
+        importers.unregister_data_importer("dir")

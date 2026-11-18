@@ -38,9 +38,8 @@ const USER_KEYS = "tsq.userKeys";                       // the values given to t
 const USER_KEY_ORIGIN = "<user key>";                   // the placeholder of such a key, before it is given
 
 /** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
-export function GenerateDatapack({ sid, workspace, repository, testdef: initial, config: initialConfig, onClose, onBaselineChanged }: {
+export function GenerateDatapack({ sid, workspace, repository, testdef: initial, config: initialConfig, onClose }: {
   sid: string; workspace: any; repository?: Repository | null; testdef?: string; config?: string | null; onClose: () => void;
-  onBaselineChanged?: () => void;                       // a version of the baseline was changed (the page that opened it reads it again)
 }) {
   const testdefs: any[] = workspace?.testdefs || [];
   const [testdef, setTestdef] = useState<string>(initial || testdefs[0]?.path || "");
@@ -97,6 +96,10 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
     : byHand;
   const overridden = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked);
   const blockedKeys = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.blocked);
+  // dataset versions for this generation only (datapack --dataset-version): dataset id -> version
+  const [versions, setVersions] = useState<Record<string, string>>({});
+  useEffect(() => setVersions({}), [testdef, config]);
+  const versionsByHand = Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [failed, setFailed] = useState("");            // the error of the last failed generation: its undefined keys are proposed
@@ -187,7 +190,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
     try {
       // in the background: its log comes line by line, subprocess errors included
       if (recalled.from) rememberKeys(GENERATE_KEYS, memory, rows);   // taken from another test definition: now its own
-      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient, keys: manual });
+      const { job } = await post(`edit/sessions/${sid}/datapack/jobs`, { testdef, setup_config: config, nocheck: !check, lenient, keys: manual, versions: versionsByHand });
       setJob(job);
       let since = 0;
       let failures = 0;
@@ -304,7 +307,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
               </div>
             </Field>
           )}
-          {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} onChanged={onBaselineChanged} />}
+          {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} versions={versions} onChange={setVersions} />}
           <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
@@ -335,6 +338,16 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             <div className="banner warn list">
               Incomplete: {result.datapack.skipped.length} input(s) left out.
               <ul className="problems">{result.datapack.skipped.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+            </div>
+          )}
+          {result.datapack?.versions_set_by_hand?.length > 0 && (
+            <div className={classes("banner list", result.datapack.versions_set_by_hand.some((v: any) => v.overrides) ? "warn" : "info")}>
+              {result.datapack.versions_set_by_hand.some((v: any) => v.overrides)
+                ? <><strong>Non-conform</strong>: dataset versions were set for this generation.</>
+                : <>Dataset versions set for this generation (each is the one written: this does not make the datapack non-conform).</>}
+              <ul className="problems">{result.datapack.versions_set_by_hand.map((v: any) => (
+                <li key={v.dataset}><code>{v.dataset} {v.version}</code>{v.overrides ? <> instead of <code>{v.was}</code></> : <> (the version written)</>}</li>
+              ))}</ul>
             </div>
           )}
           {result.datapack?.keys_set_by_hand?.length > 0 && (
@@ -371,64 +384,50 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   );
 }
 
-/** The versions of the baseline of a test definition, to change before generating: a version is changed in the file
- *  that writes it (the dictionary key its version names, or the setup file), as the Datapacks page did. */
-function BaselineVersions({ sid, testdef, config, onChanged }: {
-  sid: string; testdef: string; config: string | null; onChanged?: () => void;
+/** The versions of the baseline of a test definition, to change for one generation (datapack --dataset-version):
+ *  nothing is written to the files (that is done in the Editor). */
+function BaselineVersions({ sid, testdef, config, versions, onChange }: {
+  sid: string; testdef: string; config: string | null; versions: Record<string, string>; onChange: (v: Record<string, string>) => void;
 }) {
   const [datasets, setDatasets] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [wanted, setWanted] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const generation = useRef(0);
-  const load = async () => {
-    const mine = ++generation.current;
-    try {
-      const found: any = await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config, versions: false, run_checks: false });
-      if (mine !== generation.current) return;
-      const baseline: any[] = found.baseline || [];
-      setDatasets(baseline);
-      setError(null);
-      // the versions of each source, one source at a time (a remote can be slow)
-      const pending = [...new Map(baseline.filter((d) => d.versions_pending).map((d) => [`${d.importer}|${d.source}`, d])).values()];
-      await Promise.all(pending.map(async (src) => {
-        const r: any = await post(`edit/sessions/${sid}/versions`, { importer: src.importer, source: src.source }).catch((e: any) => ({ versions: null, error: e.message }));
-        if (mine !== generation.current) return;
-        setDatasets((cur) => cur && cur.map((d) => d.importer === src.importer && d.source === src.source
-          ? { ...d, versions: r.versions, versions_error: r.error, versions_pending: false } : d));
-      }));
-    } catch (e: any) {
-      if (mine === generation.current) setError(e.message);
-    }
-  };
   useEffect(() => {
+    let current = true;
     setDatasets(null);
-    setWanted({});
-    load();
+    (async () => {
+      try {
+        const found: any = await post(`edit/sessions/${sid}/synthesis`, { testdef, setup_config: config, versions: false, run_checks: false });
+        if (!current) return;
+        const baseline: any[] = found.baseline || [];
+        setDatasets(baseline);
+        setError(null);
+        // the versions of each source, one source at a time (a remote can be slow)
+        const pending = [...new Map(baseline.filter((d) => d.versions_pending).map((d) => [`${d.importer}|${d.source}`, d])).values()];
+        await Promise.all(pending.map(async (src) => {
+          const r: any = await post(`edit/sessions/${sid}/versions`, { importer: src.importer, source: src.source }).catch((e: any) => ({ versions: null, error: e.message }));
+          if (!current) return;
+          setDatasets((cur) => cur && cur.map((d) => d.importer === src.importer && d.source === src.source
+            ? { ...d, versions: r.versions, versions_error: r.error, versions_pending: false } : d));
+        }));
+      } catch (e: any) {
+        if (current) setError(e.message);
+      }
+    })();
+    return () => { current = false; };
   }, [sid, testdef, config]);
-  const set = async (d: any) => {
-    setBusy(d.id);
-    const done = await attempt(() => post(`edit/sessions/${sid}/baseline`, { testdef, dataset: d.id, version: wanted[d.id], setup_config: config }),
-      `${d.id}: version ${wanted[d.id]}${d.key ? ` (key ${d.key})` : ""}`);
-    setBusy(null);
-    if (done) {
-      setWanted((w) => ({ ...w, [d.id]: "" }));
-      load();
-      onChanged?.();
-    }
-  };
   if (datasets && datasets.length === 0 && !error) return null;
+  const changed = (datasets || []).filter((d) => (versions[d.id] ?? "").trim() && versions[d.id].trim() !== d.version);
   return (
-    <Field label="Baseline versions" help="The version of each dataset the datapack is built from. **Set** changes it in the file that writes it (the dictionary key its version names, or the setup file): the change stays in the files, and a datapack generated from uncommitted files is a **draft** until it is committed and pushed.">
+    <Field label="Baseline versions" help="The version of each dataset the datapack is built from. A version picked here is used **for this generation only** (`datapack --dataset-version`): nothing is written to the files, and a version other than the one written makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. To change a version in the files, edit them in the Editor.">
       {error && <pre className="error-box">{error}</pre>}
       {!datasets && !error && <Spinner text="Reading the baseline…" />}
       {datasets && datasets.length > 0 && (
         <table className="grid compact baseline">
-          <thead><tr><th>Dataset</th><th>From</th><th>Version</th></tr></thead>
+          <thead><tr><th>Dataset</th><th>From</th><th>Version for this generation</th></tr></thead>
           <tbody>
             {datasets.map((d) => {
-              const value = wanted[d.id] ?? "";
-              const changed = value.trim() !== "" && value.trim() !== d.version;
+              const value = versions[d.id] ?? "";
+              const overrides = value.trim() !== "" && value.trim() !== d.version;
               return (
                 <tr key={d.id}>
                   <td><strong>{d.id}</strong>{d.name && <div className="muted small">{d.name}</div>}</td>
@@ -437,18 +436,16 @@ function BaselineVersions({ sid, testdef, config, onChanged }: {
                     {d.versions_error && <div className="muted small" title={d.versions_error}>versions not listed: {d.versions_error}</div>}</td>
                   <td>
                     <div className="version-edit">
-                      <input list={`gen-versions-${d.id}`} placeholder={d.version || d.written} value={value} disabled={!d.editable || busy === d.id}
-                        onChange={(e) => setWanted({ ...wanted, [d.id]: e.target.value })}
-                        onKeyDown={(e) => e.key === "Enter" && changed && set(d)}
-                        title={d.editable ? "Pick one of the versions available, or type one" : `Not written in a file of this repository: ${d.defined_in || d.written}`} />
+                      <input list={`gen-versions-${d.id}`} placeholder={d.version || d.written} value={value}
+                        onChange={(e) => onChange({ ...versions, [d.id]: e.target.value })}
+                        title="Pick one of the versions available, or type one: for this generation only" />
                       <datalist id={`gen-versions-${d.id}`}>
-                        {(d.versions || []).map((v: string) => <option key={v} value={v}>{v === d.version ? "current" : ""}</option>)}
+                        {(d.versions || []).map((v: string) => <option key={v} value={v}>{v === d.version ? "written" : ""}</option>)}
                       </datalist>
-                      <button className="small primary" disabled={!changed || busy === d.id} onClick={() => set(d)}>Set</button>
+                      {value && <button className="small" onClick={() => onChange({ ...versions, [d.id]: "" })} title="Use the version written">×</button>}
                     </div>
-                    <div className="small">current <code>{d.version ?? d.written}</code>
-                      {d.versions && <span className="muted"> · {d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</span>}
-                      {d.key && <span className="muted"> · key <code>{d.key}</code></span>}</div>
+                    <div className="small">{overrides ? <span className="warn-text">instead of <code>{d.version ?? d.written}</code></span> : <>written <code>{d.version ?? d.written}</code></>}
+                      {d.versions && <span className="muted"> · {d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</span>}</div>
                   </td>
                 </tr>
               );
@@ -456,6 +453,7 @@ function BaselineVersions({ sid, testdef, config, onChanged }: {
           </tbody>
         </table>
       )}
+      {changed.length > 0 && <div className="banner warn"><span>{changed.length === 1 ? "A dataset version" : `${changed.length} dataset versions`} other than the one written {changed.length === 1 ? "makes" : "make"} this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</span></div>}
     </Field>
   );
 }

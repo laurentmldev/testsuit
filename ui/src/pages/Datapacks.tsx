@@ -212,7 +212,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
           <Dictionaries data={data} edit={edit} />
         </>
       )}
-      {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} onBaselineChanged={load} />}
+      {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} />}
     </div>
   );
 }
@@ -387,11 +387,12 @@ function Dictionaries({ data, edit }: { data: any; edit: (f: string) => void }) 
   );
 }
 
-/** The baseline of the test definition, read-only: its versions are changed in the Generate form. */
+/** The baseline of the test definition, read-only: a version is changed for one generation in the Generate form,
+ *  in the files in the Editor. */
 function Baseline({ datasets, edit, onChange }: { datasets: any[]; edit: (f: string) => void; onChange: () => void }) {
   return (
     <Section title={<>Baseline <span className="muted small">versions of the data it is built from</span></>}
-      actions={datasets.length > 0 ? <button className="link small" onClick={onChange}>change a version…</button> : undefined}>
+      actions={datasets.length > 0 ? <button className="link small" onClick={onChange}>generate with other versions…</button> : undefined}>
       {datasets.length === 0 && <p className="muted small">This setup imports no dataset.</p>}
       {datasets.length > 0 && (
         <table className="grid compact baseline">
@@ -415,7 +416,7 @@ function Baseline({ datasets, edit, onChange }: { datasets: any[]; edit: (f: str
           </tbody>
         </table>
       )}
-      <p className="muted small">To change a version, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): it is changed in the file that writes it, and a datapack generated from uncommitted files is a draft until the change is committed and pushed.</p>
+      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only, and the datapack is non-conform. To change a version in the files, open them in the Editor (<strong>Edit…</strong>, or the file under <em>Written in</em>).</p>
     </Section>
   );
 }
