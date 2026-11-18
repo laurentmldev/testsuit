@@ -372,6 +372,19 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
       {kind === "http" && (
         <>
           <HttpEditor value={s.http} onChange={(x) => set("http", x)} withSave help={(f) => helpText(schemas.library, [...CMD_PATH, "http", ...(f ? [f] : [])])} />
+          {s.timeout !== undefined && s.timeout !== "" && (
+            // a REST API call has one timeout in the form, the request's; one the command has too (written in
+            // YAML) only applies when the request has none: shown so that it does not go unseen
+            <p className="hint small">
+              This command also has <code>timeout: {String(s.timeout)}</code>, which applies only when the request timeout is empty.{" "}
+              <button className="link" onClick={() => {
+                const { timeout: t, ...rest } = s;
+                const http = typeof s.http === "string" ? { url: s.http } : { ...(s.http || {}) };
+                if (http.timeout === undefined || http.timeout === "") http.timeout = t;
+                onChange({ ...rest, http });
+              }}>{s.http?.timeout ? "Remove it" : "Make it the request timeout"}</button>
+            </p>
+          )}
           {!noVia && (
             <Field label="Send it from" help={help("via")} hint={s.via ? <>sent from <code>{s.via}</code> with curl</> : "empty: from the sequencer host"}>
               <Combo value={s.via} onChange={(x) => set("via", x)} choices={viaChoices(ctx)} placeholder="stage_server" mono />
