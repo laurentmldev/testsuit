@@ -378,6 +378,15 @@ class Sequencer:
         if execution is None:
             if run["state"] in DONE_STATES:
                 raise SequencerError(f"run {run['id']} is already {run['state']}")
+            ours = run["local"] == self.local and (not run["local"] or run["owner"] == OWNER)
+            if ours or (run["local"] and not owner_alive(run["owner"])) or (mode == "kill" and run.get("abort") == "kill"):
+                # nothing runs it any more (its execution was lost), or killed twice: ended here, locks released
+                why = "its execution was lost" if ours else ("its tsq run --local process ended" if run["local"]
+                                                             else "killed again while nothing answered")
+                log.warning(f"run {run['id']}: {mode} of a {run['state']} run that nothing runs ({why}): ended")
+                self.finish_without_running(run["id"], f"{'killed' if mode == 'kill' else 'cancelled'} ({why})")
+                self.wake()
+                return self.store.get_run(run["id"])
             self.store.update_run(run["id"], abort=mode)          # a run of another process (tsq run --local)
             return self.store.get_run(run["id"])
         await execution.abort(mode)
@@ -754,8 +763,10 @@ class Sequencer:
         return result
 
     # ── restart recovery and housekeeping ───────────────────────────────
-    async def recover(self) -> None:
-        """Runs found active at startup: back to the queue if not started, else killed, finally run, locks released."""
+    async def recover(self, background: bool = False) -> None:
+        """Runs found active at startup: back to the queue if not started, else killed, finally run, locks released.
+        background (tsqd): returns before their finally steps end, so that the daemon serves meanwhile."""
+        started = []
         for run in self.store.runs(ACTIVE_STATES + ("queued",), limit=10000):
             if run["local"] and (run["owner"] == OWNER or owner_alive(run["owner"])):
                 continue                                     # a tsq run --local still running
@@ -772,10 +783,16 @@ class Sequencer:
                 datapack = load_datapack(Path(run["dir"]))
                 binding = Binding.from_dict(run["binding"])
                 execution = RunExecution(self, run["id"], datapack, binding)
-                await execution.recover(run.get("phase") or "")
             except Exception as e:
                 log.exception(f"recovery of run {run['id']}")
                 self.finish_without_running(run["id"], f"sequencer restarted; recovery failed: {e}")
+                continue
+            # in the background: the daemon serves (UI, API) while finally steps run, and a Kill can end it
+            self.executions[run["id"]] = execution
+            execution.task = asyncio.ensure_future(execution.recover(run.get("phase") or ""))
+            started.append(execution.task)
+        if not background:
+            await asyncio.gather(*started, return_exceptions=True)
 
     def cleanup(self) -> None:
         """Remove run folders past storage.retention.runs (the results zips stay)."""
@@ -819,6 +836,7 @@ class RunExecution:
         self.wait: dict | None = None
         self.retry = asyncio.Event()                 # set by retry_now: check again at once
         self._asked = False                          # the last wait ended with retry_now
+        self._stopping: asyncio.Task | None = None   # the stop and kill commands of an abort
 
     # ── helpers ─────────────────────────────────────────────────────────
     def set_state(self, state: str, **fields: Any) -> None:
@@ -1174,41 +1192,93 @@ class RunExecution:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dest)
 
+    ABORT_CHECK = 15.0                       # s: at most, to see whether a component still has processes of the run
+
     async def abort(self, mode: str) -> None:
         """cancel: no new step starts, components with live processes get their stop command (grace), then
-        kill; kill: their kill command at once. The current phase's finally steps run after."""
-        if self.ctx is None or self.task is None or self.ctx.abort_mode == "kill":
+        kill; kill: their kill command at once. The current phase's finally steps run after (a kill also stops
+        the finally steps running then). Wherever the run is (steps, finally, waiting for a later phase,
+        cleaning), it ends; a kill of a run already killed ends it at once, and a run whose execution died is
+        ended here. Returns once the stop and kill commands are started, not when they end."""
+        if self.task is None:
+            return
+        if self.task.done():                     # its execution ended without ending the run (a sequencer bug)
+            self._end_now(mode, "its execution had stopped")
+            return
+        if self.abort_mode == "kill":
+            if mode == "kill":                   # killed again: the run does not answer, end it without waiting
+                log.warning(f"run {self.run_id}: killed again: its execution is stopped")
+                self.reason = self.reason or "killed (forced: the run did not end after a first kill)"
+                self.task.cancel()
+            return
+        if self.abort_mode == mode == "cancel":
             return
         self.abort_mode = mode
-        self.ctx.abort_mode = mode
         self.store.update_run(self.run_id, abort=mode)
         self.seq.notify("run", {"run": self.run_id, "abort": mode})
+        self.retry.set()                         # a later phase waiting to start stops waiting
+        if self.ctx is None:                     # not started yet
+            self.reason = self.reason or ("killed" if mode == "kill" else "cancelled")
+            self.task.cancel()
+            return
+        self.ctx.abort_mode = mode
+        if self._stopping is not None and not self._stopping.done():
+            self._stopping.cancel()              # a kill after a cancel: no more grace
+        self._stopping = asyncio.ensure_future(self._stop_and_kill(mode))
+        await asyncio.sleep(0)                   # started before the answer
 
-        async def alive(bound: BoundSlot) -> bool:
-            for transport, folder in bound.pid_places(self.run_id):
-                try:
-                    if await transport.alive_in(folder):
+    async def _stop_and_kill(self, mode: str) -> None:
+        """The stop (cancel) then kill commands of the components with live processes, each one bounded in
+        time, then the steps of the current phase are cancelled (and its finally steps, on a kill)."""
+        try:
+            async def alive(bound: BoundSlot) -> bool:
+                for transport, folder in bound.pid_places(self.run_id):
+                    try:
+                        if await asyncio.wait_for(transport.alive_in(folder), self.ABORT_CHECK):
+                            return True
+                    except Exception:
+                        if transport is bound.transport and bound.vias:
+                            continue                       # reached through another component only
                         return True
-                except Exception:
-                    if transport is bound.transport and bound.vias:
-                        continue                       # reached through another component only
-                    return True
-            return False
-        bound = list(self.ctx.bound.values())
-        if mode == "cancel":
+                return False
+            bound = list(self.ctx.bound.values())
+            if mode == "cancel":
+                live = [b for b, a in zip(bound, await asyncio.gather(*[alive(b) for b in bound])) if a]
+                stops = [self._command(b, "stop") for b in live if "stop" in b.resolved.commands]
+                if stops:
+                    try:
+                        await asyncio.wait_for(asyncio.gather(*stops, return_exceptions=True), DEFAULT_STOP_GRACE)
+                    except asyncio.TimeoutError:
+                        pass
+            # kill before the current phase's finally steps run (they start once its steps are cancelled)
             live = [b for b, a in zip(bound, await asyncio.gather(*[alive(b) for b in bound])) if a]
-            stops = [self._command(b, "stop") for b in live if "stop" in b.resolved.commands]
-            if stops:
+            kills = [self._command(b, "kill") for b in live if "kill" in b.resolved.commands]
+            if kills:
                 try:
-                    await asyncio.wait_for(asyncio.gather(*stops, return_exceptions=True), DEFAULT_STOP_GRACE)
+                    await asyncio.wait_for(asyncio.gather(*kills, return_exceptions=True), DEFAULT_STOP_GRACE)
                 except asyncio.TimeoutError:
-                    pass
-        # kill before the current phase's finally steps run (they start once its steps are cancelled)
-        live = [b for b, a in zip(bound, await asyncio.gather(*[alive(b) for b in bound])) if a]
-        await asyncio.gather(*[self._command(b, "kill") for b in live if "kill" in b.resolved.commands],
-                             return_exceptions=True)
-        if self.ctx.main_task is not None:
-            self.ctx.main_task.cancel()
+                    log.warning(f"run {self.run_id}: kill commands still running after {DEFAULT_STOP_GRACE:g} s")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(f"run {self.run_id}: {mode}")
+        finally:
+            if self.ctx.main_task is not None:
+                self.ctx.main_task.cancel()
+            if mode == "kill" and self.ctx.finally_task is not None:
+                self.ctx.finally_task.cancel()
+
+    def _end_now(self, mode: str, why: str) -> None:
+        """End the run in the store at once (its execution is gone): locks released, state done, error."""
+        self.reason = f"{'killed' if mode == 'kill' else 'cancelled'} ({why})"
+        log.warning(f"run {self.run_id}: {self.reason}")
+        self.store.release(self.run_id)
+        if self.ctx is not None:
+            self.seq.monitor.active -= {b.concrete.id for b in self.ctx.bound.values()}
+        self.store.update_run(self.run_id, state="done", verdict=ERROR, reason=self.reason, ended_at=now(), abort=mode)
+        self.seq.notify("run", {"run": self.run_id, "state": "done", "verdict": ERROR, "reason": self.reason})
+        self.seq.executions.pop(self.run_id, None)
+        self.seq.wake()
 
     async def watch_abort(self) -> None:
         """An abort written to the store by another process (the daemon, for a tsq run --local run)."""
@@ -1234,23 +1304,34 @@ class RunExecution:
     async def recover(self, phase_id: str) -> None:
         """After a restart: kill what the run started, run its current phase's finally, pack, release."""
         self.ctx = self.make_context()
-        self.ctx.abort_mode = "kill"
+        self.ctx.abort_mode = self.abort_mode = "kill"     # a Kill now ends it at once
         self.reason = "sequencer restarted during the run"
-        await self.bind_slots()
-        for bound in self.ctx.bound.values():
-            for transport, folder in bound.pid_places(self.run_id):
+        try:
+            await self.bind_slots()
+            for bound in self.ctx.bound.values():
+                for transport, folder in bound.pid_places(self.run_id):
+                    try:
+                        await asyncio.wait_for(transport.signal_dir(folder, "KILL"), self.ABORT_CHECK)
+                    except Exception:
+                        pass
+            flat = next((f for f in self.datapack.phases if f.phase.id == phase_id), None)
+            if flat is not None and flat.finally_:
+                runner = PhaseRunner(self.ctx, flat)
+                limit = parse_duration(flat.phase.timeout) or self.RECOVERY_FINALLY
                 try:
-                    await transport.signal_dir(folder, "KILL")
+                    await asyncio.wait_for(runner.run_dag(flat.finally_, True), limit)
+                except asyncio.TimeoutError:
+                    log.warning(f"run {self.run_id}: finally after restart still running after {limit:g} s: stopped")
+                    self.reason += f"; its finally steps did not end within {limit:g} s"
                 except Exception:
-                    pass
-        flat = next((f for f in self.datapack.phases if f.phase.id == phase_id), None)
-        if flat is not None and flat.finally_:
-            runner = PhaseRunner(self.ctx, flat)
-            try:
-                await runner.run_dag(flat.finally_, True)
-            except Exception:
-                log.exception(f"run {self.run_id}: finally after restart")
-        await self.finish(ERROR)
+                    log.exception(f"run {self.run_id}: finally after restart")
+        except asyncio.CancelledError:
+            self.reason += "; killed during recovery"
+        except Exception:
+            log.exception(f"run {self.run_id}: recovery")
+        await asyncio.shield(self.finish(ERROR))
+
+    RECOVERY_FINALLY = 600.0                 # s: the finally steps after a restart, when the phase has no timeout
 
     async def finish(self, verdict: str) -> None:
         if verdict == "requeued":
@@ -1261,7 +1342,10 @@ class RunExecution:
             if self.ctx is not None:
                 for process in self.ctx.detached:
                     if not process.done.done():
-                        await process.kill()
+                        try:
+                            await asyncio.wait_for(process.kill(), self.ABORT_CHECK)
+                        except Exception as e:
+                            log.warning(f"run {self.run_id}: killing a detached process: {e or type(e).__name__}")
                 await self.clean_remote()
             self.write_records(verdict, run)
             cfg = self.seq.config
@@ -1279,7 +1363,10 @@ class RunExecution:
             self.store.release(self.run_id)
             if self.ctx is not None:
                 self.seq.monitor.active -= {b.concrete.id for b in self.ctx.bound.values()}
-            self.snapshot_steps()
+            try:
+                self.snapshot_steps()
+            except Exception:                    # the run ends anyway: never left 'running'
+                log.exception(f"run {self.run_id}: saving its steps")
             self.store.update_run(self.run_id, state="done", verdict=verdict, reason=self.reason, ended_at=now())
             self.seq.notify("run", {"run": self.run_id, "state": "done", "verdict": verdict, "reason": self.reason})
             self.seq.executions.pop(self.run_id, None)
@@ -1290,7 +1377,7 @@ class RunExecution:
         for bound in self.ctx.bound.values():
             for transport, folder in bound.pid_places(self.run_id):
                 try:
-                    await transport.signal_dir(folder, "KILL")
+                    await asyncio.wait_for(transport.signal_dir(folder, "KILL"), self.ABORT_CHECK)
                     await transport.shell(f"rm -rf {shlex.quote(folder)}; rmdir {shlex.quote(folder.rsplit('/', 1)[0])} "
                                           "2>/dev/null; true", timeout=20)
                 except Exception as e:
