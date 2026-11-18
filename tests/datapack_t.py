@@ -420,3 +420,75 @@ def test_user_keys(tmp_path, no_git):
         assert context["operator"] == {"name": "Ada"} and context["bench_mode"] == "full"
     finally:
         asking.unlink()
+
+
+def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
+    """a dataset version set for one generation is imported instead of the written one and recorded; a tag of the
+    source keeps the datapack conform, anything else (a branch) makes it non-conform; nothing is written to the setup"""
+    from testsuit.datatools.datapack import importers
+    from testsuit.datatools.datapack.baseline import nonconform_reasons
+    from testsuit.datatools.datapack.datapack_tools import read_baseline
+    monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
+    root = tmp_path / "dp"
+    (root / "setup").mkdir(parents=True)
+    (root / "testdef").mkdir()
+    repo = tmp_path / "datarepo"
+    setup = {"id": "s", "datarepositories": [{"id": "r", "path": str(repo), "datasources": [
+                 {"id": "src", "importer": "dir", "source": "nowhere", "datasets": [{"id": "sw", "version": "v1"}]}]}],
+             "slot_types": {"t": {"configurations": {"std": {"inputs": []}}}},
+             "configurations": {"c": {"slots": {"a": {"type": "t", "configuration": "std"}}}}}
+    setup_file = root / "setup" / "setup.yml"
+    setup_file.write_text(yaml.safe_dump(setup, sort_keys=False))
+    written = setup_file.read_text()
+    testdef = root / "testdef" / "t.yml"
+    testdef.write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml", "setup_config": "c",
+                                       "dictionaries": []}))
+
+    class TagsOnly(_DirImporter):                     # a version starting with 'branch-' is not a tag
+        def checkVersion(self, expected):
+            return super().checkVersion(expected) and not expected.startswith("branch-")
+
+    importers.register_data_importer("dir", TagsOnly)
+    try:
+        zip_path = datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v2"})
+        baseline = read_baseline(zip_path)
+        assert (repo / "sw" / "v2" / "VERSION").read_text() == "v2" and not (repo / "sw" / "v1").exists()
+        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v2", "overrides": True, "was": "v1",
+                                                     "tag": True}]
+        assert next(s for s in baseline["sources"] if s["role"] == "dataset")["version"] == "v2"
+        assert baseline["datapack"]["conform"] is True and nonconform_reasons(baseline) == []
+        assert setup_file.read_text() == written
+
+        # not a tag (a branch): non-conform
+        baseline = read_baseline(datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "branch-x"}))
+        assert baseline["versions_set_by_hand"][0]["tag"] is False and baseline["datapack"]["conform"] is False
+        assert nonconform_reasons(baseline) == ["dataset 'sw' set by hand to version 'branch-x' instead of 'v1', not a tag of its source"]
+        assert "this datapack is non-conform" in capsys.readouterr().out
+
+        # the version written, given by hand: recorded, still conform
+        baseline = read_baseline(datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"sw": "v1"}))
+        assert baseline["datapack"]["conform"] is True
+        assert baseline["versions_set_by_hand"] == [{"dataset": "sw", "version": "v1", "overrides": False}]
+
+        with pytest.raises(DatapackError, match="no dataset 'nope'"):
+            datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"nope": "v1"})
+    finally:
+        importers.unregister_data_importer("dir")
+
+
+def test_git_importer_lists_tags(tmp_path):
+    """the tags of a git source, apart from its branches: a version set by hand that is one keeps a datapack conform"""
+    import subprocess
+    from testsuit.datatools.datapack.importers import create_data_importer
+    repo = tmp_path / "src"
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+    repo.mkdir()
+    run("init", "-q", "-b", "main")
+    (repo / "f").write_text("x")
+    run("add", "f")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+    run("tag", "v1.0")
+    run("branch", "dev")
+    importer = create_data_importer("git", str(tmp_path / "out"), str(repo), "v1.0")
+    assert importer.listTags() == ["v1.0"]
+    assert set(importer.listVersions()) == {"v1.0", "dev", "main"}

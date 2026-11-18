@@ -204,7 +204,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
       )}
       {data && (
         <>
-          <Baseline sid={sid} testdef={testdef} config={config} datasets={data.baseline} onChanged={load} edit={edit} />
+          <Baseline datasets={data.baseline} edit={edit} onChange={() => setGenerate(true)} />
           <LogicalConfig data={data} edit={edit} sid={sid} config={config} />
           <PipelineGraph sid={sid} testdef={testdef} config={config} edit={edit} />
           <Criteria sid={sid} testdef={testdef} />
@@ -387,61 +387,36 @@ function Dictionaries({ data, edit }: { data: any; edit: (f: string) => void }) 
   );
 }
 
-function Baseline({ sid, testdef, config, datasets, onChanged, edit }: {
-  sid: string; testdef: string; config: string | null; datasets: any[]; onChanged: () => void; edit: (f: string) => void;
-}) {
-  const [wanted, setWanted] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const set = async (d: any) => {
-    setBusy(d.id);
-    const done = await attempt(() => post(`edit/sessions/${sid}/baseline`, { testdef, dataset: d.id, version: wanted[d.id], setup_config: config }),
-      `${d.id}: version ${wanted[d.id]}${d.key ? ` (key ${d.key})` : ""}`);
-    setBusy(null);
-    if (done) {
-      setWanted({ ...wanted, [d.id]: "" });
-      onChanged();
-    }
-  };
+/** The baseline of the test definition, read-only: a version is changed for one generation in the Generate form,
+ *  in the files in the Editor. */
+function Baseline({ datasets, edit, onChange }: { datasets: any[]; edit: (f: string) => void; onChange: () => void }) {
   return (
-    <Section title={<>Baseline <span className="muted small">versions of the data it is built from</span></>}>
+    <Section title={<>Baseline <span className="muted small">versions of the data it is built from</span></>}
+      actions={datasets.length > 0 ? <button className="link small" onClick={onChange}>generate with other versions…</button> : undefined}>
       {datasets.length === 0 && <p className="muted small">This setup imports no dataset.</p>}
       {datasets.length > 0 && (
         <table className="grid compact baseline">
           <thead><tr><th>Dataset</th><th>From</th><th>Version</th><th>Written in</th></tr></thead>
           <tbody>
-            {datasets.map((d) => {
-              const value = wanted[d.id] ?? "";
-              const changed = value.trim() !== "" && value.trim() !== d.version;
-              return (
-                <tr key={d.id}>
-                  <td><strong>{d.id}</strong><div className="muted small">{d.name}</div></td>
-                  <td className="small"><span className="badge">{d.importer}</span> <code title={d.source}>{d.source}</code>
-                    {d.versions_pending && <div className="muted small"><Spinner text="listing its versions…" /></div>}
-                    {d.versions_error && <div className="muted small" title={d.versions_error}>versions not listed: {d.versions_error}</div>}</td>
-                  <td>
-                    <div className="version-edit">
-                      <input list={`versions-${d.id}`} placeholder={d.version || d.written} value={value} disabled={!d.editable}
-                        onChange={(e) => setWanted({ ...wanted, [d.id]: e.target.value })}
-                        onKeyDown={(e) => e.key === "Enter" && changed && set(d)}
-                        title={d.editable ? "Pick one of the versions available, or type one" : "Not written in a file of this repository"} />
-                      <datalist id={`versions-${d.id}`}>
-                        {(d.versions || []).map((v: string) => <option key={v} value={v}>{v === d.version ? "current" : ""}</option>)}
-                      </datalist>
-                      <button className="small primary" disabled={!changed || busy === d.id} onClick={() => set(d)}>Set</button>
-                    </div>
-                    <div className="small">current <code>{d.version ?? d.written}</code>
-                      {d.versions && <span className="muted"> · {d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</span>}</div>
-                  </td>
-                  <td className="small">
-                    {d.key ? <>key <code>{d.key}</code> in </> : null}<FileLink path={d.defined_in} edit={edit} />
-                  </td>
-                </tr>
-              );
-            })}
+            {datasets.map((d) => (
+              <tr key={d.id}>
+                <td><strong>{d.id}</strong><div className="muted small">{d.name}</div></td>
+                <td className="small"><span className="badge">{d.importer}</span> <code title={d.source}>{d.source}</code>
+                  {d.versions_pending && <div className="muted small"><Spinner text="listing its versions…" /></div>}
+                  {d.versions_error && <div className="muted small" title={d.versions_error}>versions not listed: {d.versions_error}</div>}</td>
+                <td>
+                  <code>{d.version ?? d.written}</code>
+                  {d.versions && <div className="muted small">{d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</div>}
+                </td>
+                <td className="small">
+                  {d.key ? <>key <code>{d.key}</code> in </> : null}<FileLink path={d.defined_in} edit={edit} />
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
-      <p className="muted small">A version is changed in the file that writes it; a datapack generated from uncommitted files is a draft until the change is committed and pushed.</p>
+      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only; the datapack stays conform when each is a tag of its source. To change a version in the files, open them in the Editor (<strong>Edit…</strong>, or the file under <em>Written in</em>).</p>
     </Section>
   );
 }

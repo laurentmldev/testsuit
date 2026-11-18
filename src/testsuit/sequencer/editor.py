@@ -2067,6 +2067,7 @@ class Editor:
                 "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
+    _tag_cache: dict[tuple[str, str], list[str] | None] = {}    # the versions that are tags (None: not known)
 
     def _versions_cached(self, importer_name: str, source: str) -> bool:
         import time
@@ -2079,7 +2080,7 @@ class Editor:
         import time
         started = time.monotonic()
         versions, error = self._versions(importer_name, source)
-        return {"versions": versions, "error": error, "seconds": round(time.monotonic() - started, 2)}
+        return {"versions": versions, "tags": self._tag_cache.get((importer_name, source)), "error": error, "seconds": round(time.monotonic() - started, 2)}
 
     def _versions(self, importer_name: str, source: str) -> tuple[list[str] | None, str | None]:
         """Versions an importer lists at a source (kept a minute: the forms ask again at each change)."""
@@ -2093,6 +2094,8 @@ class Editor:
             importer = importers.create_data_importer(importer_name, "", source, "")
             if hasattr(importer, "listVersions"):
                 versions = importer.listVersions()
+            tags = importer.listTags() if hasattr(importer, "listTags") else None
+            self._tag_cache[(importer_name, source)] = list(tags) if tags is not None else None
         except Exception as e:                       # unreachable remote, unknown importer...
             error = str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__
         self._version_cache[(importer_name, source)] = (time.monotonic(), versions, error)
@@ -2131,6 +2134,7 @@ class Editor:
                     source = os.path.normpath(source)
                 pending = not list_versions and not self._versions_cached(str(src.get("importer", "")), source)
                 versions, error = (None, None) if pending else self._versions(str(src.get("importer", "")), source)
+                tags = None if pending else self._tag_cache.get((str(src.get("importer", "")), source))
                 for d, ds in enumerate(src.get("datasets") or []):
                     if not isinstance(ds, dict):
                         continue
@@ -2152,7 +2156,7 @@ class Editor:
                                      "written": written, "version": version, "key": key,
                                      "defined_in": shown(origin) if origin.startswith("/") else origin or None,
                                      "editable": editable, "at": [r, s, d],
-                                     "versions": versions, "versions_error": error, "versions_pending": pending})
+                                     "versions": versions, "tags": tags, "versions_error": error, "versions_pending": pending})
         return datasets
 
     def set_version(self, session: EditSession, testdef_rel: str, dataset: str, version: str,
@@ -2180,15 +2184,18 @@ class Editor:
     STOP_GRACE_S = 5          # a stopped generation is killed if it has not ended by then
 
     def generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                 nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None) -> dict:
+                 nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None,
+                 dataset_versions: dict | None = None) -> dict:
         """Run the datapack tool on a test definition of the session, as ``datapack <testdef>`` would;
-        manual_keys: keys set by hand (dotted name -> value, ``datapack --set``)."""
-        job_id = self.start_generate(session, testdef_rel, setup_config, nocheck, lenient, manual_keys)["job"]
+        manual_keys: keys set by hand (dotted name -> value, ``datapack --set``); dataset_versions: dataset
+        versions for this generation only (dataset id -> version, ``datapack --dataset-version``)."""
+        job_id = self.start_generate(session, testdef_rel, setup_config, nocheck, lenient, manual_keys, dataset_versions)["job"]
         self.jobs[job_id]["thread"].join()
         return self.jobs[job_id]["result"]
 
     def start_generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
-                       nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None) -> dict:
+                       nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None,
+                       dataset_versions: dict | None = None) -> dict:
         """The same as generate, in the background: its log can be read while it runs (generation_job).
 
         The datapack tool runs in a process of its own: a stopped generation ends for sure (the process and
@@ -2197,6 +2204,10 @@ class Editor:
         for name in manual_keys or {}:
             if not str(name).strip() or any(not part.strip() for part in str(name).split(".")) or "=" in str(name):
                 raise SequencerError(f"'{name}' is not a key name (name, or name.sub for a nested key)")
+        dataset_versions = {str(k).strip(): str(v).strip() for k, v in (dataset_versions or {}).items() if str(v).strip()}
+        for name in dataset_versions:
+            if not name or "=" in name:
+                raise SequencerError(f"'{name}' is not a dataset id")
         job_id = uuid.uuid4().hex[:8]
         log = _LiveLog()
         job: dict[str, Any] = {"session": session.id, "log": log, "result": None, "done": False,
@@ -2209,7 +2220,8 @@ class Editor:
         def work() -> None:
             logger.info(f"editor: datapack generation of {testdef_rel} ({session.repo}) started")
             try:
-                job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job, manual_keys)
+                job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job, manual_keys,
+                                               dataset_versions)
             except BaseException as e:                   # never a silent end
                 job["result"] = {"ok": False, "error": _describe(e), "log": self._clean(session, log.text())}
             finally:
@@ -2267,7 +2279,8 @@ class Editor:
     _generation_lock = threading.Lock()     # one generation at a time: they may share a working folder
 
     def _generate(self, session: EditSession, testdef_rel: str, setup_config: str | None, nocheck: bool,
-                  lenient: bool, job: dict, manual_keys: dict | None = None) -> dict:
+                  lenient: bool, job: dict, manual_keys: dict | None = None,
+                  dataset_versions: dict | None = None) -> dict:
         from testsuit.datatools.datapack.datapack_tools import read_baseline
         log: _LiveLog = job["log"]
         out_dir = Path(session.dir) / "generated"
@@ -2279,6 +2292,8 @@ class Editor:
         command += ["--setup-config", setup_config] if setup_config else []
         for name, value in (manual_keys or {}).items():     # a text value is read as YAML by the tool, as typed
             command += ["--set", f"{str(name).strip()}={value if isinstance(value, str) else json.dumps(value)}"]
+        for dataset, version in (dataset_versions or {}).items():
+            command += ["--dataset-version", f"{dataset}={version}"]
         popen_args: dict[str, Any] = {"start_new_session": True} if hasattr(os, "killpg") else {}
 
         waited = False
