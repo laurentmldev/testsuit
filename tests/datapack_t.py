@@ -474,3 +474,21 @@ def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
             datapack(testdef, output_dir=tmp_path / "out", dataset_versions={"nope": "v1"})
     finally:
         importers.unregister_data_importer("dir")
+
+
+def test_git_importer_lists_tags(tmp_path):
+    """the tags of a git source, apart from its branches: a version set by hand that is one keeps a datapack conform"""
+    import subprocess
+    from testsuit.datatools.datapack.importers import create_data_importer
+    repo = tmp_path / "src"
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+    repo.mkdir()
+    run("init", "-q", "-b", "main")
+    (repo / "f").write_text("x")
+    run("add", "f")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+    run("tag", "v1.0")
+    run("branch", "dev")
+    importer = create_data_importer("git", str(tmp_path / "out"), str(repo), "v1.0")
+    assert importer.listTags() == ["v1.0"]
+    assert set(importer.listVersions()) == {"v1.0", "dev", "main"}

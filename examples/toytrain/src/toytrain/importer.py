@@ -115,6 +115,10 @@ class ReleaseImporter(ADataImporter):
         return sort_versions([p.stem if p.suffix == ".zip" else p.name for p in store.iterdir()
                               if (p.is_dir() and not p.name.startswith(".")) or p.suffix == ".zip"])
 
+    def listTags(self) -> list[str]:
+        """Every release of the store is fixed: each is a tag."""
+        return self.listVersions()
+
     def getTag(self, testTag: bool = False) -> str | bool:
         marker = self._marker()
         if testTag:

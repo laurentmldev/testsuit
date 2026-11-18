@@ -94,7 +94,6 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
   const manual = Object.keys(userKeys).length
     ? { ...(byHand || {}), ...Object.fromEntries(Object.keys(userKeys).filter((k) => given[k] !== undefined && given[k] !== "").map((k) => [k, given[k]])) }
     : byHand;
-  const overridden = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.overrides && !keyStatus(k)?.blocked);
   const blockedKeys = Object.keys(byHand || {}).filter((k) => keyStatus(k)?.blocked);
   // dataset versions for this generation only (datapack --dataset-version): dataset id -> version
   const [versions, setVersions] = useState<Record<string, string>>({});
@@ -315,9 +314,8 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             {recalled.from && rows.length > 0 && <div className="muted small">None remembered for this test definition: these are the keys last set for <code>{recalled.from}</code>.</div>}
             <KeysByHand rows={rows} onChange={setRows} status={keyStatus} missing={missingKeys}
               known={(defined || []).filter((d) => d.origin !== "<datapack>").map((d) => ({ value: d.key, description: `\`${d.value}\`${d.origin ? ` · ${d.origin}` : ""}` }))}
-              setNote="the datapack stays conform." overrideNote="the datapack will be non-conform."
+              overrideNote="non-conform"
               emptyNote="read and not defined: give it a value (not set until then)" />
-            {overridden.length > 0 && <div className="banner warn">Overriding {overridden.length === 1 ? "a defined key" : `${overridden.length} defined keys`} makes this datapack <strong>non-conform</strong>: the queue accepts it, and its run and results are flagged.</div>}
           </Field>
         </>
       )}
@@ -407,7 +405,7 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
           const r: any = await post(`edit/sessions/${sid}/versions`, { importer: src.importer, source: src.source }).catch((e: any) => ({ versions: null, error: e.message }));
           if (!current) return;
           setDatasets((cur) => cur && cur.map((d) => d.importer === src.importer && d.source === src.source
-            ? { ...d, versions: r.versions, versions_error: r.error, versions_pending: false } : d));
+            ? { ...d, versions: r.versions, tags: r.tags, versions_error: r.error, versions_pending: false } : d));
         }));
       } catch (e: any) {
         if (current) setError(e.message);
@@ -416,7 +414,6 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
     return () => { current = false; };
   }, [sid, testdef, config]);
   if (datasets && datasets.length === 0 && !error) return null;
-  const changed = (datasets || []).filter((d) => (versions[d.id] ?? "").trim() && versions[d.id].trim() !== d.version);
   return (
     <Field label="Baseline versions" help="The version of each dataset the datapack is built from. A version picked here is used **for this generation only** (`datapack --dataset-version`): nothing is written to the files, and a version other than the one written keeps the datapack conform when it is a **tag** of its source (a git tag, a release), and makes it **non-conform** otherwise (a branch, a commit). Both are recorded in its `datapack.yml` and `baseline.yml`. To change a version in the files, edit them in the Editor.">
       {error && <pre className="error-box">{error}</pre>}
@@ -428,6 +425,7 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
             {datasets.map((d) => {
               const value = versions[d.id] ?? "";
               const overrides = value.trim() !== "" && value.trim() !== d.version;
+              const tag = overrides && (d.tags || []).includes(value.trim());   // a tag of the source: stays conform
               return (
                 <tr key={d.id}>
                   <td><strong>{d.id}</strong>{d.name && <div className="muted small">{d.name}</div>}
@@ -443,7 +441,8 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
                       </datalist>
                       {value && <button className="small" onClick={() => onChange({ ...versions, [d.id]: "" })} title="Use the version written">×</button>}
                     </div>
-                    <div className="small">{overrides ? <span className="warn-text">instead of <code>{d.version ?? d.written}</code></span> : <>written <code>{d.version ?? d.written}</code></>}
+                    <div className="small">{overrides ? <>instead of <code>{d.version ?? d.written}</code></> : <>written <code>{d.version ?? d.written}</code></>}
+                      {overrides && !tag && <span className="warn-text" title="Only a tag of the source (a git tag, a release) keeps the datapack conform"> · not a tag: <strong>non-conform</strong></span>}
                       {d.versions && <span className="muted"> · {d.versions.length} available{d.versions[0] && d.versions[0] !== d.version ? `, latest ${d.versions[0]}` : ""}</span>}</div>
                   </td>
                 </tr>
@@ -452,7 +451,6 @@ function BaselineVersions({ sid, testdef, config, versions, onChange }: {
           </tbody>
         </table>
       )}
-      {changed.length > 0 && <div className="banner info"><span>{changed.length === 1 ? "A dataset version" : `${changed.length} dataset versions`} other than the one written: the datapack stays conform if {changed.length === 1 ? "it is a tag" : "each is a tag"} of its source (a git tag, a release); otherwise (a branch, a commit) it is <strong>non-conform</strong>. Checked when the dataset is imported.</span></div>}
     </Field>
   );
 }

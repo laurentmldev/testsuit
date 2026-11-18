@@ -2067,6 +2067,7 @@ class Editor:
                 "baseline": baseline, "problems": problems}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
+    _tag_cache: dict[tuple[str, str], list[str] | None] = {}    # the versions that are tags (None: not known)
 
     def _versions_cached(self, importer_name: str, source: str) -> bool:
         import time
@@ -2079,7 +2080,7 @@ class Editor:
         import time
         started = time.monotonic()
         versions, error = self._versions(importer_name, source)
-        return {"versions": versions, "error": error, "seconds": round(time.monotonic() - started, 2)}
+        return {"versions": versions, "tags": self._tag_cache.get((importer_name, source)), "error": error, "seconds": round(time.monotonic() - started, 2)}
 
     def _versions(self, importer_name: str, source: str) -> tuple[list[str] | None, str | None]:
         """Versions an importer lists at a source (kept a minute: the forms ask again at each change)."""
@@ -2093,6 +2094,8 @@ class Editor:
             importer = importers.create_data_importer(importer_name, "", source, "")
             if hasattr(importer, "listVersions"):
                 versions = importer.listVersions()
+            tags = importer.listTags() if hasattr(importer, "listTags") else None
+            self._tag_cache[(importer_name, source)] = list(tags) if tags is not None else None
         except Exception as e:                       # unreachable remote, unknown importer...
             error = str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__
         self._version_cache[(importer_name, source)] = (time.monotonic(), versions, error)
@@ -2131,6 +2134,7 @@ class Editor:
                     source = os.path.normpath(source)
                 pending = not list_versions and not self._versions_cached(str(src.get("importer", "")), source)
                 versions, error = (None, None) if pending else self._versions(str(src.get("importer", "")), source)
+                tags = None if pending else self._tag_cache.get((str(src.get("importer", "")), source))
                 for d, ds in enumerate(src.get("datasets") or []):
                     if not isinstance(ds, dict):
                         continue
@@ -2152,7 +2156,7 @@ class Editor:
                                      "written": written, "version": version, "key": key,
                                      "defined_in": shown(origin) if origin.startswith("/") else origin or None,
                                      "editable": editable, "at": [r, s, d],
-                                     "versions": versions, "versions_error": error, "versions_pending": pending})
+                                     "versions": versions, "tags": tags, "versions_error": error, "versions_pending": pending})
         return datasets
 
     def set_version(self, session: EditSession, testdef_rel: str, dataset: str, version: str,

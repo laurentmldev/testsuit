@@ -59,6 +59,14 @@ class ADataImporter(metaclass=abc.ABCMeta):
         """
         return None
 
+    def listTags(self):
+        """The versions available at the reference location that are tags (fixed: a git tag, a release), as
+        opposed to a branch: a dataset version set by hand that is a tag keeps a datapack conform.
+
+        Optional: an importer that cannot tell returns None (the default).
+        """
+        return None
+
     def isClean(self):
         """Return True if evcerything is clean tagged, no local modifs etc"""
         if not self.getChanges(testClean=True):

@@ -75,6 +75,14 @@ class GitImporter(ADataImporter):
             return [line.split("\t", 1)[1].split("/", 2)[2] for line in out.stdout.splitlines() if "\t" in line]
         return sort_versions(remote("--tags")) + sorted(remote("--heads"))
 
+    def listTags(self):
+        """Tags of the remote repository, newest first."""
+        out = subprocess.run(["git", "ls-remote", "--refs", "--tags", self._remotePath], capture_output=True,
+                             text=True, timeout=20, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        if out.returncode != 0:
+            return None
+        return sort_versions([line.split("\t", 1)[1].split("/", 2)[2] for line in out.stdout.splitlines() if "\t" in line])
+
     def retrieve(self):
 
         print("\n### Git Dataset Importer ###")
