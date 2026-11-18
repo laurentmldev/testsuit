@@ -13,7 +13,7 @@
 
 // The keys explorer of a slot (Datapacks page): every key its template files and the commands of its steps can
 // use, as trees to browse, filter and copy as {{ key }}. Asked from the server only when it is opened. Its text
-// field filters the trees, or, in Evaluate mode, gives the value of a key expression.
+// field filters the trees as it is typed; Evaluate (or Enter) gives the value of the text as a key expression.
 
 import { useEffect, useMemo, useState } from "react";
 import { post } from "../api";
@@ -100,11 +100,11 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [where, setWhere] = useState<"run" | "generation">("generation");
-  const [filter, setFilter] = useState("");
   const [text, setText] = useState("");
-  const [evaluate, setEvaluate] = useState(false);
+  const filter = text.toLowerCase();
   const [result, setResult] = useState<{ expression: string; where: string; value?: any; error?: string | null } | null>(null);
   const [evaluating, setEvaluating] = useState(false);
+  // Typing filters the trees; Evaluate (or Enter) evaluates the text as a key expression.
   const run = (expression = text, w = where) => {
     if (!expression.trim()) { setResult(null); return; }
     setEvaluating(true);
@@ -113,17 +113,7 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
       .catch((e) => setResult({ expression, where: w, error: e.message }))
       .finally(() => setEvaluating(false));
   };
-  const changeWhere = (w: "run" | "generation") => { setWhere(w); if (evaluate && result) run(text, w); };
-  // Evaluate evaluates the text, every time it is clicked; Filter goes back to filtering the trees with it.
-  const startEvaluate = () => {
-    if (!evaluate) { setEvaluate(true); setFilter(""); setResult(null); }
-    run(text);
-  };
-  const stopEvaluate = () => {
-    setEvaluate(false);
-    setFilter(text.toLowerCase());
-    setResult(null);
-  };
+  const changeWhere = (w: "run" | "generation") => { setWhere(w); if (result) run(result.expression, w); };
   useEffect(() => {
     post(`edit/sessions/${sid}/slot_keys`, { testdef, slot, setup_config: config }).then(setData).catch((e) => setError(e.message));
   }, [sid, testdef, slot, config]);
@@ -142,25 +132,25 @@ export function KeysExplorer({ sid, testdef, config, slot, onClose }: {
               <button className={classes(where === "run" && "selected")} onClick={() => changeWhere("run")}
                 title="The keys only the commands of its steps have: of the run and of the lab component it would be bound to">Runtime-only</button>
             </div>
-            <input type="search" className={classes(evaluate && "mono")} autoFocus value={text}
-              placeholder={evaluate ? "Key expression, e.g. lab.components[slots.my_slot.component].host" : "Filter names and values"}
-              onChange={(e) => { setText(e.target.value); if (!evaluate) setFilter(e.target.value.toLowerCase()); }}
-              onKeyDown={(e) => { if (evaluate && e.key === "Enter") run(); }} />
-            <button className="primary" onClick={startEvaluate} disabled={evaluating || (evaluate && !text.trim())}
+            <input type="search" className="mono" autoFocus value={text}
+              placeholder="Filter names and values, or a key expression to evaluate, e.g. lab.components[slots.my_slot.component].host"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") run(); }} />
+            <button className="primary" onClick={() => run()} disabled={evaluating || !text.trim()}
               title="Evaluate the text as a key expression, as {{ … }} in a template or a command would (Enter does it too)">
               {evaluating ? "Evaluating…" : "Evaluate"}</button>
-            {evaluate && <button onClick={stopEvaluate} title="Back to filtering the keys with the text">Filter</button>}
           </div>
-          {evaluate && (evaluating ? <Spinner text="Evaluating…" />
+          {evaluating ? <Spinner text="Evaluating…" />
             : result ? (
               <div className={classes("key-eval", result.error ? "bad" : "ok")}>
                 <code>{`{{ ${result.expression.trim().replace(/^\{\{\s*|\s*\}\}$/g, "")} }}`}</code>
                 <span className="muted small"> {result.where === "run" ? "in the commands" : "at generation"}</span>
+                <button className="link small" style={{ float: "right" }} onClick={() => setResult(null)} title="Hide this result">×</button>
                 {result.error
                   ? <pre className="error-box">{result.error}</pre>
                   : <pre className="mono small">{typeof result.value === "string" ? result.value : JSON.stringify(result.value, null, 2)}</pre>}
               </div>)
-            : <p className="small muted">Type an expression of these keys, without or with its <code>{"{{ }}"}</code>, and press Enter: its value {where === "run" ? "in the commands of its steps" : "at generation"} (switch above). Filters work too: <code>{"slot.id | upper"}</code>.</p>)}
+            : <p className="small muted">Type to filter the keys below, or click Evaluate (or press Enter) to get the value of the text as a key expression, without or with its <code>{"{{ }}"}</code>, {where === "run" ? "in the commands of its steps" : "at generation"} (switch on the left). Filters work too: <code>{"slot.id | upper"}</code>.</p>}
           {where === "run" && (data.component
             ? <p className="small muted">Only in the commands of its steps (and their <code>env</code>, <code>wait_for</code>…), rendered when the run executes them: the slot is then bound to a lab component, now <strong>{data.component}</strong>{data.stage ? <> of stage <strong>{data.stage}</strong></> : <>, ad hoc: the slot has no <code>stage_slot</code>, so its <code>stage.*</code> keys are empty, at run time too (the other components are under <code>lab.components.*</code>)</>} (it may be another one when it runs). Values in &lt;…&gt; are known then. <code>slot</code> here is its run-time form; a template file cannot use these keys. For example, the address of the host the slot runs on is <code>{"{{ component.host }}"}</code>: it depends on the lab component the run is given, so a command can read it, a template cannot. The host bound to another slot, <code>my_slot</code>: <code>{"{{ lab.components[slots.my_slot.component].host }}"}</code>.</p>
             : <p className="banner warn">{data.why_not}</p>)}
