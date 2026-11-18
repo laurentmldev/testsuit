@@ -1483,7 +1483,7 @@ tsqd --listen 0.0.0.0:8640 &                  # instead, to reach it from anothe
 (cd ../../ui && TSQ_URL=http://127.0.0.1:8640 npm run e2e)   # every page and editor view rendered in a headless Chrome (CHROMIUM=<path> if needed)
 ```
 
-- **Runs** (subtabs **Queue** and **All runs**) and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
+- **Runs** (subtabs **Queue** and **All runs**; the tab opens on **All runs** when no run is waiting or running) and **Lab**: post a datapack, follow a run on its pipeline graph with live states and logs, browse its files; hold, maintenance, self-test and reload buttons.
 - **Editor** (`server.editor: true`; section 13.2): open a session on the lab or on `datapack/`, edit the inventory, lab roles and components, setups, test definitions, pipelines and templates in forms with their help on the right, then **Generate a datapack** to try the change and **Review and push…** to commit it in your name.
 
 **Lab operations:**
