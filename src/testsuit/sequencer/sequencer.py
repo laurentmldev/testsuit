@@ -39,6 +39,7 @@ from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPE
                                        StepRecord, StepRunner, worst)
 from testsuit.sequencer.intake import Datapack, check_against_lab, load_datapack, unpack
 from testsuit.sequencer.lab import Lab, checkout, load_lab, pull_lab
+from testsuit.sequencer.library import without_comments
 from testsuit.sequencer.model import FlatStep, Step
 from testsuit.sequencer.monitor import Monitor, component_keys, selftest_component
 from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resources, find_binding, order_queue)
@@ -666,7 +667,7 @@ class Sequencer:
                                  "the built-in kill, can be run by hand (deploy and collect need a datapack)")
         comp = self.lab.inventory.components[comp_id]
         stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
-        spec = command["spec"]
+        spec = without_comments(command["spec"])     # its comments are notes for the people: never run
         transport = self.transport_for(comp_id)
         result: dict = {"component": comp_id, "command": name, "kind": command["kind"], "at": now()}
         vias = self.lab.command_vias(comp, stage)

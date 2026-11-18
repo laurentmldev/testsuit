@@ -52,6 +52,7 @@ from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria
                                              is_scenario, is_utests)
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
+from testsuit.sequencer.library import without_comments
 from testsuit.sequencer.util import SequencerError, now
 
 WORK_DIRS = (".current_datapack/", ".work/")     # what the datapack tool writes next to the definitions: never committed
@@ -1821,7 +1822,7 @@ class Editor:
                                 keys = _step_keys(lab, needs, binding, context, flat.phase.id, fs.params, bound, spec)
                                 what = (f"command '{step.do}' of slot '{target}' ({entry['concrete']})" if step.action == "do"
                                         else f"its '{step.action}'" + (f" on slot '{target}'" if target else ""))
-                                for name in _missing_keys({"spec": spec, "env": step.env, "timeout": step.timeout}, keys):
+                                for name in _missing_keys({"spec": without_comments(spec), "env": step.env, "timeout": step.timeout}, keys):
                                     settable = name.split(".")[0] not in RUN_KEY_NAMES
                                     if settable and name not in missing_keys:
                                         missing_keys.append(name)

@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { get, post, useEvents, useLabels, useResource } from "../api";
 import { Dialog } from "../fields";
 import { handKeys, KeysByHand, rememberedKeys, rememberKeys, type HandKey } from "../keysbyhand";
-import { Address, ago, attempt, Badge, classes, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
+import { Address, ago, attempt, Badge, classes, CommentsNote, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, offNote, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
 
@@ -151,7 +151,7 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
                     ? <ViaTag via={c.via.id} label={labelOf(c.via.id)} host={c.via.host_alias || c.via.host}
                       title={`${c.name} runs on ${c.via.id} (${c.via.host}), which reaches ${id}: not on ${id} itself`} />
                     : <span className="via-tag" title={c.via_error || ""}>↪ via <strong>{c.spec.via}</strong> <span className="bad-text">(not found)</span></span>}</div>}</td>
-                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.detach && <span className="muted"> (detached)</span>}</td>
+                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.detach && <span className="muted"> (detached)</span>}<CommentsNote text={c.spec.comments} compact /></td>
                   <td>{c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
                     : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>
@@ -386,6 +386,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
                   {!live && <>, {time(p.at)}, {p.duration} s</>}
                 </p>
               )}
+              <CommentsNote text={p.status?.comments} />
               {p.via && <ViaRoute via={labelOf(p.via.id)} viaHost={p.via.host} target={labelOf(id)} targetHost={p.host} />}
               {(p.steps || []).map((st: any, i: number) => <ProbeStep key={i} step={st} index={i} running={live && i === p.steps.length - 1} />)}
               {live && !(p.steps || []).length && <p className="muted small"><span className="pulse run" /> starting…</p>}

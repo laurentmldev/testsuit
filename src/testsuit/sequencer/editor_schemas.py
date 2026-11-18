@@ -37,6 +37,10 @@ def h(text: str, **extra: Any) -> dict:
 DURATION = h("A duration: `30s`, `2m`, `1h30m`, or a number of seconds.",
              type=["string", "number"], examples=["30s", "2m", "15m"])
 
+COMMENTS = h("Free notes for the people who maintain it (Markdown, as long as needed): why it is done this way, "
+             "what to beware of, what was tried. Shown in the Editor and on the Lab page; never run nor rendered "
+             "(templates in it stay as written).", type="string")
+
 STRICT_NOTE = ("Its lines run in one shell (a `cd` or `export` holds for the next lines) and it stops at the first "
                "line that fails (`set -e`); `|| true` lets a line fail.")
 
@@ -176,6 +180,7 @@ COMMAND = h(
         "builtin": h("A built-in command: `deploy` (push the datapack inputs to `<remote_root>/<component>/input`), "
                      "`collect` (pull `<remote_root>/<component>/output` back into the results), `kill` (kill every "
                      "process tree the run started).", type="string", enum=["deploy", "collect", "kill"]),
+        "comments": COMMENTS,
     },
     defaultSnippets=[
         {"label": "run a shell command", "body": {"run": "${1:command}", "timeout": "${2:30s}"}},
@@ -246,6 +251,7 @@ STATUS = h(
                  "so that its stage stays available.", type="string"),
         "builtin": h("`linux_system`: `offline` when the transport fails, `running` while processes the "
                      "sequencer started are alive, `idle` otherwise.", type="string", enum=["linux_system"]),
+        "comments": COMMENTS,
     },
     defaultSnippets=[{"label": "probe with a command", "body": {
         "probe": {"run": "${1:systemctl is-active my-service}"},

@@ -37,7 +37,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, phase_slots
 from testsuit.sequencer.transports import Result, Transport, strict, traced, untraced
-from testsuit.sequencer.library import Resolved
+from testsuit.sequencer.library import Resolved, without_comments
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
 log = logging.getLogger("testsuit.sequencer")
@@ -320,7 +320,7 @@ class StepRunner:
         if spec is None:
             raise SequencerError(f"slot '{self.slot.id}' (lab component {self.slot.concrete.id}, role {self.slot.concrete.role}) has no "
                                  f"command '{name}' (has: {', '.join(sorted(self.slot.resolved.commands)) or 'none'})")
-        return dict(spec)
+        return dict(without_comments(spec))           # its comments are notes for the people: never run
 
     async def command_spec(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
         """Run a command definition: run, wait_for, signal, builtin, or a plugin step type."""

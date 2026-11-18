@@ -17,7 +17,7 @@ import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text, Toggle } from "../fields";
 import { get, post, put } from "../api";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
-import { CommandEditor, CommandsEditor, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
+import { CommandEditor, CommandsEditor, CommentsField, CommentsNote, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
 import { ItemLink, ItemLinks, useItemRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
@@ -434,6 +434,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
           <button className="small" onClick={() => onChange({ probe: { run: "" }, states: { running: { regex: "^active" }, idle: { regex: "^inactive" } } })}>Define a probe</button>
         </p>
       )}
+      {!s && inherited && <CommentsNote text={inherited.spec?.comments} />}
       {s && (
         <>
           <Field label="Probe with" help={help(["probe"])}>
@@ -488,6 +489,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
             </div>
             <p className="muted small">The first matching rule wins, in this order.</p>
           </Field>
+          <CommentsField value={s.comments} onChange={(v) => set("comments", v)} help={help(["comments"])} />
           <button className="small" onClick={() => onChange(undefined)}>Remove the probe{inherited ? " (use the inherited one)" : ""}</button>
         </>
       )}

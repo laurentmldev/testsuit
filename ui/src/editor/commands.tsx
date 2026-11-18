@@ -16,7 +16,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { CodeEditor } from "../monaco";
-import { classes, freeName, Markdown } from "../util";
+import { classes, CommentsNote, freeName, Markdown } from "../util";
+
+export { CommentsNote };
 import { clone, useSession, viaChoices } from "./state";
 
 const CMD_PATH = ["models", "_", "commands", "_"];
@@ -26,7 +28,17 @@ export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "depl
 export function commandKind(spec: any): string {
   if (!spec || typeof spec !== "object") return "run";
   for (const k of ["builtin", "wait_for", "signal", "run", "python", "http"]) if (k in spec) return k;
-  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via"].includes(k)) || "run";
+  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via", "comments"].includes(k)) || "run";
+}
+
+/** The editable comments of a command or a status probe. */
+export function CommentsField({ value, onChange, help }: { value: any; onChange: (v: string) => void; help?: string }) {
+  return (
+    <Field name="comments" label="Comments" help={help} wide hint="notes for the people who maintain it (Markdown): never run">
+      <Text multiline value={typeof value === "string" ? value : ""} onChange={onChange}
+        placeholder="Why it is done this way, what to beware of, what was tried…" />
+    </Field>
+  );
 }
 
 export function pythonSummary(py: any): string {
@@ -313,6 +325,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
     if (!k || k === kind) return;
     const keep: any = {};
     if (s.timeout) keep.timeout = s.timeout;
+    if (s.comments) keep.comments = s.comments;
     onChange({
       ...keep,
       ...(k === "run" ? { run: "" } : k === "python" ? { python: { script: "{{ component.input_dir }}/check.py" } } : k === "wait_for" ? { wait_for: { log: { file: "{{ component.output_dir }}/app.log", regex: "READY" }, timeout: "30s" } }
@@ -389,6 +402,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
           }
         }} /></Field>
       )}
+      <CommentsField value={s.comments} onChange={(x) => set("comments", x)} help={help("comments")} />
     </div>
   );
 }
@@ -514,7 +528,8 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
             return [
               <tr key={name} className={classes("clickable", !mine && "inherited", openName === name && "selected open")} onClick={() => setOpenName(openName === name ? null : name)}
                   title={openName === name ? "Click to close its details" : mine ? "Click to edit it" : "Click to see it"}>
-                <td><span className="disclosure" aria-hidden="true">{openName === name ? "▾" : "▸"}</span><code>{name}</code></td>
+                <td><span className="disclosure" aria-hidden="true">{openName === name ? "▾" : "▸"}</span><code>{name}</code>
+                  {String((mine ? own[name] : from?.spec)?.comments ?? "").trim() && <span className="comments-mark" title={String((mine ? own[name] : from?.spec).comments)}>💬</span>}</td>
                 <td className="mono small">{summary(mine ? own[name] : from?.spec)}</td>
                 <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}{required && !role && <span className="warning-text"> · not in the role</span>}</td>
                 <td>
@@ -546,7 +561,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 </td></tr>
               ),
               openName === name && !mine && from && (
-                <tr key={name + ":view"} className="editing"><td colSpan={4}><pre className="mono small">{JSON.stringify(from.spec, null, 1)}</pre><Markdown text={wellKnown.find((w) => w.value === name)?.description} /></td></tr>
+                <tr key={name + ":view"} className="editing"><td colSpan={4}><CommentsNote text={from.spec?.comments} /><pre className="mono small">{JSON.stringify({ ...from.spec, comments: undefined }, null, 1)}</pre><Markdown text={wellKnown.find((w) => w.value === name)?.description} /></td></tr>
               ),
             ];
           })}
