@@ -38,15 +38,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shlex
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, Callable
 
 from testsuit.sequencer.util import SequencerError, parse_duration
 
@@ -56,6 +58,9 @@ EXPECT_KEYS = ("status", "regex", "json")
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 SECRET = re.compile(r"auth|token|key|secret|password|cookie", re.IGNORECASE)
 STATUS_MARK = "\n__tsq_http_status__ "
+BODY_MARK = "\n__tsq_http_body__\n"          # through via with a body_file: the answer, after curl's progress meter
+SIZE_MARK = "__tsq_upload_size__ "
+Progress = Callable[[int, int], None]           # bytes sent, bytes to send
 MAX_BODY = 4 << 20
 
 
@@ -250,15 +255,46 @@ def timeout_of(spec: dict, default: float = 30.0) -> float:
     return parse_duration(spec["timeout"]) if spec.get("timeout") is not None else default
 
 
-def send(spec: dict, timeout: float | None = None, base: Path | None = None) -> Answer:
+class _FileBody:
+    """A body file read as it is sent (not held in memory), its progress told at most every quarter second."""
+
+    def __init__(self, path: Path, progress: Progress | None):
+        self.file = open(path, "rb")
+        self.size = os.fstat(self.file.fileno()).st_size
+        self.done, self.progress, self.told = 0, progress, 0.0
+
+    def read(self, n: int = -1) -> bytes:
+        chunk = self.file.read(1 << 16 if n is None or n < 0 else n)
+        self.done += len(chunk)
+        if self.progress is not None:
+            now = time.monotonic()
+            if now - self.told >= 0.25 or self.done >= self.size:
+                self.told = now
+                self.progress(self.done, self.size)
+        return chunk
+
+    def close(self) -> None:
+        self.file.close()
+
+
+def send(spec: dict, timeout: float | None = None, base: Path | None = None,
+         progress: Progress | None = None) -> Answer:
     """Send the request from this host (blocking: run it in a thread); ``base``: the run folder, where a
-    relative ``body_file`` is."""
+    relative ``body_file`` is; ``progress`` is told how much of the body file is sent (from this thread)."""
+    headers = _headers(spec)
+    body = None
     try:
-        data = _payload(spec, base)
+        if "body_file" in spec:
+            body = data = _FileBody(body_path(spec, base), progress)
+            headers["Content-Length"] = str(body.size)
+            if progress is not None:
+                progress(0, body.size)
+        else:
+            data = _payload(spec, base)
     except (OSError, ValueError) as e:
         reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
         return Answer(None, "", f"cannot read the body file '{spec.get('body_file')}': {reason}")
-    request = urllib.request.Request(_url(spec), data=data, headers=_headers(spec),
+    request = urllib.request.Request(_url(spec), data=data, headers=headers,
                                      method=str(spec.get("method") or "GET").upper())
     context = None
     if spec.get("verify") is False:
@@ -270,26 +306,31 @@ def send(spec: dict, timeout: float | None = None, base: Path | None = None) -> 
             return Answer(r.status, r.read(MAX_BODY).decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         try:
-            body = e.read(MAX_BODY).decode("utf-8", "replace")
+            text = e.read(MAX_BODY).decode("utf-8", "replace")
         except Exception:
-            body = ""
-        return Answer(e.code, body)
+            text = ""
+        return Answer(e.code, text)
     except Exception as e:
         reason = getattr(e, "reason", None)
         return Answer(None, "", str(reason or e) or type(e).__name__)
+    finally:
+        if body is not None:
+            body.close()
 
 
 def curl_command(spec: dict, timeout: float | None = None) -> str:
-    """The same request as a curl command, for another component (``via``): the answer then its status; curl
-    reads ``body_file`` on that component."""
+    """The same request as a curl command, for another component (``via``): the answer then its status. With
+    ``body_file`` (read there by curl), the file's size, curl's progress meter and the status, then the answer
+    (kept in a temporary file meanwhile)."""
     headers = _headers(spec)
-    args = ["curl", "-sS", "-X", str(spec.get("method") or "GET").upper(), "--max-time", f"{timeout or timeout_of(spec):g}",
-            "-w", STATUS_MARK.replace("\n", "\\n") + "%{http_code}"]
+    upload = "body_file" in spec
+    args = ["curl", "-S" if upload else "-sS", "-X", str(spec.get("method") or "GET").upper(),
+            "--max-time", f"{timeout or timeout_of(spec):g}", "-w", STATUS_MARK.replace("\n", "\\n") + "%{http_code}"]
     if spec.get("verify") is False:
         args.append("-k")
     for k, v in headers.items():
         args += ["-H", f"{k}: {v}"]
-    if "body_file" in spec:
+    if upload:
         args += ["--data-binary", "@" + str(spec["body_file"]).strip()]
     else:
         data = _payload(spec)
@@ -297,16 +338,53 @@ def curl_command(spec: dict, timeout: float | None = None) -> str:
             args += ["--data-binary", data.decode()]
     args.append(_url(spec))
     command = " ".join(shlex.quote(a) for a in args)
-    if "body_file" in spec:                      # curl alone would not say which file it could not read
-        path = shlex.quote(str(spec["body_file"]).strip())
-        reason = shlex.quote(f"cannot read the body file '{str(spec['body_file']).strip()}' on this component: ")
-        command = (f"if [ ! -e {path} ]; then echo {reason}'no such file'; exit 66; "
-                   f"elif [ ! -f {path} ] || [ ! -r {path} ]; then echo {reason}'not a readable file'; exit 66; fi; "
-                   + command)
-    return command
+    if not upload:
+        return command
+    path = shlex.quote(str(spec["body_file"]).strip())       # curl alone would not say which file it cannot read
+    reason = shlex.quote(f"cannot read the body file '{str(spec['body_file']).strip()}' on this component: ")
+    return (f"if [ ! -e {path} ]; then echo {reason}'no such file'; exit 66; "
+            f"elif [ ! -f {path} ] || [ ! -r {path} ]; then echo {reason}'not a readable file'; exit 66; fi; "
+            f"t=$(mktemp) || exit 70; echo \"{SIZE_MARK}$(wc -c < {path} | tr -d ' ')\"; "
+            f"{command} -o \"$t\" 2>&1; s=$?; printf '{BODY_MARK.replace(chr(10), chr(92) + 'n')}'; cat \"$t\"; "
+            f"rm -f \"$t\"; exit $s")
+
+
+_METER_ROW = re.compile(r"^\s*\d+\s+\S+\s+\d+\s+\S+\s+\d+\s+(?P<sent>[\d.]+[kMGTP]?)\s")
+_UNITS = {"": 1, "k": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
+
+
+def _meter_line(line: str) -> bool:
+    return bool(_METER_ROW.match(line)) or "% Total" in line or "Dload  Upload" in line or line.startswith(SIZE_MARK)
+
+
+class UploadMeter:
+    """Reads the output of an upload through via as it comes: the file's size, then curl's progress meter
+    (a row each second, after a carriage return); tells ``progress`` the bytes sent."""
+
+    def __init__(self, progress: Progress):
+        self.progress, self.pending, self.total = progress, "", 0
+
+    def feed(self, data: bytes) -> None:
+        *lines, self.pending = re.split(r"[\r\n]", self.pending + data.decode("utf-8", "replace"))
+        for line in lines:
+            if line.startswith(SIZE_MARK) and line[len(SIZE_MARK):].strip().isdigit():
+                self.total = int(line[len(SIZE_MARK):].strip())
+                self.progress(0, self.total)
+            elif self.total and (m := _METER_ROW.match(line)):
+                sent = m["sent"]
+                unit = sent[-1] if sent[-1] in _UNITS else ""
+                self.progress(min(int(float(sent[:-1] if unit else sent) * _UNITS[unit]), self.total), self.total)
 
 
 def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
+    if BODY_MARK in output:                      # an upload: its meter and status, then the answer
+        head, _, answer = output.partition(BODY_MARK)
+        head = "\n".join(line for line in re.split(r"[\r\n]", head) if line.strip() and not _meter_line(line))
+        before, _, status = head.rpartition(STATUS_MARK.strip("\n"))
+        status = status.strip()
+        if exit_status or not status.isdigit() or status == "000":
+            return Answer(None, "", (error or before or head).strip()[-500:] or f"curl exit status {exit_status}")
+        return Answer(int(status), answer)
     body, _, status = output.rpartition(STATUS_MARK.strip("\n"))
     status = status.strip()
     if exit_status or not status.isdigit() or status == "000":
@@ -314,14 +392,23 @@ def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
     return Answer(int(status), body[:-1] if body.endswith("\n") else body)
 
 
-async def request(spec: dict, transport=None, timeout: float | None = None, base: Path | None = None) -> Answer:
+async def request(spec: dict, transport=None, timeout: float | None = None, base: Path | None = None,
+                  progress: Progress | None = None) -> Answer:
     """Send the request: from the sequencer host, or through a component's transport (curl there); with
     ``extract``, the answer's body is that part of it (the whole answer in ``raw``). ``base``: the run folder,
-    where a relative ``body_file`` is read on the sequencer host."""
+    where a relative ``body_file`` is read on the sequencer host; ``progress`` is told how much of the body file
+    is sent, in the event loop."""
     if transport is None:
-        return apply_extract(spec, await asyncio.to_thread(send, spec, timeout, base))
+        told = None
+        if progress is not None and "body_file" in spec:
+            loop = asyncio.get_running_loop()
+            told = lambda done, total: loop.call_soon_threadsafe(progress, done, total)   # noqa: E731
+        return apply_extract(spec, await asyncio.to_thread(send, spec, timeout, base, told))
     limit = timeout or timeout_of(spec)
-    result = await transport.shell(curl_command(spec, limit), timeout=limit + 5)
+    if progress is not None and "body_file" in spec and hasattr(transport, "run"):
+        result = await transport.run(curl_command(spec, limit), timeout=limit + 5, log=UploadMeter(progress).feed)
+    else:
+        result = await transport.shell(curl_command(spec, limit), timeout=limit + 5)
     if not result.completed:
         return Answer(None, "", result.error or "no answer")
     return apply_extract(spec, parse_curl(result.output, result.exit_status, result.error or ""))

@@ -93,7 +93,7 @@ HTTP = h(
                        "It is read where the request is sent from: on the sequencer host, a relative path is in the "
                        "run folder (`{{ run.dir }}`: the datapack's files), and only an absolute one works outside a "
                        "run (by hand, status probes); with `via`, on that component (curl reads it there). Only one of "
-                       "`json`, `body` and `body_file`.", type="string",
+                       "`json`, `body` and `body_file`. The Run page shows the upload's progress.", type="string",
                        examples=["payload.bin", "{{ component.input_dir }}/firmware.bin"]),
         "timeout": DURATION,
         "verify": h("Check the server's TLS certificate (default true; false for a self-signed lab server).",

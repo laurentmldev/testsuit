@@ -156,13 +156,15 @@ class StepRecord:
     # the lab command a 'do:' step runs: {name, component (lab component id), source ("model M", "host H",
     # "stage S", "" when its component has none)}, so the Run page opens where it is defined
     lab_command: dict | None = None
+    # an upload running now (http body_file): {"sent": bytes, "total": bytes}, for the Run page's progress bar
+    progress: dict | None = None
 
     @property
     def key(self) -> str:
         return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items()}
+        return {k: v for k, v in self.__dict__.items() if v is not None or k != "progress"}
 
 
 class Aborted(Exception):
@@ -237,6 +239,14 @@ class RunContext:
 
 # ── step execution ─────────────────────────────────────────────────────────
 
+def _size(n: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GiB"
+
+
 class StepRunner:
     """Executes one flat step of a phase, for one slot or none."""
 
@@ -266,6 +276,24 @@ class StepRunner:
 
     def close(self) -> None:
         self._log.close()
+
+    def upload_progress(self):
+        """What an upload tells of its progress: a line in the step log at each tenth, the step's ``progress``
+        (the Run page's bar) at most each half second."""
+        started, state = time.monotonic(), {"tenth": -1, "told": 0.0}
+
+        def told(sent: int, total: int) -> None:
+            tenth = 10 if total <= 0 else min(10, sent * 10 // total)
+            now_ = time.monotonic()
+            if tenth > state["tenth"]:
+                state["tenth"] = tenth
+                rate = sent / (now_ - started) if now_ > started and sent else 0
+                self.note(f"sent {_size(sent)} of {_size(total)} ({tenth * 10}%)" + (f", {_size(rate)}/s" if rate else ""))
+            if now_ - state["told"] >= 0.5 or sent >= total:
+                state["told"] = now_
+                self.record.progress = {"sent": sent, "total": total}
+                self.ctx.notify("step", {"run": self.ctx.run_id, **self.record.as_dict()})
+        return told
 
     @property
     def pidfile(self) -> str | None:
@@ -389,7 +417,12 @@ class StepRunner:
             self.note(f"through {via.id} ({via.host}), with curl")
         limit = timeout if timeout is not None else httpcall.timeout_of(request)
         self.note(f"HTTP {httpcall.describe(request)}")
-        answer = await httpcall.request(request, transport, limit, self.ctx.bag)
+        progress = self.upload_progress() if "body_file" in request else None
+        try:
+            answer = await httpcall.request(request, transport, limit, self.ctx.bag, progress)
+        finally:
+            if self.record.progress is not None:
+                self.record.progress = None          # the step's end tells the Run page
         if answer.status is None:
             self.note(f"no answer: {answer.error}")
             return ERROR, f"no answer: {answer.error}"

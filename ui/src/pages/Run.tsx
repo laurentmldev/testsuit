@@ -64,6 +64,8 @@ function StepNode({ data }: NodeProps) {
   const d = data as any;
   // its command runs through another component (a command's via): said on the step itself
   const vias = [...new Set<string>((d.items || []).map((i: any) => i.via).filter(Boolean))];
+  // a file being sent (a REST API call's body file): its progress on the step
+  const uploading = (d.items || []).find((i: any) => i.state === "running" && i.progress);
   return (
     <div className={classes("step-node", STATE_COLORS[d.state] || "muted", d.selected && "selected", d.part === "finally" && "finally",
       (d.items || []).some((i: any) => i.state === "running") && "pulsing")}
@@ -71,6 +73,7 @@ function StepNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Left} />
       <div className="step-id">{d.label}</div>
       <div className="step-action">{d.action}</div>
+      {uploading && <UploadBar progress={uploading.progress} compact />}
       {vias.length > 0 && <div className="step-via">{vias.map((v) => <ViaTag key={v} via={v} title={`its command runs on ${v}, which reaches the component of its slot`} />)}</div>}
       {d.items?.length > 1 && (
         <div className="step-items nowheel" style={{ maxHeight: SLOT_ROWS_SHOWN * SLOT_ROW }}>
@@ -83,6 +86,25 @@ function StepNode({ data }: NodeProps) {
         </div>
       )}
       <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}
+
+function sizeText(n: number): string {
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return i ? `${n.toFixed(1)} ${units[i]}` : `${n} B`;
+}
+
+/** The progress of a file a step sends (a REST API call's body file), as the sequencer last told it. */
+export function UploadBar({ progress, compact }: { progress: { sent: number; total: number }; compact?: boolean }) {
+  const pct = progress.total > 0 ? Math.min(100, Math.floor((progress.sent * 100) / progress.total)) : 100;
+  const text = `${sizeText(progress.sent)} of ${sizeText(progress.total)} sent (${pct}%)`;
+  return (
+    <div className={classes("upload-progress", compact && "compact")} title={text}>
+      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><div style={{ width: `${pct}%` }} /></div>
+      {compact ? <span className="small">{pct}%</span> : <span className="small">{text}</span>}
     </div>
   );
 }
@@ -583,6 +605,7 @@ function StepFacts({ record, records }: { record: any; records: any[] }) {
           {record.exit_status !== null && record.exit_status !== undefined && <> · exit {record.exit_status}</>}
           {record.attempts > 1 && <> · {record.attempts} tries</>}
           {record.started && <> · <Elapsed from={record.started} to={record.ended || null} /></>}
+          {record.state === "running" && record.progress && <UploadBar progress={record.progress} />}
           {record.via && (
             <div className="step-via-note">
               <ViaTag via={record.via} title={`its command ran on ${record.via}, not on the component of its slot`}>run on</ViaTag>
