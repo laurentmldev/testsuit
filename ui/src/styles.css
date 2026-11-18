@@ -199,6 +199,7 @@ tr.finally-row td { color: var(--muted); }
 .frame-node.run { border-color: var(--run); }
 .frame-node.bad { border-color: var(--bad); }
 .frame-title { font-size: 12px; font-weight: 600; padding: 4px 8px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.frame-node > .react-flow__handle { opacity: 0; }   /* a frame's arrows (merged ones) start or end on its side, no dot */
 .frame-node.lane.pickable { cursor: pointer; }
 .frame-node.lane.pickable:hover { border-color: var(--accent); }
 .frame-node.lane.target { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }

@@ -92,3 +92,41 @@ export async function layoutWithRoutes(nodes: LayoutNode[], edges: LayoutEdge[],
   walk(result);
   return { nodes: placed, routes };
 }
+
+/** Fewer arrows around groups (sub-pipeline frames, a finally lane): when every way out of a group (its steps that
+ * no other step of the group needs) has an arrow to the same node, one arrow from the group's frame stands for all
+ * of them, and likewise one arrow into a group when a node has one to every way in (its steps that need no other step
+ * of the group). The arrows to that node from the other steps of the group go too: they are implied, through its ways
+ * out. ``groups`` gives the steps inside each group, at any depth; outer groups are merged first. */
+export function mergeGroupEdges<E extends LayoutEdge>(edges: E[], groups: Record<string, string[]>,
+  merged: (edge: E, id: string, source: string, target: string) => E = (e, id, source, target) => ({ ...e, id, source, target })): E[] {
+  let list = edges;
+  const order = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b));   // outer ones first
+  for (const side of ["source", "target"] as const) {
+    const other = side === "source" ? "target" : "source";
+    for (const g of order) {
+      const steps = groups[g];
+      if (steps.length < 2) continue;
+      // a group inside this one stands for its steps (an arrow from or to its frame, merged before)
+      const nested = order.filter((n) => n !== g && groups[n].every((m) => steps.includes(m)) && groups[n].length < steps.length);
+      const members = new Set([...steps, ...nested]);
+      const stand = (m: string) => [m, ...nested.filter((n) => groups[n].includes(m))];
+      const inner = list.filter((e) => members.has(e.source) && members.has(e.target));
+      // the ways out of the group (no step of it needs them), or the ways in (they need no step of it)
+      const ends = steps.filter((m) => !stand(m).some((x) => inner.some((e) => e[side] === x)));
+      const byOther = new Map<string, E[]>();
+      for (const e of list) if (members.has(e[side]) && !members.has(e[other]) && e[other] !== g) {
+        const k = e[other];
+        byOther.set(k, [...(byOther.get(k) || []), e]);
+      }
+      for (const [node, from] of byOther) {
+        const covered = new Set(from.map((e) => e[side]));
+        if (from.length < 2 || !ends.length || !ends.every((m) => stand(m).some((x) => covered.has(x)))) continue;
+        const [s, t] = side === "source" ? [g, node] : [node, g];
+        list = list.filter((e) => !from.includes(e));
+        if (!list.some((e) => e.source === s && e.target === t)) list.push(merged(from[0], `${s}=>${t}`, s, t));
+      }
+    }
+  }
+  return list;
+}
