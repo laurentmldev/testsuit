@@ -359,8 +359,9 @@ export function ViaRoute({ via, viaHost, target, targetHost }: {
 const TRACED = /^\++tsq\$ /;
 /** A note of the sequencer in a step log ("[tsq <time>] …"). */
 const NOTE = /^\[tsq [^\]]*\] /;
-/** The notes that say what a step executes: the lab command it runs and on which component, then the command and
- *  where it runs ("run on <host>: …", its next lines indented); they stand out from the other notes. */
+/** The notes that say what a step executes: the lab command it runs and on which component, then where it runs
+ *  ("run on <host>: …", its next lines indented); they stand out from the other notes. The command itself is shown
+ *  there by where it runs only: its traced lines just below show it, line by line (the raw log keeps it whole). */
 const NOTE_LAB_COMMAND = /^\[tsq [^\]]*\] lab command /;
 const NOTE_EXEC = /^\[tsq [^\]]*\] (run|start \(detached\)) on /;
 const NOTE_GOES_ON = /^\[tsq [^\]]*\]   /;
@@ -509,9 +510,11 @@ export function ConsoleText({ text }: { text: string }) {
           exec = false;
           return <div key={i} className="console-note console-labcmd">{line.replace(NOTE, "")}<span className="console-stamp">{line.match(NOTE)![0]}</span></div>;
         }
-        if (NOTE_EXEC.test(line) || (exec && NOTE_GOES_ON.test(line))) {
+        if (exec && NOTE_GOES_ON.test(line)) return null;          // the next lines of the command: shown traced
+        if (NOTE_EXEC.test(line)) {
           exec = true;
-          return <div key={i} className="console-note console-exec">{line.replace(NOTE, "")}</div>;
+          const said = line.replace(NOTE, "");
+          return <div key={i} className="console-note console-exec">{said.includes(": ") ? said.slice(0, said.indexOf(": ")) : said}</div>;
         }
         exec = false;
         return NOTE.test(line)
