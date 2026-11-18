@@ -18,7 +18,7 @@ import "./styles.css";
 import { get, post, url, useConnected, useResource } from "./api";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
 import { NavIcon } from "./navicons";
-import { QueuePage } from "./pages/Queue";
+import { ACTIVE, QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
 import { RunPage } from "./pages/Run";
 import { LabPage } from "./pages/Lab";
@@ -80,6 +80,17 @@ function RunsSubtabs({ page }: { page: string }) {
   );
 }
 
+// The Runs tab itself (#/, the home page): opens the Queue subtab while some run waits or runs, and the
+// All runs subtab when the queue is empty. #/queue and #/runs still open their subtab whatever the queue.
+function RunsHome() {
+  const pending = useResource<any[]>("runs?limit=1&state=" + ["queued", "waiting_resources", ...ACTIVE].join(","));
+  useEffect(() => {
+    if (pending.data) window.location.replace(pending.data.length ? "#/queue" : "#/runs");
+    else if (pending.error) window.location.replace("#/queue");
+  }, [pending.data, pending.error]);
+  return null;
+}
+
 function App() {
   const route = useRoute();
   const connected = useConnected();
@@ -90,7 +101,7 @@ function App() {
   }, []);
   const title = health.data?.title || "Test sequencer";
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
-  const page = route.parts[0] || "queue";
+  const page = route.parts[0] || "";   // "": the Runs tab, which picks its subtab (RunsHome)
   const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
   useEffect(() => {
     if (!editing) document.title = title;
@@ -100,7 +111,7 @@ function App() {
   ];
   // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
   // are kept as they were, so existing links still work
-  const tabOf = (key: string) => (key === "queue" ? "runs" : key);
+  const tabOf = (key: string) => (key === "queue" || key === "" ? "runs" : key);
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor} />;
   else if (page === "runs") content = <RunsPage />;
@@ -111,7 +122,8 @@ function App() {
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
   else if (page === "criteria" && route.parts[1]) content = <SessionCriteriaPage sid={route.parts[1]} route={route} />;
   else if (page === "edit") content = <EditorHome />;
-  else content = <QueuePage />;
+  else if (page === "queue") content = <QueuePage />;
+  else content = <RunsHome />;
   return (
     <div className={classes("app", editing && "full")}>
       <header className="topbar">
@@ -121,7 +133,7 @@ function App() {
         </a>
         <nav>
           {nav.map(([key, label]) => (
-            <a key={key} href={key === "runs" ? "#/queue" : `#/${key}`} className={classes(tabOf(page) === key && "active")}><NavIcon name={key} />{label}</a>
+            <a key={key} href={key === "runs" ? "#/" : `#/${key}`} className={classes(tabOf(page) === key && "active")}><NavIcon name={key} />{label}</a>
           ))}
         </nav>
         <div className="topbar-right">
