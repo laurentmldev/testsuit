@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from testsuit.sequencer.inventory import ICON_EXTENSIONS, ICONS, Component, Stage
+from testsuit.sequencer.library import without_comments
 from testsuit.sequencer.util import SequencerError
 
 # keys naming another component in a command, a probe or a self-test: {{ stage.roles.<role>.host }}...
@@ -68,7 +69,7 @@ def templates(spec: Any) -> list[str]:
     for key in ("signal", "builtin"):
         if spec.get(key) is not None:
             return [f"{key} {spec[key]}"]
-    skip = {"via", "id", "timeout", "states", "detach", "description", "expect"}
+    skip = {"via", "id", "timeout", "states", "detach", "description", "expect", "comments"}
     return [f"{k} {v}" if not isinstance(v, (dict, list)) else f"{k} {' '.join(templates(v))}"
             for k, v in spec.items() if k not in skip]
 
@@ -125,8 +126,9 @@ def lab_links(lab) -> list[dict]:
             add(probe_via, comp, "probe", "status probe", templates(resolved.status), stage, probe_via)
             for name, via in command_vias.items():
                 add(via, comp, "probe", f"command {name}", templates(resolved.commands[name]), stage, via)
-            parts = [(f"command {n}", spec, command_vias.get(n)) for n, spec in resolved.commands.items()]
-            parts += [("status probe", resolved.status, probe_via), ("self-test", resolved.selftest, probe_via),
+            # what they run: their comments (notes for the people) name no component
+            parts = [(f"command {n}", without_comments(spec), command_vias.get(n)) for n, spec in resolved.commands.items()]
+            parts += [("status probe", without_comments(resolved.status), probe_via), ("self-test", resolved.selftest, probe_via),
                       ("collect", resolved.collect, None)]
             parts += [(f"variable {k}", v, None) for k, v in comp.vars_in(stage).items()
                       if k not in ("tsq_commands", "tsq_status", "tsq_selftest", "tsq_collect", "tsq_links")]

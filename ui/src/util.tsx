@@ -155,6 +155,17 @@ export function Spinner({ text, className }: { text?: string; className?: string
   );
 }
 
+/** The comments of a command or a status probe (notes for the people, never run), read-only. */
+export function CommentsNote({ text, compact }: { text?: string | null; compact?: boolean }) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  return (
+    <div className={classes("comments-note", compact && "compact")}>
+      <span className="comments-label">Comments</span>
+      <Markdown text={text} />
+    </div>
+  );
+}
+
 export function Markdown({ text, className }: { text?: string | null; className?: string }) {
   if (!text) return null;
   const blocks: ReactNode[] = [];

@@ -110,6 +110,13 @@ input.priority { width: 80px; }
 .warn-list { color: var(--warn); margin: 6px 0; }
 .hint, .hint-box { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .hint-box { background: var(--panel-2); padding: 8px 10px; border-radius: 6px; }
+/* comments of a command or a status probe: notes for the people, never run */
+.comments-note { border-left: 3px solid var(--accent); background: var(--panel-2); padding: 6px 10px; border-radius: 0 6px 6px 0; margin: 6px 0; font-size: 12.5px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; white-space: normal; }
+.comments-note .comments-label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.comments-note .md p { margin: 2px 0; }
+.comments-note.compact { padding: 3px 8px; margin: 4px 0 0; font-size: 12px; }
+.comments-note.compact .comments-label { display: none; }
+.comments-mark { margin-left: 6px; font-size: 11px; cursor: help; opacity: .8; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
 .dot.on { background: var(--ok); }
 .dot.off { background: var(--bad); }

@@ -703,6 +703,23 @@ The commands, status probes and self-test checks of a component can use the **ot
 
 A component's own variables (`{{ component.vars }}`) include those of its stage group in its status probe and self-test too.
 
+**Comments.** A command, and a status probe (section 7.5), can carry `comments`: free notes for the people who maintain it (Markdown, as long as needed), such as why it is done this way, what to beware of, or what was tried before. They never change what runs: the sequencer neither runs nor renders them (a `{{ ... }}` in them stays as written and reads no key), and a component that overrides a command or a probe brings its own comments, or none.
+
+```yaml
+    commands:
+      start:
+        run: "sudo systemctl start app-{{ component.role }}"
+        comments: |
+          Through systemd rather than detached: the unit restarts the app after a watchdog reset,
+          which a detached process would not survive.
+    status:
+      probe: {run: "systemctl is-active app"}
+      states: {running: {regex: "^active"}, idle: {regex: "^inactive"}}
+      comments: "`activating` is matched by nothing on purpose: unknown until the unit settles."
+```
+
+The Editor gives them a Comments field in the command and status probe forms, and shows them where a command or a probe is shown read-only: an inherited command or probe, the hover help of a slot's commands in the pipeline, and the Commands and State dialogs of the Lab page.
+
 ### 7.5 State monitoring
 
 Each component has a monitored **state**:

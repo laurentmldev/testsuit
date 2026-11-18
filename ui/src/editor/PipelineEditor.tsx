@@ -541,7 +541,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
           <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.type}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
-              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})`).join("")}` })}>
+              onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})${typeof i.spec?.comments === "string" && i.spec.comments.trim() ? `: ${i.spec.comments.trim().replace(/\s*\n\s*/g, " ")}` : ""}`).join("")}` })}>
               {cmd}
             </button>
           ))}

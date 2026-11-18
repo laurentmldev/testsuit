@@ -39,6 +39,20 @@ INPUT_KEYS = {"name", "type", "optional", "description"}
 INPUT_TYPES = ("file", "folder")
 COMPONENT_KEYS = {"extends", "roles", "description", "transport", "commands", "status", "selftest", "collect"}
 HOST_KEYS = {"tsq_commands": "commands", "tsq_status": "status", "tsq_selftest": "selftest", "tsq_collect": "collect"}
+COMMENTS = "comments"        # free notes of a command or a status probe: for the people, never run
+
+
+def without_comments(spec: Any) -> Any:
+    """A command or status probe definition without its ``comments``: what runs. The comments are notes for
+    the people who maintain it (why it is done this way...): the sequencer never runs nor renders them."""
+    if isinstance(spec, dict) and COMMENTS in spec:
+        return {k: v for k, v in spec.items() if k != COMMENTS}
+    return spec
+
+
+def _check_comments(spec: dict, where: str) -> None:
+    if spec.get(COMMENTS) is not None and not isinstance(spec[COMMENTS], str):
+        raise SequencerError(f"{where}: 'comments' must be text")
 
 BUILTIN_ROLES: dict[str, dict] = {
     "component": {
@@ -163,9 +177,12 @@ class ComponentDef:
         for cmd, spec in commands.items():
             if not isinstance(spec, dict):
                 raise SequencerError(f"{source}: component '{name}': command '{cmd}' must be a mapping")
+            _check_comments(spec, f"{source}: component '{name}': command '{cmd}'")
             if "python" in spec:
                 from testsuit.sequencer.model import check_python
                 check_python(spec["python"], f"{source}: component '{name}': command '{cmd}'")
+        if isinstance(data.get("status"), dict):
+            _check_comments(data["status"], f"{source}: component '{name}': status")
         selftest = data.get("selftest") or []
         if not isinstance(selftest, list) or not all(isinstance(c, dict) and c.get("id") for c in selftest):
             raise SequencerError(f"{source}: component '{name}': 'selftest' must be a list of checks with an 'id'")
