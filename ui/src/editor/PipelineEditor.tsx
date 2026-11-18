@@ -16,9 +16,10 @@
 // (the commands its lab role offers), a form per step, the phase resources, and the flattened pipeline.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps,
+  applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from "@xyflow/react";
 import { post } from "../api";
+import { COMMENT_WIDTH, CommentNode, commentCard, type CommentCard } from "../comments";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, notify, relPath, slug } from "../util";
@@ -76,7 +77,16 @@ function LaneNode({ data }: NodeProps) {
   );
 }
 
-const nodeTypes = { step: EditStepNode, lane: LaneNode };
+const nodeTypes = { step: EditStepNode, lane: LaneNode, comment: CommentNode };
+
+/** What the editor asks the graph, to place a card: the middle of the view, a step's place, a card's place. */
+interface GraphApi {
+  center: () => { x: number; y: number } | null;
+  step: (id: string) => { x: number; y: number } | null;
+  card: (i: number) => { x: number; y: number } | null;
+}
+/** Where a card pinned to a step without a place of its own goes: above the step. */
+const PIN_OFFSET = { x: 0, y: -70 };
 
 function label(step: any, plugins: string[]): string {
   const a = stepAction(step, plugins);
@@ -86,13 +96,20 @@ function label(step: any, plugins: string[]): string {
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
 }
 
-function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelete, problems, plugins, subs, target, onTarget }: {
+function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelete, problems, plugins, subs, target, onTarget,
+  comments, selectedComment, onSelectComment, onMoveComment, onDeleteComments, graph }: {
   lanes: { part: string; title: string; steps: any[] }[]; selected: string[]; onSelect: (ids: string[]) => void;
   target?: string; onTarget?: (part: "steps" | "finally") => void;     // the lane the palette adds to (phases only)
   onConnect: (part: string, from: string, to: string) => void; onDisconnect: (part: string, from: string, to: string) => void;
   onDelete: (part: string, ids: string[]) => void; problems: Record<string, string>; plugins: string[]; subs: Record<string, any>;
+  // the comment cards of the phase or sub-pipeline: never run, moved by dragging them
+  comments: CommentCard[]; selectedComment: number | null; onSelectComment: (i: number | null) => void;
+  onMoveComment: (i: number, x: number, y: number) => void; onDeleteComments: (indexes: number[]) => void;
+  graph?: { current: GraphApi | null };
 }) {
+  const flow = useRef<ReactFlowInstance | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [cards, setCards] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const shape = JSON.stringify(lanes.map((l) => l.steps.map((s) => [s.id, s.needs, s.uses])));
   const content = JSON.stringify(lanes);
@@ -154,14 +171,70 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
     return [{ ...n, selected: selected.includes(`${part}:${id}`), data: { ...n.data, step, label: label(step, plugins), action: stepAction(step, plugins), problem: problems[id], inner: step.uses ? subs[step.uses]?.steps : null } }];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [nodes, content, selected, problems, subs, target]);
+  // a card without a place goes under the lanes, next to the other cards without one; it keeps the place it is
+  // dragged to (written in the file)
+  const bottom = nodes.filter((n) => n.type === "lane").reduce((y, n) => Math.max(y, n.position.y + Number(n.style?.height || 0)), 0);
+  // where each step is on the graph (its lane's place plus its own), by step id: a pinned card is placed from it
+  const stepAt = useMemo(() => {
+    const at: Record<string, { x: number; y: number }> = {};
+    for (const n of nodes) {
+      if (n.type !== "step") continue;
+      const lane = nodes.find((l) => l.id === n.parentId);
+      at[(n.data as any).id] = { x: n.position.x + (lane?.position.x || 0), y: n.position.y + (lane?.position.y || 0) };
+    }
+    return at;
+  }, [nodes]);
+  const commentsKey = JSON.stringify(comments);
+  useEffect(() => {
+    let free = 0;
+    setCards((old) => comments.map((c, i) => {
+      const id = `comment:${i}`;
+      const placed = typeof c.x === "number" && typeof c.y === "number";
+      const anchor = c.step ? stepAt[c.step] : undefined;
+      const position = anchor ? { x: anchor.x + (placed ? c.x! : PIN_OFFSET.x), y: anchor.y + (placed ? c.y! : PIN_OFFSET.y) }
+        : placed ? { x: c.x!, y: c.y! } : { x: (free++) * (COMMENT_WIDTH + 16), y: bottom + 30 };
+      const prev = old.find((n) => n.id === id);
+      return { ...(prev || {}), id, type: "comment", position, data: { text: c.text, editable: true, pin: c.step, lost: !!c.step && !anchor && Object.keys(stepAt).length > 0 },
+        style: { width: c.width || COMMENT_WIDTH }, draggable: true, zIndex: 1000 };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentsKey, bottom, stepAt]);
+  if (graph) graph.current = {
+    center: () => {
+      const f = flow.current;
+      const box = document.querySelector(".pipeline-graph .graph-box")?.getBoundingClientRect();
+      return f && box ? f.screenToFlowPosition({ x: box.left + box.width / 2, y: box.top + box.height / 2 }) : null;
+    },
+    step: (id) => stepAt[id] || null,
+    card: (i) => cards.find((n) => n.id === `comment:${i}`)?.position || null,
+  };
+  const shown = useMemo(() => [...live, ...cards.map((n) => ({ ...n, selected: selectedComment === Number(n.id.slice(8)) }))], [live, cards, selectedComment]);
   return (
     <>
     <div className="graph-box editable">
-      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ maxZoom: 1.1 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
+      <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={(f) => { flow.current = f as any; }} fitView fitViewOptions={{ maxZoom: 1.1 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
         // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
         // measured again, which does not happen when its size did not change (the graph went blank on an update)
-        onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))}
+        onNodesChange={(changes) => {
+          const isCard = (c: any) => String(c.id || "").startsWith("comment:");
+          setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions" && !isCard(c)), ns));
+          // a card follows the mouse while dragged; its place is written when it is dropped
+          setCards((cs) => applyNodeChanges(changes.filter((c) => (c.type === "dimensions" || c.type === "position") && isCard(c)), cs));
+        }}
+        onNodeDragStop={(_, node) => {
+          if (node.type !== "comment") return;
+          // a pinned card keeps its place from its step, a free one its place on the graph
+          const i = Number(node.id.slice(8));
+          const anchor = comments[i]?.step ? stepAt[comments[i].step!] : undefined;
+          onMoveComment(i, Math.round(node.position.x - (anchor?.x || 0)), Math.round(node.position.y - (anchor?.y || 0)));
+        }}
         onNodeClick={(e, node) => {
+          if (node.type === "comment") {
+            if (selected.length) onSelect([]);
+            onSelectComment(Number(node.id.slice(8)));
+            return;
+          }
+          if (selectedComment !== null) onSelectComment(null);
           if (node.type === "lane") {
             onTarget?.(node.id.slice(5) as "steps" | "finally");
             return;
@@ -171,7 +244,10 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
           const many = e.shiftKey || e.metaKey || e.ctrlKey;
           onSelect(many ? (selected.includes(node.id) ? selected.filter((x) => x !== node.id) : [...selected, node.id]) : [node.id]);
         }}
-        onPaneClick={() => selected.length && onSelect([])}
+        onPaneClick={() => {
+          if (selected.length) onSelect([]);
+          if (selectedComment !== null) onSelectComment(null);
+        }}
         // an arrow picked alone: the steps unselected, so that Delete removes the arrow, not the steps
         onEdgeClick={(e) => !(e.shiftKey || e.metaKey || e.ctrlKey) && selected.length && onSelect([])}
         onEdgesChange={(changes) => setEdges((es) => applyEdgeChanges(changes.filter((c) => c.type === "select"), es))}
@@ -190,13 +266,15 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
           const byPart: Record<string, string[]> = {};
           for (const n of list) if (n.type === "step") (byPart[(n.data as any).part] ||= []).push((n.data as any).id);
           for (const [part, ids] of Object.entries(byPart)) onDelete(part, ids);
+          const gone = list.filter((n) => n.type === "comment").map((n) => Number(n.id.slice(8)));
+          if (gone.length) onDeleteComments(gone);
         }}
         deleteKeyCode={["Delete", "Backspace"]} multiSelectionKeyCode={["Shift", "Meta", "Control"]}>
         <Background gap={16} />
         <Controls showInteractive={false} />
       </ReactFlow>
       </div>
-      <div className="graph-hint">Drag from the right dot of a step to another step: it then <em>needs</em> it. Select an arrow or a step and press Delete to remove it. Shift-click to select several steps.</div>
+      <div className="graph-hint">Drag from the right dot of a step to another step: it then <em>needs</em> it. Select an arrow or a step and press Delete to remove it. Shift-click to select several steps. Drag a comment card to move it.</div>
     </>
   );
 }
@@ -217,6 +295,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
   const phases: any[] = pipeline?.phases || [];
   const [scope, setScope] = useState<Scope>(isTestdef ? (phases.length ? { kind: "phase", index: 0 } : { kind: "settings" }) : { kind: "sub", name: Object.keys(subsOwn)[0] || "" });
   const [selected, setSelected] = useState<string[]>([]);
+  const [selectedComment, setSelectedComment] = useState<number | null>(null);
   // drag and drop of the phases: positions in the running order
   const [dragPhase, setDragPhase] = useState<number | null>(null);
   const [dropPhase, setDropPhase] = useState<number | null>(null);
@@ -299,7 +378,67 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
     if (scope.kind === "sub") return subsOwn[scope.name]?.steps || [];
     return [];
   };
-  const editSteps = (p: string, fn: (steps: any[]) => void) => write((d) => fn(listOf(d, p)));
+  const editSteps = (p: string, fn: (steps: any[]) => void, renamed?: [string, string]) => write((d) => {
+    fn(listOf(d, p));
+    // a step renamed: the cards pinned to it follow
+    const holder = renamed && scope.kind !== "flat" && scope.kind !== "settings" ? holderOf(d) : null;
+    if (holder && Array.isArray(holder.comments)) holder.comments = holder.comments.map((c: any) => (commentCard(c).step === renamed![0] ? { ...commentCard(c), step: renamed![1] } : c));
+  });
+
+  // the comment cards of the current scope (a phase or a sub-pipeline): notes on its graph, never run
+  const holderOf = (draft: any): any => {
+    const pl = isTestdef ? draft.pipeline : draft;
+    if (scope.kind === "phase") return pl.phases[scope.index];
+    if (scope.kind === "sub") return ((pl.subpipelines ||= {})[scope.name] ||= { steps: [] });
+    return null;
+  };
+  const comments: CommentCard[] = ((scope.kind === "phase" ? phases[scope.index]?.comments : scope.kind === "sub" ? subsOwn[scope.name]?.comments : null) || []).map(commentCard);
+  const editComments = (fn: (list: any[]) => void) => write((d) => {
+    const holder = holderOf(d);
+    if (!holder) return;
+    const list = Array.isArray(holder.comments) ? holder.comments : [];
+    fn(list);
+    if (list.length) holder.comments = list;
+    else delete holder.comments;
+  });
+  const setComment = (i: number, patch: Partial<CommentCard>) => editComments((list) => {
+    const next: any = { ...commentCard(list[i]), ...patch };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    list[i] = next;
+  });
+  const graph = useRef<GraphApi | null>(null);
+  const addComment = () => {
+    // in the middle of the graph as it is shown, where the user sees it
+    const at = graph.current?.center();
+    editComments((list) => list.push({ text: "", ...(at ? { x: Math.round(at.x - COMMENT_WIDTH / 2), y: Math.round(at.y - 30) } : {}) }));
+    setSelected([]);
+    setSelectedComment(comments.length);
+  };
+  // pinned to a step, or free again: the card stays where it is on the graph (its x, y from the step, or not)
+  const pinComment = (i: number, step: string | null) => {
+    const card = graph.current?.card(i);
+    const anchor = step ? graph.current?.step(step) : null;
+    setComment(i, { step: step || undefined, ...(card ? { x: Math.round(card.x - (anchor?.x || 0)), y: Math.round(card.y - (anchor?.y || 0)) } : {}) });
+  };
+  /** The cards pinned to steps that are gone: free, where they were; or pinned to the step that replaces them. */
+  const unpinGone = (list: any[], gone: string[], to?: string) => {
+    for (let i = 0; i < list.length; i++) {
+      const c = commentCard(list[i]);
+      if (!c.step || !gone.includes(c.step)) continue;
+      if (to) {
+        list[i] = { ...c, step: to };
+        continue;
+      }
+      const card = graph.current?.card(i);
+      const next: any = { ...c, ...(card ? { x: Math.round(card.x), y: Math.round(card.y) } : {}) };
+      delete next.step;
+      list[i] = next;
+    }
+  };
+  const deleteComments = (indexes: number[]) => {
+    editComments((list) => list.splice(0, list.length, ...list.filter((_, i) => !indexes.includes(i))));
+    setSelectedComment(null);
+  };
 
   const phase = scope.kind === "phase" ? phases[scope.index] : null;
   const held: string[] = useMemo(() => {
@@ -342,6 +481,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
             onClick={() => {
               setScope({ kind: "phase", index: i });
               setSelected([]);
+              setSelectedComment(null);
             }}
             onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(k)); setDragPhase(k); }}
             onDragOver={(e) => { if (dragPhase !== null) { e.preventDefault(); setDropPhase(k); } }}
@@ -368,6 +508,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
         <button key={n} className={classes("scope", scope.kind === "sub" && scope.name === n && "selected")} onClick={() => {
           setScope({ kind: "sub", name: n });
           setSelected([]);
+          setSelectedComment(null);
         }}>{n}</button>
       ))}
       <button className="scope add" onClick={() => {
@@ -409,10 +550,12 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
         onDeleted={() => setScope(phases.length > 1 ? { kind: "phase", index: 0 } : { kind: "settings" })} />}
       {scope.kind === "sub" && scope.name && <SubForm name={scope.name} sub={subsOwn[scope.name] || {}} isTestdef={isTestdef} write={write} onRenamed={(n) => setScope({ kind: "sub", name: n })} />}
       <div className="pipeline-body">
-        <Palette palette={palette} held={held} subs={subs} part={part} setPart={scope.kind === "phase" ? setPart : undefined} onAdd={addStep} selected={selected.length} />
+        <Palette palette={palette} held={held} subs={subs} part={part} setPart={scope.kind === "phase" ? setPart : undefined} onAdd={addStep} selected={selected.length} onComment={addComment} />
         <div className="pipeline-graph">
           <StepGraph lanes={lanes} selected={selected} onSelect={setSelected} problems={problems} plugins={plugins} subs={subs}
             target={part} onTarget={scope.kind === "phase" ? setPart : undefined}
+            comments={comments} selectedComment={selectedComment} onSelectComment={setSelectedComment}
+            onMoveComment={(i, x, y) => setComment(i, { x, y })} onDeleteComments={deleteComments} graph={graph}
             onConnect={(p, from, to) => {
               if (from === to) return;
               if (hasCycle(current(p), from, to)) return notify(`${from} already waits for ${to}: that would be a cycle`, "error");
@@ -437,6 +580,8 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
                 }
                 list.splice(0, list.length, ...list.filter((s: any) => !ids.includes(s.id)));
               });
+              // a card pinned to a deleted step stays, free, where it was
+              if (comments.some((c) => c.step && ids.includes(c.step))) editComments((list) => unpinGone(list, ids));
               setSelected([]);
             }} />
           {selected.length > 1 && (
@@ -447,7 +592,11 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
           )}
         </div>
         <div className="step-panel">
-          {selectedStep ? (
+          {selectedComment !== null && comments[selectedComment] ? (
+            <CommentForm key={`${scope.kind === "phase" ? scope.index : scope.kind === "sub" ? scope.name : ""}:${selectedComment}`} card={comments[selectedComment]}
+              steps={lanes.flatMap((l) => l.steps.map((s: any) => ({ id: s.id, part: l.part })))} onPin={(step) => pinComment(selectedComment, step)}
+              onChange={(patch) => setComment(selectedComment, patch)} onDelete={() => deleteComments([selectedComment])} />
+          ) : selectedStep ? (
             <StepForm key={selected[0]} step={selectedStep.step} part={selectedStep.part} siblings={current(selectedStep.part)} palette={palette} held={held} subs={subs}
               isSub={scope.kind === "sub"} schemas={schemas} onUsed={includeFor}
               onChange={(next) => editSteps(selectedStep.part, (list) => {
@@ -455,14 +604,14 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
                 if (next.id !== selectedStep.step.id) for (const s of list) if (s.needs) s.needs = s.needs.map((n: string) => (n === selectedStep.step.id ? next.id : n));
                 list[i] = next;
                 if (next.id !== selectedStep.step.id) setSelected([`${selectedStep.part}:${next.id}`]);
-              })}
+              }, next.id !== selectedStep.step.id ? [selectedStep.step.id, next.id] : undefined)}
               onOpenSub={(n) => {
                 if (subsOwn[n]) setScope({ kind: "sub", name: n });
                 else notify(`${n} is in ${subs[n]?.file}: open that file to edit it`, "info");
               }} />
           ) : (
             <div className="muted pad">
-              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps.\n\nA phase locks its **stage slots** (each with the lab stage it is bound to) and ad hoc **slots**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
+              <Markdown text={"Pick a step to edit it, or add one from the palette: it is linked after the selected steps. A **comment** card (palette, *anywhere*) is a note on the graph: it is never run.\n\nA phase locks its **stage slots** (each with the lab stage it is bound to) and ad hoc **slots**, then runs its steps as their `needs` allow, in parallel otherwise. The **finally** steps run in the end whatever happened: stop leftovers, collect the outputs."} />
             </div>
           )}
         </div>
@@ -489,12 +638,41 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
           for (const s of rest) if (s.needs) s.needs = [...new Set(s.needs.map((n: string) => (ids.includes(n) ? usesId : n)))];
           rest.splice(Math.min(first, rest.length), 0, uses);
           list.splice(0, list.length, ...rest);
+          // the cards pinned to the grouped steps: pinned to the step that uses the group
+          const cardsHolder = holderOf(d);
+          if (cardsHolder && Array.isArray(cardsHolder.comments)) unpinGone(cardsHolder.comments, ids, usesId);
           setSelected([`${p}:${usesId}`]);
         });
         setGrouping(false);
       }} />}
     </div>
     </KeysProvider>
+  );
+}
+
+function CommentForm({ card, steps, onChange, onPin, onDelete }: {
+  card: CommentCard; steps: { id: string; part: string }[]; onChange: (patch: Partial<CommentCard>) => void; onPin: (step: string | null) => void; onDelete: () => void;
+}) {
+  const lost = !!card.step && !steps.some((s) => s.id === card.step);
+  return (
+    <div className="step-form">
+      <div className="form-title"><strong>Comment</strong><span className="spacer" /><button className="small danger" onClick={onDelete}>Delete</button></div>
+      <Field label="Pinned to" help="A free card stays where it is put on the graph; a card pinned to a step follows that step when the graph is laid out again. When its step is deleted, it stays, free." >
+        <select value={card.step || ""} onChange={(e) => onPin(e.target.value || null)}>
+          <option value="">nothing: a free card</option>
+          {lost && <option value={card.step}>{card.step} (no such step)</option>}
+          {steps.map((s) => <option key={s.part + s.id} value={s.id}>{s.part === "finally" ? `${s.id} (finally)` : s.id}</option>)}
+        </select>
+      </Field>
+      <Field label="Text" help="Markdown: **bold**, `code`, lists, links. Never run nor rendered: a `{{ key }}` in it stays as written." wide>
+        <Text multiline value={card.text} onChange={(v) => onChange({ text: v })} placeholder="Why these steps are this way, what to beware of…" />
+      </Field>
+      <Field label="Width" help="Of the card on the graph, in pixels (any other width can be written in the file).">
+        <Choices value={card.width ? String(card.width) : null} onChange={(v) => onChange({ width: v ? Number(v) : undefined })} allowNone={`${COMMENT_WIDTH} (default)`}
+          choices={[...new Set([160, 320, 440, ...(card.width ? [card.width] : [])])].filter((w) => w !== COMMENT_WIDTH).sort((x, y) => x - y).map((w) => ({ value: String(w), label: String(w) }))} />
+      </Field>
+      <p className="muted small">Drag the card on the graph to move it (a pinned card keeps that place next to its step); Delete removes it when it is selected. A comment is a note for the people who read the pipeline: the sequencer never runs it, and the run page shows it under its phase.</p>
+    </div>
   );
 }
 
@@ -510,9 +688,9 @@ function GroupDialog({ subs, onClose, onGroup }: { subs: Record<string, any>; on
 
 // ── palette ─────────────────────────────────────────────────────────────
 
-function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
+function Palette({ palette, held, subs, part, setPart, onAdd, selected, onComment }: {
   palette: any; held: string[]; subs: Record<string, any>; part: string; setPart?: (p: "steps" | "finally") => void;
-  onAdd: (step: any, part?: "steps" | "finally") => void; selected: number;
+  onAdd: (step: any, part?: "steps" | "finally") => void; selected: number; onComment: () => void;
 }) {
   const setHelp = useHelp();
   const { ctx } = useSession();
@@ -559,6 +737,8 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected }: {
         <button className="palette-item" onClick={() => onAdd({ id: "api", http: { url: "http://localhost:8080/api/status" } })}
           onMouseEnter={() => setHelp({ title: "http", text: "An HTTP request (a REST API call) from the sequencer host: URL, method, headers, body; it succeeds when the answer is the expected one." })}>REST API call</button>
         {(ctx.step_types || []).map((t: string) => <button key={t} className="palette-item" onClick={() => onAdd({ id: t, [t]: {} })}>{t}</button>)}
+        <button className="palette-item comment-item" onClick={onComment}
+          onMouseEnter={() => setHelp({ title: "comment", text: "A note on the graph, like a sticky note (Markdown): why the steps are this way, what to beware of. It is kept in the file with its place on the graph, never run, and shown under its phase on the run page." })}>comment</button>
       </div>
       <SubPalette subs={subs} onAdd={onAdd} />
     </div>

@@ -131,9 +131,42 @@ class Step(BaseModel):
             raise SequencerError(f"step '{self.id}': a 'uses' step has no slot")
 
 
+class Comment(_Model):
+    """A comment card of the pipeline editor (a sticky note on the graph of a phase or a sub-pipeline): free text
+    for the people who read the pipeline (Markdown). Never run nor rendered. A card is free, or pinned to a step of
+    its phase or sub-pipeline (``step``, a step id as written there), when it follows that step on the graph.
+    ``x`` and ``y`` only say where the editor draws it (pixels): on the graph for a free card, from the step for a
+    pinned one; a card without them is placed by the editor. ``width`` is its width."""
+    text: str = ""
+    step: str | None = None
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _plain(cls, data):
+        return {"text": data} if isinstance(data, str) else data      # a card given as its text only
+
+
+def comment_problems(pipeline: Pipeline) -> list[str]:
+    """Comment cards pinned to a step their phase or sub-pipeline does not have: shown free, said as a warning
+    (a note never stops a run)."""
+    problems = []
+    holders = [(f"phase '{p.id}'", p.comments, p.steps + p.finally_) for p in pipeline.phases]
+    holders += [(f"sub-pipeline '{n}'", s.comments, s.steps) for n, s in pipeline.subpipelines.items()]
+    for where, comments, steps in holders:
+        ids = {s.id for s in steps}
+        for i, c in enumerate(comments, 1):
+            if c.step and c.step not in ids:
+                problems.append(f"{where}: comment {i} is pinned to unknown step '{c.step}' (it is shown free)")
+    return problems
+
+
 class SubPipeline(_Model):
     params: dict[str, Any] = Field(default_factory=dict)
     steps: list[Step]
+    comments: list[Comment] = Field(default_factory=list)
 
 
 class PhaseInput(_Model):
@@ -150,6 +183,7 @@ class Phase(_Model):
     steps: list[Step] = Field(default_factory=list)
     finally_: list[Step] = Field(default_factory=list, alias="finally")
     timeout: str | float | None = None
+    comments: list[Comment] = Field(default_factory=list)      # comment cards: notes, never run
 
     @model_validator(mode="before")
     @classmethod
