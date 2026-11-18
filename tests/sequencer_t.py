@@ -2198,14 +2198,17 @@ def test_http_steps(bench, api):
 def test_http_checked():
     """An http request is checked when the pipeline or the lab loads: former keys, unknown ones, json and body."""
     from testsuit.sequencer.httpcall import Answer, judge, normalize, parse_curl
-    from testsuit.sequencer.util import SequencerError
+    from testsuit.sequencer.util import SequencerError, render
     for spec, message in ((7, "takes a URL or a mapping"), ({"method": "GET"}, "needs a 'url'"),
                           ({"url": "x", "status": 200}, r"'http' status is now 'expect: \{status\}'"),
                           ({"url": "x", "data": 1}, "unknown 'http' key"),
                           ({"url": "x", "json": {}, "body": ""}, "one of 'json', 'body' or 'body_file', not json and body"),
                           ({"url": "x", "body": "", "body_file": "f"}, "not body and body_file"),
                           ({"url": "x", "body_file": ""}, "'http.body_file' takes the path"),
-                          ({"url": "x", "body_file": ["f"]}, "'http.body_file' takes the path"),
+                          ({"url": "x", "body_file": ["f"]}, r'takes the path of the file to send, not a list \["f"\]'),
+                          ({"url": "x", "body_file": None}, "not an empty value"),
+                          (render({"url": "x", "body_file": "{{ params.f }}"}, {"params": {}}, "x"),
+                           r"not an undefined key \(f is not defined\)"),
                           ({"url": "x", "method": "FETCH"}, "not one of"),
                           ({"url": "x", "expect": {"code": 1}}, "unknown 'http.expect' key")):
         with pytest.raises(SequencerError, match=message):
@@ -2227,6 +2230,7 @@ def test_http_body_file(tmp_path, api):
     write_bytes.parent.mkdir()
     write_bytes.write_bytes(data)
     spec = normalize({"url": f"{api.url}/upload", "method": "POST", "body_file": "in/payload.bin"}, "here")
+    assert normalize({"url": "x", "body_file": tmp_path / "f"}, "here")["body_file"] == str(tmp_path / "f")
     answer = send(spec, 5, tmp_path)                                   # relative: in the run folder
     assert answer.status == 201 and answer.body == '{"size": 768}'
     _, _, headers, sent = api.requests[-1]
