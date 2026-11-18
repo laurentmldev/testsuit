@@ -1112,6 +1112,7 @@ The Run page says which phase waits, since when, why (one line per missing resou
    - Before a phase, the kernel copies its `inputs` and binds and locks its resources if they aren't held yet.
    - The engine builds the step DAG and starts every step whose `needs` are met, as asyncio tasks, one command at a time per component unless `detach`.
    - Each step's output goes to `runs/<id>/logs/<phase>/<step>[<component>].log` and to the event bus.
+   - What the sequencer does with the run goes to `runs/<id>/logs/sequencer.log`, written as it goes: the run's states (queued, waiting for lab resources, running...), each phase started, waiting or ended, each step's state with its slot, reason and via, and the sequencer's warnings and errors about the run (tracebacks included). A run that seems stuck says there where it is, without the tsqd log.
 4. **Finally**: the `finally` steps of each phase always run, with their own timeout. The phase's resources are released afterwards, unless the next phase uses them.
 5. **Verdict**, one of three, computed from the steps (those with `continue_on_error` excepted):
    - `succeeded`: every step gave its expected result;
@@ -1130,7 +1131,7 @@ State machines:
 Everything retrieved from the components becomes part of the datapack contents. The **results datapack** is the run folder, packed with the same layout as the datapack it came from:
 - `data/<slot>/input/`: the inputs, unchanged;
 - `data/<slot>/output/`: everything `collect` retrieved, whatever its size or format (logs, CSV, binary records, pcap files...);
-- `logs/`: the log of every step;
+- `logs/`: the log of every step, and `logs/sequencer.log`, what the sequencer did with the run;
 - `selftest.yml`, `run.yml` (states, verdict, step statuses) and the completed `baseline.yml`.
 
 The BagIt manifests are recomputed over all of it, so `datapack --verify` checks the outputs too. It is written to `storage.results` as `<run>/<datapack>_results.zip`, with the `_NONCONFORM` suffix when flagged (section 5.3); the run folder keeps the same datapack submitted several times apart.

@@ -1607,6 +1607,12 @@ def test_failed_http_via_runs_finally(tmp_path, no_git):
     steps = {s["id"]: s for s in record["steps"] if s["phase"] == "test_run"}
     assert (steps["api"]["state"], steps["api"]["reason"], steps["api"]["via"]) == ("failed", "status 406", "seq_host")
     assert steps["run"]["state"] == "skipped" and steps["collect"]["state"] == "succeeded"
+    # the run's own log, in its folder: where the run went, step by step
+    runlog = read_member(run, "logs/sequencer.log")
+    assert "step test_run:api[dut] state=failed reason=status 406 via=seq_host" in runlog
+    assert "step test_run:collect[dut] state=succeeded" in runlog
+    assert runlog.index("state=failed reason=status 406") < runlog.index("step test_run:collect[dut] state=running")
+    assert "phase phase=test_run state=done verdict=failed" in runlog
 
 
 def test_kill_ends_a_run_nothing_runs(tmp_path, no_git):
