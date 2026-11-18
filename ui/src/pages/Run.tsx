@@ -34,6 +34,25 @@ export function stepKey(phase: string, id: string, slot?: string) {
 
 /** The slot a step record ran for ('' for the whole step); runs recorded before slots were named say 'component'. */
 export const slotOf = (record: any): string => record?.slot ?? record?.component ?? "";
+/** Whether a selected key ('phase:id' or 'phase:id[slot]') is of this step: of it only, not of another step whose id
+ *  starts the same ('deploy' and 'deploy_check'). */
+export const isOfStep = (key: string | null | undefined, phase: string, id: string): boolean =>
+  !!key && (key === `${phase}:${id}` || key.startsWith(`${phase}:${id}[`));
+
+/** The height of a row of slot names on a step card, and the rows shown at most (more are scrolled to). */
+const SLOT_ROW = 19;
+const SLOT_ROWS_SHOWN = 6;
+/** The rows the slot names of a step take on its card (150 px wide): none when it runs on one slot. */
+function slotRows(names?: string[]): number {
+  if (!names || names.length < 2) return 0;
+  let rows = 1, width = 0;
+  for (const n of names) {
+    const w = n.length * 7 + 17;
+    if (width && width + w > 134) { rows++; width = 0; }
+    width += w + 3;
+  }
+  return Math.min(rows, SLOT_ROWS_SHOWN);
+}
 
 function StepNode({ data }: NodeProps) {
   const d = data as any;
@@ -48,8 +67,13 @@ function StepNode({ data }: NodeProps) {
       <div className="step-action">{d.action}</div>
       {vias.length > 0 && <div className="step-via">{vias.map((v) => <ViaTag key={v} via={v} title={`its command runs on ${v}, which reaches the component of its slot`} />)}</div>}
       {d.items?.length > 1 && (
-        <div className="step-items">
-          {d.items.map((i: any) => <span key={slotOf(i)} className={classes("chip", STATE_COLORS[i.state] || "muted")} title={`${slotOf(i)}: ${i.state}`}>{slotOf(i)}</span>)}
+        <div className="step-items nowheel" style={{ maxHeight: SLOT_ROWS_SHOWN * SLOT_ROW }}>
+          {/* each slot of the step is picked here, its log then shown aside (no tabs there: they overflowed with many slots) */}
+          {d.items.map((i: any) => (
+            <span key={slotOf(i)} className={classes("chip", "slot-pick", STATE_COLORS[i.state] || "muted", d.selected && d.selectedSlot === slotOf(i) && "picked")}
+              title={`${slotOf(i)}: ${i.state} (click to see its log)`}
+              onClick={(e) => { e.stopPropagation(); d.onPickSlot?.(slotOf(i)); }}>{slotOf(i)}</span>
+          ))}
         </div>
       )}
       <Handle type="source" position={Position.Right} />
@@ -81,11 +105,15 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
     for (const r of records) (map[`${r.phase}:${r.id}`] ||= []).push(r);
     return map;
   }, [records]);
+  // the slots of each step run on several: their names on its card make it taller, laid out again when they change
+  const slotNames = useMemo(() => JSON.stringify(Object.fromEntries(Object.entries(byStep).filter(([, rs]) => rs.length > 1)
+    .map(([k, rs]) => [k, rs.map(slotOf)]))), [byStep]);
 
   useEffect(() => {
     let cancelled = false;
     const lay: any[] = [];
     const edgeList: Edge[] = [];
+    const slots: Record<string, string[]> = JSON.parse(slotNames);
     for (const phase of pipeline.phases) {
       const pid = `phase:${phase.id}`;
       lay.push({ id: pid, width: 200, height: 80 });
@@ -103,7 +131,7 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
           }
           parent = g;
         }
-        lay.push({ id: `${pid}/${s.id}`, width: 150, height: 56, parent });
+        lay.push({ id: `${pid}/${s.id}`, width: 150, height: 56 + slotRows(slots[`${phase.id}:${s.id}`]) * SLOT_ROW, parent });
         for (const n of s.needs) edgeList.push({ id: `${phase.id}:${n}->${s.id}`, source: `${pid}/${n}`, target: `${pid}/${s.id}` });
       }
       // finally steps after every step of the phase
@@ -139,7 +167,7 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [structure]);
+  }, [structure, slotNames]);
 
   const live = nodes.map((n) => {
     if (n.type === "frame") {
@@ -155,7 +183,9 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
     return {
       ...n, data: {
         ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}`,
-        state, items, part: step.part, selected: selected?.startsWith(`${phase}:${step.id}`),
+        state, items, part: step.part, selected: isOfStep(selected, phase, step.id),
+        selectedSlot: isOfStep(selected, phase, step.id) ? (selected!.match(/\[(.*)\]$/)?.[1] ?? slotOf(items[0])) : null,
+        onPickSlot: (slot: string) => onSelect(stepKey(phase, step.id, slot), step, phase),
         title: `${phase}:${step.id}\n${step.action}${step.do ? " " + step.do : ""}${step.if ? `\nif ${step.if}` : ""}\nneeds: ${step.needs.join(", ") || "-"}\n${items.map((i: any) => `${slotOf(i) || "-"}: ${i.state}${i.reason ? " (" + i.reason + ")" : ""}`).join("\n")}`,
       },
     };
@@ -411,7 +441,7 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
               <>
                 {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
                 {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
-                <StepFacts record={logRecord} records={records.filter((s) => selected.startsWith(`${s.phase}:${s.id}`))} onPick={pick} />
+                <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; dashed arrows lead to the finally steps.</p>}
@@ -450,17 +480,13 @@ export function RunPage({ id, tab }: { id: string; tab: string }) {
   );
 }
 
-function StepFacts({ record, records, onPick }: { record: any; records: any[]; onPick: (k: string) => void }) {
+function StepFacts({ record, records }: { record: any; records: any[] }) {
   if (!record && !records.length) return <p className="muted">This step has not started.</p>;
   return (
     <div className="step-facts">
-      {records.length > 1 && (
-        <div className="segmented">
-          {records.map((s) => (
-            <button key={slotOf(s)} className={slotOf(record) === slotOf(s) ? "selected" : ""} onClick={() => onPick(stepKey(s.phase, s.id, slotOf(s)))}>
-              {slotOf(s)} <Badge value={s.state} />
-            </button>
-          ))}
+      {records.length > 1 && record && (
+        <div className="small">
+          slot <code>{slotOf(record)}</code> <span className="muted">· {records.length} slots: click a slot name on the step to see its log</span>
         </div>
       )}
       {record && (
