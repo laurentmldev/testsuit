@@ -2244,6 +2244,16 @@ def test_http_body_file(tmp_path, api):
     assert describe(spec).endswith("-H 'Content-Type: application/octet-stream' --data-binary @in/payload.bin")
     command = curl_command({**spec, "body_file": "/data/my file.bin"}, 5)
     assert "--data-binary '@/data/my file.bin'" in command and "Content-Type: application/octet-stream" in command
+    import subprocess
+    from testsuit.sequencer.httpcall import parse_curl
+    for target, why in ((tmp_path / "nope.bin", "no such file"), (tmp_path / "in", "not a readable file")):
+        done = subprocess.run(["sh", "-c", curl_command({**spec, "body_file": str(target)}, 5)],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        failed = parse_curl(done.stdout, done.returncode)
+        assert failed.status is None and failed.error == f"cannot read the body file '{target}' on this component: {why}"
+    sent = subprocess.run(["sh", "-c", curl_command({**spec, "body_file": str(write_bytes)}, 5)],
+                          stdout=subprocess.PIPE, text=True)
+    assert parse_curl(sent.stdout, sent.returncode).status == 201 and api.requests[-1][3] == data
 
 
 def test_http_extract():

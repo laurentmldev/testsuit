@@ -296,7 +296,14 @@ def curl_command(spec: dict, timeout: float | None = None) -> str:
         if data is not None:
             args += ["--data-binary", data.decode()]
     args.append(_url(spec))
-    return " ".join(shlex.quote(a) for a in args)
+    command = " ".join(shlex.quote(a) for a in args)
+    if "body_file" in spec:                      # curl alone would not say which file it could not read
+        path = shlex.quote(str(spec["body_file"]).strip())
+        reason = shlex.quote(f"cannot read the body file '{str(spec['body_file']).strip()}' on this component: ")
+        command = (f"if [ ! -e {path} ]; then echo {reason}'no such file'; exit 66; "
+                   f"elif [ ! -f {path} ] || [ ! -r {path} ]; then echo {reason}'not a readable file'; exit 66; fi; "
+                   + command)
+    return command
 
 
 def parse_curl(output: str, exit_status: int | None, error: str = "") -> Answer:
