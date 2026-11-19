@@ -15,6 +15,7 @@
 """The Plot page of ``mxp webui`` (testsuit.exploit.editor.plots): data files opened with the data loaders,
 figures of the plotly backend, exports; through Python and through the REST routes."""
 
+import base64
 import io
 import json
 import shutil
@@ -43,7 +44,7 @@ def no_installed_plugins(monkeypatch):
 
 @pytest.fixture
 def data(request) -> Path:
-    """A folder of a TDMS file (a speed, and a trajectory x, y, z: 2000 points at 100 Hz) and a CSV file."""
+    """A TDMS file (a speed, and a trajectory x, y, z: 2000 points at 100 Hz) and a CSV file."""
     from nptdms import ChannelObject, GroupObject, RootObject, TdmsWriter
     root = (TMP_ROOT / request.node.name).resolve()
     shutil.rmtree(root, ignore_errors=True)
@@ -64,6 +65,11 @@ def data(request) -> Path:
     return root
 
 
+def files(data: Path) -> list[str]:
+    """The two files of data, each a source of its own."""
+    return [str(data / "motor.tdms"), str(data / "brake.csv")]
+
+
 def trace(fields, **style):
     return {"id": fields[0], "fields": fields, **style}
 
@@ -78,16 +84,13 @@ def test_decimate_keeps_peaks():
 
 def test_sources_and_figures(data):
     plots = PlotData()
-    (data / "notes.csv").write_text("not a table\n")
-    found = plots.sources([str(data)])
-    assert {f["name"]: f["type"] for f in found["files"]} == {"brake.csv": "csv", "motor.tdms": "tdms", "notes.csv": "csv"}
-    # a file its loader cannot read says why, and the others stay usable
-    assert [f["name"] for f in found["files"] if f["error"]] == ["notes.csv"]
-    assert not any(f.startswith("notes.csv::") for f in found["fields"])
+    found = plots.sources(files(data))
+    assert [(x["label"], x["folder"], [f["type"] for f in x["files"]]) for x in found["sources"]] == \
+        [("motor.tdms", False, ["tdms"]), ("brake.csv", False, ["csv"])]
     assert "motor.tdms::Motor___speed" in found["fields"] and "brake.csv::pressure" in found["fields"]
 
     # 2D: two files, an offset, a decimation
-    answer = json.loads(plots.figure({"sources": [str(data)], "title": "Bench", "maxPoints": 500, "traces": [
+    answer = json.loads(plots.figure({"sources": files(data), "title": "Bench", "maxPoints": 500, "traces": [
         trace(["motor.tdms::Motor___speed"], color="#ff0000", linestyle="dashed"),
         trace(["brake.csv::pressure"], offset="-3"),
         trace(["motor.tdms::nothing"])]}))
@@ -102,18 +105,63 @@ def test_sources_and_figures(data):
 
     # 3D: X, Y and Z of three fields; the same trace in 2D is three lines against time
     xyz = trace(["motor.tdms::Position___x", "motor.tdms::Position___y", "motor.tdms::Position___z"], label="probe")
-    fig3d = json.loads(plots.figure({"sources": [str(data)], "projection": "3d", "traces": [xyz]}))["figure"]
+    fig3d = json.loads(plots.figure({"sources": files(data), "projection": "3d", "traces": [xyz]}))["figure"]
     assert [d["type"] for d in fig3d["data"]] == ["scatter3d"] and fig3d["data"][0]["name"] == "probe"
-    fig2d = json.loads(plots.figure({"sources": [str(data)], "traces": [xyz]}))["figure"]
+    fig2d = json.loads(plots.figure({"sources": files(data), "traces": [xyz]}))["figure"]
     assert [d["name"] for d in fig2d["data"]] == ["probe: Position___x", "probe: Position___y", "probe: Position___z"]
-    bad = json.loads(plots.figure({"sources": [str(data)], "projection": "3d", "traces": [trace(["motor.tdms::Motor___speed"])]}))
+    bad = json.loads(plots.figure({"sources": files(data), "projection": "3d", "traces": [trace(["motor.tdms::Motor___speed"])]}))
     assert bad["figure"] is None and "3 fields" in bad["traces"][0]["error"]
 
     # hidden traces are not drawn
-    hidden = json.loads(plots.figure({"sources": [str(data)], "traces": [trace(["brake.csv::pressure"], hidden=True)]}))
+    hidden = json.loads(plots.figure({"sources": files(data), "traces": [trace(["brake.csv::pressure"], hidden=True)]}))
     assert hidden == {"figure": None, "traces": []}
     with pytest.raises(CriteriaError):
         plots.sources([str(data / "missing")])
+
+
+def test_folder_is_one_source(data):
+    """A folder picked is one data source (FolderParamMgr): a parameter of several of its files (a recording
+    split in several files) is one field, merged in time; a file its loader cannot read says why."""
+    from nptdms import ChannelObject, GroupObject, RootObject, TdmsWriter
+    split = data / "split"
+    split.mkdir()
+    for k in range(3):
+        props = {"wf_start_time": np.datetime64("2026-11-18T09:30:00") + np.timedelta64(k * 10, "s"),
+                 "wf_increment": 0.01, "wf_start_offset": 0.0}
+        with TdmsWriter(str(split / f"part_{k + 1}.tdms")) as w:
+            w.write_segment([RootObject({}), GroupObject("Motor"), ChannelObject("Motor", "speed", np.full(1000, k), properties=props)])
+    (split / "notes.csv").write_text("not a table\n")
+    plots = PlotData()
+    found = plots.sources([str(split), str(data / "brake.csv")])
+    folder = found["sources"][0]
+    assert folder["label"] == "split" and folder["folder"] and folder["fields"] == 1
+    assert sorted(f["name"] for f in folder["files"]) == ["notes.csv", "part_1.tdms", "part_2.tdms", "part_3.tdms"]
+    assert [f["name"] for f in folder["files"] if f["error"]] == ["notes.csv"]
+    assert found["fields"][0] == "split::Motor___speed"
+    answer = json.loads(plots.figure({"sources": [str(split), str(data / "brake.csv")],
+                                      "traces": [trace(["split::Motor___speed"]), trace(["brake.csv::pressure"])]}))
+    assert [r["points"] for r in answer["traces"]] == [3000, 40]
+    speed = answer["figure"]["data"][0]
+    y = speed["y"]
+    if isinstance(y, dict):     # plotly >= 6: a typed array
+        y = np.frombuffer(base64.b64decode(y["bdata"]), dtype=y["dtype"])
+    assert speed["name"] == "Motor___speed (split)" and sorted(set(np.asarray(y).tolist())) == [0, 1, 2]
+
+    # files of a folder whose times overlap cannot be merged: said, not hidden
+    props = {"wf_start_time": np.datetime64("2026-11-18T09:30:05"), "wf_increment": 0.01, "wf_start_offset": 0.0}
+    with TdmsWriter(str(split / "part_1b.tdms")) as w:
+        w.write_segment([RootObject({}), GroupObject("Motor"), ChannelObject("Motor", "speed", np.full(1000, 9), properties=props)])
+    plots = PlotData()
+    answer = json.loads(plots.figure({"sources": [str(split)], "traces": [trace(["split::Motor___speed"])]}))
+    assert answer["figure"] is None and "overlap" in answer["traces"][0]["error"]
+
+    # two sources of the same name stay apart
+    other = data / "other" / "brake.csv"
+    other.parent.mkdir()
+    shutil.copy(data / "brake.csv", other)
+    found = plots.sources([str(data / "brake.csv"), str(other)])
+    assert [x["label"] for x in found["sources"]] == ["brake.csv", "brake.csv (2)"]
+    assert "brake.csv (2)::pressure" in found["fields"]
 
 
 def test_fields_loaded_together(data, monkeypatch):
@@ -125,16 +173,17 @@ def test_fields_loaded_together(data, monkeypatch):
     monkeypatch.setattr(FolderParamMgr, "loadParams", lambda self, names, *a, **k: calls.append(list(names)) or real(self, names, *a, **k))
     plots = PlotData()
     fields = ["motor.tdms::Motor___speed", "brake.csv::pressure", "motor.tdms::Position___x"]
-    answer = json.loads(plots.figure({"sources": [str(data)], "traces": [trace([f]) for f in fields]}))
-    assert calls == [fields] and all(not r["error"] for r in answer["traces"])
+    answer = json.loads(plots.figure({"sources": files(data), "traces": [trace([f]) for f in fields]}))
+    # one call per source: motor.tdms (speed and x), brake.csv (pressure, alone: loaded on its own)
+    assert calls == [["motor.tdms::Motor___speed", "motor.tdms::Position___x"], ["brake.csv::pressure"]] and all(not r["error"] for r in answer["traces"])
     assert [d["name"] for d in answer["figure"]["data"]] == ["Motor___speed (motor.tdms)", "pressure (brake.csv)", "Position___x (motor.tdms)"]
-    plots.figure({"sources": [str(data)], "traces": [trace([f], color="#000000") for f in fields]})
-    assert len(calls) == 1
+    plots.figure({"sources": files(data), "traces": [trace([f], color="#000000") for f in fields]})
+    assert len(calls) == 2
 
 
 def test_exports(data):
     plots = PlotData()
-    spec = {"sources": [str(data)], "maxPoints": 100, "xLabel": "time",
+    spec = {"sources": files(data), "maxPoints": 100, "xLabel": "time",
             "traces": [trace(["motor.tdms::Motor___speed"]), trace(["brake.csv::pressure"], offset="autoz:1s")]}
     # every point of the view (the decimation is for the screen only), on one time column
     csv = pd.read_csv(io.StringIO(plots.export_csv({**spec, "view": {"x": [START, START + 5]}})))
@@ -170,12 +219,12 @@ def test_webui_plot_routes(data):
         js = requests.get(f"{url}/plotly.js")
         assert js.status_code == 200 and js.headers["content-type"].startswith("text/javascript") and "plotly" in js.text[:2000].lower()
         found = requests.post(f"{url}/sources", json={"paths": [str(data / "motor.tdms")]}).json()
-        assert [f["name"] for f in found["files"]] == ["motor.tdms"]
-        r = requests.post(f"{url}/figure", json={"sources": [str(data)], "traces": [trace(["motor.tdms::Motor___speed"])]})
+        assert [f["name"] for f in found["sources"][0]["files"]] == ["motor.tdms"]
+        r = requests.post(f"{url}/figure", json={"sources": files(data), "traces": [trace(["motor.tdms::Motor___speed"])]})
         assert r.status_code == 200 and r.json()["figure"]["data"][0]["type"] == "scatter"
         assert requests.post(f"{url}/sources", json={"paths": []}).status_code == 400
-        csv = requests.post(f"{url}/export/csv", json={"sources": [str(data)], "traces": [trace(["brake.csv::pressure"])]})
+        csv = requests.post(f"{url}/export/csv", json={"sources": files(data), "traces": [trace(["brake.csv::pressure"])]})
         assert csv.status_code == 200 and csv.headers["content-type"].startswith("text/csv")
-        assert requests.post(f"{url}/export/html", json={"sources": [str(data)], "traces": []}).status_code == 400
+        assert requests.post(f"{url}/export/html", json={"sources": files(data), "traces": []}).status_code == 400
     finally:
         server.should_exit = True
