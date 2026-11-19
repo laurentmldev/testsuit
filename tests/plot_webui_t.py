@@ -116,6 +116,22 @@ def test_sources_and_figures(data):
         plots.sources([str(data / "missing")])
 
 
+def test_fields_loaded_together(data, monkeypatch):
+    """The fields of a figure not loaded yet are loaded in one call (the CSV loader then reads its file
+    once), and are then kept: restyling loads nothing."""
+    from testsuit.datatools.DataFileMgrs.FolderParamMgr import FolderParamMgr
+    calls = []
+    real = FolderParamMgr.loadParams
+    monkeypatch.setattr(FolderParamMgr, "loadParams", lambda self, names, *a, **k: calls.append(list(names)) or real(self, names, *a, **k))
+    plots = PlotData()
+    fields = ["motor.tdms::Motor___speed", "brake.csv::pressure", "motor.tdms::Position___x"]
+    answer = json.loads(plots.figure({"sources": [str(data)], "traces": [trace([f]) for f in fields]}))
+    assert calls == [fields] and all(not r["error"] for r in answer["traces"])
+    assert [d["name"] for d in answer["figure"]["data"]] == ["Motor___speed (motor.tdms)", "pressure (brake.csv)", "Position___x (motor.tdms)"]
+    plots.figure({"sources": [str(data)], "traces": [trace([f], color="#000000") for f in fields]})
+    assert len(calls) == 1
+
+
 def test_exports(data):
     plots = PlotData()
     spec = {"sources": [str(data)], "maxPoints": 100, "xLabel": "time",

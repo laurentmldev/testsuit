@@ -221,58 +221,60 @@ class CsvFileMgr(AFileMgr):
             for i in range(len(paramNamesList)):
                 indexNamesList+=[indexColName]
 
-        paramIdx=0
-        totalNbParams=len(paramNamesList)
-        
-        for requestedFieldname in paramNamesList:
-
-            if abortEvent and abortEvent.is_set():
-                raise Exception("Received abort event, CSV params extraction interrupted")
-            
-            indexName=indexNamesList[paramIdx]
-            indexColPos=self.getFieldNames().index(indexName)
-            
+        # the parameters are read together, one read of the file per index column (a CSV of many columns is
+        # parsed once, not once per parameter), then each one is finalized on its own as before
+        fieldNames=self.getFieldNames()
+        wanted=[]
+        for requestedFieldname,indexName in zip(paramNamesList,indexNamesList):
             # do not extract index col as a parameter (already extracted)
             if requestedFieldname==indexName:
-                totalNbParams-=1
                 monitorProgress.complete_n(1)
                 continue
-            
-            (not silent) and monitorProgress.msg(msg=[ f"extracting {requestedFieldname}", 
+            wanted.append((requestedFieldname,indexName))
+
+        loaded={}
+        for indexName in dict.fromkeys(indexName for _,indexName in wanted):
+            if abortEvent and abortEvent.is_set():
+                raise Exception("Received abort event, CSV params extraction interrupted")
+            indexColPos=fieldNames.index(indexName)
+            paramCols=list(dict.fromkeys(fieldNames.index(name) for name,idx in wanted if idx==indexName))
+            colsList=sorted(set(paramCols+[indexColPos]))
+            (not silent) and monitorProgress.msg(msg=[ f"extracting {len(paramCols)} parameter(s)",
                                             f"source file: {self.getBaseName()}",
                                             f"source type: {self.getFileType()} {self.getCsvFileType()}",
-                                            f"timestamp: col '{indexName}' at pos '{indexColPos}'"])                     
-            paramIdx+=1       
-
-            paramColPos = self.getFieldNames().index(requestedFieldname)
-            colsList=[indexColPos,paramColPos]
-            colsList.sort()
-            index_col_pos_in_sublist=colsList.index(indexColPos)
+                                            f"timestamp: col '{indexName}' at pos '{indexColPos}'"])
             date_parser_func=self.getDateParserFunc(indexColPos)
 
             read_csv_kwargs = {
-                'index_col': index_col_pos_in_sublist,
+                'index_col': colsList.index(indexColPos),
                 'usecols': colsList,
                 'encoding': 'utf-8',
                 'sep': self.getSeparator(),
                 'comment': '#',
                 'float_precision': CSV_FLOAT_PRECISION,
             }
-            
-            dfParam = pd.read_csv(self.getFileName(),**read_csv_kwargs)            
-            
-            if date_parser_func is not None and not isinstance(dfParam.index, pd.DatetimeIndex):
-                dfParam.index = dfParam.index.map(date_parser_func)
-            if isinstance(dfParam.index, pd.DatetimeIndex):
-                if dfParam.index.tz is None:
-                    dfParam.index = dfParam.index.tz_localize('UTC')
+
+            dfAll = pd.read_csv(self.getFileName(),**read_csv_kwargs)
+
+            if date_parser_func is not None and not isinstance(dfAll.index, pd.DatetimeIndex):
+                dfAll.index = dfAll.index.map(date_parser_func)
+            if isinstance(dfAll.index, pd.DatetimeIndex):
+                if dfAll.index.tz is None:
+                    dfAll.index = dfAll.index.tz_localize('UTC')
                 else:
-                    dfParam.index = dfParam.index.tz_convert('UTC')
+                    dfAll.index = dfAll.index.tz_convert('UTC')
 
                 # Pandas <2.0 has only ns reoslution (and as_unit is not present)
-                try: dfParam.index = dfParam.index.as_unit('ns').view('int64') / 1e9
-                except AttributeError: dfParam.index = dfParam.index.view('int64') / 1e9
-            
+                try: dfAll.index = dfAll.index.as_unit('ns').view('int64') / 1e9
+                except AttributeError: dfAll.index = dfAll.index.view('int64') / 1e9
+
+            # columns of dfAll: the param columns, in file order (the index column is the index)
+            dataCols=[c for c in colsList if c!=indexColPos]
+            for paramColPos in paramCols:
+                loaded[(paramColPos,indexColPos)]=dfAll.iloc[:,[dataCols.index(paramColPos)]]
+
+        for requestedFieldname,indexName in wanted:
+            dfParam=loaded[(fieldNames.index(requestedFieldname),fieldNames.index(indexName))].copy()
             rst.append(self.finalizeParam(dfParam,
                                             name=requestedFieldname,
                                             indexName="Timestamps/"+indexName,
