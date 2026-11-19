@@ -17,7 +17,23 @@
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <!-- a suit that helps with tests: jacket and tie, a check mark in the chest pocket -->
+  <defs><clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="44"/></clipPath></defs>
   <rect x="8" y="8" width="240" height="240" rx="44" fill="#e8eef9"/>
+  <!-- a technical plot behind it: grid, limit band, a measured curve with its samples -->
+  <g clip-path="url(#tile)">
+    <g stroke="#c5d3ea" stroke-width="2">
+      <path d="M8 40 H248 M8 72 H248 M8 104 H248 M8 136 H248 M8 168 H248 M8 200 H248 M8 232 H248"/>
+      <path d="M40 8 V248 M72 8 V248 M104 8 V248 M136 8 V248 M168 8 V248 M200 8 V248 M232 8 V248"/>
+    </g>
+    <rect x="8" y="22" width="240" height="30" fill="#fbcfcf" fill-opacity="0.55"/>
+    <path d="M8 52 H248" stroke="#ef4444" stroke-width="3" stroke-dasharray="10 7"/>
+    <polyline points="14,96 34,78 54,88 74,62 94,74 114,58 134,70 154,60 174,76 194,64 214,84 242,70" fill="none"
+              stroke="#3b82f6" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+    <g fill="#3b82f6">
+      <circle cx="34" cy="78" r="4"/><circle cx="74" cy="62" r="4"/><circle cx="114" cy="58" r="4"/>
+      <circle cx="154" cy="60" r="4"/><circle cx="194" cy="64" r="4"/><circle cx="242" cy="70" r="4"/>
+    </g>
+  </g>
   <!-- jacket -->
   <path d="M40 236 L40 112 Q40 84 68 74 L104 60 L128 132 L152 60 L188 74 Q216 84 216 112 L216 236 Z" fill="#1f3a68"/>
   <!-- shirt -->
