@@ -33,6 +33,31 @@ To use testsuit without cloning it, install straight from GitHub (add `@<tag>` t
 pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
 ```
 
+### From Anaconda Navigator
+
+Installed with conda, testsuit shows in Anaconda Navigator as the **mexploit** app. The package is not published to
+any channel: it is installed from a local folder. Get that folder from the `conda` workflow (artifact
+`testsuit-conda-channel` of a run, on each `v*` tag or by hand from the Actions tab: unzip it anywhere), or build it
+yourself (recipe in [conda/](conda/meta.yaml)):
+
+```bash
+cd ui && npm ci && npm run build && cd ..
+python -m build --sdist                    # dist/testsuit-<version>.tar.gz, with the web UI
+TESTSUIT_VERSION=<version> TESTSUIT_SDIST=$PWD/dist/testsuit-<version>.tar.gz conda build conda -c conda-forge --output-folder testsuit-conda-channel
+```
+
+Then, in a terminal on the environment Navigator shows (*Anaconda Prompt* on Windows), install it from the folder,
+its dependencies from conda-forge:
+
+```bash
+conda install -c ./testsuit-conda-channel -c conda-forge testsuit
+```
+
+Restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed; *Launch* runs `mxp webui --last`:
+the folder opened last, or a folder picker the first time; *Change folder…* in its bar opens another one, and *Stop*
+stops it (launching it again while it runs only opens the browser on it). Plugins (entry points of the
+`testsuit.plugins` group) must be installed in the same environment: `pip install` them from that terminal.
+
 ## Jupyter GUIs
 
 Three notebook GUIs come with the package: Data-Plot (browse and plot parameters), H5-Conv (convert data files to HDF5) and M-Exploit (run a scenario and view its report). Copy their starter notebooks into a working folder and open Jupyter there:
@@ -66,7 +91,7 @@ The checks run on test results are mexploit scenarios: YAML files of entries, ea
 | `mxp describe` | every criterion a scenario can use, with its help and the JSON Schema of its fields; the helpers of expressions |
 | `mxp lint` | checks a scenario without running it: fields, expressions, computed parameters, parameter names against data (`--auto`: with the keys of its test definition) |
 | `mxp utest` | unit tests of a scenario: small data cases (`criteria_utests/<scenario>/utests.yml`), each with the status every check must give, and the coverage of each check |
-| `mxp webui` | the web UI: the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page; and **Plot**, to plot the parameters of data files by hand (2D or 3D, a style per trace, exports to PNG, HTML and CSV). Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
+| `mxp webui` | the web UI (on the current folder, or `--last`: the folder opened last; *Change folder…* opens another one): the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page; and **Plot**, to plot the parameters of data files by hand (2D or 3D, a style per trace, exports to PNG, HTML and CSV). Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
 | `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
 
 Scenarios are Jinja templates rendered before they run: a value can be a key of the test's dictionaries (`max: "{{ train.speed_limit_mps }}"`), a shared part can be included (`{% include "limits.inc.yml" %}`), and a loop can apply the same checks to several parameters (`{% for p in train.monitored %}`). The tools above render them too, and report each problem on the line where it is written ([examples](src/testsuit/exploit/README.md#templating-with-jinja-keys-includes-and-loops)).

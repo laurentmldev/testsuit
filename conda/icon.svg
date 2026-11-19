@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright (C) 2026 Laurent Millet-Lacombe
+  SPDX-License-Identifier: AGPL-3.0-or-later
+
+  This file is part of testsuit.
+  testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+  General Public License as published by the Free Software Foundation, either version 3 of the License,
+  or (at your option) any later version.
+  testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+  implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+  Public License for more details.
+  You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+  see <https://www.gnu.org/licenses/>.
+
+  The icon of the mexploit web UI in Anaconda Navigator (icon.png: rendered from it at 256x256).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#2563eb"/>
+  <polyline points="36,170 78,128 112,150 156,92 220,60" fill="none" stroke="#bfdbfe" stroke-width="12"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="36" y1="110" x2="220" y2="110" stroke="#ffffff" stroke-opacity="0.45" stroke-width="5" stroke-dasharray="12 10"/>
+  <circle cx="186" cy="182" r="38" fill="#ffffff"/>
+  <polyline points="168,183 181,196 205,170" fill="none" stroke="#16a34a" stroke-width="11"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="34" y="222" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="44"
+        fill="#ffffff">mxp</text>
+</svg>

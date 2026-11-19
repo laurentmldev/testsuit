@@ -1,0 +1,83 @@
+# Copyright (C) 2026 Laurent Millet-Lacombe
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of testsuit.
+# testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+# General Public License as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+# Public License for more details.
+# You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+# see <https://www.gnu.org/licenses/>.
+
+# The conda package of testsuit (conda/meta.yaml), shown as the "mexploit" app in Anaconda Navigator once
+# installed. Not published anywhere: the job keeps the package, in a local channel folder, as the artifact
+# "testsuit-conda-channel" of the run (on a v* tag, a pull request changing it, or by hand from the Actions
+# tab). Install it from that folder: README.md, "From Anaconda Navigator".
+name: conda
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "conda/**"
+      - ".github/workflows/conda.yml"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conda:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}   # a login shell: the conda environment is activated
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # setuptools-scm needs history/tags for the version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build the web UI (packaged with the sequencer)
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the sdist (with the web UI)
+        run: |
+          python -m pip install --upgrade build setuptools-scm
+          python -m build --sdist
+          version=$(python -m setuptools_scm)
+          echo "TESTSUIT_VERSION=$version" >> "$GITHUB_ENV"
+          echo "TESTSUIT_SDIST=$PWD/dist/testsuit-$version.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          conda-remove-defaults: true
+      - name: Build the conda package
+        run: |
+          conda install -n base -y conda-build   # a conda subcommand: in the base environment
+          conda build conda --output-folder conda-out
+          rm -rf conda-out/src_cache
+          ls conda-out/noarch
+
+      # conda-out is a local channel (its repodata.json is written by conda build): unzipped anywhere,
+      # conda installs from it, with the dependencies from conda-forge
+      - name: Keep the package as a local channel
+        uses: actions/upload-artifact@v4
+        with:
+          name: testsuit-conda-channel
+          path: conda-out/
+          retention-days: 90

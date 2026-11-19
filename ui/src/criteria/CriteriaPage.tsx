@@ -22,6 +22,7 @@ import { classes, navigate, setQuery, Toasts, type Route } from "../util";
 import { restAdapter, type Overview } from "./adapter";
 import { CriteriaEditor } from "./CriteriaEditor";
 import { useTabTitle } from "../title";
+import { FolderPickerPage, WebuiFolderActions, WebuiStopped, type WebuiMode } from "./FolderPicker";
 
 function GitTag({ ov }: { ov: Overview | null }) {
   if (!ov?.git) return null;
@@ -69,11 +70,12 @@ function WebuiNav({ page }: { page: WebuiPage }) {
   );
 }
 
-export function StandaloneCriteriaApp({ mode }: { mode: { folder: string; testsuit: string } }) {
+export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
   const adapter = useMemo(() => restAdapter("criteria", "local"), []);
   const read = () => ({ page: (window.location.hash.startsWith("#/exploit") ? "exploit" : window.location.hash.startsWith("#/plot") ? "plot" : "criteria") as WebuiPage,
     file: new URLSearchParams(window.location.hash.split("?")[1] || "").get("file") });
   const [where, setWhere] = useState(read);
+  const [stopped, setStopped] = useState(false);
   useEffect(() => {
     const on = () => setWhere(read());
     window.addEventListener("hashchange", on);
@@ -81,7 +83,9 @@ export function StandaloneCriteriaApp({ mode }: { mode: { folder: string; testsu
   }, []);
   // `mxp webui` has no app name of its own: its tabs are named after the page and the folder
   useEffect(() => {
-    document.title = `${PAGE_NAMES[where.page]} · ${mode.folder.split("/").pop()}`;
+    document.title = mode.folder
+      ? `${PAGE_NAMES[where.page]} · ${mode.folder.split(/[\\/]/).filter(Boolean).pop() || mode.folder}`
+      : "mexploit";
   }, [mode.folder, where.page]);
   const onFile = useCallback((p: string | null) => {
     if (!window.location.hash.startsWith("#/criteria")) window.location.hash = "#/criteria";
@@ -94,9 +98,26 @@ export function StandaloneCriteriaApp({ mode }: { mode: { folder: string; testsu
       <code title="The folder of this web UI">{mode.folder}</code>
       {extra}
       <span style={{ flex: 1 }} />
+      <WebuiFolderActions mode={mode} onStopped={() => setStopped(true)} />
       <span className="muted small">testsuit {mode.testsuit}</span>
     </div>
   );
+  if (stopped) return <div className="app standalone"><main><WebuiStopped /></main></div>;
+  // no folder open yet (the first launch from Anaconda Navigator): the folder picker
+  if (!mode.folder) {
+    return (
+      <div className="app standalone">
+        <div className="standalone-bar">
+          <span className="brand">mexploit</span>
+          <span style={{ flex: 1 }} />
+          <WebuiFolderActions mode={mode} changeable={false} onStopped={() => setStopped(true)} />
+          <span className="muted small">testsuit {mode.testsuit}</span>
+        </div>
+        <main><FolderPickerPage mode={mode} /></main>
+        <Toasts />
+      </div>
+    );
+  }
   if (where.page === "plot") {
     return (
       <div className="app full standalone">
