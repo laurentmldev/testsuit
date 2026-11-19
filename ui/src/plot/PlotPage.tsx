@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { get, post, url } from "../api";
 import { PathList, PathPicker, type Info, type Root } from "../exploit/ExploitPage";
-import { classes, MenuButton, notify } from "../util";
+import { classes, MenuButton, notify, setQuery, useRoute } from "../util";
 
 const BASE = "plot";
 const STORE = "mxp.plot";
@@ -279,6 +279,17 @@ export function PlotPage() {
 
   const addSources = (p: string[]) => setState((s) => ({ ...s, sources: [...s.sources, ...p.filter((x) => !s.sources.includes(x))] }));
   const removeSource = (p: string) => setState((s) => ({ ...s, sources: s.sources.filter((x) => x !== p) }));
+  // ?source=<path>: a data file opened from elsewhere (the Plot… button of a file of a run in tsqd), added to the
+  // sources and its fields shown; taken out of the address then, so that reloading the page does not add it again
+  const linked = useRoute().query.get("source");
+  useEffect(() => {
+    if (!linked) return;
+    addSources([linked]);
+    const name = linked.split(/[\\/]/).filter(Boolean).pop() || "";
+    setFilter(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));      // its fields: the filter is a regex
+    setQuery("source", null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked]);
   const clear = () => { setTraces(() => []); setOpen(null); };
   const visibleCount = traces.filter((t) => !t.hidden).length;
   const is3d = options.projection === "3d";
