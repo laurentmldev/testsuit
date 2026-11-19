@@ -35,7 +35,7 @@ pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.gi
 
 ### From Anaconda Navigator
 
-Installed with conda, testsuit shows in Anaconda Navigator as the **mexploit** app. The package is not published to
+Installed with conda, testsuit shows in Anaconda Navigator as the **testsuit** app (its tile runs the mexploit web UI). The package is not published to
 any channel: it is installed from a local folder. Get that folder from the `conda` workflow (artifact
 `testsuit-conda-channel` of a run, on each `v*` tag or by hand from the Actions tab: unzip it anywhere), or build it
 yourself (recipe in [conda/](conda/meta.yaml)):
@@ -51,8 +51,20 @@ in either of two ways.
 
 **In Navigator**: on the *Home* page, *Channels*, *Add*: `file:///C:/conda-channels/testsuit-conda-channel` (forward
 slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come from there); *Update channels*.
-**mexploit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
+**testsuit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
 *Update channels*: the tile offers the new version.
+
+> **Tips for the Channels dialog.** There is no *Browse* button: the field takes a name or a URL only, so a plain
+> path (`C:\...`) is refused as you type. Type or paste the folder as `file:///` (three slashes) followed by its path
+> with forward slashes, then press **Enter**: Navigator checks that the folder exists, and only then enables
+> *Update channels* (a tooltip says why when it refuses). The folder is the one holding `noarch\` (with
+> `repodata.json` in it): a zip unzipped into a folder of its own often adds one level too many.
+>
+> **Anaconda installed by an administrator**: adding a channel needs no rights (it goes to your own
+> `C:\Users\<you>\.condarc`), but the `base` environment (`C:\ProgramData\anaconda3`) cannot be written to. Create an
+> environment of your own (*Environments*, *Create*: it goes to `C:\Users\<you>\.conda\envs`), select it in
+> *Applications on* on the *Home* page, then *Install*. An administrator may also restrict the channels for everyone
+> (`allowlist_channels` in the system `.condarc`): then only they can allow this one.
 
 **In a terminal** on the environment Navigator shows (*Anaconda Prompt* on Windows), its dependencies from conda-forge:
 
@@ -60,7 +72,7 @@ slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come fr
 conda install -c C:/conda-channels/testsuit-conda-channel -c conda-forge testsuit
 ```
 
-then restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed. The same command upgrades it
+then restart Navigator (or *Refresh* its *Home* page): **testsuit** is there, installed. The same command upgrades it
 from a newer folder. Upgrade testsuit in that environment with conda, not `pip install -U`, which would leave conda
 and Navigator on the old version.
 

@@ -13,16 +13,42 @@
   You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
   see <https://www.gnu.org/licenses/>.
 
-  The icon of the mexploit web UI in Anaconda Navigator (icon.png: rendered from it at 256x256).
+  The icon of testsuit in Anaconda Navigator: a measured curve under its limit, checked (icon.png: rendered from it at 256x256).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <rect x="8" y="8" width="240" height="240" rx="44" fill="#2563eb"/>
-  <polyline points="36,170 78,128 112,150 156,92 220,60" fill="none" stroke="#bfdbfe" stroke-width="12"
+  <!-- a measured curve that stays under its limit, and the check that says so -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <!-- axes ticks as a faint dot grid -->
+    <g fill="#ffffff" fill-opacity="0.16">
+      <circle cx="48" cy="48" r="2.5"/><circle cx="88" cy="48" r="2.5"/><circle cx="128" cy="48" r="2.5"/><circle cx="168" cy="48" r="2.5"/><circle cx="208" cy="48" r="2.5"/>
+      <circle cx="48" cy="96" r="2.5"/><circle cx="88" cy="96" r="2.5"/><circle cx="128" cy="96" r="2.5"/><circle cx="168" cy="96" r="2.5"/><circle cx="208" cy="96" r="2.5"/>
+      <circle cx="48" cy="144" r="2.5"/><circle cx="88" cy="144" r="2.5"/><circle cx="128" cy="144" r="2.5"/><circle cx="168" cy="144" r="2.5"/><circle cx="208" cy="144" r="2.5"/>
+      <circle cx="48" cy="192" r="2.5"/><circle cx="88" cy="192" r="2.5"/><circle cx="128" cy="192" r="2.5"/>
+    </g>
+    <!-- the limit -->
+    <path d="M28 70 H228" stroke="#fda4af" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 12"/>
+    <!-- the measured curve, under the limit -->
+    <path d="M8 188 C44 186 54 132 90 136 S136 182 166 140 S214 92 248 100 L248 248 L8 248 Z" fill="url(#area)"/>
+    <path d="M8 188 C44 186 54 132 90 136 S136 182 166 140 S214 92 248 100" fill="none" stroke="#ffffff"
+          stroke-width="9" stroke-linecap="round"/>
+    <circle cx="90" cy="136" r="9" fill="#ffffff"/>
+    <circle cx="166" cy="140" r="9" fill="#ffffff"/>
+  </g>
+  <!-- the check -->
+  <circle cx="190" cy="190" r="42" fill="#ffffff"/>
+  <circle cx="190" cy="190" r="34" fill="#22c55e"/>
+  <polyline points="173,191 185,203 208,178" fill="none" stroke="#ffffff" stroke-width="10"
             stroke-linecap="round" stroke-linejoin="round"/>
-  <line x1="36" y1="110" x2="220" y2="110" stroke="#ffffff" stroke-opacity="0.45" stroke-width="5" stroke-dasharray="12 10"/>
-  <circle cx="186" cy="182" r="38" fill="#ffffff"/>
-  <polyline points="168,183 181,196 205,170" fill="none" stroke="#16a34a" stroke-width="11"
-            stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="34" y="222" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="44"
-        fill="#ffffff">mxp</text>
 </svg>
