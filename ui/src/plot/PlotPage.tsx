@@ -12,6 +12,7 @@
 // see <https://www.gnu.org/licenses/>.
 
 // The Plot page of `mxp webui` (#/plot): the data-plot notebook in the browser. Pick data files or folders
+// (a folder is one data source, read as a whole by FolderParamMgr)
 // (every format of the data loaders), find their parameters by name or regex, plot them in 2D (against time)
 // or 3D (X, Y, Z), style each trace on its own, then export the figure (PNG, interactive HTML, or the CSV
 // of what the view shows). The figure is made by the plotly plot backend of testsuit (routes /plot,
@@ -42,7 +43,8 @@ interface Options {
 }
 interface State { sources: string[]; traces: Trace[]; options: Options }
 interface FileInfo { name: string; path: string; type: string; entries: number | null; info: string[]; error: string | null }
-interface Sources { files: FileInfo[]; fields: string[]; total: number; truncated: boolean }
+interface SourceInfo { label: string; path: string; folder: boolean; files: FileInfo[]; fields: number }
+interface Sources { sources: SourceInfo[]; fields: string[]; total: number; truncated: boolean }
 interface TraceReport { id: string; points: number; shown: number; error: string | null }
 
 const OPTIONS: Options = { projection: "2d", title: "", subtitle: "", xLabel: "", yLabel: "", zLabel: "", legend: true,
@@ -267,34 +269,36 @@ export function PlotPage() {
         <section className="card plot-section">
           <div className="card-head"><strong>1. Data</strong><span className="muted small">files or folders, any format</span>
             <span style={{ flex: 1 }} /><button className="small" onClick={() => setPicker(true)}>Browse…</button></div>
-          <PathList paths={sources} roots={roots} onRemove={removeSource} empty="Pick recordings: TDMS, MDF, CSV, HDF5, DXD… or a folder of them." />
+          <PathList paths={sources} roots={roots} onRemove={removeSource} empty="Pick recordings: TDMS, MDF, CSV, HDF5, DXD… or a folder of them, read as one source (a recording split in several files is merged in time)." />
           {opening && <p className="muted small">Opening…</p>}
           {sourceError && <div className="banner error">{sourceError}</div>}
-          {found && (
-            <details className="small plot-files">
-              <summary>{found.files.length} file{found.files.length > 1 ? "s" : ""}, {count(found.total)} fields
-                {found.files.some((f) => f.error) && <span className="badge bad">{found.files.filter((f) => f.error).length} unreadable</span>}</summary>
+          {found?.sources.map((src) => (
+            // a folder is one data source: a parameter of several of its files is one field, merged in time
+            <details key={src.path} className="small plot-files" title={src.path}>
+              <summary><span className="mono">{src.label}</span>{" "}
+                <span className="muted">{src.folder ? `folder of ${src.files.length} file${src.files.length > 1 ? "s" : ""}` : src.files[0]?.type}, {count(src.fields)} fields</span>
+                {src.files.some((f) => f.error) && <span className="badge bad">{src.files.filter((f) => f.error).length} unreadable</span>}</summary>
               <table className="plot-files-table"><tbody>
-                {found.files.map((f) => (
+                {src.files.map((f) => (
                   <tr key={f.path} title={f.path}><td className="mono">{f.name}</td><td><span className="badge">{f.type}</span></td>
                     <td className={f.error ? "plot-file-error" : "muted"}>{f.error || [...(f.entries != null && f.entries > 1 ? [`${count(f.entries)} rows`] : []), ...f.info].join(", ")}</td></tr>
                 ))}
               </tbody></table>
             </details>
-          )}
+          ))}
         </section>
 
         <section className="card plot-section plot-fields">
           <div className="card-head"><strong>2. Fields</strong>
             <span className="muted small">{found ? `${count(matching.length)} of ${count(found.total)}` : "of the data"}</span></div>
           <input className="mono" value={filter} onChange={(e) => setFilter(e.target.value)} disabled={!found}
-            placeholder="filter: words or regex, file::param" title="Words found anywhere in the name (case ignored), or a regex. 'file::param' matches the file and the parameter apart, as in the notebook. Double-click a field to plot it." />
+            placeholder="filter: words or regex, source::param" title="Words found anywhere in the name (case ignored), or a regex. 'source::param' matches the source (file or folder) and the parameter apart, as in the notebook. Double-click a field to plot it." />
           <div className="plot-field-list">
             {!found && <p className="muted small">Pick data first.</p>}
             {found && !matching.length && <p className="muted small">No field matches.</p>}
             {byFile.map(([file, fields]) => (
               <div key={file}>
-                {(found?.files.length || 0) > 1 && <div className="plot-file-head muted small">{file}</div>}
+                {(found?.sources.length || 0) > 1 && <div className="plot-file-head muted small">{file}</div>}
                 {fields.map((f) => (
                   <label key={f} className={classes("plot-field", picked.includes(f) && "selected")} title={f} onDoubleClick={(e) => { e.preventDefault(); add([f]); }}>
                     <input type="checkbox" checked={picked.includes(f)} onChange={() => toggle(f)} />
