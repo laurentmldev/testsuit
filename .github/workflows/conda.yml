@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-# The conda package of testsuit (conda/meta.yaml), shown as the "mexploit" app in Anaconda Navigator once
+# The conda package of testsuit (conda/meta.yaml), shown as the "testsuit" app (the mexploit web UI) in Anaconda Navigator once
 # installed. Not published anywhere: the job keeps the package, in a local channel folder, as the artifact
 # "testsuit-conda-channel" of the run (on a v* tag, a pull request changing it, or by hand from the Actions
 # tab). Install it from that folder: README.md, "From Anaconda Navigator".
@@ -72,6 +72,20 @@ jobs:
           conda build conda --output-folder conda-out
           rm -rf conda-out/src_cache
           ls conda-out/noarch
+
+      # Navigator shows a package of a local channel with the icon that channeldata.json names (icon_url, relative
+      # to the channel folder), before it is installed; without one, the Anaconda default icon
+      - name: Give the package its icon in the channel
+        run: |
+          mkdir -p conda-out/icons
+          cp conda/icon.png conda-out/icons/testsuit.png
+          python - <<'EOF'
+          import json, pathlib
+          path = pathlib.Path("conda-out/channeldata.json")
+          data = json.loads(path.read_text()) if path.is_file() else {"channeldata_version": 1, "packages": {}}
+          data.setdefault("packages", {}).setdefault("testsuit", {})["icon_url"] = "icons/testsuit.png"
+          path.write_text(json.dumps(data, indent=2))
+          EOF
 
       # conda-out is a local channel (its repodata.json is written by conda build): unzipped anywhere,
       # conda installs from it, with the dependencies from conda-forge

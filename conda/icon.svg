@@ -13,16 +13,28 @@
   You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
   see <https://www.gnu.org/licenses/>.
 
-  The icon of the mexploit web UI in Anaconda Navigator (icon.png: rendered from it at 256x256).
+  The icon of testsuit in Anaconda Navigator: a suit that helps with tests (icon.png: rendered from it at 256x256).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <rect x="8" y="8" width="240" height="240" rx="44" fill="#2563eb"/>
-  <polyline points="36,170 78,128 112,150 156,92 220,60" fill="none" stroke="#bfdbfe" stroke-width="12"
+  <!-- a suit that helps with tests: jacket and tie, a check mark in the chest pocket -->
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#e8eef9"/>
+  <!-- jacket -->
+  <path d="M40 236 L40 112 Q40 84 68 74 L104 60 L128 132 L152 60 L188 74 Q216 84 216 112 L216 236 Z" fill="#1f3a68"/>
+  <!-- shirt -->
+  <path d="M104 60 L128 52 L152 60 L128 132 Z" fill="#ffffff"/>
+  <!-- collar -->
+  <path d="M104 60 L128 52 L118 78 Z M152 60 L128 52 L138 78 Z" fill="#dbe4f3"/>
+  <!-- tie -->
+  <path d="M121 66 L135 66 L131 78 L140 126 L128 140 L116 126 L125 78 Z" fill="#16a34a"/>
+  <!-- lapels -->
+  <path d="M104 60 L86 92 L100 100 L90 112 L128 132 Z" fill="#162c52"/>
+  <path d="M152 60 L170 92 L156 100 L166 112 L128 132 Z" fill="#162c52"/>
+  <!-- buttons -->
+  <circle cx="128" cy="168" r="6" fill="#0f1f3d"/>
+  <circle cx="128" cy="200" r="6" fill="#0f1f3d"/>
+  <!-- chest pocket with a check mark as its handkerchief -->
+  <rect x="160" y="136" width="40" height="8" rx="2" fill="#162c52"/>
+  <circle cx="180" cy="116" r="22" fill="#ffffff"/>
+  <polyline points="169,117 177,125 192,108" fill="none" stroke="#16a34a" stroke-width="7"
             stroke-linecap="round" stroke-linejoin="round"/>
-  <line x1="36" y1="110" x2="220" y2="110" stroke="#ffffff" stroke-opacity="0.45" stroke-width="5" stroke-dasharray="12 10"/>
-  <circle cx="186" cy="182" r="38" fill="#ffffff"/>
-  <polyline points="168,183 181,196 205,170" fill="none" stroke="#16a34a" stroke-width="11"
-            stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="34" y="222" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="44"
-        fill="#ffffff">mxp</text>
 </svg>

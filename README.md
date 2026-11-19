@@ -35,7 +35,7 @@ pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.gi
 
 ### From Anaconda Navigator
 
-Installed with conda, testsuit shows in Anaconda Navigator as the **mexploit** app. The package is not published to
+Installed with conda, testsuit shows in Anaconda Navigator as the **testsuit** app (its tile runs the mexploit web UI). The package is not published to
 any channel: it is installed from a local folder. Get that folder from the `conda` workflow (artifact
 `testsuit-conda-channel` of a run, on each `v*` tag or by hand from the Actions tab: unzip it anywhere), or build it
 yourself (recipe in [conda/](conda/meta.yaml)):
@@ -51,7 +51,7 @@ in either of two ways.
 
 **In Navigator**: on the *Home* page, *Channels*, *Add*: `file:///C:/conda-channels/testsuit-conda-channel` (forward
 slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come from there); *Update channels*.
-**mexploit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
+**testsuit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
 *Update channels*: the tile offers the new version.
 
 > **Tips for the Channels dialog.** There is no *Browse* button: the field takes a name or a URL only, so a plain
@@ -72,7 +72,7 @@ slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come fr
 conda install -c C:/conda-channels/testsuit-conda-channel -c conda-forge testsuit
 ```
 
-then restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed. The same command upgrades it
+then restart Navigator (or *Refresh* its *Home* page): **testsuit** is there, installed. The same command upgrades it
 from a newer folder. Upgrade testsuit in that environment with conda, not `pip install -U`, which would leave conda
 and Navigator on the old version.
 
