@@ -13,45 +13,42 @@
   You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
   see <https://www.gnu.org/licenses/>.
 
-  The icon of testsuit in Anaconda Navigator: a suit that helps with tests (icon.png: rendered from it at 256x256).
+  The icon of testsuit in Anaconda Navigator: a measured curve under its limit, checked (icon.png: rendered from it at 256x256).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- a suit that helps with tests, in front of a measured curve -->
+  <!-- a measured curve that stays under its limit, and the check that says so -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#06b6d4"/>
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0891b2"/>
     </linearGradient>
     <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.38"/>
       <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
     <clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
   </defs>
   <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
   <g clip-path="url(#tile)">
-    <!-- dot grid -->
-    <g fill="#ffffff" fill-opacity="0.18">
-      <circle cx="40" cy="36" r="2.5"/><circle cx="72" cy="36" r="2.5"/><circle cx="104" cy="36" r="2.5"/><circle cx="136" cy="36" r="2.5"/><circle cx="168" cy="36" r="2.5"/><circle cx="200" cy="36" r="2.5"/><circle cx="232" cy="36" r="2.5"/>
-      <circle cx="24" cy="68" r="2.5"/><circle cx="56" cy="68" r="2.5"/><circle cx="88" cy="68" r="2.5"/><circle cx="120" cy="68" r="2.5"/><circle cx="152" cy="68" r="2.5"/><circle cx="184" cy="68" r="2.5"/><circle cx="216" cy="68" r="2.5"/>
+    <!-- axes ticks as a faint dot grid -->
+    <g fill="#ffffff" fill-opacity="0.16">
+      <circle cx="48" cy="48" r="2.5"/><circle cx="88" cy="48" r="2.5"/><circle cx="128" cy="48" r="2.5"/><circle cx="168" cy="48" r="2.5"/><circle cx="208" cy="48" r="2.5"/>
+      <circle cx="48" cy="96" r="2.5"/><circle cx="88" cy="96" r="2.5"/><circle cx="128" cy="96" r="2.5"/><circle cx="168" cy="96" r="2.5"/><circle cx="208" cy="96" r="2.5"/>
+      <circle cx="48" cy="144" r="2.5"/><circle cx="88" cy="144" r="2.5"/><circle cx="128" cy="144" r="2.5"/><circle cx="168" cy="144" r="2.5"/><circle cx="208" cy="144" r="2.5"/>
+      <circle cx="48" cy="192" r="2.5"/><circle cx="88" cy="192" r="2.5"/><circle cx="128" cy="192" r="2.5"/>
     </g>
-    <!-- the measured curve and the area under it -->
-    <path d="M8 92 C40 92 52 52 84 56 S124 96 152 72 S204 30 248 44 L248 248 L8 248 Z" fill="url(#area)"/>
-    <path d="M8 92 C40 92 52 52 84 56 S124 96 152 72 S204 30 248 44" fill="none" stroke="#ffffff"
-          stroke-width="5" stroke-linecap="round"/>
-    <circle cx="84" cy="56" r="7" fill="#ffffff"/>
-    <circle cx="208" cy="36" r="7" fill="#ffffff"/>
-    <!-- the suit -->
-    <path d="M44 256 L44 150 Q44 124 70 116 L102 104 L128 168 L154 104 L186 116 Q212 124 212 150 L212 256 Z" fill="#0f172a"/>
-    <path d="M102 104 L128 98 L154 104 L128 168 Z" fill="#f8fafc"/>
-    <path d="M122 108 L134 108 L131 120 L139 158 L128 170 L117 158 L125 120 Z" fill="#a3e635"/>
-    <path d="M102 104 L88 132 L100 138 L92 148 L128 168 Z" fill="#1e293b"/>
-    <path d="M154 104 L168 132 L156 138 L164 148 L128 168 Z" fill="#1e293b"/>
-    <!-- chest pocket: a check mark -->
-    <circle cx="178" cy="176" r="20" fill="#a3e635"/>
-    <polyline points="168,177 175,184 189,169" fill="none" stroke="#0f172a" stroke-width="6"
-              stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="128" cy="200" r="5" fill="#334155"/>
-    <circle cx="128" cy="226" r="5" fill="#334155"/>
+    <!-- the limit -->
+    <path d="M28 70 H228" stroke="#fda4af" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 12"/>
+    <!-- the measured curve, under the limit -->
+    <path d="M8 188 C44 186 54 132 90 136 S136 182 166 140 S214 92 248 100 L248 248 L8 248 Z" fill="url(#area)"/>
+    <path d="M8 188 C44 186 54 132 90 136 S136 182 166 140 S214 92 248 100" fill="none" stroke="#ffffff"
+          stroke-width="9" stroke-linecap="round"/>
+    <circle cx="90" cy="136" r="9" fill="#ffffff"/>
+    <circle cx="166" cy="140" r="9" fill="#ffffff"/>
   </g>
+  <!-- the check -->
+  <circle cx="190" cy="190" r="42" fill="#ffffff"/>
+  <circle cx="190" cy="190" r="34" fill="#22c55e"/>
+  <polyline points="173,191 185,203 208,178" fill="none" stroke="#ffffff" stroke-width="10"
+            stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
