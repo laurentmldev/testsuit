@@ -35,13 +35,28 @@ pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.gi
 
 ### From Anaconda Navigator
 
-The conda package of testsuit (recipe in [conda/](conda/meta.yaml), built and uploaded to anaconda.org by the
-`conda` workflow on each `v*` tag) is shown by Anaconda Navigator as the **mexploit** app: add the channel in
-Navigator (*Channels*, *Add*: `https://conda.anaconda.org/<channel>`, then *Update channels*), then *Install* and
-*Launch* it on the *Home* page. Launch runs `mxp webui --last`: the folder opened last, or a folder picker the first
-time; *Change folder…* in its bar opens another one, and *Stop* stops it (launching it again while it runs only
-opens the browser on it). Plugins (entry points of the `testsuit.plugins` group) must be installed in the same
-environment: `pip install` them from a terminal opened on that environment.
+Installed with conda, testsuit shows in Anaconda Navigator as the **mexploit** app. The package is not published to
+any channel: it is installed from a local folder. Get that folder from the `conda` workflow (artifact
+`testsuit-conda-channel` of a run, on each `v*` tag or by hand from the Actions tab: unzip it anywhere), or build it
+yourself (recipe in [conda/](conda/meta.yaml)):
+
+```bash
+cd ui && npm ci && npm run build && cd ..
+python -m build --sdist                    # dist/testsuit-<version>.tar.gz, with the web UI
+TESTSUIT_VERSION=<version> TESTSUIT_SDIST=$PWD/dist/testsuit-<version>.tar.gz conda build conda -c conda-forge --output-folder testsuit-conda-channel
+```
+
+Then, in a terminal on the environment Navigator shows (*Anaconda Prompt* on Windows), install it from the folder,
+its dependencies from conda-forge:
+
+```bash
+conda install -c ./testsuit-conda-channel -c conda-forge testsuit
+```
+
+Restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed; *Launch* runs `mxp webui --last`:
+the folder opened last, or a folder picker the first time; *Change folder…* in its bar opens another one, and *Stop*
+stops it (launching it again while it runs only opens the browser on it). Plugins (entry points of the
+`testsuit.plugins` group) must be installed in the same environment: `pip install` them from that terminal.
 
 ## Jupyter GUIs
 

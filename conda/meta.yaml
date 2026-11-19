@@ -11,7 +11,8 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-# The conda package of testsuit, shown as the "mexploit" app in Anaconda Navigator (its app: section).
+# The conda package of testsuit, shown as the "mexploit" app in Anaconda Navigator once installed (its app:
+# section). Not published to any channel: installed from a local file (README.md, "From Anaconda Navigator").
 # Built by .github/workflows/conda.yml from the sdist of python -m build (with the web UI in it):
 #   TESTSUIT_VERSION=1.2.0 TESTSUIT_SDIST=$PWD/dist/testsuit-1.2.0.tar.gz conda build conda -c conda-forge
 # Without TESTSUIT_SDIST, the sdist of that version on PyPI.
