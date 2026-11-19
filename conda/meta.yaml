@@ -1,0 +1,105 @@
+# Copyright (C) 2026 Laurent Millet-Lacombe
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of testsuit.
+# testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+# General Public License as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+# Public License for more details.
+# You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+# see <https://www.gnu.org/licenses/>.
+
+# The conda package of testsuit, shown as the "mexploit" app in Anaconda Navigator (its app: section).
+# Built by .github/workflows/conda.yml from the sdist of python -m build (with the web UI in it):
+#   TESTSUIT_VERSION=1.2.0 TESTSUIT_SDIST=$PWD/dist/testsuit-1.2.0.tar.gz conda build conda -c conda-forge
+# Without TESTSUIT_SDIST, the sdist of that version on PyPI.
+# One noarch package for Linux, macOS and Windows; the runtime dependencies are those of pyproject.toml,
+# with the criteria editor (fastapi, uvicorn) since the app is its web UI.
+
+{% set version = environ.get("TESTSUIT_VERSION", "0.0.0") %}
+{% set sdist = environ.get("TESTSUIT_SDIST", "") %}
+
+package:
+  name: testsuit
+  version: {{ version }}
+
+source:
+{% if sdist %}
+  url: file://{{ sdist }}
+{% else %}
+  url: https://pypi.org/packages/source/t/testsuit/testsuit-{{ version }}.tar.gz
+{% endif %}
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+  entry_points:
+    - data2h5 = testsuit.cli.data2h5:main
+    - data2db = testsuit.cli.data2db:main
+    - extract_data_any = testsuit.cli.extract_data_any:main
+    - extract_data_flags = testsuit.cli.extract_data_flags:main
+    - apply_clock_correction = testsuit.cli.apply_clock_correction:main
+    - mxp = testsuit.cli.mxp:main
+    - exploit_runner = testsuit.cli.exploit_runner:main
+    - datapack = testsuit.cli.datapack:main
+    - testsuit-notebooks = testsuit.cli.notebooks:main
+    - evalfile = testsuit.cli.evalfile:main
+    - tsq = testsuit.cli.tsq:main
+    - tsqd = testsuit.sequencer.daemon:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=77
+    - setuptools-scm >=8
+  run:
+    - python >=3.10
+    - numpy >=2.2.6
+    - pandas >=2.3.3
+    - requests >=2.32.5
+    - gitpython >=3.1
+    - colorama >=0.4
+    - h5py >=3.15
+    - unidecode >=1.4
+    - pytest-html >=4.1
+    - pytest-metadata >=3.1
+    - matplotlib-base >=3.10
+    - plotly >=5.24
+    - pytest >=8
+    - pyyaml >=6.0
+    - ruamel.yaml >=0.18
+    - markdown >=3.5
+    - python-dateutil >=2.8
+    - pyarrow >=15
+    - jinja2 >=3.1
+    - pydantic >=2.5
+    # the criteria editor (testsuit[editor]): the web UI of the app
+    - fastapi >=0.110
+    - uvicorn >=0.29
+
+test:
+  imports:
+    - testsuit
+    - testsuit.exploit.editor.standalone
+  commands:
+    - mxp webui -h
+    - python -c "from testsuit.exploit.editor.standalone import UI_DIR; assert (UI_DIR / 'index.html').is_file(), 'the web UI is not in the package'"
+
+# Anaconda Navigator lists the packages of its channels that have this section on its Home page;
+# Launch runs the entry in the environment: the folder opened last, or a folder picker the first time.
+app:
+  entry: mxp webui --last
+  icon: icon.png
+  summary: "mexploit: write test criteria and run them on test data, in the browser"
+  type: desk
+
+about:
+  home: https://github.com/laurentmldev/testsuit
+  license: AGPL-3.0-or-later
+  license_file: LICENSE
+  summary: "Test data preparation and analysis: mexploit criteria, their editor and runs in the browser"
+  dev_url: https://github.com/laurentmldev/testsuit

@@ -33,6 +33,16 @@ To use testsuit without cloning it, install straight from GitHub (add `@<tag>` t
 pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
 ```
 
+### From Anaconda Navigator
+
+The conda package of testsuit (recipe in [conda/](conda/meta.yaml), built and uploaded to anaconda.org by the
+`conda` workflow on each `v*` tag) is shown by Anaconda Navigator as the **mexploit** app: add the channel in
+Navigator (*Channels*, *Add*: `https://conda.anaconda.org/<channel>`, then *Update channels*), then *Install* and
+*Launch* it on the *Home* page. Launch runs `mxp webui --last`: the folder opened last, or a folder picker the first
+time; *Change folder…* in its bar opens another one, and *Stop* stops it (launching it again while it runs only
+opens the browser on it). Plugins (entry points of the `testsuit.plugins` group) must be installed in the same
+environment: `pip install` them from a terminal opened on that environment.
+
 ## Jupyter GUIs
 
 Three notebook GUIs come with the package: Data-Plot (browse and plot parameters), H5-Conv (convert data files to HDF5) and M-Exploit (run a scenario and view its report). Copy their starter notebooks into a working folder and open Jupyter there:
@@ -66,7 +76,7 @@ The checks run on test results are mexploit scenarios: YAML files of entries, ea
 | `mxp describe` | every criterion a scenario can use, with its help and the JSON Schema of its fields; the helpers of expressions |
 | `mxp lint` | checks a scenario without running it: fields, expressions, computed parameters, parameter names against data (`--auto`: with the keys of its test definition) |
 | `mxp utest` | unit tests of a scenario: small data cases (`criteria_utests/<scenario>/utests.yml`), each with the status every check must give, and the coverage of each check |
-| `mxp webui` | the web UI: the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; and **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page. Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
+| `mxp webui` | the web UI (on the current folder, or `--last`: the folder opened last; *Change folder…* opens another one): the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; and **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page. Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
 | `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
 
 Scenarios are Jinja templates rendered before they run: a value can be a key of the test's dictionaries (`max: "{{ train.speed_limit_mps }}"`), a shared part can be included (`{% include "limits.inc.yml" %}`), and a loop can apply the same checks to several parameters (`{% for p in train.monitored %}`). The tools above render them too, and report each problem on the line where it is written ([examples](src/testsuit/exploit/README.md#templating-with-jinja-keys-includes-and-loops)).
