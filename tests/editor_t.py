@@ -902,6 +902,14 @@ def test_api(repos, tmp_path):
         roots = [r["label"] for r in requests.get(f"{url}/exploit").json()["roots"]]
         assert roots == ["workspace0: datapack", "more: datapack", "Runs"], roots         # the Exploit tab, on every workspace
         assert requests.get(f"{url}/exploit/browse", params={"path": "/"}).status_code == 400
+        # its Plot subtab: the folders of the Exploit tab only
+        runs_folder = repos.config.storage_path("runs")
+        runs_folder.mkdir(parents=True, exist_ok=True)
+        (runs_folder / "values.csv").write_text("time,speed\n0,1\n1,2\n")
+        found = requests.post(f"{url}/plot/sources", json={"paths": [str(runs_folder / "values.csv")]})
+        assert found.status_code == 200 and "values.csv::speed" in found.json()["fields"], found.text
+        assert requests.post(f"{url}/plot/sources", json={"paths": ["/etc"]}).status_code == 400
+        assert requests.get(f"{url}/plot/plotly.js").status_code == 200
         refused = requests.post(f"{url}/edit/repositories", json={"url": "https://a:b@example.com/x.git"})
         assert refused.status_code >= 400 and "b@" not in refused.text
         (repos.config.root / "workspaces/more/datapack/setup/extra.yml").write_text("extra: 1\n")
