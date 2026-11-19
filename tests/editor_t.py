@@ -951,6 +951,14 @@ def test_api(repos, tmp_path):
         zip_path = Bench(tmp_path / "other").build()
         logging.getLogger("testsuit").setLevel(logging.INFO)
         run = seq.submit(zip_path)
+        # a data file of the run: the Plot… button of its Files tab, when a data loader reads it
+        run_dir = Path(seq.store.get_run(run["id"])["dir"])
+        (run_dir / "speed.csv").write_text("time,speed\n0,1\n1,2\n")
+        readable = requests.get(f"{url}/plot/runs/{run['id']}/speed.csv").json()
+        assert readable == {"path": str((run_dir / "speed.csv").resolve()), "format": "csv", "fields": 2}, readable
+        assert requests.get(f"{url}/plot/runs/{run['id']}/datapack.yml").status_code == 404
+        assert requests.get(f"{url}/plot/runs/{run['id']}/../../../etc/passwd").status_code == 404
+        assert requests.get(f"{url}/plot/runs/nope/speed.csv").status_code == 404
         # the event, in the log of the sequencer
         logs = requests.get(f"{url}/logs").json()
         assert any(line["message"].startswith(f"run: run={run['id']} state=queued") for line in logs["lines"]), logs

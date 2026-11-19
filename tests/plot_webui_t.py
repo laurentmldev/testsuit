@@ -210,6 +210,33 @@ def test_exports(data):
         plots.export_csv({**spec, "projection": "3d"})
 
 
+def test_readable(data, tmp_path):
+    """Whether a file can be opened on the Plot page: a format of the data loaders' registry reads it, a format
+    of a plugin among them, and its loader lists its fields."""
+    from testsuit.datatools.DataFileMgrs.CsvFileMgr import CsvFileMgr
+    from testsuit.datatools.DataFileMgrs.formats import register_file_format, unregister_file_format
+    from testsuit.exploit.editor.service import NotFound
+
+    plots = PlotData()
+    assert plots.readable(str(data / "motor.tdms")) == {"path": str(data / "motor.tdms"), "format": "tdms", "fields": 4}
+    assert plots.readable(str(data / "brake.csv"))["format"] == "csv"
+    (data / "step.log").write_text("09:30:00 starting the train\n09:30:01 done\n")    # a log, not a CSV
+    (data / "notes.md").write_text("# notes\n")                                        # no loader for it
+    for name in ("step.log", "notes.md", "none.csv"):
+        with pytest.raises(NotFound):
+            plots.readable(str(data / name))
+    (data / "speed.mydata").write_text("time,speed\n0,1\n1,2\n")
+    with pytest.raises(NotFound):
+        plots.readable(str(data / "speed.mydata"))
+    register_file_format("mydata", ["mydata"], CsvFileMgr)                              # as a plugin does
+    try:
+        assert plots.readable(str(data / "speed.mydata"))["format"] == "mydata"
+    finally:
+        unregister_file_format("mydata")
+    with pytest.raises(CriteriaError):
+        PlotData(lambda p: (_ for _ in ()).throw(CriteriaError("outside"))).readable(str(data / "brake.csv"))
+
+
 def test_webui_plot_routes(data):
     """The /plot routes of ``mxp webui``, through HTTP."""
     import uvicorn
@@ -237,6 +264,8 @@ def test_webui_plot_routes(data):
         r = requests.post(f"{url}/figure", json={"sources": files(data), "traces": [trace(["motor.tdms::Motor___speed"])]})
         assert r.status_code == 200 and r.json()["figure"]["data"][0]["type"] == "scatter"
         assert requests.post(f"{url}/sources", json={"paths": []}).status_code == 400
+        assert requests.get(f"{url}/readable", params={"path": str(data / "motor.tdms")}).json()["format"] == "tdms"
+        assert requests.get(f"{url}/readable", params={"path": str(data / "nothing.tdms")}).status_code == 404
         csv = requests.post(f"{url}/export/csv", json={"sources": files(data), "traces": [trace(["brake.csv::pressure"])]})
         assert csv.status_code == 200 and csv.headers["content-type"].startswith("text/csv")
         assert requests.post(f"{url}/export/html", json={"sources": files(data), "traces": []}).status_code == 400

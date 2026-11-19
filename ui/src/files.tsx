@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { parse } from "yaml";
 import { get, url } from "./api";
 import { CodeEditor, languageOf, type ValueHover } from "./monaco";
-import { classes, size } from "./util";
+import { classes, navigate, size } from "./util";
 
 export interface Entry {
   name: string;
@@ -79,8 +79,9 @@ async function renderedFiles(base: string, q: string): Promise<Record<string, Re
   return files;
 }
 
-/** Browses a folder API: base + "/" + path lists a folder (JSON array) or downloads a file. */
-export function FileBrowser({ base, query, initial }: { base: string; query?: string; initial?: string }) {
+/** Browses a folder API: base + "/" + path lists a folder (JSON array) or downloads a file. With plot, plot +
+ * "/" + path says whether the Plot page can open the file (a data loader reads it): it then gets a link there. */
+export function FileBrowser({ base, query, initial, plot }: { base: string; query?: string; initial?: string; plot?: string }) {
   const [open, setOpen] = useState<Record<string, Entry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [selected, setSelected] = useState<Entry | null>(null);
@@ -141,14 +142,26 @@ export function FileBrowser({ base, query, initial }: { base: string; query?: st
         {render("", 0)}
       </div>
       <div className="viewer">
-        {selected ? <FileView href={url(`${base}/${selected.path}${q}`)} path={selected.path} rendered={rendered[selected.path]} /> : <p className="muted">Pick a file to see it.</p>}
+        {selected ? <FileView href={url(`${base}/${selected.path}${q}`)} path={selected.path} rendered={rendered[selected.path]}
+          plot={plot && `${plot}/${selected.path}`} /> : <p className="muted">Pick a file to see it.</p>}
       </div>
     </div>
   );
 }
 
-export function FileView({ href, path, rendered }: { href: string; path: string; rendered?: RenderedFile }) {
+/** The file on this host and its data format, when the Plot page can open it (GET plot: 404 when not). */
+interface Readable { path: string; format: string; fields: number | null }
+
+export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
   const [text, setText] = useState<string | null>(null);
+  const [readable, setReadable] = useState<Readable | null>(null);
+  useEffect(() => {
+    setReadable(null);
+    if (!plot) return;
+    let current = true;
+    get<Readable>(plot).then((r) => current && setReadable(r)).catch(() => { /* no data loader reads it */ });
+    return () => { current = false; };
+  }, [plot]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"auto" | "raw">("auto");
   // a file rendered from a template is text, whatever its extension
@@ -174,6 +187,10 @@ export function FileView({ href, path, rendered }: { href: string; path: string;
         <span className="spacer" />
         {/\.(csv|tsv)$/i.test(path) && (
           <button className="small" onClick={() => setMode(mode === "auto" ? "raw" : "auto")}>{mode === "auto" ? "raw text" : "table"}</button>
+        )}
+        {readable && (
+          <button className="small" onClick={() => navigate("exploit/plot", { source: readable.path })}
+            title={`Open it in the Plot subtab of the Exploit tab (read as ${readable.format}${readable.fields != null ? `, ${readable.fields} field${readable.fields === 1 ? "" : "s"}` : ""})`}>Plot…</button>
         )}
         <a className="button small" href={href} download={path.split("/").pop()}>Download</a>
       </div>

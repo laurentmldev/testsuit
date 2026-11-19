@@ -547,9 +547,9 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
           </div>
         </div>
       )}
-      {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} />}
+      {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} plot={editor ? `plot/runs/${r.id}` : undefined} />}
       {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
-      {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" />}
+      {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" plot={editor ? `plot/runs/${r.id}` : undefined} />}
     </div>
   );
 }
