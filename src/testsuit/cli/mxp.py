@@ -15,6 +15,11 @@
 import argparse
 import sys,os,re
 
+# mxp webui: its launch is logged before the imports below, which can take long the first time in a new
+# environment (Anaconda Navigator shows nothing meanwhile); standalone.py imports only the standard library
+if sys.argv[1:2] in (["webui"], ["edit"]):
+    from testsuit.exploit.editor import standalone as _webui
+    _webui.log(f"process started: mxp {' '.join(sys.argv[1:])}, loading testsuit")
 
 from testsuit.exploit.mexploit.mexploit import mexploit
 from testsuit.datatools.plotBackends import plot_backend_names
