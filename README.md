@@ -46,17 +46,28 @@ python -m build --sdist                    # dist/testsuit-<version>.tar.gz, wit
 TESTSUIT_VERSION=<version> TESTSUIT_SDIST=$PWD/dist/testsuit-<version>.tar.gz conda build conda -c conda-forge --output-folder testsuit-conda-channel
 ```
 
-Then, in a terminal on the environment Navigator shows (*Anaconda Prompt* on Windows), install it from the folder,
-its dependencies from conda-forge:
+Unzip or build that folder somewhere it stays (`C:\conda-channels\testsuit-conda-channel` below), then install it
+in either of two ways.
+
+**In Navigator**: on the *Home* page, *Channels*, *Add*: `file:///C:/conda-channels/testsuit-conda-channel` (forward
+slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come from there); *Update channels*.
+**mexploit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
+*Update channels*: the tile offers the new version.
+
+**In a terminal** on the environment Navigator shows (*Anaconda Prompt* on Windows), its dependencies from conda-forge:
 
 ```bash
-conda install -c ./testsuit-conda-channel -c conda-forge testsuit
+conda install -c C:/conda-channels/testsuit-conda-channel -c conda-forge testsuit
 ```
 
-Restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed; *Launch* runs `mxp webui --last`:
-the folder opened last, or a folder picker the first time; *Change folder…* in its bar opens another one, and *Stop*
-stops it (launching it again while it runs only opens the browser on it). Plugins (entry points of the
-`testsuit.plugins` group) must be installed in the same environment: `pip install` them from that terminal.
+then restart Navigator (or *Refresh* its *Home* page): **mexploit** is there, installed. The same command upgrades it
+from a newer folder. Upgrade testsuit in that environment with conda, not `pip install -U`, which would leave conda
+and Navigator on the old version.
+
+*Launch* runs `mxp webui --last`: the folder opened last, or a folder picker the first time; *Change folder…* in its
+bar opens another one, and *Stop* stops it (launching it again while it runs only opens the browser on it). Plugins
+(entry points of the `testsuit.plugins` group) must be installed in the same environment: `pip install` them from a
+terminal on it (*Environments*, ▶, *Open Terminal* in Navigator); upgrading testsuit keeps them.
 
 ## Jupyter GUIs
 
