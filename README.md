@@ -81,6 +81,10 @@ bar opens another one, and *Stop* stops it (launching it again while it runs onl
 (entry points of the `testsuit.plugins` group) must be installed in the same environment: `pip install` them from a
 terminal on it (*Environments*, ▶, *Open Terminal* in Navigator); upgrading testsuit keeps them.
 
+Navigator shows no console: when *Launch* seems to do nothing, open http://127.0.0.1:8650 (the server may be running
+already), and read `testsuit\mxp_webui.log` in `%APPDATA%` (`~/.config/testsuit/mxp_webui.log` elsewhere), which
+tells what each launch did: the folder, the address, whether the browser opened.
+
 ## Jupyter GUIs
 
 Three notebook GUIs come with the package: Data-Plot (browse and plot parameters), H5-Conv (convert data files to HDF5) and M-Exploit (run a scenario and view its report). Copy their starter notebooks into a working folder and open Jupyter there:
