@@ -365,6 +365,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     app.include_router(exploit_routes(exploit_runs), prefix="/exploit")
 
+    # the Plot page (the Exploit tab's other subtab): data of the same folders only, the runs' among them
+    from testsuit.exploit.editor.plots import PlotData
+    from testsuit.exploit.editor.routes import plot_routes
+    plots = PlotData(lambda path: exploit_runs().allowed(path))
+    app.include_router(plot_routes(lambda: plots), prefix="/plot")
+
     @app.get("/edit/schemas")
     async def lab_schemas():
         lab = {"lab": Editor.describe_lab(seq.lab)}

@@ -27,6 +27,7 @@ import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
 import { DatapacksPage } from "./pages/Datapacks";
 import { ExploitPage } from "./exploit/ExploitPage";
+import { PlotPage } from "./plot/PlotPage";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
 import { SessionCriteriaPage, StandaloneCriteriaApp } from "./criteria/CriteriaPage";
@@ -81,6 +82,22 @@ function RunsSubtabs({ page }: { page: string }) {
   );
 }
 
+// The subtabs of the Exploit tab: run exploit_runner, and plot the data of the runs by hand.
+const EXPLOIT_SUBTABS: [string, string, string][] = [
+  ["exploit", "exploit_runner", "Run exploit_runner on scenarios and the data of runs, open its reports"],
+  ["exploit/plot", "Plot", "Plot the parameters of the data of runs (or of the workspaces) by hand"],
+];
+
+function ExploitSubtabs({ sub }: { sub: string }) {
+  return (
+    <div className="page subtabs-row"><div className="tabs subtabs">
+      {EXPLOIT_SUBTABS.map(([key, label, title]) => (
+        <a key={key} href={`#/${key}`} title={title} className={classes((sub ? `exploit/${sub}` : "exploit") === key && "selected")}>{label}</a>
+      ))}
+    </div></div>
+  );
+}
+
 // The Runs tab itself (#/, the home page): opens the Queue subtab while some run waits or runs, and the
 // All runs subtab when the queue is empty. #/queue and #/runs still open their subtab whatever the queue.
 function RunsHome() {
@@ -104,6 +121,7 @@ function App() {
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
   const page = route.parts[0] || "";   // "": the Runs tab, which picks its subtab (RunsHome)
   const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
+  const plotting = page === "exploit" && route.parts[1] === "plot";                  // the Plot page fills the window
   useEffect(() => { setAppName(title); }, [title]);
   const nav = [
     ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
@@ -119,6 +137,7 @@ function App() {
   else if (page === "runs") content = <RunsPage />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
+  else if (plotting) content = <PlotPage />;
   else if (page === "exploit") content = <ExploitPage />;
   else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
@@ -127,7 +146,7 @@ function App() {
   else if (page === "queue") content = <QueuePage />;
   else content = <RunsHome />;
   return (
-    <div className={classes("app", editing && "full")}>
+    <div className={classes("app", (editing || plotting) && "full")}>
       <header className="topbar">
         <a className="brand" href="#/">
           {logo && <img src={logo} alt="" />}
@@ -150,8 +169,9 @@ function App() {
         </div>
       </header>
       <LabBanner editor={editor} />
-      <main>
+      <main className={classes(plotting && "plot-host")}>
         {(page === "queue" || (page === "runs" && !route.parts[1])) && <RunsSubtabs page={page} />}
+        {page === "exploit" && <ExploitSubtabs sub={route.parts[1] || ""} />}
         {content}
       </main>
       <Toasts />

@@ -46,6 +46,7 @@ if (edit?.enabled) {
   await visit("edit");
   await visit("datapacks", 4000);
   await visit("exploit", 3000);
+  await visit("exploit/plot", 2500);
   let sessions = edit.sessions || [];
   if (!sessions.length)
     for (const r of edit.repositories)
