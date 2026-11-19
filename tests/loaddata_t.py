@@ -95,3 +95,32 @@ def test_data2h5_flags(input_file,flags_desc_file,expected_output):
     # not ready yet
     assert(diff_h5files_struct(ref_file, rst_file)==True)
 
+
+
+def test_csv_params_read_together(monkeypatch):
+    """The generic CSV loader reads the file once for all the parameters asked (not once per parameter),
+    and each parameter is the same as when loaded alone."""
+    import pandas as pd
+    from testsuit.datatools.DataFileMgrs import formats
+    from testsuit.datatools.DataFileMgrs.CsvFileMgr import CsvFileMgr
+    from testsuit.misc.MonitorProgress import consoleSilentProgressCb
+
+    path = os.path.join("tests", "tmp", "loaddata_test", "five_params.csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("Timestamps;p1;p2;p3;p4;p5\n")
+        for i in range(50):
+            f.write(f"2026-11-18 09:30:{i:02d}.250;{i};{i * 0.5};{-i};{i % 3};{'' if i % 7 else 1.5}\n")
+    mgr = formats.create_file_mgr(path, 0)
+    assert type(mgr) is CsvFileMgr
+    names = ["p5", "p1", "p3", "p2", "p4"]
+    progress = lambda: MonitorProgress(name="t", progressCb=consoleSilentProgressCb)
+    alone = [mgr.loadParams([n], monitorProgress=progress(), silent=True)[0] for n in names]
+    reads = []
+    real = pd.read_csv
+    monkeypatch.setattr(pd, "read_csv", lambda *a, **k: reads.append(k.get("usecols")) or real(*a, **k))
+    together = mgr.loadParams(names, monitorProgress=progress(), silent=True)
+    assert len(reads) == 1 and len(reads[0]) == 6            # the index column and the 5 parameters
+    for a, b in zip(alone, together):
+        pd.testing.assert_frame_equal(a, b, check_exact=True)
+        assert a.name == b.name and a.index.name == b.index.name
