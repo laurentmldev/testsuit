@@ -1033,3 +1033,5 @@ tr.bypassed td { background: var(--warn-soft); }
 .plot-canvas { position: absolute; inset: 0; }
 .plot-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; pointer-events: none; font-size: 15px; }
 .plot-file-error { color: var(--bad); }
+.plot-delta { font-weight: 600; color: var(--muted); }
+.plot-delta.on { color: var(--accent); background: var(--accent-soft); border-radius: 4px; }

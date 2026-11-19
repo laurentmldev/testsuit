@@ -112,6 +112,18 @@ def test_sources_and_figures(data):
     bad = json.loads(plots.figure({"sources": files(data), "projection": "3d", "traces": [trace(["motor.tdms::Motor___speed"])]}))
     assert bad["figure"] is None and "3 fields" in bad["traces"][0]["error"]
 
+    # line width, dot size and fill (2D only), and the series of the figure each trace is
+    styled = json.loads(plots.figure({"sources": files(data), "traces": [
+        trace(["motor.tdms::Motor___speed"], width="4", size="9", fill="gradient"),
+        trace(["brake.csv::pressure"], fill="solid", width="99")]}))
+    assert [r["series"] for r in styled["traces"]] == [[0], [1]]
+    speed, pressure = styled["figure"]["data"]
+    assert speed["line"]["width"] == 4 and speed["marker"]["size"] == 9 and speed["fill"] == "tozeroy"
+    assert speed["fillgradient"]["type"] == "vertical" and "fillcolor" not in speed
+    assert pressure["line"]["width"] == 20 and pressure["fill"] == "tozeroy" and pressure["fillcolor"].startswith("rgba(")
+    flat = json.loads(plots.figure({"sources": files(data), "projection": "3d", "traces": [dict(xyz, fill="solid", width="3")]}))
+    assert "fill" not in flat["figure"]["data"][0] and flat["figure"]["data"][0]["line"]["width"] == 3
+
     # hidden traces are not drawn
     hidden = json.loads(plots.figure({"sources": files(data), "traces": [trace(["brake.csv::pressure"], hidden=True)]}))
     assert hidden == {"figure": None, "traces": []}
@@ -192,6 +204,8 @@ def test_exports(data):
     assert (csv["pressure__brake_csv_"].dropna() == 0).all()
     page = plots.export_html(spec)
     assert "<html" in page[:200] and "Plotly.newPlot" in page
+    # nothing of the figure may leave the page: no "Share to Plotly Cloud" button, no server of plotly
+    assert '"showSendToCloud": false' in page
     with pytest.raises(CriteriaError):
         plots.export_csv({**spec, "projection": "3d"})
 

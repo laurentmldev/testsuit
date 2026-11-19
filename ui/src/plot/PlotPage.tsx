@@ -30,12 +30,17 @@ const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b
 const LINES: [string, string][] = [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["dashdot", "Dash-dot"], ["", "No line"]];
 const MARKERS: [string, string][] = [[",", "None"], [".", "Dot"], ["o", "Circle"], ["x", "Cross"], ["d", "Diamond"], ["*", "Star"], ["2", "Triangle"], ["_", "Horizontal bar"], ["|", "Vertical bar"]];
 const DRAWS: [string, string][] = [["default", "Straight"], ["steps-post", "Steps (post)"], ["steps-pre", "Steps (pre)"], ["steps-mid", "Steps (mid)"]];
+const FILLS: [string, string][] = [["none", "None"], ["solid", "Solid"], ["gradient", "Gradient"]];
+// plotly.js config: drag pans (the wheel zooms), and nothing may leave the page: plotly.js 3 shows a
+// "Share to Plotly Cloud" button by default, uploading the figure (plotlyBackend.PRIVATE_CONFIG)
+const CONFIG = { responsive: true, scrollZoom: true, displaylogo: false, showSendToCloud: false,
+  plotlyServerURL: "", modeBarButtonsToRemove: ["toImage"] };
 const POINTS: [number, string][] = [[20000, "20k"], [100000, "100k"], [500000, "500k"], [2000000, "2M"]];
 const MAX_LISTED = 400;
 
 interface Trace {
   id: string; fields: string[]; label: string; color: string; linestyle: string; marker: string; drawstyle: string;
-  offset: string; hidden: boolean;
+  offset: string; hidden: boolean; width?: string; size?: string; fill?: string;
 }
 interface Options {
   projection: "2d" | "3d"; title: string; subtitle: string; xLabel: string; yLabel: string; zLabel: string;
@@ -45,7 +50,7 @@ interface State { sources: string[]; traces: Trace[]; options: Options }
 interface FileInfo { name: string; path: string; type: string; entries: number | null; info: string[]; error: string | null }
 interface SourceInfo { label: string; path: string; folder: boolean; files: FileInfo[]; fields: number }
 interface Sources { sources: SourceInfo[]; fields: string[]; total: number; truncated: boolean }
-interface TraceReport { id: string; points: number; shown: number; error: string | null }
+interface TraceReport { id: string; points: number; shown: number; error: string | null; series: number[] }
 
 const OPTIONS: Options = { projection: "2d", title: "", subtitle: "", xLabel: "", yLabel: "", zLabel: "", legend: true,
   xTimestamp: true, index: "", maxPoints: 100000 };
@@ -80,7 +85,7 @@ function themed(fig: any, uirevision: string): any {
   const v = (n: string) => css.getPropertyValue(n).trim();
   const text = v("--text"), grid = v("--border"), panel = v("--panel");
   const axis = { gridcolor: grid, zerolinecolor: grid, linecolor: grid, color: text };
-  const layout = { ...fig.layout, autosize: true, uirevision, paper_bgcolor: panel, plot_bgcolor: panel,
+  const layout = { ...fig.layout, autosize: true, uirevision, paper_bgcolor: panel, plot_bgcolor: panel, dragmode: "pan",
     font: { ...(fig.layout?.font || {}), color: text }, legend: { ...(fig.layout?.legend || {}), bgcolor: panel + "cc", font: { color: text } },
     xaxis: { ...(fig.layout?.xaxis || {}), ...axis }, yaxis: { ...(fig.layout?.yaxis || {}), ...axis },
     margin: { l: 70, r: 20, t: fig.layout?.title?.text ? 80 : 30, b: 60 } };
@@ -89,6 +94,22 @@ function themed(fig: any, uirevision: string): any {
   delete layout.width; delete layout.height;
   return { data: fig.data, layout };
 }
+
+/** The value of a line of the figure (its calcdata: points {x, y}, x in order) at x: interpolated, or held
+ * as the line draws it in steps; null outside the line. */
+function valueAt(points: any[] | undefined, x: number, drawstyle: string): number | null {
+  if (!points?.length || x < points[0].x || x > points[points.length - 1].x) return null;
+  let lo = 0, hi = points.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (points[mid].x <= x) lo = mid; else hi = mid; }
+  const p = points[lo], q = points[hi];
+  if (!Number.isFinite(p.y) || !Number.isFinite(q.y)) return null;
+  if (q.x === p.x || drawstyle === "steps-post") return x >= q.x ? q.y : p.y;
+  if (drawstyle === "steps-pre") return x <= p.x ? p.y : q.y;
+  if (drawstyle === "steps-mid") return x < (p.x + q.x) / 2 ? p.y : q.y;
+  return p.y + ((q.y - p.y) * (x - p.x)) / (q.x - p.x);
+}
+
+const fmt = (v: number) => (Math.abs(v) >= 1e5 || (Math.abs(v) < 1e-3 && v !== 0) ? v.toExponential(3) : String(Math.round(v * 1e4) / 1e4));
 
 /** Seconds of a date of plotly's date axis ("2026-11-18 09:30:12.5", UTC), or the number itself. */
 function seconds(v: any): number {
@@ -217,8 +238,7 @@ export function PlotPage() {
         setReports(Object.fromEntries(answer.traces.map((r) => [r.id, r])));
         if (!answer.figure) { setEmpty(true); setFigError("No trace could be drawn: see the traces."); P.purge(plotBox.current); return; }
         const { data, layout } = themed(answer.figure, uirevision);
-        await P.react(plotBox.current, data, layout, { responsive: true, displaylogo: false, scrollZoom: true,
-          modeBarButtonsToRemove: ["toImage"] });
+        await P.react(plotBox.current, data, layout, CONFIG);
         setEmpty(false); setFigError(null);
       } catch (e: any) {
         if (!stale) setFigError(e.message || String(e));
@@ -245,6 +265,7 @@ export function PlotPage() {
   }, [empty]);
   useEffect(() => { view.current = {}; }, [uirevision]);
 
+
   const fileName = (options.title || traces.find((t) => !t.hidden)?.fields.map(paramOf).join("_") || "plot").replace(/[^\w.-]+/g, "_").slice(0, 80);
   const exportPng = async () => {
     const P = await plotly();
@@ -261,6 +282,44 @@ export function PlotPage() {
   const clear = () => { setTraces(() => []); setOpen(null); };
   const visibleCount = traces.filter((t) => !t.hidden).length;
   const is3d = options.projection === "3d";
+
+  // the delta between two traces (2D): a vertical segment between them at the mouse, with their difference
+  const [delta, setDelta] = useState<string[]>([]);
+  const toggleDelta = (id: string) => setDelta((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id].slice(-2)));
+  useEffect(() => {
+    const gd = plotBox.current as any;
+    const pair = delta.filter((id) => traces.some((t) => t.id === id && !t.hidden) && reports[id]?.series?.length);
+    if (!gd || empty || is3d || pair.length !== 2) return;
+    const [a, b] = pair.map((id) => ({ trace: traces.find((t) => t.id === id)!, index: reports[id].series[0] }));
+    let frame = 0;
+    const css = getComputedStyle(document.documentElement);
+    const text = css.getPropertyValue("--text").trim(), panel = css.getPropertyValue("--panel").trim();
+    const clear = () => {
+      cancelAnimationFrame(frame);
+      if (gd._fullLayout?.shapes?.length || gd._fullLayout?.annotations?.some((n: any) => n.name === "delta"))
+        plotly().then((P) => P.relayout(gd, { shapes: [], annotations: [] })).catch(() => undefined);
+    };
+    const move = (e: MouseEvent) => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const xa = gd._fullLayout?.xaxis, area = gd.querySelector(".nsewdrag")?.getBoundingClientRect();
+        if (!xa || !area || e.clientX < area.left || e.clientX > area.right || e.clientY < area.top || e.clientY > area.bottom) return clear();
+        const x = xa.p2c(e.clientX - area.left);
+        const ya = valueAt(gd.calcdata?.[a.index], x, a.trace.drawstyle), yb = valueAt(gd.calcdata?.[b.index], x, b.trace.drawstyle);
+        if (ya === null || yb === null) return clear();
+        const name = (t: Trace) => t.label || t.fields.map(paramOf).join(" / ");
+        plotly().then((P) => P.relayout(gd, {
+          shapes: [{ type: "line", xref: "x", yref: "y", x0: x, x1: x, y0: ya, y1: yb, line: { color: text, width: 2, dash: "dot" } }],
+          annotations: [{ name: "delta", xref: "x", yref: "y", x, y: (ya + yb) / 2, xanchor: "left", xshift: 8, showarrow: false,
+            align: "left", bgcolor: panel, bordercolor: text, borderwidth: 1, borderpad: 4, font: { color: text, size: 12 },
+            text: `${name(b.trace)} − ${name(a.trace)}<br><b>Δ = ${fmt(yb - ya)}</b>` }],
+        })).catch(() => undefined);
+      });
+    };
+    gd.addEventListener("mousemove", move);
+    gd.addEventListener("mouseleave", clear);
+    return () => { gd.removeEventListener("mousemove", move); gd.removeEventListener("mouseleave", clear); clear(); };
+  }, [delta, reports, empty, is3d, traces]);
   const addLabel = is3d && picked.length === 3 ? "Plot X, Y, Z" : `Plot ${picked.length || ""}`;
 
   return (
@@ -343,6 +402,8 @@ export function PlotPage() {
                   {r?.error ? <span className="badge bad" title={r.error}>error</span>
                     : r && r.shown < r.points ? <span className="muted small" title={`${count(r.points)} points, ${count(r.shown)} drawn (min and max kept)`}>{count(r.shown)}/{count(r.points)}</span>
                     : r ? <span className="muted small">{count(r.points)} pts</span> : null}
+                  {!is3d && <button className={classes("icon", "plot-delta", delta.includes(t.id) && "on")} onClick={() => toggleDelta(t.id)}
+                    title="Delta: pick two traces, then move the mouse over the figure to see the difference between them">Δ</button>}
                   <button className="icon" title={t.hidden ? "Show" : "Hide"} onClick={() => editTrace(t.id, { hidden: !t.hidden })}>{t.hidden ? "◌" : "●"}</button>
                   <button className="icon" title="Remove" onClick={() => setTraces((all) => all.filter((x) => x.id !== t.id))}>×</button>
                 </div>
@@ -353,6 +414,9 @@ export function PlotPage() {
                     <label>Line<select value={t.linestyle} onChange={(e) => editTrace(t.id, { linestyle: e.target.value })}>{LINES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
                     <label>Markers<select value={t.marker} onChange={(e) => editTrace(t.id, { marker: e.target.value })}>{MARKERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
                     {!is3d && <label>Drawn<select value={t.drawstyle} onChange={(e) => editTrace(t.id, { drawstyle: e.target.value })}>{DRAWS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
+                    <label>Line width<input type="number" min={0} max={20} step={0.5} value={t.width ?? ""} placeholder="2" onChange={(e) => editTrace(t.id, { width: e.target.value })} /></label>
+                    <label>Dot size<input type="number" min={1} max={40} step={1} value={t.size ?? ""} placeholder={is3d ? "3" : "6"} onChange={(e) => editTrace(t.id, { size: e.target.value })} /></label>
+                    {!is3d && <label title="Fill between the line and zero: plain, or fading from the line down">Fill<select value={t.fill || "none"} onChange={(e) => editTrace(t.id, { fill: e.target.value })}>{FILLS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
                     <label title="Added to the values: a number or expression ('-12', '1e3/2'), or 'autoz:XXs' to start from zero (minus the mean of the first XX seconds)">Offset
                       <input className="mono" value={t.offset} placeholder="0, -12, autoz:2s" onChange={(e) => editTrace(t.id, { offset: e.target.value })} /></label>
                     <div className="muted small mono plot-trace-fields">{t.fields.join("\n")}</div>
@@ -397,7 +461,7 @@ export function PlotPage() {
           {empty && !figError && (
             <div className="plot-empty muted">
               {!sources.length ? "1. Pick data files or folders." : !traces.length ? "2. Tick fields, then Plot (or double-click a field)." : "Every trace is hidden."}
-              <div className="small">Drag to zoom, double-click to reset, scroll to zoom on a point{is3d ? ", drag to rotate" : ""}.</div>
+              <div className="small">{is3d ? "Drag to rotate, scroll to zoom" : "Drag to pan, scroll to zoom on a point, double-click to reset; Δ on two traces measures them"}.</div>
             </div>
           )}
         </div>

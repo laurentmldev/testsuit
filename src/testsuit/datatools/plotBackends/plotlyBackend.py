@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 from contextlib import nullcontext
 from pathlib import Path
@@ -35,6 +36,11 @@ from testsuit.datatools.plotBackends.common import FigureSpec,timeline_label_pos
 
 PLOTLY_JSON_SUFFIX = ".plotly.json"
 
+# plotly.js config of every figure testsuit shows (reports, figure pages, exported HTML, mxp webui): figures
+# hold test data, which may be industrial property. No button may send them to a third party: plotly.js 3
+# shows "Share to Plotly Cloud" (showSendToCloud, which uploads the figure to plotlyServerURL) by default.
+PRIVATE_CONFIG = {"displaylogo": False, "showSendToCloud": False, "plotlyServerURL": ""}
+
 # matplotlib styles (see common.Trace) -> plotly
 DASHES = {"solid": "solid", "-": "solid", "dotted": "dot", ":": "dot", "dashed": "dash", "--": "dash", "dashdot": "dashdot", "-.": "dashdot"}
 MARKERS = {".": "circle", "o": "circle", "2": "triangle-up", "^": "triangle-up", "v": "triangle-down", "s": "square",
@@ -42,6 +48,19 @@ MARKERS = {".": "circle", "o": "circle", "2": "triangle-up", "^": "triangle-up",
 # steps-pre: the step happens before the point (vertical then horizontal), steps-post after it
 SHAPES = {"default": "linear", "steps-pre": "vh", "steps-mid": "hvh", "steps-post": "hv", "steps": "vh"}
 NO_LINE = ("None", "none", "", " ")
+
+
+def _keep_private(fig) -> None:
+    """No "Share to Plotly Cloud" on a figure shown in Jupyter: a FigureWidget takes its config from the
+    figure, a Figure from the plotly renderer that shows it."""
+    if isinstance(fig, go.FigureWidget):
+        fig._config = {**(fig._config or {}), **PRIVATE_CONFIG}
+        return
+    import plotly.io as pio
+    for name in list(pio.renderers):
+        config = getattr(pio.renderers[name], "config", None)
+        if isinstance(config, dict):
+            config.update(PRIVATE_CONFIG)
 
 
 def _mode_and_style(trace) -> tuple[str, dict, dict]:
@@ -85,6 +104,7 @@ class PlotlyBackend(APlotBackend):
                 pass
         if fig is None:
             fig = go.Figure()
+        _keep_private(fig)
         fig.update_layout(width=None if interactive else spec.figSize[0] * 100,
                           height=spec.figSize[1] * 100,
                           template="plotly_white",
@@ -252,7 +272,7 @@ class PlotlyBackend(APlotBackend):
 
     def export_image(self, fig, filePath):
         if filePath.lower().endswith((".html", ".htm")):
-            go.Figure(fig).write_html(filePath, include_plotlyjs=True)
+            go.Figure(fig).write_html(filePath, include_plotlyjs=True, config=PRIVATE_CONFIG)
         else:
             go.Figure(fig).write_image(filePath)
 
@@ -280,6 +300,6 @@ def write_figure_page(jsonFile: str | os.PathLike, htmlFile: str | os.PathLike, 
 const fig = {figure};
 const layout = Object.assign(fig.layout || {{}}, {{ autosize: true }});
 delete layout.width; delete layout.height;
-Plotly.newPlot('figure', fig.data, layout, {{ responsive: true, displaylogo: false }});
+Plotly.newPlot('figure', fig.data, layout, Object.assign({{ responsive: true }}, {json.dumps(PRIVATE_CONFIG)}));
 </script></body></html>
 """, encoding="utf-8")
