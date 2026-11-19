@@ -97,6 +97,11 @@ if (process.env.MXP_WEBUI_URL) {
   await page.waitForSelector("text=Run exploit_runner", { timeout: 20000 });
   await page.waitForTimeout(1500);
   if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui-exploit.png` });
+  // its Plot page
+  await page.goto(`${mxp}/ui/#/plot`);
+  await page.waitForSelector("text=1. Data", { timeout: 20000 });
+  await page.waitForTimeout(1000);
+  if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-mxp-webui-plot.png` });
 }
 await browser.close();
 if (errors.length) {

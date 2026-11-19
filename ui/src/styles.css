@@ -981,3 +981,43 @@ tr.bypassed td { background: var(--warn-soft); }
 .comment-node.empty { font-style: italic; }
 .comment-pin { font-size: 10.5px; font-weight: 600; opacity: 0.75; margin-bottom: 2px; font-family: var(--mono); }
 .comment-pin.lost { color: var(--bad); text-decoration: line-through; }
+
+/* the Plot page of mxp webui (plot/PlotPage.tsx): data, fields and traces on the left, the figure on the right */
+.plot-page { flex: 1; min-height: 0; display: grid; grid-template-columns: 360px minmax(0, 1fr); }
+@media (max-width: 900px) { .plot-page { grid-template-columns: 1fr; } .plot-main { min-height: 70vh; } }
+.plot-side { display: flex; flex-direction: column; gap: 10px; padding: 10px; overflow: auto; border-right: 1px solid var(--border); min-height: 0; }
+.plot-section .card-head { flex-wrap: wrap; }
+.plot-files summary { cursor: pointer; color: var(--muted); }
+.plot-files-table { margin-top: 4px; border-collapse: collapse; }
+.plot-files-table td { padding: 1px 6px 1px 0; vertical-align: top; overflow-wrap: anywhere; }
+.plot-fields input.mono { width: 100%; }
+.plot-field-list { max-height: 34vh; min-height: 80px; overflow: auto; margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+.plot-file-head { padding: 4px 4px 2px; font-weight: 600; position: sticky; top: -4px; background: var(--panel); }
+.plot-field { display: flex; align-items: center; gap: 6px; padding: 1px 4px; border-radius: 4px; cursor: pointer; user-select: none; }
+.plot-field:hover { background: var(--panel-2); }
+.plot-field.selected { background: var(--accent-soft); }
+.plot-field .mono { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plot-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.plot-field-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.plot-field-actions select { max-width: 150px; }
+.plot-trace { border-top: 1px solid var(--border); padding: 4px 0; }
+.plot-trace:first-of-type { border-top: none; }
+.plot-trace.hidden .plot-trace-name { opacity: 0.45; text-decoration: line-through; }
+.plot-trace-row { display: flex; align-items: center; gap: 6px; }
+.plot-trace-row input[type="color"] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; flex-shrink: 0; }
+.plot-trace-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+.plot-trace-error { color: var(--bad); margin: 2px 0 0 28px; overflow-wrap: anywhere; }
+.plot-trace-style { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin: 6px 0 4px 28px; }
+.plot-trace-style label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.plot-trace-style label:first-child { grid-column: 1 / -1; }
+.plot-trace-fields { grid-column: 1 / -1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plot-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 8px 12px 12px; gap: 6px; }
+.plot-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plot-toolbar .plot-title { flex: 2; min-width: 160px; font-weight: 600; }
+.plot-toolbar .plot-subtitle { flex: 1; min-width: 120px; }
+.plot-axes label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.plot-axes label input:not([type="checkbox"]) { width: 150px; }
+.plot-figure { flex: 1; min-height: 360px; position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.plot-canvas { position: absolute; inset: 0; }
+.plot-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; pointer-events: none; font-size: 15px; }
+.plot-file-error { color: var(--bad); }
