@@ -16,41 +16,42 @@
   The icon of testsuit in Anaconda Navigator: a suit that helps with tests (icon.png: rendered from it at 256x256).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- a suit that helps with tests: jacket and tie, a check mark in the chest pocket -->
-  <defs><clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="44"/></clipPath></defs>
-  <rect x="8" y="8" width="240" height="240" rx="44" fill="#e8eef9"/>
-  <!-- a technical plot behind it: grid, limit band, a measured curve with its samples -->
+  <!-- a suit that helps with tests, in front of a measured curve -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
   <g clip-path="url(#tile)">
-    <g stroke="#c5d3ea" stroke-width="2">
-      <path d="M8 40 H248 M8 72 H248 M8 104 H248 M8 136 H248 M8 168 H248 M8 200 H248 M8 232 H248"/>
-      <path d="M40 8 V248 M72 8 V248 M104 8 V248 M136 8 V248 M168 8 V248 M200 8 V248 M232 8 V248"/>
+    <!-- dot grid -->
+    <g fill="#ffffff" fill-opacity="0.18">
+      <circle cx="40" cy="36" r="2.5"/><circle cx="72" cy="36" r="2.5"/><circle cx="104" cy="36" r="2.5"/><circle cx="136" cy="36" r="2.5"/><circle cx="168" cy="36" r="2.5"/><circle cx="200" cy="36" r="2.5"/><circle cx="232" cy="36" r="2.5"/>
+      <circle cx="24" cy="68" r="2.5"/><circle cx="56" cy="68" r="2.5"/><circle cx="88" cy="68" r="2.5"/><circle cx="120" cy="68" r="2.5"/><circle cx="152" cy="68" r="2.5"/><circle cx="184" cy="68" r="2.5"/><circle cx="216" cy="68" r="2.5"/>
     </g>
-    <rect x="8" y="22" width="240" height="30" fill="#fbcfcf" fill-opacity="0.55"/>
-    <path d="M8 52 H248" stroke="#ef4444" stroke-width="3" stroke-dasharray="10 7"/>
-    <polyline points="14,96 34,78 54,88 74,62 94,74 114,58 134,70 154,60 174,76 194,64 214,84 242,70" fill="none"
-              stroke="#3b82f6" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
-    <g fill="#3b82f6">
-      <circle cx="34" cy="78" r="4"/><circle cx="74" cy="62" r="4"/><circle cx="114" cy="58" r="4"/>
-      <circle cx="154" cy="60" r="4"/><circle cx="194" cy="64" r="4"/><circle cx="242" cy="70" r="4"/>
-    </g>
+    <!-- the measured curve and the area under it -->
+    <path d="M8 92 C40 92 52 52 84 56 S124 96 152 72 S204 30 248 44 L248 248 L8 248 Z" fill="url(#area)"/>
+    <path d="M8 92 C40 92 52 52 84 56 S124 96 152 72 S204 30 248 44" fill="none" stroke="#ffffff"
+          stroke-width="5" stroke-linecap="round"/>
+    <circle cx="84" cy="56" r="7" fill="#ffffff"/>
+    <circle cx="208" cy="36" r="7" fill="#ffffff"/>
+    <!-- the suit -->
+    <path d="M44 256 L44 150 Q44 124 70 116 L102 104 L128 168 L154 104 L186 116 Q212 124 212 150 L212 256 Z" fill="#0f172a"/>
+    <path d="M102 104 L128 98 L154 104 L128 168 Z" fill="#f8fafc"/>
+    <path d="M122 108 L134 108 L131 120 L139 158 L128 170 L117 158 L125 120 Z" fill="#a3e635"/>
+    <path d="M102 104 L88 132 L100 138 L92 148 L128 168 Z" fill="#1e293b"/>
+    <path d="M154 104 L168 132 L156 138 L164 148 L128 168 Z" fill="#1e293b"/>
+    <!-- chest pocket: a check mark -->
+    <circle cx="178" cy="176" r="20" fill="#a3e635"/>
+    <polyline points="168,177 175,184 189,169" fill="none" stroke="#0f172a" stroke-width="6"
+              stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="128" cy="200" r="5" fill="#334155"/>
+    <circle cx="128" cy="226" r="5" fill="#334155"/>
   </g>
-  <!-- jacket -->
-  <path d="M40 236 L40 112 Q40 84 68 74 L104 60 L128 132 L152 60 L188 74 Q216 84 216 112 L216 236 Z" fill="#1f3a68"/>
-  <!-- shirt -->
-  <path d="M104 60 L128 52 L152 60 L128 132 Z" fill="#ffffff"/>
-  <!-- collar -->
-  <path d="M104 60 L128 52 L118 78 Z M152 60 L128 52 L138 78 Z" fill="#dbe4f3"/>
-  <!-- tie -->
-  <path d="M121 66 L135 66 L131 78 L140 126 L128 140 L116 126 L125 78 Z" fill="#16a34a"/>
-  <!-- lapels -->
-  <path d="M104 60 L86 92 L100 100 L90 112 L128 132 Z" fill="#162c52"/>
-  <path d="M152 60 L170 92 L156 100 L166 112 L128 132 Z" fill="#162c52"/>
-  <!-- buttons -->
-  <circle cx="128" cy="168" r="6" fill="#0f1f3d"/>
-  <circle cx="128" cy="200" r="6" fill="#0f1f3d"/>
-  <!-- chest pocket with a check mark as its handkerchief -->
-  <rect x="160" y="136" width="40" height="8" rx="2" fill="#162c52"/>
-  <circle cx="180" cy="116" r="22" fill="#ffffff"/>
-  <polyline points="169,117 177,125 192,108" fill="none" stroke="#16a34a" stroke-width="7"
-            stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
