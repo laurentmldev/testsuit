@@ -20,7 +20,7 @@ Optional features are installed as extras:
 | `plotly`   | plotly figures updated in place in Jupyter   |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
-| `editor`   | the criteria editor and exploit runs in the browser (`mxp webui`) |
+| `editor`   | the criteria editor, exploit runs and plots of data in the browser (`mxp webui`) |
 | `sequencer`| the test sequencer `tsq`/`tsqd` and its web UI, with `editor` |
 | `test`     | what the test suite needs                    |
 | `dev`      | `test` plus build and lint tools             |
@@ -66,7 +66,7 @@ The checks run on test results are mexploit scenarios: YAML files of entries, ea
 | `mxp describe` | every criterion a scenario can use, with its help and the JSON Schema of its fields; the helpers of expressions |
 | `mxp lint` | checks a scenario without running it: fields, expressions, computed parameters, parameter names against data (`--auto`: with the keys of its test definition) |
 | `mxp utest` | unit tests of a scenario: small data cases (`criteria_utests/<scenario>/utests.yml`), each with the status every check must give, and the coverage of each check |
-| `mxp webui` | the web UI: the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; and **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page. Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
+| `mxp webui` | the web UI: the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page; and **Plot**, to plot the parameters of data files by hand (2D or 3D, a style per trace, exports to PNG, HTML and CSV). Also in tsqd (criteria on the Datapacks tab, and an Exploit tab). |
 | `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
 
 Scenarios are Jinja templates rendered before they run: a value can be a key of the test's dictionaries (`max: "{{ train.speed_limit_mps }}"`), a shared part can be included (`{% include "limits.inc.yml" %}`), and a loop can apply the same checks to several parameters (`{% for p in train.monitored %}`). The tools above render them too, and report each problem on the line where it is written ([examples](src/testsuit/exploit/README.md#templating-with-jinja-keys-includes-and-loops)).
