@@ -603,6 +603,7 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
             <StepForm key={selected[0]} step={selectedStep.step} part={selectedStep.part} siblings={current(selectedStep.part)} palette={palette} held={held} subs={subs}
               isSub={scope.kind === "sub"} schemas={schemas} onUsed={includeFor} testdef={testdefFor}
               phaseIds={scope.kind === "phase" ? phaseOrder(phases).map((i) => phases[i]?.id).filter(Boolean) : phases.map((p) => p.id)}
+              phaseSlots={Object.fromEntries(phases.map((ph) => [ph.id, palette ? Object.entries<any>(palette.slots).filter(([id, c]) => (c.stage_slot && (ph.stage_slots || []).includes(c.stage_slot)) || (ph.slots || []).includes(id)).map(([id]) => id) : []]))}
               onChange={(next) => editSteps(selectedStep.part, (list) => {
                 const i = list.findIndex((s: any) => s.id === selectedStep.step.id);
                 if (next.id !== selectedStep.step.id) for (const s of list) if (s.needs) s.needs = s.needs.map((n: string) => (n === selectedStep.step.id ? next.id : n));
@@ -792,10 +793,11 @@ function SubPalette({ subs, onAdd }: { subs: Record<string, any>; onAdd: (step: 
 
 /** The criteria an exploit step checks (scenario folders, relative to the test definition) and the files of the
  *  run they read (`[<phase>:]<slot or *>/<path>`, globs allowed). */
-function ExploitEditor({ value, onChange, testdef, phaseIds, slots, help }: {
-  value: any; onChange: (v: any) => void; testdef?: string; phaseIds: string[]; slots: string[]; help: (field?: string) => any;
+function ExploitEditor({ value, onChange, testdef, phaseIds, phaseSlots, slotRoles, help }: {
+  value: any; onChange: (v: any) => void; testdef?: string; phaseIds: string[]; phaseSlots: Record<string, string[]>;
+  slotRoles: Record<string, string>; help: (field?: string) => any;
 }) {
-  const { sid } = useSession();
+  const { sid, ctx } = useSession();
   const [scenarios, setScenarios] = useState<any[] | null>(null);
   useEffect(() => {
     get<any>(`edit/sessions/${sid}/criteria`).then((ov) => setScenarios(ov.scenarios || [])).catch(() => setScenarios([]));
@@ -809,7 +811,19 @@ function ExploitEditor({ value, onChange, testdef, phaseIds, slots, help }: {
   // the scenario folders of the workspace, as paths relative to the test definition: its own first
   const criteriaChoices: Choice[] = (scenarios || []).map((s: any) => ({ value: relPath(testdef || "", s.path), description: `${s.files.length} file(s)${s.testdef === testdef ? ", of this test definition" : s.testdef ? `, of ${s.testdef}` : ""}` }))
     .sort((a, b) => Number(a.value.startsWith("..")) - Number(b.value.startsWith("..")) || a.value.localeCompare(b.value));
-  const dataChoices: Choice[] = phaseIds.flatMap((ph) => [...slots, "*"].map((sl) => ({ value: `${ph}:${sl}/output/`, description: sl === "*" ? `the outputs of every slot, collected in phase ${ph}` : `what phase ${ph} collected from ${sl}` })));
+  // what each phase collects: the outputs the role of each of its slots foresees (lab role `outputs`), then its whole
+  // output folder; any sub-folder, file or pattern can be typed too
+  const dataChoices: Choice[] = phaseIds.flatMap((ph) => [
+    ...(phaseSlots[ph] || []).flatMap((sl) => {
+      const role = slotRoles[sl];
+      const outputs: any[] = ctx.lab?.roles?.[role]?.outputs || [];
+      return [
+        ...outputs.map((o) => ({ value: `${ph}:${sl}/output/${o.name}`, description: `${o.optional ? "optional output" : "output"} of role ${role}${o.description ? `: ${o.description}` : ""}` })),
+        { value: `${ph}:${sl}/output/`, description: `everything phase ${ph} collected from ${sl}${outputs.length ? "" : ` (role ${role} lists no outputs)`}` },
+      ];
+    }),
+    { value: `${ph}:*/output/`, description: `the outputs of every slot, collected in phase ${ph}` },
+  ]);
   const unknown = asList(v.criteria).filter((c: string) => scenarios && !criteriaChoices.some((ch) => ch.value === c.replace(/\/$/, "") || ch.value.startsWith(c.replace(/\/$/, "") + "/")));
   return (
     <div className="sub-form">
@@ -817,7 +831,7 @@ function ExploitEditor({ value, onChange, testdef, phaseIds, slots, help }: {
         hint="scenario folders (of *.mexploit.yml files), relative to the test definition">
         <Tags value={asList(v.criteria)} onChange={(x) => set("criteria", x)} choices={criteriaChoices} />
       </Field>
-      <Field label="Data" help={help("data")} hint="files of the run: [phase:]slot/output/path, globs allowed (*.csv)">
+      <Field label="Data" help={help("data")} hint="files of the run: [phase:]slot/output/<sub-folder, file or pattern such as aaa_*.csv>; the outputs the lab roles foresee are proposed">
         <Tags keys value={asList(v.data)} onChange={(x) => set("data", x)} choices={dataChoices} />
       </Field>
       <div className="inline-fields">
@@ -831,10 +845,11 @@ function useStepHelp(schemas: any) {
   return (field: string) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, field]);
 }
 
-function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub, onUsed, testdef, phaseIds }: {
+function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub, onUsed, testdef, phaseIds, phaseSlots }: {
   step: any; part: string; siblings: any[]; palette: any; held: string[]; subs: Record<string, any>; isSub: boolean; schemas: any;
   onChange: (s: any) => void; onOpenSub: (n: string) => void; onUsed?: (n: string) => void;
   testdef?: string; phaseIds?: string[];      // for an exploit step: where its criteria are, the phases its data can come from
+  phaseSlots?: Record<string, string[]>;      // and the slots each phase holds (whose outputs it collects)
 }) {
   const { ctx } = useSession();
   const help = useStepHelp(schemas);
@@ -922,7 +937,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {action === "http" && <div className="sub-form"><HttpEditor value={step.http} onChange={(v) => set("http", v)} withSave
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "http", ...(f ? [f] : [])])} /></div>}
       {action === "exploit" && <ExploitEditor value={step.exploit} onChange={(v) => set("exploit", v)} testdef={testdef} phaseIds={phaseIds || []}
-        slots={palette ? Object.keys(palette.slots) : []} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
+        phaseSlots={phaseSlots || {}} slotRoles={palette ? Object.fromEntries(Object.entries<any>(palette.slots).map(([id, c]) => [id, c.role])) : {}} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
       {(action === "push" || action === "pull") && (

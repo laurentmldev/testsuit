@@ -1081,12 +1081,14 @@ class Editor:
                 chain = [x.name for x in lib.role_chain(name)]
                 commands = lib.role_commands(name)
                 inputs = lib.role_inputs(name)
+                outputs = lib.role_outputs(name)
             except SequencerError:                        # extends a role that is not there (renamed?): itself only
                 chain = [name]
                 commands = {c: {"description": d, "from": name} for c, d in r.commands.items()}
                 inputs = [{**i, "from": name} for i in r.inputs]
+                outputs = [{**o, "from": name} for o in r.outputs]
             roles[name] = {"extends": r.extends, "description": r.description, "source": r.source, "chain": chain,
-                           "commands": commands, "own_commands": sorted(r.commands), "inputs": inputs,
+                           "commands": commands, "own_commands": sorted(r.commands), "inputs": inputs, "outputs": outputs,
                            "used_by": [c.id for c in lab.inventory.components.values() if c.role == name],
                            "implemented_by": [c for c in lib.components if name in self_roles(c)],
                            "abstract": any(o.extends == name for o in lib.roles.values())}

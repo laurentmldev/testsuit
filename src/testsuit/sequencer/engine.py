@@ -348,7 +348,10 @@ class StepRunner:
                 fn = registry.step_types[action.lower()]
                 outcome = await fn(self, render(self.step.plugin_actions[action], keys, self.fs.id))
                 return outcome if isinstance(outcome, tuple) else ((SUCCEEDED, "") if outcome else (FAILED, "plugin step failed"))
-            return await self.command_spec(spec, keys, timeout)
+            verdict, reason = await self.command_spec(spec, keys, timeout)
+            if action == "do" and self.step.do == "collect" and verdict == SUCCEEDED:
+                return self.check_outputs()
+            return verdict, reason
         except SequencerError as e:
             self.note(f"error: {e}")
             return ERROR, str(e)
@@ -484,6 +487,31 @@ class StepRunner:
             self.note("the script raised an exception: error, not failed")
             return ERROR, "python exception"
         return verdict, reason
+
+    def check_outputs(self) -> tuple[str, str]:
+        """After a collect: the outputs the slot's role foresees are there (SPEC section 4.2). A mandatory one
+        missing fails the step; an optional one is only noted."""
+        from testsuit.sequencer.library import missing_outputs
+        lab = self.ctx.lab
+        if self.slot is None or lab is None:
+            return SUCCEEDED, ""
+        try:
+            outputs = lab.library.role_outputs(self.slot.concrete.role)
+        except (SequencerError, KeyError):
+            return SUCCEEDED, ""
+        if not outputs:
+            return SUCCEEDED, ""
+        folder = self.ctx.bag / "data" / self.slot.id / "output"
+        absent = missing_outputs([{**o, "optional": False} for o in outputs], folder)
+        optional = [o["name"] for o in outputs if o["optional"] and o["name"] in absent]
+        missing = [n for n in absent if n not in optional]
+        if optional:
+            self.note(f"optional output(s) of role {self.slot.concrete.role} not collected: {', '.join(optional)}")
+        if missing:
+            self.note(f"expected output(s) of role {self.slot.concrete.role} not collected: {', '.join(missing)}")
+            return FAILED, f"expected output(s) not collected: {', '.join(missing)}"
+        self.note(f"the {len(outputs) - len(optional)} output(s) role {self.slot.concrete.role} foresees are collected")
+        return SUCCEEDED, ""
 
     async def exploit(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
         """Criteria checked on outputs of the run (SPEC section 6.8): exploit_runner on the sequencer host, on the

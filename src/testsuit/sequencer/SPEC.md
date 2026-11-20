@@ -151,12 +151,16 @@ A **lab role** is abstract:
 ```yaml
 roles:
   <role>:
-    extends: <role>                 # inherits its commands and inputs
+    extends: <role>                 # inherits its commands, inputs and outputs
     description: <text>
     commands: {<name>: <description>, ...}
     inputs:                         # expected in the input folder
       - {name: <path>[/], type: file|folder, optional: <bool>, description: <markdown>}
+    outputs:                        # foreseen in the output folder, once collected
+      - {name: <path or glob>[/], type: file|folder, optional: <bool>, description: <markdown>}
 ```
+
+`outputs` MUST stay in the output folder (no `..`). After a `do: collect` step succeeds on a slot, every output of its role not `optional` MUST be present in `data/<slot>/output/` (a pattern: at least one match of its type), else the step is `failed` naming the missing ones; an optional one missing is only noted in the log. The Editor proposes the outputs of each slot's role as `exploit` data (§6.8).
 
 A **component model** is concrete:
 

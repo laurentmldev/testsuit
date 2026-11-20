@@ -661,6 +661,40 @@ def test_exploit_step_checked(bench):
         with pytest.raises(SequencerError, match=problem):
             validate_pipeline(load_pipeline(pipeline), needs)
 
+
+def test_role_outputs_checked_at_collect(bench):
+    """The outputs a role foresees: a mandatory one missing after collect fails it, an optional one is noted."""
+    roles = copy.deepcopy(LAB_ROLES)
+    roles["roles"]["dut"]["outputs"] = [
+        {"name": "count.txt"}, {"name": "app.log", "description": "its log"},
+        {"name": "trace_*.csv", "optional": True}]
+    write(bench.root / "lab" / "roles" / "bench.yml", yaml.safe_dump(roles))
+    run = run_one(bench, bench.build("outputs_ok"))
+    assert run["verdict"] == "succeeded", run
+    log = read_member(run, "logs/test_run/collect[dut].log")
+    assert "optional output(s) of role dut not collected: trace_*.csv" in log
+    roles["roles"]["dut"]["outputs"].append({"name": "results/", "description": "never written"})
+    write(bench.root / "lab" / "roles" / "bench.yml", yaml.safe_dump(roles))
+    run = run_one(bench, bench.build("outputs_missing"))
+    assert run["verdict"] == "failed"
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    [collect] = [s for s in record["steps"] if s["phase"] == "test_run" and s["id"] == "collect" and s["slot"] == "dut"]
+    assert (collect["state"], collect["reason"]) == ("failed", "expected output(s) not collected: results/")
+
+
+def test_role_outputs_read():
+    from testsuit.sequencer.library import Library, RoleDef, missing_outputs
+    from testsuit.sequencer.util import SequencerError
+    base = RoleDef.from_dict("app", {"outputs": [{"name": "logs/"}, {"name": "a.csv", "optional": True}]}, "x")
+    child = RoleDef.from_dict("app2", {"extends": "app", "outputs": [{"name": "a.csv"}]}, "x")
+    assert base.outputs[0] == {"name": "logs/", "type": "folder", "optional": False, "description": ""}
+    lib = Library({"app": base, "app2": child}, {}, strict=False)
+    assert [(o["name"], o["optional"], o["from"]) for o in lib.role_outputs("app2")] == [("logs/", False, "app"), ("a.csv", False, "app2")]
+    with pytest.raises(SequencerError, match="must stay in the output folder"):
+        RoleDef.from_dict("bad", {"outputs": [{"name": "../x"}]}, "x")
+    with pytest.raises(SequencerError, match="listed twice"):
+        RoleDef.from_dict("bad", {"outputs": [{"name": "x"}, {"name": "x"}]}, "x")
+
 def test_queue_and_parallel_stages(tmp_path, no_git):
     """Three runs on two stages: two run at once, the third waits for a stage."""
     bench = Bench(tmp_path, stages=2)
