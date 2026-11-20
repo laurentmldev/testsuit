@@ -300,6 +300,7 @@ export function labRoleChoices(ctx: any, filter?: (name: string, r: any) => bool
         r.used_by?.length ? `used by ${r.used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}` : "",
       ].filter(Boolean).join(" · "),
       group: sourceGroup(r.source),
+      kind: "role" as const,
     }));
 }
 
@@ -331,11 +332,12 @@ export function componentChoices(ctx: any, opts: { filter?: (name: string) => bo
         c.used_by?.length ? `extended by ${c.used_by.map((h: string) => hostLabel(ctx, h)).join(", ")}` : "",
       ].filter(Boolean).join(" · "),
       group: sourceGroup(c.source),
+      kind: "model" as const,
     }));
   if (opts.hosts)
     for (const [id, h] of Object.entries<any>(ctx.lab.components || {}))
       if (!opts.filter || opts.filter(id))
-        result.push({ value: id, description: `inventory component, role ${h.role || "?"}, extends ${h.extends}`, group: "hosts" });
+        result.push({ value: id, description: `inventory component, role ${h.role || "?"}, extends ${h.extends}`, group: "hosts", kind: "component" });
   return result;
 }
 
@@ -343,12 +345,12 @@ export function stageTypeChoices(ctx: any): Choice[] {
   const result: Record<string, Choice> = {};
   for (const [type, stages] of Object.entries<any>(ctx.lab.stage_types || {})) {
     const roles = Object.keys(ctx.lab.stage_type_roles?.[type] || {}).join(", ");
-    result[type] = { value: type, description: `in the lab: ${stages.join(", ")}${roles ? ` · roles ${roles}` : ""}` };
+    result[type] = { value: type, kind: "stage_type", description: `in the lab: ${stages.join(", ")}${roles ? ` · roles ${roles}` : ""}` };
   }
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
       for (const [, type] of Object.entries<any>(c.stage_slots || {}))
-        if (type && !result[type]) result[type] = { value: type, description: `asked for by datapack setup ${setup.id} (${cfg}), no such stage in the lab yet` };
+        if (type && !result[type]) result[type] = { value: type, kind: "stage_type", description: `asked for by datapack setup ${setup.id} (${cfg}), no such stage in the lab yet` };
   return Object.values(result);
 }
 
@@ -361,14 +363,14 @@ export function roleChoices(ctx: any, opts: { stageType?: string | null; adhoc?:
   const roles = opts.stageType ? Object.keys(ctx.lab.stage_type_roles?.[opts.stageType] || {})
     : opts.adhoc ? Object.keys(ctx.lab.adhoc_roles || {}) : Object.keys(types);
   for (const role of roles)
-    result[role] = { value: role, description: (opts.stageType ? `in the ${opts.stageType} stages · ` : opts.adhoc ? "ad hoc · " : "") + (types[role]?.description || "not a lab role") };
+    result[role] = { value: role, kind: "role", description: (opts.stageType ? `in the ${opts.stageType} stages · ` : opts.adhoc ? "ad hoc · " : "") + (types[role]?.description || "not a lab role") };
   for (const setup of ctx.workspace?.setups || [])
     for (const [cfg, c] of Object.entries<any>(setup.configurations || {}))
       for (const [id, comp] of Object.entries<any>(c.slots || {})) {
         if (!comp.role || result[comp.role]) continue;
         const stageType = comp.stage_slot ? c.stage_slots?.[comp.stage_slot] : null;
         if ((opts.stageType && stageType !== opts.stageType) || (opts.adhoc && comp.stage_slot)) continue;
-        result[comp.role] = { value: comp.role, description: `asked for by datapack setup ${setup.id} (${cfg}), slot ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
+        result[comp.role] = { value: comp.role, kind: "role", description: `asked for by datapack setup ${setup.id} (${cfg}), slot ${id}: no lab component has it yet${types[comp.role] ? "" : ", and no lab role of that name"}` };
       }
   return Object.values(result);
 }

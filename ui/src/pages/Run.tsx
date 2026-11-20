@@ -20,6 +20,7 @@ import { FileBrowser } from "../files";
 import { COMMENT_WIDTH, CommentNode } from "../comments";
 import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
+import { Named } from "../kinds";
 import { abort, ACTIVE, PriorityInput, repost, RunStateBadge } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -494,7 +495,8 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
         <span title={time(r.submitted_at)}>submitted {ago(r.submitted_at)}</span>
         {r.activated_at && <span>{ENDED.includes(r.verdict) || r.ended_at ? "ran" : "running for"} <Elapsed from={r.activated_at} to={r.ended_at} /></span>}
         {r.phase && <span>phase <strong>{r.phase}</strong></span>}
-        {r.binding && <span title="stage slot = lab stage, slot = lab component">on {Object.entries(r.binding.stage_slots || r.binding.realms || r.binding.stages || {}).map(([l, c]) => `${l}=${c}`).join(", ")} {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => `${l}=${labelOf(c as string)}`).join(", ")}</span>}
+        {r.binding && <span className="run-binding">on {Object.entries(r.binding.stage_slots || r.binding.realms || r.binding.stages || {}).map(([l, c]) => <span key={"s" + l}><Named kind="stage_slot" name={l} />=<Named kind="stage" name={c as string} /></span>)}
+          {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => <span key={l}><Named kind="slot" name={l} />=<Named kind="component" name={c as string}>{labelOf(c as string)}</Named></span>)}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
       {r.reason && <div className="banner warn">{r.reason}</div>}
@@ -709,13 +711,13 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
         return (
           <div key={s.logical} className="need">
             <div className="need-head">
-              <code>{s.logical}</code> <span className="muted">stage slot, on a lab stage of type</span> <code>{s.type}</code>
+              <code><Named kind="stage_slot" name={s.logical} /></code> <span className="muted">stage slot, on a lab stage of type</span> <code><Named kind="stage_type" name={s.type} /></code>
               <span className={classes("chip", color)}>{label}{s.bound && <> on {s.bound}</>}</span>
               <span className="spacer" />
               <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>
             </div>
             {s.slots.length > 0 && (
-              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.type || "any type"})`).join(", ")}</div>
+              <div className="small muted">slots {s.slots.map((c: any, i: number) => <span key={c.logical}>{i > 0 && ", "}<Named kind="slot" name={c.logical} /> (<Named kind="role" name={c.role} />, {c.type ? <Named kind="slot_type" name={c.type} /> : "any type"})</span>)}</div>
             )}
             {s.problem ? <div className="small bad-text">{s.problem}</div> : (
               <table className="grid compact">
@@ -744,8 +746,8 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
         return (
           <div key={n.logical} className="need">
             <div className="need-head">
-              <code>{n.logical}</code> <span className="muted">role</span> <code>{n.role}</code>
-              {n.type && <><span className="muted">type</span> <code>{n.type}</code></>}
+              <code><Named kind="slot" name={n.logical} /></code> <span className="muted">role</span> <code><Named kind="role" name={n.role} /></code>
+              {n.type && <><span className="muted">type</span> <code><Named kind="slot_type" name={n.type} /></code></>}
               <span className={classes("chip", color)}>{label}{n.bound && <> on {labelOf(n.bound)}</>}</span>
               <span className="spacer" />
               <span className="muted small">{n.phases.length ? `phases ${n.phases.join(", ")}` : "used by no phase"}</span>

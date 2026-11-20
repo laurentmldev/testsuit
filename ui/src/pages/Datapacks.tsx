@@ -22,6 +22,7 @@ import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from ".
 import { DiffView } from "../monaco";
 import { WorkspacePicker } from "../editor/workspace";
 import { RunGraph } from "./Run";
+import { Named } from "../kinds";
 import { Dialog, Field, Section, Text } from "../fields";
 import { attempt, classes, Markdown, navigate, notify, openInNewTab, setQuery, Spinner, type Route } from "../util";
 
@@ -325,10 +326,10 @@ function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: strin
     <Section title={<>Logical configuration <span className="muted small">{td.setup_config} of {data.setup?.name || data.setup?.id}</span></>}
       actions={<FileLink path={td.setup_file} edit={edit} />}>
       {Object.keys(data.stage_slots).length > 0 && (
-        <p className="small">Stage slots: {Object.entries(data.stage_slots).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
+        <p className="small">Stage slots: {Object.entries(data.stage_slots).map(([s, t]: [string, any]) => <span key={s} className="chip"><Named kind="stage_slot" name={s} />: <Named kind="stage_type" name={t} /></span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Needs</th><th /></tr></thead>
+        <thead><tr><th><Named kind="role" name="">Role</Named></th><th><Named kind="slot" name="">Slot</Named></th><th><Named kind="slot_type" name="">Slot type</Named></th><th>Configuration</th><th><Named kind="stage_slot" name="">Stage slot</Named></th><th>Needs</th><th /></tr></thead>
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>

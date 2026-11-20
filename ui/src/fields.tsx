@@ -16,6 +16,7 @@
 // roles with the components that have them...).
 import { createContext, CSSProperties, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { classes, idInput, idProblem, Markdown, notify } from "./util";
+import { KindIcon, kindName, KINDS, type Kind } from "./kinds";
 
 // ── help panel ──────────────────────────────────────────────────────────
 
@@ -290,6 +291,7 @@ export interface Choice {
   label?: string;
   description?: string;
   group?: string;
+  kind?: Kind;          // what the value names (role, slot...): its glyph before it, its kind on the right
 }
 
 /** What a choice falls back to when none is set: the value it inherits (or its default), and where it comes from. */
@@ -368,11 +370,12 @@ export function useDropPlacement(anchor: RefObject<HTMLElement | null>, open: bo
 /** A text input with suggestions: each suggestion shows its description, free text stays possible
  * (strict: only the choices). */
 export function Combo({
-  value, onChange, choices, placeholder, strict, mono, onPick, autoFocus, keys,
+  value, onChange, choices, placeholder, strict, mono, onPick, autoFocus, keys, kind,
 }: {
   value?: string | null; onChange: (v: string) => void; choices: Choice[]; placeholder?: string; strict?: boolean;
   mono?: boolean; onPick?: (v: string) => void; autoFocus?: boolean;
   keys?: boolean;      // the value is rendered with keys: typing {{ proposes them
+  kind?: Kind;         // what the value names (role, slot type...): its glyph in the field (else that of the picked choice)
 }) {
   const picker = useKeyPicker(keys, onChange);
   const [open, setOpen] = useState(false);
@@ -397,10 +400,13 @@ export function Combo({
     setTyped(false);
   };
   const known = choices.find((c) => c.value === v);
+  const mixed = new Set(shown.map((c) => c.kind)).size > 1;    // the kinds spelled out only when the list mixes them
+  const shownKind = kind || known?.kind;
   const listOpen = open && !picker.open && shown.length > 0;
   const placement = useDropPlacement(input, listOpen);
   return (
-    <div className="combo" ref={box}>
+    <div className={classes("combo", shownKind && "with-kind")} ref={box}>
+      {shownKind && <KindIcon kind={shownKind} title={v ? kindName(shownKind, v) : KINDS[shownKind].label} />}
       <input ref={input} className={classes(mono && "mono", strict && v && !known && "invalid")} value={v} placeholder={placeholder}
         autoFocus={autoFocus}
         onFocus={() => {
@@ -431,8 +437,8 @@ export function Combo({
                 pick(c);
               }} onMouseEnter={() => setActive(i)}>
               <div className="combo-value">
-                {c.label || c.value}
-                {c.group && <span className="combo-group">{c.group}</span>}
+                {c.kind && <KindIcon kind={c.kind} />}{c.label || c.value}
+                {c.group ? <span className="combo-group">{c.group}</span> : mixed && c.kind && <span className="combo-kind">{KINDS[c.kind].label}</span>}
               </div>
               {c.description && <div className="combo-item-desc"><Markdown text={c.description} /></div>}
             </div>
@@ -444,14 +450,15 @@ export function Combo({
 }
 
 /** A list of short strings (needs, stages, components...) as removable tags, with suggestions. */
-export function Tags({ value, onChange, choices, placeholder, keys, onOpen, openTitle }: {
+export function Tags({ value, onChange, choices, placeholder, keys, onOpen, openTitle, kind }: {
   value?: string[] | null; onChange: (v: string[]) => void; choices?: Choice[]; placeholder?: string;
+  kind?: Kind;         // what the items name (slots, roles...): their glyph, and that of the suggestions
   keys?: boolean;      // the items are rendered with keys: typing {{ proposes them
   onOpen?: (item: string) => void; openTitle?: string;   // an item is a link (a file to look at)
 }) {
   const list = value || [];
   const [draft, setDraft] = useState("");
-  const remaining = (choices || []).filter((c) => !list.includes(c.value));
+  const remaining = (choices || []).filter((c) => !list.includes(c.value)).map((c) => (kind && !c.kind ? { ...c, kind } : c));
   const add = (v: string) => {
     const t = v.trim();
     if (t && !list.includes(t)) onChange([...list, t]);
@@ -460,7 +467,8 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
   return (
     <div className="tags">
       {list.map((t) => (
-        <span key={t} className="tag">
+        <span key={t} className="tag" title={kind ? kindName(kind, t) : undefined}>
+          {kind && <KindIcon kind={kind} />}
           {onOpen ? <button type="button" className="tag-open" onClick={() => onOpen(t)} title={openTitle}>{t}</button> : t}
           <button type="button" onClick={() => onChange(list.filter((x) => x !== t))} title="Remove">×</button>
         </span>
