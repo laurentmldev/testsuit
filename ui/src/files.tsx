@@ -159,9 +159,20 @@ const INLINE_MIN = 2;
 const INLINE_MAX = 100_000;
 const INLINE_BYTES = 20 << 20;      // a bigger file holds more values: not loaded to find out
 
+/** Why a data file is not plotted where it is shown, known before loading it; null when it may be. */
+function quickPlotRefused(file: Readable): string | null {
+  if (file.fields == null) return "its loader takes too long to list its fields";
+  const fields = file.names?.filter((f) => !TIME.test(f));
+  if (!fields || fields.length > INLINE_FIELDS)
+    return `${fields?.length ?? file.fields} fields besides its times, more than ${INLINE_FIELDS}`;
+  if (!fields.length) return "no field besides its times";
+  if (file.size > INLINE_BYTES) return `${size(file.size)}, too big to be loaded for a quick look`;
+  return null;
+}
+
 /** The fields of a small data file, plotted (2D, against time) by the Plot page's backend; nothing when it has
  *  too few or too many values. */
-function InlinePlot({ file }: { file: Readable }) {
+function InlinePlot({ file, onSkip }: { file: Readable; onSkip: (why: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState(false);
   const fields = (file.names || []).filter((f) => !TIME.test(f));
@@ -174,15 +185,18 @@ function InlinePlot({ file }: { file: Readable }) {
         linestyle: "solid", marker: ",", drawstyle: "default", offset: "", hidden: false })) };
     Promise.all([plotly(), post<{ figure: any; traces: { points: number; error: string | null }[] }>("plot/figure", spec)])
       .then(async ([P, answer]) => {
+        if (!current || !box.current) return;
         const points = Math.max(0, ...answer.traces.map((t) => t.points || 0));
-        if (!current || !answer.figure || points < INLINE_MIN || points > INLINE_MAX || !box.current) return;
+        const failed = answer.traces.find((t) => t.error)?.error;
+        if (points > INLINE_MAX) return onSkip(`${points.toLocaleString("en-US")} values, more than ${INLINE_MAX.toLocaleString("en-US")}`);
+        if (!answer.figure || points < INLINE_MIN) return onSkip(failed || `${points} value${points === 1 ? "" : "s"}, fewer than ${INLINE_MIN}`);
         setShown(true);
         const { data, layout } = themed(answer.figure, key);
         // a quick look: sized to its box, no toolbar (the Plot… button has the rest)
         await P.react(box.current, data, { ...layout, title: undefined, autosize: false, width: box.current.clientWidth, height: 298,
           margin: { l: 50, r: 20, t: 10, b: 40 } }, { ...CONFIG, displayModeBar: false });
       })
-      .catch(() => { /* not plotted here: the Plot… button tells why */ });
+      .catch((e) => current && onSkip(e.message || String(e)));
     return () => { current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -193,8 +207,10 @@ function InlinePlot({ file }: { file: Readable }) {
 export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
   const [text, setText] = useState<string | null>(null);
   const [readable, setReadable] = useState<Readable | null>(null);
+  const [skipped, setSkipped] = useState<string | null>(null);    // why the quick plot was not drawn, found when trying it
   useEffect(() => {
     setReadable(null);
+    setSkipped(null);
     if (!plot) return;
     let current = true;
     get<Readable>(plot).then((r) => current && setReadable(r)).catch(() => { /* no data loader reads it */ });
@@ -218,6 +234,8 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
       .catch((e) => setError(e.message));
   }, [href, path, isText]);
   const keys = Object.entries(rendered?.keys || {});
+  const openPlot = () => readable && openInNewTab({ path: "exploit/plot", query: { source: readable.path } });
+  const noQuickPlot = readable && (skipped || quickPlotRefused(readable));
   return (
     <div className="file-view">
       <div className="file-view-head">
@@ -227,7 +245,7 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
           <button className="small" onClick={() => setMode(mode === "auto" ? "raw" : "auto")}>{mode === "auto" ? "raw text" : "table"}</button>
         )}
         {readable && (
-          <button className="small" onClick={() => openInNewTab({ path: "exploit/plot", query: { source: readable.path } })}
+          <button className="small" onClick={openPlot}
             title={`Open it in the Plot subtab of the Exploit tab, in a new browser tab (read as ${readable.format}${readable.fields != null ? `, ${readable.fields} field${readable.fields === 1 ? "" : "s"}` : ""})`}>Plot…</button>
         )}
         <a className="button small" href={href} download={path.split("/").pop()}>Download</a>
@@ -244,9 +262,10 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
           </table>
         </details>
       )}
-      {readable && readable.size <= INLINE_BYTES && readable.names
-        && (n => n >= 1 && n <= INLINE_FIELDS)(readable.names.filter((f) => !TIME.test(f)).length)
-        && <InlinePlot key={readable.path} file={readable} />}
+      {readable && (noQuickPlot
+        ? <div className="file-plot-note muted small">No quick plot: {noQuickPlot}.{" "}
+            <button className="link" onClick={openPlot}>Open it in the Plot tab</button> (a new browser tab).</div>
+        : <InlinePlot key={readable.path} file={readable} onSkip={setSkipped} />)}
       {IMAGE.test(path) && <img className="file-image" src={href} alt={path} />}
       {!IMAGE.test(path) && !isText && <p className="muted">Binary file: download it to open it.</p>}
       {text !== null && /\.(csv|tsv)$/i.test(path) && mode === "auto" && <CsvTable text={text} tab={/\.tsv$/i.test(path)} />}
