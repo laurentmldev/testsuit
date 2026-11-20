@@ -250,9 +250,12 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
     const items = byStep[`${phase}:${step.id}`] || [];
     const state = items.length ? worst(items.map((i) => i.state)) : "pending";
     const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
+    // an exploit step: how many of its checks are met, once it has run
+    const checks: any[] | undefined = step.action === "exploit" ? items[0]?.exploit?.checks : undefined;
+    const met = checks ? `${checks.filter(checkMet).length}/${checks.length} checks` : "";
     return {
       ...n, data: {
-        ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}`,
+        ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}${met ? ` · ${met}` : ""}`,
         state, items, part: step.part, selected: isOfStep(selected, phase, step.id),
         selectedSlot: isOfStep(selected, phase, step.id) ? (selected!.match(/\[(.*)\]$/)?.[1] ?? slotOf(items[0])) : null,
         onPickSlot: (slot: string) => onSelect(stepKey(phase, step.id, slot), step, phase),
@@ -515,6 +518,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
                 {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {editor && logRecord && <EditLabCommand record={logRecord} />}
+                <ExploitChecks runId={r.id} record={logRecord} />
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; the finally steps, in their dashed lane after the steps, always run at the end, cancel and kill included.</p>}
@@ -586,6 +590,39 @@ function EditLabCommand({ record }: { record: any }) {
         title={`Open the lab config in the Editor (in place), in a new browser tab, on the command '${lc.name}' ${lc.source ? `of ${lc.source}` : `(to implement it on ${lc.component})`}`}>
         Edit the command
       </button>
+    </div>
+  );
+}
+
+const checkMet = (c: any) => ["SUCCESS", "ACCEPTED"].includes(String(c.status || "").toUpperCase());
+
+/** An exploit step's checks (the criteria it ran on the run's outputs): each one's status, and its report. */
+function ExploitChecks({ runId, record }: { runId: string; record: any }) {
+  const x = record?.exploit;
+  if (!x) return null;
+  const checks: any[] = x.checks || [];
+  const bad = checks.filter((c) => !checkMet(c));
+  return (
+    <div className="exploit-checks small">
+      <div>
+        <strong>{checks.length - bad.length} of {checks.length}</strong> check(s) met
+        {x.report && <> · <a href={url(`runs/${runId}/files/${x.report}`)} target="_blank" rel="noreferrer">open the report</a></>}
+        {x.folder && <span className="muted"> · results in <code>{x.folder}</code></span>}
+      </div>
+      {checks.length > 0 && (
+        <table className="grid compact">
+          <thead><tr><th>Criteria</th><th>Check</th><th>Status</th></tr></thead>
+          <tbody>
+            {[...bad, ...checks.filter(checkMet)].map((c, i) => (
+              <tr key={i}>
+                <td><code>{c.criteria}</code>{c.scenario && !String(c.criteria).endsWith(c.scenario) && <span className="muted"> · {c.scenario}</span>}</td>
+                <td>{c.check || <span className="muted">the whole scenario</span>}</td>
+                <td><span className={classes("badge", checkMet(c) ? "ok" : "bad")}>{String(c.status).toLowerCase()}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

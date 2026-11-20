@@ -641,6 +641,26 @@ SETUP = {
 
 # ── datapack side: test definition and pipeline ────────────────────────────
 
+EXPLOIT = h("Check criteria (mexploit scenarios) on outputs of the run: exploit_runner on the sequencer host, after "
+            "the steps that produce the data. Succeeded when every check is met, failed when one is not, error when "
+            "they cannot be run (no data, a crash). The datapack holds only the criteria its exploit steps name; the "
+            "report and each check's status are kept with the run (`data/_sequencer/exploit/<step>/`). No `slot` "
+            "nor `for_each`.", type="object", required=["criteria", "data"], additionalProperties=False,
+            properties={
+                "criteria": h("Scenario folders (holding `*.mexploit.yml` files), or folders of them, relative to the "
+                              "test definition. Not a template: the criteria a step checks are known before the run.",
+                              type=["array", "string"], items={"type": "string"}, examples=[["criteria/max_speed"]]),
+                "data": h("Files or folders of the run folder the criteria read: `[<phase>:]<slot or *>/<path>`, "
+                          "globs allowed (`test_run:telemetry/output/*.csv`). The phase only says where they come "
+                          "from; outputs are there once collected. Templates allowed.",
+                          type=["array", "string"], items={"type": "string"},
+                          examples=[["test_run:telemetry/output/telemetry.csv"]]),
+                "name": h("Title of the report (default: the test definition's name and the step id).", type="string"),
+                "description": h("Description shown in the report.", type="string"),
+            },
+            defaultSnippets=[{"label": "criteria on outputs", "body": {
+                "criteria": ["criteria/${1:name}"], "data": ["${2:test_run}:${3:slot}/output/${4:*.csv}"]}}])
+
 STEP_FIELDS = {
     "id": h("Step id, unique in its phase or sub-pipeline (no `.`, `[` or `/`). Steps of a sub-pipeline appear as "
             "`<uses step>.<id>`.", type="string"),
@@ -653,6 +673,7 @@ STEP_FIELDS = {
              + TEMPLATE_NOTE, type="string"),
     "python": PYTHON,
     "http": HTTP,
+    "exploit": EXPLOIT,
     "push": h("Copy files to the component: `{from: <path in the run folder>, to: <path on the component>}`.",
               type="object"),
     "pull": h("Copy files from the component: `{from: <path on the component>, to: <path in the run folder>}`.",
@@ -671,12 +692,14 @@ STEP_FIELDS = {
     "timeout": DURATION,
     "retries": h("Times the step is tried again when it does not succeed.", type="integer", minimum=0),
     "detach": h("Start the command and go on (overrides the command's `detach`).", type="boolean"),
-    "continue_on_error": h("Steps that need this one run even when it fails; the phase verdict still counts it.",
+    "continue_on_error": h("`true`: steps that need this one run even when it fails, and the run verdict leaves it out. "
+                           "Not written: `false`, except for an `exploit` step, whose dependants run anyway while its "
+                           "verdict still counts (`false` stops them).",
                            type="boolean"),
     "env": h("Environment variables of the step's command.", type="object"),
 }
 
-STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `http`, `push`, `pull`, `delay`, "
+STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, "
          "`wait_for`, `uses`, or a plugin step type), and options.", type="object", required=["id"],
          properties=STEP_FIELDS, additionalProperties=True,
          defaultSnippets=[
@@ -686,6 +709,8 @@ STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `pyt
              {"label": "run a shell command", "body": {"id": "${1:check}", "slot": "${2:slot}",
                                                        "run": "${3:command}"}},
              {"label": "run Python code", "body": {"id": "${1:check}", "python": {"code": "import sys\n${2:sys.exit(0)}\n"}}},
+             {"label": "check criteria", "body": {"id": "${1:criteria}", "exploit": {
+                 "criteria": ["criteria/${2:name}"], "data": ["${3:test_run}:${4:slot}/output/${5:*.csv}"]}}},
              {"label": "delay", "body": {"id": "${1:run}", "delay": "${2:30s}", "needs": []}},
              {"label": "wait for a state", "body": {"id": "${1:running}", "wait_for": {
                  "state": "running", "slot": "${2:slot}", "timeout": "20s"}}},

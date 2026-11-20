@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from "@xyflow/react";
-import { post } from "../api";
+import { get, post } from "../api";
 import { COMMENT_WIDTH, CommentNode, commentCard, type CommentCard } from "../comments";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
@@ -27,13 +27,15 @@ import { ExpectEditor, HttpEditor, httpSummary, PythonEditor, pythonSummary, sum
 import { clone, hostLabel, useSession, useTestKeys, type Doc } from "./state";
 
 type Scope = { kind: "phase"; index: number } | { kind: "sub"; name: string } | { kind: "settings" } | { kind: "flat" };
-const ACTIONS = ["do", "run", "python", "http", "push", "pull", "delay", "wait_for", "uses"];
+const ACTIONS = ["do", "run", "python", "http", "exploit", "push", "pull", "delay", "wait_for", "uses"];
 
 export function stepAction(step: any, plugins: string[] = []): string {
   const found = ACTIONS.find((a) => step?.[a] !== undefined && step?.[a] !== null);
   if (found) return found;
   return Object.keys(step || {}).find((k) => plugins.includes(k)) || "";
 }
+
+const asList = (v: any): any[] => (v === undefined || v === null || v === "" ? [] : Array.isArray(v) ? v : [v]);
 
 function hasCycle(steps: any[], from: string, to: string): boolean {
   // adding "to needs from": a cycle if from (transitively) needs to
@@ -53,7 +55,7 @@ function hasCycle(steps: any[], from: string, to: string): boolean {
 function EditStepNode({ data, selected }: NodeProps) {
   const d = data as any;
   return (
-    <div className={classes("step-node edit", selected && "selected", d.problem && "has-problem", d.part === "finally" && "finally", d.action === "uses" && "uses")} title={d.problem || ""}>
+    <div className={classes("step-node edit", selected && "selected", d.problem && "has-problem", d.part === "finally" && "finally", d.action === "uses" && "uses", d.action === "exploit" && "exploit")} title={d.problem || ""}>
       <Handle type="target" position={Position.Left} />
       <div className="step-id">{d.step.id}</div>
       <div className="step-action">{d.label}</div>
@@ -92,7 +94,8 @@ function label(step: any, plugins: string[]): string {
   const a = stepAction(step, plugins);
   const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
   const what = a === "do" ? step.do : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "http" ? httpSummary(step.http).slice(0, 40) : a === "delay" ? `delay ${step.delay}`
-    : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}` : a || "no action";
+    : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}`
+    : a === "exploit" ? `criteria ${asList(step.exploit?.criteria).map((c: string) => c.replace(/\/$/, "").split("/").pop()).join(", ") || "?"}` : a || "no action";
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
 }
 
@@ -598,7 +601,8 @@ export function PipelineEditor({ doc, api }: { doc: Doc; api: { setData: (d: any
               onChange={(patch) => setComment(selectedComment, patch)} onDelete={() => deleteComments([selectedComment])} />
           ) : selectedStep ? (
             <StepForm key={selected[0]} step={selectedStep.step} part={selectedStep.part} siblings={current(selectedStep.part)} palette={palette} held={held} subs={subs}
-              isSub={scope.kind === "sub"} schemas={schemas} onUsed={includeFor}
+              isSub={scope.kind === "sub"} schemas={schemas} onUsed={includeFor} testdef={testdefFor}
+              phaseIds={scope.kind === "phase" ? phaseOrder(phases).map((i) => phases[i]?.id).filter(Boolean) : phases.map((p) => p.id)}
               onChange={(next) => editSteps(selectedStep.part, (list) => {
                 const i = list.findIndex((s: any) => s.id === selectedStep.step.id);
                 if (next.id !== selectedStep.step.id) for (const s of list) if (s.needs) s.needs = s.needs.map((n: string) => (n === selectedStep.step.id ? next.id : n));
@@ -736,6 +740,8 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected, onCommen
           onMouseEnter={() => setHelp({ title: "python", text: "A Python script or inline code, on a slot's lab component or on the sequencer host, with the run's keys as `keys`. Exit 0 succeeds; an exception makes the step an error." })}>Python script</button>
         <button className="palette-item" onClick={() => onAdd({ id: "api", http: { url: "http://localhost:8080/api/status" } })}
           onMouseEnter={() => setHelp({ title: "http", text: "An HTTP request (a REST API call) from the sequencer host: URL, method, headers, body; it succeeds when the answer is the expected one." })}>REST API call</button>
+        <button className="palette-item" onClick={() => onAdd({ id: "criteria", exploit: { criteria: [], data: [] } })}
+          onMouseEnter={() => setHelp({ title: "exploit", text: "Check criteria (mexploit scenarios of the test definition) on outputs of the run, with exploit_runner on the sequencer host. The datapack holds only the criteria such steps name; the run page shows each check and the report." })}>check criteria</button>
         {(ctx.step_types || []).map((t: string) => <button key={t} className="palette-item" onClick={() => onAdd({ id: t, [t]: {} })}>{t}</button>)}
         <button className="palette-item comment-item" onClick={onComment}
           onMouseEnter={() => setHelp({ title: "comment", text: "A note on the graph, like a sticky note (Markdown): why the steps are this way, what to beware of. It is kept in the file with its place on the graph, never run, and shown under its phase on the run page." })}>comment</button>
@@ -784,13 +790,51 @@ function SubPalette({ subs, onAdd }: { subs: Record<string, any>; onAdd: (step: 
 
 // ── forms ───────────────────────────────────────────────────────────────
 
+/** The criteria an exploit step checks (scenario folders, relative to the test definition) and the files of the
+ *  run they read (`[<phase>:]<slot or *>/<path>`, globs allowed). */
+function ExploitEditor({ value, onChange, testdef, phaseIds, slots, help }: {
+  value: any; onChange: (v: any) => void; testdef?: string; phaseIds: string[]; slots: string[]; help: (field?: string) => any;
+}) {
+  const { sid } = useSession();
+  const [scenarios, setScenarios] = useState<any[] | null>(null);
+  useEffect(() => {
+    get<any>(`edit/sessions/${sid}/criteria`).then((ov) => setScenarios(ov.scenarios || [])).catch(() => setScenarios([]));
+  }, [sid]);
+  const v = value || {};
+  const set = (k: string, x: any) => {
+    const next = { ...v, [k]: x };
+    if (x === undefined || x === "" || (k !== "criteria" && k !== "data" && Array.isArray(x) && !x.length)) delete next[k];
+    onChange(next);
+  };
+  // the scenario folders of the workspace, as paths relative to the test definition: its own first
+  const criteriaChoices: Choice[] = (scenarios || []).map((s: any) => ({ value: relPath(testdef || "", s.path), description: `${s.files.length} file(s)${s.testdef === testdef ? ", of this test definition" : s.testdef ? `, of ${s.testdef}` : ""}` }))
+    .sort((a, b) => Number(a.value.startsWith("..")) - Number(b.value.startsWith("..")) || a.value.localeCompare(b.value));
+  const dataChoices: Choice[] = phaseIds.flatMap((ph) => [...slots, "*"].map((sl) => ({ value: `${ph}:${sl}/output/`, description: sl === "*" ? `the outputs of every slot, collected in phase ${ph}` : `what phase ${ph} collected from ${sl}` })));
+  const unknown = asList(v.criteria).filter((c: string) => scenarios && !criteriaChoices.some((ch) => ch.value === c.replace(/\/$/, "") || ch.value.startsWith(c.replace(/\/$/, "") + "/")));
+  return (
+    <div className="sub-form">
+      <Field label="Criteria" help={help("criteria")} error={unknown.length ? `no scenario in ${unknown.join(", ")}` : null}
+        hint="scenario folders (of *.mexploit.yml files), relative to the test definition">
+        <Tags value={asList(v.criteria)} onChange={(x) => set("criteria", x)} choices={criteriaChoices} />
+      </Field>
+      <Field label="Data" help={help("data")} hint="files of the run: [phase:]slot/output/path, globs allowed (*.csv)">
+        <Tags keys value={asList(v.data)} onChange={(x) => set("data", x)} choices={dataChoices} />
+      </Field>
+      <div className="inline-fields">
+        <Field label="Report title" help={help("name")}><Text keys value={v.name} onChange={(x) => set("name", x)} placeholder="the test name and the step id" /></Field>
+      </div>
+    </div>
+  );
+}
+
 function useStepHelp(schemas: any) {
   return (field: string) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, field]);
 }
 
-function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub, onUsed }: {
+function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, onChange, onOpenSub, onUsed, testdef, phaseIds }: {
   step: any; part: string; siblings: any[]; palette: any; held: string[]; subs: Record<string, any>; isSub: boolean; schemas: any;
   onChange: (s: any) => void; onOpenSub: (n: string) => void; onUsed?: (n: string) => void;
+  testdef?: string; phaseIds?: string[];      // for an exploit step: where its criteria are, the phases its data can come from
 }) {
   const { ctx } = useSession();
   const help = useStepHelp(schemas);
@@ -833,6 +877,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     if (a === "run") next.run = "";
     if (a === "python") next.python = { code: "import sys\n\nsys.exit(0)\n" };
     if (a === "http") next.http = { url: "http://localhost:8080/api/status" };
+    if (a === "exploit") { next.exploit = { criteria: [], data: [] }; delete next.slot; delete next.for_each; }
     if (a === "delay") next.delay = "30s";
     if (a === "wait_for") next.wait_for = { state: "running", timeout: "30s" };
     if (a === "uses") next.uses = Object.keys(subs)[0] || "";
@@ -848,19 +893,20 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
   return (
     <div className="step-form">
       <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} /></Field>
-      <Field label="On" help={help("for_each")}>
+      {action !== "exploit" && <Field label="On" help={help("for_each")}>
         <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no slot" choices={[
           { value: "slot", label: "a slot" }, { value: "all", label: "every slot", description: "of the phase, in parallel" },
           { value: "list", label: "some slots", description: "in parallel" }, { value: "role", label: "a role" },
         ]} />
-      </Field>
+      </Field>}
       {targetMode === "slot" && <Field label="Slot" help={help("slot")}><Combo keys value={step.slot} onChange={(v) => set("slot", v)} choices={comps} strict={!isSub} /></Field>}
       {targetMode === "list" && <Field label="Slots" help={help("for_each")}><Tags value={step.for_each} onChange={(v) => set("for_each", v)} choices={comps} /></Field>}
       {targetMode === "role" && <Field label="Role"><Combo value={step.for_each} onChange={(v) => set("for_each", v)} choices={roles.map((r) => ({ value: r }))} /></Field>}
       {targetMode === "expr" && <Field label="for_each" help={help("for_each")}><Text keys mono value={step.for_each} onChange={(v) => set("for_each", v)} /></Field>}
       <Field label="Does" help={help(action || "do")}>
         <Choices value={action} onChange={setAction} choices={[
-          { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "python", label: "Python" }, { value: "http", label: "REST API" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
+          { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "python", label: "Python" }, { value: "http", label: "REST API" },
+          { value: "exploit", label: "check criteria", description: "mexploit scenarios on outputs of the run" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
           { value: "uses", label: "sub-pipeline" }, { value: "push", label: "push files" }, { value: "pull", label: "pull files" },
           ...plugins.map((p) => ({ value: p, label: p, description: "plugin step type" })),
         ]} />
@@ -875,6 +921,8 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "python", ...(f ? [f] : [])])} />}
       {action === "http" && <div className="sub-form"><HttpEditor value={step.http} onChange={(v) => set("http", v)} withSave
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "http", ...(f ? [f] : [])])} /></div>}
+      {action === "exploit" && <ExploitEditor value={step.exploit} onChange={(v) => set("exploit", v)} testdef={testdef} phaseIds={phaseIds || []}
+        slots={palette ? Object.keys(palette.slots) : []} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
       {(action === "push" || action === "pull") && (
@@ -915,7 +963,11 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
             </Field>
           </>
         )}
-        <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>
+        {action === "exploit"
+          // an exploit step goes on by default and still counts: unchecked writes false, checked removes it
+          ? <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error !== false} onChange={(v) => onChange(v ? (({ continue_on_error: _, ...rest }) => rest)(step) : { ...step, continue_on_error: false })}
+            label={step.continue_on_error === true ? "steps that need it still run, and it is left out of the verdict" : "steps that need it still run (its checks still count in the verdict)"} /></Field>
+          : <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>}
         <Field label="Environment" help={help("env")}><KeyValues keys value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
       </Section>
       {part === "finally" && <p className="muted small">A finally step runs at the end of the phase in every case, cancel included.</p>}

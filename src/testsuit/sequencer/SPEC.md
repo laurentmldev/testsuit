@@ -279,7 +279,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 
 ## 5. Datapack model
 
-A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup and included sub-pipeline files, `datapack.yml`, `baseline.yml`).
+A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup, included sub-pipeline files and the criteria its exploit steps name (§6.8), `datapack.yml`, `baseline.yml`).
 
 ### 5.1 Setup
 
@@ -366,7 +366,7 @@ pipeline:
   slot: <slot>
   for_each: [<slot>...] | slots | <role> | "{{ params.x }}"
   # action (exactly one)
-  do: <command> | run: <script> | python: {...} | http: {...}
+  do: <command> | run: <script> | python: {...} | http: {...} | exploit: {...}
   | push: ... | pull: ... | delay: <duration> | wait_for: {...} | uses: <sub-pipeline> | <plugin type>: ...
   # options
   needs: [<step>...]
@@ -419,6 +419,27 @@ Kinds: `state` (§4.6), `tcp`, `http` (§4.5.2 `expect`), `file`, `log` (`{file,
 ### 6.7 Comment cards
 
 `comments` on phases and sub-pipelines: `<text>` or `{text, step, x, y, width}`. They MUST NOT be executed or rendered; a card pinned to a missing step is shown free with a warning, never an error.
+
+### 6.8 `exploit` action
+
+Binds criteria (mexploit scenarios) to the run contents they check.
+
+```yaml
+- id: speed_criteria
+  needs: [...]
+  exploit:
+    criteria: [<scenario folder>...]   # relative to the test definition; a folder of scenario folders allowed
+    data: ["[<phase>:]<slot|*>/<path>"...]   # files or folders of the run folder, globs allowed
+    name: <report title>               # OPTIONAL
+    description: <text>                # OPTIONAL
+```
+
+- The step has no `slot` nor `for_each`; it runs on the sequencer host. `criteria` and `data` MUST be non-empty. `criteria` MUST NOT be a template, so the binding is known without running: tools read it from the pipeline as written (phases, `finally`, sub-pipelines, included files).
+- Validation (§6.2) MUST reject a `data` entry naming an unknown phase or slot. The phase is informative: the entry reads `data/<slot>/<path>` of the run folder, once collected.
+- Generation MUST copy each named criteria entry into `definition/<path>` (`definition/criteria/<name>` for a path outside the test definition), and only those; a missing one MUST fail the generation. The Editor reports it as a problem of the test definition.
+- At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
+- Result: `succeeded` on exit 0 (every check met), `failed` on exit 1 (a check not met), `error` otherwise, or when no data entry matches a file (an entry matching nothing is noted in the log), or when a criteria entry is absent from the datapack. `timeout`, `retries`, `env` apply; `expect` and `detach` do not. Without `continue_on_error`, the steps that need an exploit step MUST run even when it does not succeed, and its result MUST still count in the verdict (§9.4); `continue_on_error: false` makes them skipped, `true` leaves it out of the verdict as for any step.
+- The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`.
 
 ---
 
@@ -559,6 +580,7 @@ The results datapack is the run folder packed with the input layout:
 data/<slot>/input/      inputs, unchanged
 data/<slot>/output/     everything collected
 data/<slot>/http/       saved HTTP answers
+data/_sequencer/exploit/<step>/   an exploit step's configuration, keys and exploit_runner results (§6.8)
 logs/                   step logs, sequencer.log
 run.yml                 states, binding, verdict, step results, lab_command, non-conformities
 selftest.yml            self-test results, bypasses
@@ -622,6 +644,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Push**: commit in the user's name, optional tag, push with credentials supplied in the request; credentials MUST NOT be stored or logged, and tsqd MUST NOT push with its own credentials (agent, credential helper, `insteadOf` rewrites). A rejected push applies nothing.
 - **Lab changes** apply only on reload (§4.9).
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
+- **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---
 
@@ -634,7 +657,7 @@ Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`)
 | `register_transport(name, cls)` | `run(cmd, env, timeout, detach)`, `put`, `get`, `signal`, `is_alive` | `ssh` (AsyncSSH), `local` |
 | `register_role(name, def)`, `register_component(name, def)` | roles and models in Python | `component`, `linux_system` |
 | `register_state_probe(name, fn)` | `status.probe` kinds | `run`, `http` |
-| `register_step_type(name, cls)` | step actions | `run`, `push`, `pull`, `delay`, `wait_for` |
+| `register_step_type(name, cls)` | step actions | `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | `method: generate` | none |
 

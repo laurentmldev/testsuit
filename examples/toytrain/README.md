@@ -187,7 +187,7 @@ The pipeline then has two phases, the first one built from two sub-pipelines.
 
 **exploit** runs on the lab server. It receives these outputs as inputs, then:
 1. `check_data`, a **Python step** (sequencer README, section 8.3): `check_data.py`, deployed with the analysis inputs, checks that the telemetry covers the whole scenario and that every recording was collected, using the scenario keys the sequencer gives it. A lost recording then fails here, as a data problem, rather than as a speed criterion; an exception in the script would make the step `error`;
-2. `analyse` runs `exploit_runner` on the criteria. Exit code 0 means the verdict is `succeeded`; any other exit code means `failed`.
+2. `analyse`, an **exploit step** (sequencer [SPEC](../../src/testsuit/sequencer/SPEC.md), section 6.8), checks the criteria of the test definition (`criteria/<test>`) on `telemetry.csv` and `propulsion.propj` as the test run collected them: exploit_runner on the sequencer host. Every check met means `succeeded`; one not met means `failed`. Only these criteria go in the datapack, and the Run page shows each check's status with a link to the report.
 
 Everything collected joins the results datapack, next to the inputs. Its baseline carries the git tags of the software and simulation, the lab inventory version, and the software version read on each calculator. A mismatch with `baseline_expected.yml` flags the run as non-conform.
 

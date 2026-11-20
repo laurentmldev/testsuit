@@ -563,6 +563,104 @@ def test_python_step_checked():
                                "components.yml")
 
 
+# Criteria of the exploit step tests: the counts the dut wrote (as a CSV, by a python step) reach min_count.
+COUNT_CRITERIA = """counted_enough:
+  type: assert_compare
+  description: The counter reached min_count.
+  expression_left: param("count").max()
+  expression_right: {{ min_count }}
+  compOperator: ">="
+"""
+
+TO_CSV = ("import pathlib\n"
+          "out = pathlib.Path('data/dut/output')\n"
+          "n = int((out / 'count.txt').read_text())\n"
+          "(out / 'counts.csv').write_text('date,count\\n' + ''.join(f'{i},{i}\\n' for i in range(1, n + 1)))\n")
+
+
+def exploit_bench(bench: Bench, name: str, exploit: dict, after: list | None = None, **values) -> Path:
+    """The bench whose exploit phase writes the counts as a CSV, then checks them with an exploit step."""
+    write(bench.dp / "testdef" / name / "criteria" / "count" / "count.mexploit.yml", COUNT_CRITERIA)
+    write(bench.dp / "testdef" / name / "criteria" / "unused" / "unused.mexploit.yml", "x:\n  type: assert\n  expression: 'False'\n")
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][1] = {"id": "exploit", "needs": ["test_run"], "steps": [
+        {"id": "to_csv", "python": {"code": TO_CSV}},
+        {"id": "criteria", "needs": ["to_csv"], "exploit": exploit}, *(after or [])]}
+    return bench.build(name, pipeline=pipeline, **values)
+
+
+def test_exploit_step(bench):
+    """An exploit step: only the criteria it names go in the datapack; exploit_runner runs them on the sequencer
+    host with the run's keys, on the files of the run its data names, and each check's status is recorded."""
+    zip_path = exploit_bench(bench, "xp", {"criteria": ["criteria/count"], "data": ["test_run:dut/output/*.csv"]},
+                             min_count=3)
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+    assert any(n.endswith("definition/criteria/count/count.mexploit.yml") for n in names)
+    assert not any("criteria/unused" in n for n in names)
+    run = run_one(bench, zip_path)
+    assert (run["verdict"], run["reason"]) == ("succeeded", ""), read_member(run, "logs/exploit/criteria.log")
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    [step] = [s for s in record["steps"] if s["id"] == "criteria"]
+    assert step["exploit"]["checks"] == [{"criteria": "criteria/count", "scenario": "count", "check": "counted_enough",
+                                          "status": "SUCCESS"}]
+    assert step["exploit"]["report"] == "data/_sequencer/exploit/criteria/results/exploit_synthesis.html"
+    files = results_of(run)[0]
+    assert step["exploit"]["report"] in files and "data/_sequencer/exploit/criteria/keys.yml" in files
+    assert "data: data/dut/output/counts.csv" in read_member(run, "logs/exploit/criteria.log")
+
+
+def test_exploit_step_results(bench):
+    """A check not met fails the step and the run, while the steps that need it still run (unless
+    continue_on_error: false); data matching nothing is an error (the outcome is unknown)."""
+    run = run_one(bench, exploit_bench(bench, "xp_bad", {"criteria": "criteria/count", "data": "dut/output/counts.csv"},
+                                       after=[{"id": "after", "needs": ["criteria"], "run": "true"},
+                                              {"id": "stopped", "needs": ["criteria"], "continue_on_error": False,
+                                               "exploit": {"criteria": "criteria/count", "data": "dut/output/counts.csv"}},
+                                              {"id": "never", "needs": ["stopped"], "run": "true"}],
+                                       min_count=100000))
+    assert run["verdict"] == "failed"
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    states = {s["id"]: s["state"] for s in record["steps"] if s["phase"] == "exploit"}
+    assert (states["after"], states["stopped"], states["never"]) == ("succeeded", "failed", "skipped")
+    [step] = [s for s in record["steps"] if s["id"] == "criteria"]
+    assert step["state"] == "failed" and step["reason"] == "1 of 1 check(s) not met"
+    assert step["exploit"]["checks"][0]["status"] == "FAILED"
+    run = run_one(bench, exploit_bench(bench, "xp_none", {"criteria": "criteria/count", "data": "dut/output/nope/*.csv"},
+                                       min_count=3))
+    assert run["verdict"] == "error"
+    assert "no file of the run matches 'dut/output/nope/*.csv'" in read_member(run, "logs/exploit/criteria.log")
+
+
+def test_exploit_step_checked(bench):
+    from testsuit.sequencer.exploitstep import definition_target, pipeline_exploit_steps
+    from testsuit.sequencer.model import Step
+    from testsuit.sequencer.util import SequencerError
+    Step(id="ok", exploit={"criteria": ["criteria/a"], "data": ["run:dut/output/a.csv"]}).check()
+    with pytest.raises(SequencerError, match="cannot be a template"):
+        Step(id="t", exploit={"criteria": ["{{ x }}"], "data": ["dut/a.csv"]}).check()
+    with pytest.raises(SequencerError, match="at least one file"):
+        Step(id="d", exploit={"criteria": ["c"]}).check()
+    with pytest.raises(SequencerError, match="no 'slot'"):
+        Step(id="s", slot="dut", exploit={"criteria": ["c"], "data": ["dut/a.csv"]}).check()
+    with pytest.raises(SequencerError, match="unknown 'exploit' key"):
+        Step(id="k", exploit={"criteria": ["c"], "data": ["dut/a.csv"], "datas": 1}).check()
+    assert definition_target("criteria/a/") == "criteria/a" and definition_target("../shared/b") == "criteria/b"
+    pipeline = {"phases": [{"id": "p", "steps": [{"id": "a", "exploit": {"criteria": "c1", "data": "x/y"}}],
+                            "finally": [{"id": "b", "exploit": {"criteria": ["c2"], "data": ["x/z"]}}]}],
+                "subpipelines": {"g": {"steps": [{"id": "c", "run": "true"}, {"id": "d", "exploit": {"criteria": ["c1"]}}]}}}
+    assert [(s.get("phase"), s.get("part"), s.get("subpipeline"), s["id"], s["criteria"])
+            for s in pipeline_exploit_steps(pipeline)] == [
+        ("p", "steps", None, "a", ["c1"]), ("p", "finally", None, "b", ["c2"]), (None, None, "g", "d", ["c1"])]
+    # the data names phases and slots of the pipeline
+    from testsuit.sequencer.model import load_pipeline, needs_from_setup, validate_pipeline
+    needs = needs_from_setup(SETUP, "bench")
+    for data, problem in (("test_run:nope/output/a.csv", "unknown slot 'nope'"), ("other:dut/a.csv", "unknown phase 'other'")):
+        pipeline = copy.deepcopy(PIPELINE)
+        pipeline["phases"][1]["steps"].append({"id": "x", "exploit": {"criteria": ["c"], "data": [data]}})
+        with pytest.raises(SequencerError, match=problem):
+            validate_pipeline(load_pipeline(pipeline), needs)
+
 def test_queue_and_parallel_stages(tmp_path, no_git):
     """Three runs on two stages: two run at once, the third waits for a stage."""
     bench = Bench(tmp_path, stages=2)

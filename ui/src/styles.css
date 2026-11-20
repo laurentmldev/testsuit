@@ -230,6 +230,7 @@ tr.finally-row td { color: var(--muted); }
 .step-node.selected { outline: 2px solid var(--accent); }
 .step-node.has-problem { border-color: var(--bad); }
 .step-node.edit { border-left-color: var(--accent); }
+.step-node.exploit { border-left-color: var(--ok); }
 .step-id { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step-action { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step-items, .step-inner { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
@@ -760,6 +761,8 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .step-via-note { margin-top: 4px; }
 .edit-lab-command { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; padding: 4px 8px; border-left: 3px solid var(--bad); background: var(--bad-soft); border-radius: 3px; }
 .edit-lab-command button { margin-left: auto; }
+.exploit-checks { margin: 6px 0; display: grid; gap: 4px; }
+.exploit-checks table { max-height: 220px; }
 
 /* a command's output as a console: the lines it ran (prompt) between what they printed */
 .console-cmd { color: var(--accent); font-weight: 600; margin-top: 2px; }

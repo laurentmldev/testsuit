@@ -167,6 +167,26 @@ def repos(tmp_path):
     return Repos(tmp_path)
 
 
+def test_exploit_step_criteria_checked(repos):
+    """A criteria folder an exploit step names that does not exist: a problem of the test definition, and of the
+    datapack before it is generated (paths relative to the test definition)."""
+    editor = repos.editor
+    session = editor.open("workspace0")
+    testdef = {"id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+               "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
+                   {"id": "start", "slot": "dut", "do": "start"},
+                   {"id": "check", "needs": ["start"], "exploit": {"criteria": ["criteria/count", "criteria/gone"],
+                                                                   "data": ["run:dut/output/*.csv"]}}]}]}}
+    editor.write(session, "testdef/count/criteria/count/count.mexploit.yml", content="ok:\n  type: assert\n  expression: 1 == 1\n")
+    written = editor.write(session, "testdef/count/testdef.yml", data=testdef)
+    errors = [p["message"] for p in written["problems"] if p["severity"] == "error"]
+    assert errors == ["step 'check': criteria 'criteria/gone' not found (exploit criteria are scenario folders, "
+                      "relative to the test definition)"]
+    assert [p for p in editor.run_problems(session, "testdef/count/testdef.yml") if p.startswith("criteria:")] == \
+        ["criteria: " + errors[0]]
+    overview = editor.criteria(session).overview()
+    assert overview["scenarios"][0]["used_by"] == [{"testdef": "testdef/count/testdef.yml", "phase": "run", "id": "check"}]
+
 def test_workspace_session(repos):
     editor = repos.editor
     session = editor.open("workspace0")

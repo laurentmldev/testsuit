@@ -793,6 +793,14 @@ class _Builder:
                 else definition / "include" / Path(name).name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+        # the criteria the pipeline's exploit steps check: only those (sequencer SPEC, section 6.8)
+        from testsuit.sequencer.exploitstep import copy_criteria, pipeline_criteria
+        for name in pipeline_criteria(pipeline, self.testdef_dir):
+            source = _expand(name, self.testdef_dir)
+            if not source.exists():
+                raise DatapackError(f"criteria '{name}' checked by an exploit step of '{self.testdef_file}' not found "
+                                    f"(paths are relative to the test definition)")
+            copy_criteria(name, source, definition)
         for layer, path in self.dictionaries:
             target = definition / "dictionaries" / layer / path.name
             if layer == "datasets":

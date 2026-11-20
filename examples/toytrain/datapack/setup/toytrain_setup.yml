@@ -70,12 +70,10 @@ slot_types:
           - {source: "{{ toytrain_sim.path }}/", target: sim/, method: copy}
           - {source: templates/piezo_sim.yml, target: piezo_sim.yml}
 
-  exploit:                                    # exploitation with testsuit's exploit_runner
+  exploit:                                    # the exploitation's own checks (the criteria: an exploit step)
     configurations:
       standard:
         inputs:
-          - {source: templates/exploit.yml, target: exploit.yml}
-          - {source: "{{ testdef.path }}/criteria/", target: scenario/toytrain/, method: copy}
           - {source: scripts/check_data.py, target: check_data.py, method: copy}   # a python step (testdef pipeline)
 
 # The datapack does not drive the train's switch: on the lab it is locked with its lab stage all the same.

@@ -409,6 +409,10 @@ function ScenarioTree({ s, utests, current, problems, open, onNewFile, onNewUtes
         {last && <span className={classes("badge", last.ok && last.fully_covered ? "ok" : last.ok ? "warn" : "bad")}
           title={`${last.cases_ok}/${last.cases} case(s) as expected; ${last.fully_covered ? "every check covered" : "some checks not covered"}`}>
           {last.ok ? (last.fully_covered ? "covered" : "partly covered") : "failing"}</span>}
+        {s.used_by && (s.used_by.length
+          ? <span className="badge info" title={`Checked by: ${s.used_by.map((u) => `${u.testdef}, ${u.subpipeline ? `sub-pipeline ${u.subpipeline}` : `phase ${u.phase}`}, step ${u.id}`).join("; ")}`}>
+            used by {s.used_by.length} step{s.used_by.length > 1 ? "s" : ""}</span>
+          : s.testdef && <span className="badge" title={`No exploit step of ${s.testdef} (nor of another test definition here) names it: no datapack holds it`}>unused</span>)}
       </div>
       <div className="tree-sub muted small">{s.testdef ? `test ${s.testdef.split("/").slice(-2, -1)[0] || s.testdef}` : s.path}</div>
       {s.files.map((f) => row(f, base(f), count(f)))}

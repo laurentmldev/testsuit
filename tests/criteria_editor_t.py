@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 import requests
 
 from testsuit import plugins
@@ -69,6 +70,19 @@ def test_overview_links_scenarios_and_unit_tests(folder):
     assert utests["cases"][1]["expect"]["value_max"] == {"status": "FAILED", "message": "not <="}
     assert folder.scenario_folder("limits/utests.yml") == folder.root / "limits" / "scenario"
 
+
+
+def test_overview_exploit_steps(folder):
+    """The exploit steps of a test definition's pipeline name the scenarios it uses: each scenario says which
+    steps check it, and a criteria path that does not exist is shown as such."""
+    (folder.root / "limits" / "testdef.yml").write_text(yaml.safe_dump({"id": "t", "pipeline": {"phases": [
+        {"id": "run", "steps": [{"id": "check", "exploit": {"criteria": ["scenario", "gone"], "data": ["dut/output/x.csv"]}}]}]}}))
+    ov = folder.overview()
+    [step] = ov["exploit_steps"]
+    assert (step["testdef"], step["phase"], step["id"], step["data"]) == ("limits/testdef.yml", "run", "check", ["dut/output/x.csv"])
+    assert step["criteria"] == [{"path": "scenario", "folder": "limits/scenario", "exists": True},
+                                {"path": "gone", "folder": "limits/gone", "exists": False}]
+    assert ov["scenarios"][0]["used_by"] == [{"testdef": "limits/testdef.yml", "phase": "run", "id": "check"}]
 
 def test_read_write_and_conflicts(folder):
     doc = folder.read(SCN)
