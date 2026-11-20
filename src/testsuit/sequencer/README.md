@@ -781,10 +781,11 @@ models:
 - A component whose self-test failed **stays** `broken` (or `offline`) even when its probe says it is healthy, until a self-test passes. Its detail tells which check failed.
 - With `selftest.when_idle` (default `true`), a self-test also runs when a component becomes `idle` (it was offline, broken, running...), except for a component an active run holds. A component kept broken by its self-test is tested again when its probe says it is idle, at most once a minute, and comes back once a test passes.
 
-**Bypassing a failed check for a while.** A check can fail for a reason that does not matter to the tests, for example a clock offset over `max_clock_offset` on a host whose clock cannot be fixed now. A failed check can then be **bypassed** for some hours, from the Lab page (Bypass… beside the failed check, in the self-test or state dialog) or with `POST /components/<id>/bypass` `{check, hours, reason, by}`:
+**Bypassing a check for a while.** A check can fail for a reason that does not matter to the tests, for example a clock offset over `max_clock_offset` on a host whose clock cannot be fixed now. Such a check can then be **bypassed** for some hours, from the Lab page (Bypass… beside the check, in the self-test or state dialog) or with `POST /components/<id>/bypass` `{check, hours, reason, by}`:
 - the bypass needs a reason and lasts at most 72 hours, and it ends by itself (or with End bypass, `hours: 0`). The `login` and `status` checks cannot be bypassed: nothing could run without them;
 - the self-test runs again at once: while only bypassed checks fail, it passes and the component is usable. The check still runs every time, and its failure is still reported, as bypassed;
 - every run whose self-test relies on a bypassed check is **not conform** (section 5.3): its results zip ends in `_NONCONFORM`, and the run record, `run.yml` and the results baseline list the check, its failure, the end of the bypass, who set it and why. `selftest.yml` keeps the check with its `bypassed` entry;
+- a check that passes now can be bypassed too, ahead, when it fails once in a while: the component then stays usable the next time it fails. Only the runs whose self-test sees it fail are not conform; those that see it pass stay conform. The Lab page shows the check as bypassed, with "passes now";
 - the Lab page shows a `bypass` badge on the component while a bypass lasts.
 
 ### 7.7 Commands run by hand, in maintenance

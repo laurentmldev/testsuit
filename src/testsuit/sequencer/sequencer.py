@@ -443,7 +443,7 @@ class Sequencer:
         self.notify("selftest", {"target": name or "lab", "ok": all(r["ok"] for r in results)})
         return list(results)
 
-    # ── bypassing a failed self-test check for a while ───────────────────
+    # ── bypassing a self-test check for a while (failed, or passing now but failing once in a while) ──
     MAX_BYPASS_HOURS = 72
     NOT_BYPASSABLE = ("login", "status")              # nothing else can run / the probe keeps it broken anyway
 
@@ -457,8 +457,9 @@ class Sequencer:
 
     async def bypass_check(self, comp_id: str, check: str, hours: float | None, reason: str = "", by: str = "") -> dict:
         """Bypass a self-test check of a component for some hours (None or 0: end its bypass), then test it again:
-        while bypassed, the check failing does not make the component broken, and every run that tests it then
-        is not conform, its results saying why. Returns the self-test."""
+        while bypassed, the check failing does not make the component broken, and every run whose self-test sees
+        it fail is not conform, its results saying why. The check may pass now (one that fails once in a while):
+        runs that see it pass stay conform. Returns the self-test."""
         if comp_id not in self.lab.inventory.components:
             raise SequencerError(f"no component '{comp_id}'")
         comp = self.lab.inventory.components[comp_id]
@@ -978,7 +979,7 @@ class RunExecution:
         # a check that failed but is bypassed: the run goes on, and is not conform
         bypassed = [f"self-test check '{c['id']}' of {r['component']} failed ({c['detail']}) but was bypassed until "
                     f"{c['bypassed'].get('until')} by {c['bypassed'].get('by') or '?'}: {c['bypassed'].get('reason')}"
-                    for r in results for c in r["checks"] if c.get("bypassed")]
+                    for r in results for c in r["checks"] if c.get("bypassed") and not c["ok"]]
         if bypassed:
             known = list(self.store.get_run(self.run_id)["nonconform"] or [])
             known += [b for b in bypassed if b not in known]
