@@ -963,7 +963,11 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
             </Field>
           </>
         )}
-        <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>
+        {action === "exploit"
+          // an exploit step goes on by default and still counts: unchecked writes false, checked removes it
+          ? <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error !== false} onChange={(v) => onChange(v ? (({ continue_on_error: _, ...rest }) => rest)(step) : { ...step, continue_on_error: false })}
+            label={step.continue_on_error === true ? "steps that need it still run, and it is left out of the verdict" : "steps that need it still run (its checks still count in the verdict)"} /></Field>
+          : <Field label="Go on after a failure" help={help("continue_on_error")}><Toggle value={step.continue_on_error} onChange={(v) => set("continue_on_error", v)} label="steps that need it still run" /></Field>}
         <Field label="Environment" help={help("env")}><KeyValues keys value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
       </Section>
       {part === "finally" && <p className="muted small">A finally step runs at the end of the phase in every case, cancel included.</p>}

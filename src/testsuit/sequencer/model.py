@@ -87,7 +87,9 @@ class Step(BaseModel):
     timeout: str | float | None = None
     retries: int = 0
     detach: bool | None = None
-    continue_on_error: bool = False
+    # True: steps that need it run even when it does not succeed, and it is left out of the phase verdict.
+    # None (not written): False, except for an exploit step, whose dependants run anyway while it still counts.
+    continue_on_error: bool | None = None
     env: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -101,6 +103,13 @@ class Step(BaseModel):
         if not v or "." in v or "[" in v or "/" in v:
             raise ValueError(f"step id '{v}' must be non-empty, without '.', '[' or '/'")
         return v
+
+    @property
+    def goes_on(self) -> bool:
+        """Steps that need this one run even when it does not succeed."""
+        if self.continue_on_error is not None:
+            return self.continue_on_error
+        return self.exploit is not None
 
     @property
     def plugin_actions(self) -> dict[str, Any]:

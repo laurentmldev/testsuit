@@ -692,7 +692,9 @@ STEP_FIELDS = {
     "timeout": DURATION,
     "retries": h("Times the step is tried again when it does not succeed.", type="integer", minimum=0),
     "detach": h("Start the command and go on (overrides the command's `detach`).", type="boolean"),
-    "continue_on_error": h("Steps that need this one run even when it fails; the phase verdict still counts it.",
+    "continue_on_error": h("`true`: steps that need this one run even when it fails, and the run verdict leaves it out. "
+                           "Not written: `false`, except for an `exploit` step, whose dependants run anyway while its "
+                           "verdict still counts (`false` stops them).",
                            type="boolean"),
     "env": h("Environment variables of the step's command.", type="object"),
 }

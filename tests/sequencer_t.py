@@ -578,14 +578,14 @@ TO_CSV = ("import pathlib\n"
           "(out / 'counts.csv').write_text('date,count\\n' + ''.join(f'{i},{i}\\n' for i in range(1, n + 1)))\n")
 
 
-def exploit_bench(bench: Bench, name: str, exploit: dict, **values) -> Path:
+def exploit_bench(bench: Bench, name: str, exploit: dict, after: list | None = None, **values) -> Path:
     """The bench whose exploit phase writes the counts as a CSV, then checks them with an exploit step."""
     write(bench.dp / "testdef" / name / "criteria" / "count" / "count.mexploit.yml", COUNT_CRITERIA)
     write(bench.dp / "testdef" / name / "criteria" / "unused" / "unused.mexploit.yml", "x:\n  type: assert\n  expression: 'False'\n")
     pipeline = copy.deepcopy(PIPELINE)
     pipeline["phases"][1] = {"id": "exploit", "needs": ["test_run"], "steps": [
         {"id": "to_csv", "python": {"code": TO_CSV}},
-        {"id": "criteria", "needs": ["to_csv"], "exploit": exploit}]}
+        {"id": "criteria", "needs": ["to_csv"], "exploit": exploit}, *(after or [])]}
     return bench.build(name, pipeline=pipeline, **values)
 
 
@@ -611,11 +611,18 @@ def test_exploit_step(bench):
 
 
 def test_exploit_step_results(bench):
-    """A check not met fails the step; data matching nothing is an error (the outcome is unknown)."""
+    """A check not met fails the step and the run, while the steps that need it still run (unless
+    continue_on_error: false); data matching nothing is an error (the outcome is unknown)."""
     run = run_one(bench, exploit_bench(bench, "xp_bad", {"criteria": "criteria/count", "data": "dut/output/counts.csv"},
+                                       after=[{"id": "after", "needs": ["criteria"], "run": "true"},
+                                              {"id": "stopped", "needs": ["criteria"], "continue_on_error": False,
+                                               "exploit": {"criteria": "criteria/count", "data": "dut/output/counts.csv"}},
+                                              {"id": "never", "needs": ["stopped"], "run": "true"}],
                                        min_count=100000))
     assert run["verdict"] == "failed"
     record = yaml.safe_load(read_member(run, "run.yml"))
+    states = {s["id"]: s["state"] for s in record["steps"] if s["phase"] == "exploit"}
+    assert (states["after"], states["stopped"], states["never"]) == ("succeeded", "failed", "skipped")
     [step] = [s for s in record["steps"] if s["id"] == "criteria"]
     assert step["state"] == "failed" and step["reason"] == "1 of 1 check(s) not met"
     assert step["exploit"]["checks"][0]["status"] == "FAILED"

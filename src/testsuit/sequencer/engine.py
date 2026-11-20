@@ -887,7 +887,7 @@ class PhaseRunner:
                 return
             results = await asyncio.gather(*[self.run_target(fs, t) for t in targets])
             verdict = worst(results)
-            if fs.step.continue_on_error and verdict != SUCCEEDED:
+            if fs.step.goes_on and verdict != SUCCEEDED:
                 verdict = SUCCEEDED
             verdicts[fs.id] = verdict
         except asyncio.CancelledError:
