@@ -946,6 +946,22 @@ def test_api(repos, tmp_path):
         assert diff["files"] == [{"status": "M", "path": "datapack/setup/globals.yml"}]
         assert requests.post(f"{url}/edit/reachability", json={"host": "localhost", "transport": "local"}).json()["ok"]
 
+        # a data file of a datapack generated in the session (the Generate dialog): extracted, then readable
+        import zipfile
+        generated = Path(app.state.editor.get(sid).dir) / "generated"
+        generated.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(generated / "dp_x.zip", "w") as z:
+            z.writestr("dp_x/datapack.yml", "slots: {}\n")
+            z.writestr("dp_x/data/dut/input/speed.csv", "time,speed\n0,1\n1,2\n")
+        readable = requests.get(f"{url}/plot/datapacks/{sid}/dp_x/data/dut/input/speed.csv").json()
+        assert readable["format"] == "csv" and readable["fields"] == 2, readable
+        assert Path(readable["path"]).read_text().startswith("time,speed")
+        assert "speed.csv::speed" in requests.post(f"{url}/plot/sources", json={"paths": [readable["path"]]}).json()["fields"]
+        assert requests.get(f"{url}/plot/datapacks/{sid}/dp_x/datapack.yml").status_code == 404
+        assert requests.get(f"{url}/plot/datapacks/{sid}/dp_x/data/none.csv").status_code == 404
+        assert requests.get(f"{url}/plot/datapacks/{sid}/dp_x/../../x.csv").status_code == 404
+        assert requests.get(f"{url}/plot/datapacks/{sid}/nope/data/dut/input/speed.csv").status_code >= 400
+
         # the pipeline of a queued run, for the run graph
         from sequencer_t import Bench
         zip_path = Bench(tmp_path / "other").build()
@@ -955,7 +971,8 @@ def test_api(repos, tmp_path):
         run_dir = Path(seq.store.get_run(run["id"])["dir"])
         (run_dir / "speed.csv").write_text("time,speed\n0,1\n1,2\n")
         readable = requests.get(f"{url}/plot/runs/{run['id']}/speed.csv").json()
-        assert readable == {"path": str((run_dir / "speed.csv").resolve()), "format": "csv", "fields": 2}, readable
+        assert readable == {"path": str((run_dir / "speed.csv").resolve()), "format": "csv", "fields": 2, "label": "speed.csv",
+                            "names": ["time", "speed"], "size": 19}, readable
         assert requests.get(f"{url}/plot/runs/{run['id']}/datapack.yml").status_code == 404
         assert requests.get(f"{url}/plot/runs/{run['id']}/../../../etc/passwd").status_code == 404
         assert requests.get(f"{url}/plot/runs/nope/speed.csv").status_code == 404

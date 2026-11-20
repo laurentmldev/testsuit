@@ -218,7 +218,8 @@ def test_readable(data, tmp_path):
     from testsuit.exploit.editor.service import NotFound
 
     plots = PlotData()
-    assert plots.readable(str(data / "motor.tdms")) == {"path": str(data / "motor.tdms"), "format": "tdms", "fields": 4}
+    assert plots.readable(str(data / "motor.tdms")) == {"path": str(data / "motor.tdms"), "format": "tdms", "fields": 4, "label": "motor.tdms",
+                                                     "names": ["Motor___speed", "Position___x", "Position___y", "Position___z"], "size": (data / "motor.tdms").stat().st_size}
     assert plots.readable(str(data / "brake.csv"))["format"] == "csv"
     (data / "step.log").write_text("09:30:00 starting the train\n09:30:01 done\n")    # a log, not a CSV
     (data / "notes.md").write_text("# notes\n")                                        # no loader for it

@@ -368,7 +368,14 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     # the Plot page (the Exploit tab's other subtab): data of the same folders only, the runs' among them
     from testsuit.exploit.editor.plots import PlotData
     from testsuit.exploit.editor.routes import plot_routes
-    plots = PlotData(lambda path: exploit_runs().allowed(path))
+    # the data files of a generated datapack, extracted from its zip when the Plot page opens one of them
+    extracted = (seq.config.root / "plot" / "datapacks").resolve()
+
+    def plot_allowed(path: str) -> Path:
+        p = Path(os.path.expanduser(str(path))).resolve()
+        return p if p.is_relative_to(extracted) else exploit_runs().allowed(path)
+
+    plots = PlotData(plot_allowed)
     app.include_router(plot_routes(lambda: plots), prefix="/plot")
 
     @app.get("/plot/runs/{run_id}/{path:path}")
@@ -384,6 +391,47 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
             raise HTTPException(404, f"no '{path}' in the folder of run {run_id}")
         from testsuit.exploit.editor.routes import _guarded
         return await asyncio.to_thread(_guarded, plots.readable, str(target))
+
+    @app.get("/plot/datapacks/{sid}/{name}/{path:path}")
+    async def generated_data_file(sid: str, name: str, path: str):
+        """A file of a datapack generated in an editing session (the Generate dialog) the Plot page can open,
+        as for a run's: the file is extracted from the zip first, under <storage.root>/plot/datapacks (kept a
+        day), when a data loader's format names it."""
+        from testsuit.datatools.DataFileMgrs import formats
+        from testsuit.exploit.editor.routes import _guarded
+        zip_path = editor.generated(session(sid), name)
+        if formats.find_file_format(Path(path).name) is None:
+            raise HTTPException(404, f"no data loader reads '{Path(path).name}'")
+        target = await asyncio.to_thread(extract_generated, zip_path, path)
+        return await asyncio.to_thread(_guarded, plots.readable, str(target))
+
+    def extract_generated(zip_path: Path, path: str) -> Path:
+        """The file path of the generated datapack zip_path, extracted (once per version of the zip)."""
+        import shutil
+        import zipfile
+        stamp = zip_path.stat().st_mtime_ns
+        folder = extracted / f"{zip_path.parent.parent.name}-{zip_path.stem}-{stamp}"
+        target = (folder / path).resolve()
+        if not target.is_relative_to(folder):
+            raise HTTPException(404, f"no '{path}' in datapack {zip_path.stem}")
+        if not target.is_file():
+            with zipfile.ZipFile(zip_path) as archive:
+                root = archive.namelist()[0].split("/")[0]
+                try:
+                    info = archive.getinfo(f"{root}/{path}")
+                except KeyError:
+                    raise HTTPException(404, f"no '{path}' in datapack {zip_path.stem}") from None
+                target.parent.mkdir(parents=True, exist_ok=True)
+                partial = target.with_name(target.name + ".part")
+                with archive.open(info) as src, open(partial, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+                partial.replace(target)
+        os.utime(folder)           # in use: kept another day
+        # the copies of other datapacks, a day old: gone
+        for old in extracted.iterdir():
+            if old != folder and old.is_dir() and time.time() - old.stat().st_mtime > 86400:
+                shutil.rmtree(old, ignore_errors=True)
+        return target
 
     @app.get("/edit/schemas")
     async def lab_schemas():
