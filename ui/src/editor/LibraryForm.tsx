@@ -301,14 +301,16 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         <p className="muted small">A role lists commands only: the models implement them, and every lab component with this role must implement them all.</p>
       </Section>
       <RoleInputs value={r.inputs} onChange={(v) => set("inputs", v.length ? v : undefined)} inherited={(parent?.inputs || []) as any[]} help={help(["inputs"])} />
+      <RoleInputs outputs value={r.outputs} onChange={(v) => set("outputs", v.length ? v : undefined)} inherited={(parent?.outputs || []) as any[]} help={help(["outputs"])} />
       {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the models {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
       {described?.used_by?.length > 0 && <div className="hint-box small">Role of <ItemLinks kind="host" names={described.used_by} /></div>}
     </div>
   );
 }
 
-/** The inputs a role expects: datapack component types bound to the role get them by default. */
-function RoleInputs({ value, onChange, inherited, help }: { value?: any[]; onChange: (v: any[]) => void; inherited: any[]; help?: string }) {
+/** The inputs a role expects: datapack component types bound to the role get them by default. With `outputs`: the
+ *  outputs it foresees (names or patterns), proposed to exploit steps, the mandatory ones checked after a collect. */
+function RoleInputs({ value, onChange, inherited, help, outputs }: { value?: any[]; onChange: (v: any[]) => void; inherited: any[]; help?: string; outputs?: boolean }) {
   const own: any[] = Array.isArray(value) ? value : [];
   const [open, setOpen] = useState<number | null>(null);
   const set = (i: number, k: string, v: any) => onChange(own.map((x, j) => {
@@ -322,34 +324,36 @@ function RoleInputs({ value, onChange, inherited, help }: { value?: any[]; onCha
   const kind = (x: any) => x.type || (String(x.name || "").endsWith("/") ? "folder" : "file");
   const shadowed = new Set(own.map((x) => String(x.name || "").replace(/\/+$/, "")));
   return (
-    <Section title="Expected inputs" help={help}
-      actions={<button className="small" onClick={() => { onChange([...own, { name: "" }]); setOpen(own.length); }}>+ Input</button>}>
+    <Section title={outputs ? "Expected outputs" : "Expected inputs"} help={help}
+      actions={<button className="small" onClick={() => { onChange([...own, { name: "" }]); setOpen(own.length); }}>{outputs ? "+ Output" : "+ Input"}</button>}>
       <table className="grid compact role-inputs">
-        <thead><tr><th>Name in the input folder</th><th>Type</th><th /><th>How to make it</th><th /></tr></thead>
+        <thead><tr><th>{outputs ? "Name or pattern in the output folder" : "Name in the input folder"}</th><th>Type</th><th /><th>{outputs ? "What it holds" : "How to make it"}</th><th /></tr></thead>
         <tbody>
           {inherited.filter((x) => !shadowed.has(String(x.name).replace(/\/+$/, ""))).map((x) => (
             <tr key={"i:" + x.name} className="inherited">
-              <td><code>{x.name}</code></td><td>{x.type}</td><td className="small">{x.optional ? "optional" : "required"}</td>
+              <td><code>{x.name}</code></td><td>{x.type}</td><td className="small">{x.optional ? "optional" : outputs ? "checked at collect" : "required"}</td>
               <td className="small"><Markdown text={x.description || ""} /></td><td className="muted small">from {x.from}</td>
             </tr>
           ))}
           {own.map((x, i) => (
             <tr key={i}>
-              <td><input className="mono" value={x.name || ""} placeholder={kind(x) === "folder" ? "app/" : "config.yml"} onChange={(e) => set(i, "name", e.target.value)} /></td>
+              <td><input className="mono" value={x.name || ""} placeholder={outputs ? (kind(x) === "folder" ? "logs/" : "run_*.csv") : kind(x) === "folder" ? "app/" : "config.yml"} onChange={(e) => set(i, "name", e.target.value)} /></td>
               <td><select value={kind(x)} onChange={(e) => set(i, "type", e.target.value)}><option value="file">file</option><option value="folder">folder</option></select></td>
               <td><Toggle value={x.optional} onChange={(v) => set(i, "optional", v)} label="optional" /></td>
               <td className="small">
                 {open === i
-                  ? <Text multiline value={x.description} onChange={(v) => set(i, "description", v)} placeholder="What it is and how to make it (Markdown): the tool or command that produces it, where to find it…" />
-                  : <div className="clickable" title="Edit" onClick={() => setOpen(i)}>{x.description ? <Markdown text={x.description} /> : <span className="muted">+ how to make it</span>}</div>}
+                  ? <Text multiline value={x.description} onChange={(v) => set(i, "description", v)} placeholder={outputs ? "What it holds (Markdown): its format, its fields, when it is written…" : "What it is and how to make it (Markdown): the tool or command that produces it, where to find it…"} />
+                  : <div className="clickable" title="Edit" onClick={() => setOpen(i)}>{x.description ? <Markdown text={x.description} /> : <span className="muted">{outputs ? "+ what it holds" : "+ how to make it"}</span>}</div>}
                 {open === i && <button className="small" onClick={() => setOpen(null)}>Done</button>}
               </td>
-              <td><button className="icon" title="Remove this input" onClick={() => onChange(own.filter((_, j) => j !== i))}>×</button></td>
+              <td><button className="icon" title={outputs ? "Remove this output" : "Remove this input"} onClick={() => onChange(own.filter((_, j) => j !== i))}>×</button></td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!own.length && !inherited.length && <p className="muted small">None yet. A component of this role expects these files or folders in its input folder; the datapack component types bound to this role get the required ones by default.</p>}
+      {!own.length && !inherited.length && <p className="muted small">{outputs
+        ? "None yet. Files, folders or patterns (run_*.csv) a component of this role writes in its output folder: the exploit steps propose them as data, and a collect fails when a mandatory one is missing (optional: only proposed)."
+        : "None yet. A component of this role expects these files or folders in its input folder; the datapack component types bound to this role get the required ones by default."}</p>}
     </Section>
   );
 }

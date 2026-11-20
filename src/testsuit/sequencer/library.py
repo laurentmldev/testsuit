@@ -34,7 +34,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Inventory, Stage
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-ROLE_KEYS = {"extends", "description", "commands", "inputs"}
+ROLE_KEYS = {"extends", "description", "commands", "inputs", "outputs"}
 INPUT_KEYS = {"name", "type", "optional", "description"}
 INPUT_TYPES = ("file", "folder")
 COMPONENT_KEYS = {"extends", "roles", "description", "transport", "commands", "status", "selftest", "collect"}
@@ -119,6 +119,48 @@ def _role_inputs(value: Any, where: str) -> list[dict]:
     return inputs
 
 
+def _role_outputs(value: Any, where: str) -> list[dict]:
+    """The outputs a role foresees (SPEC section 4.2): each a file or a folder of the component's output folder, by
+    name or glob pattern (a folder ending with /). Mandatory unless optional: a collect without it fails."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SequencerError(f"{where}: 'outputs' is a list of {{name, type, optional, description}}")
+    outputs, names = [], set()
+    for i, item in enumerate(value, 1):
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+            raise SequencerError(f"{where}: output {i} needs a 'name' (its path or pattern in the output folder)")
+        unknown = set(item) - INPUT_KEYS
+        if unknown:
+            raise SequencerError(f"{where}: output '{item['name']}': unknown keys {sorted(unknown)}")
+        kind = str(item.get("type") or ("folder" if str(item["name"]).endswith("/") else "file"))
+        if kind not in INPUT_TYPES:
+            raise SequencerError(f"{where}: output '{item['name']}': type '{kind}' is not file or folder")
+        name = str(item["name"]).strip().lstrip("/")
+        if ".." in name.split("/"):
+            raise SequencerError(f"{where}: output '{name}' must stay in the output folder")
+        name = name.rstrip("/") + "/" if kind == "folder" else name
+        if name in names:
+            raise SequencerError(f"{where}: output '{name}' listed twice")
+        names.add(name)
+        outputs.append({"name": name, "type": kind, "optional": bool(item.get("optional")),
+                        "description": str(item.get("description") or "")})
+    return outputs
+
+
+def missing_outputs(outputs: list[dict], folder: Path) -> list[str]:
+    """The mandatory outputs that a collected output folder does not hold (a pattern: no match of its type)."""
+    missing = []
+    for item in outputs:
+        if item.get("optional"):
+            continue
+        pattern = item["name"].rstrip("/")
+        found = [p for p in folder.glob(pattern)] if folder.is_dir() else []
+        if not any(p.is_dir() if item["type"] == "folder" else p.is_file() for p in found):
+            missing.append(item["name"])
+    return missing
+
+
 @dataclass
 class RoleDef:
     name: str
@@ -126,6 +168,7 @@ class RoleDef:
     description: str = ""
     commands: dict[str, str] = field(default_factory=dict)     # name -> what it does
     inputs: list[dict] = field(default_factory=list)           # what a component of the role expects as inputs
+    outputs: list[dict] = field(default_factory=list)          # what it is foreseen to produce (collected)
     source: str = "<builtin>"
 
     @classmethod
@@ -146,7 +189,8 @@ class RoleDef:
                                  "(`start: start the application`), not how it is done: implementations go in the lab components")
         return cls(name=name, extends=str(data.get("extends") or ""), description=str(data.get("description") or ""),
                    commands={str(k): str(v or "") for k, v in commands.items()},
-                   inputs=_role_inputs(data.get("inputs"), f"{source}: role '{name}'"), source=source)
+                   inputs=_role_inputs(data.get("inputs"), f"{source}: role '{name}'"),
+                   outputs=_role_outputs(data.get("outputs"), f"{source}: role '{name}'"), source=source)
 
 
 @dataclass
@@ -287,6 +331,14 @@ class Library:
             for cmd, text in role.commands.items():
                 commands[cmd] = {"description": text or commands.get(cmd, {}).get("description", ""), "from": role.name}
         return commands
+
+    def role_outputs(self, name: str) -> list[dict]:
+        """The outputs a role foresees, its parents' first (a role redefines one by name), with the role listing it."""
+        outputs: dict[str, dict] = {}
+        for role in self.role_chain(name):
+            for item in role.outputs:
+                outputs[item["name"]] = {**item, "from": role.name}
+        return list(outputs.values())
 
     def role_inputs(self, name: str) -> list[dict]:
         """The inputs a role expects, its parents' first (a role redefines one by name), with the role listing it."""

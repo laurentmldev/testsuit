@@ -24,6 +24,10 @@ roles:
           The application release for this calculator: the folder of its role in the
           toy-train software release (`toytrain-sw-<version>/<role>/`), with `bin/` and `lib/`.
           Built by `make release` in the toytrain-sw repository, or imported as a dataset.
+    outputs:                    # foreseen in its output folder once collected (optional: only proposed as data)
+      - name: app.log
+        optional: true
+        description: The application log.
 
   pilot:
     extends: toytrain_app
@@ -39,6 +43,9 @@ roles:
   telemetry:
     extends: toytrain_app
     description: CALC-TM, telemetry
+    outputs:                    # checked after each collect, proposed to the exploit steps
+      - name: telemetry.csv
+        description: The telemetry recorded by CALC-TM (20 Hz), speed and pilot commands.
 
   acquisition:
     extends: toytrain_app
@@ -57,14 +64,24 @@ roles:
       stop:    Stops the simulation.
       ready:   Waits until the simulation logs READY.
       version: Prints the version of the simulation release.
+    outputs:
+      - name: sim.log
+        optional: true
+        description: The simulation log.
 
   propulsion_sim:
     extends: toytrain_sim
     description: The simulated propulsion controller
+    outputs:
+      - name: propulsion.propj
+        description: The record of the simulated propulsion controller (speed sent).
 
   piezo_sim:
     extends: toytrain_sim
     description: The simulated piezo sensors
+    outputs:
+      - name: piezo.csv
+        description: The contacts the simulated piezo sensors sent.
 
   sequencer:
     extends: linux_system

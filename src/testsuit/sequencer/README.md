@@ -994,7 +994,21 @@ The toy-train example has one: `check_data` in the exploit phase of its test def
 - **Binding, known before the run**: `criteria` is never a template, so the tools read it from the pipeline as written. The datapack copies only the criteria its exploit steps name (into `definition/`), and generating it fails when one is missing. The Datapacks tab lists them per step with the data each one reads, and the scenarios of the test definition no step uses ("left out of the datapack"); the criteria editor marks each scenario with the steps that check it.
 - **Run**: no `slot`: on the sequencer host, as a separate process (`python -m testsuit.cli.exploit_runner` with tsqd's interpreter, so the criteria plugins installed there are available). One exploit_runner session per criteria entry, on every file or folder the data entries match; the scenarios are rendered with the step's keys (`keys.yml`). Its configuration and results stay in the run folder, under `data/_sequencer/exploit/<step>/`, and so in the results datapack.
 - **Result**: `succeeded` when every check is met, `failed` when one is not, `error` when they cannot be judged (no data matches, a criteria entry missing, exploit_runner crashed, timeout). The steps that need it run anyway (other criteria, a report), while its result still counts in the run verdict; `continue_on_error: false` makes them skipped instead, and `true` leaves it out of the verdict as for any step. Each check's status is recorded with the step: the Run page shows them next to its log, with a link to the HTML report, and the step's node counts the checks met.
-- **Help in the Editor**: the palette offers **check criteria**; its form picks the scenario folders of the workspace and proposes the outputs of each phase as data.
+- **Help in the Editor**: the palette offers **check criteria**; its form picks the scenario folders of the workspace and proposes as data, for each phase, the outputs the lab role of each of its slots foresees, then the slot's whole output folder. Any sub-folder, file or pattern (`test_run:logger/output/run_*.csv`) can be typed.
+
+**Foreseen outputs of a role** ([SPEC](SPEC.md) section 4.2). A lab role lists, next to the inputs it expects, the outputs its components write in their output folder: a name, a folder (ending with `/`) or a glob pattern, each with what it holds.
+
+```yaml
+roles:
+  telemetry:
+    extends: linux_system
+    outputs:
+      - {name: telemetry.csv, description: "speed and commands, 20 Hz"}
+      - {name: logs/}
+      - {name: "trace_*.csv", optional: true, description: "only in debug mode"}
+```
+
+The exploit step form proposes them. A mandatory one (the default) is also checked after each `do: collect` on a slot of that role: missing, the collect step fails, naming it, so a lost recording reads as such rather than as a criterion failing; an optional one missing is only noted in the step log. The lab editor edits them in the role form (**Expected outputs**).
 
 The `run: exploit_runner <config>` step of earlier versions still works, but the tools cannot tell which criteria it uses.
 

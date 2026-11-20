@@ -364,6 +364,19 @@ ROLE = h(
                             "optional": h("The component works without it.", type="boolean"),
                             "description": h("What it is and how to make it (Markdown, as long as needed): shown in "
                                              "the Editor next to the datapack input.", type="string")})),
+        "outputs": h("The outputs a component of this role is foreseen to produce, in its output folder once "
+                     "collected (section 4.2): exploit steps propose them as data. A mandatory one (the default) "
+                     "missing after a `collect` fails that step; an optional one is only listed. A role extending "
+                     "another one adds to its outputs, or redefines one by name.", type="array", items=h(
+                         "An output the role foresees.", type="object", required=["name"], additionalProperties=False,
+                         properties={
+                             "name": h("Its path in the component's output folder, or a glob pattern (`telemetry.csv`, "
+                                       "`logs/`, `run_*.csv`). A folder ends with `/`.", type="string"),
+                             "type": h("`file` (default) or `folder`.", type="string", enum=["file", "folder"]),
+                             "optional": h("Not always produced: listed for the exploit steps, never checked.",
+                                           type="boolean"),
+                             "description": h("What it holds (Markdown): shown in the Editor where data is picked.",
+                                              type="string")})),
         "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
                       "models.", type="object",
                       properties={name: h(f"**{name}**: {text}", type=["string", "null"])
