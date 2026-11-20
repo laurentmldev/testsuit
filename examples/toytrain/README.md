@@ -226,10 +226,12 @@ docker compose up --build      # then open http://localhost:8640
 | File | Content |
 |---|---|
 | `Dockerfile` | the image: system packages, Miniconda, `testsuit[sequencer]` from PyPI, then this package (`pip install -e`) and the example's files in `/app` |
-| `docker-compose.yml` | the `toytrain` service: build arguments taken from `.env`, port 8640, the datapack, lab and `.work/` folders mounted from the host, the sequencer storage (`~/.toytrain-emu`) in a named volume |
+| `docker-compose.yml` | the `toytrain` service: build arguments taken from `.env`, port 8640, the sequencer configuration (`tsq.dev.yml`, or `TOYTRAIN_CONFIG`), the datapack, lab and `.work/` folders mounted from the host, the sequencer storage (`~/.toytrain-emu`) in a named volume |
 | `.env.sample` | every setting of the compose file, to copy to `.env` (which Git ignores) |
 
 The datapack and lab folders are mounted from host paths, so what the Editor changes lands directly in your working copies, ready to be reviewed, committed and pushed from the host, and the reverse. By default they are this example's `datapack/` and `lab/`; point `TOYTRAIN_DATAPACK_DIR` and `TOYTRAIN_LAB_DIR` in `.env` to your own clones of the tests and lab repositories instead. The container runs as `TOYTRAIN_UID:TOYTRAIN_GID` (default `1000:1000`; set them to the output of `id -u` and `id -g`), so the files it writes there belong to you, not to root.
+
+The sequencer configuration is mounted read-only from the host (`tsq.dev.yml` by default, or the file named by `TOYTRAIN_CONFIG` in `.env`) rather than copied into the image, so after editing it `docker compose restart` applies it without a rebuild. If you move `storage.root`, keep it under `~/.toytrain-emu` (the named volume) or mount a volume or host folder at the new path: anything else lives in the container only and is lost when it is recreated, for example by `docker compose up --build`.
 
 Any other command runs in the same image:
 

@@ -15,6 +15,8 @@
 #   cp .env.sample .env          # optional: host folders and user, proxies, port, testsuit version
 #   mkdir -p .work               # before the first run: a missing mounted folder would be created by root
 #   docker compose up --build    # then open http://localhost:8640
+# The sequencer's configuration (tsq.dev.yml) is mounted from the host: after editing it,
+#   docker compose restart       # is enough, no rebuild needed
 # Any other command runs in the same image, for example:
 #   docker compose run --rm --entrypoint datapack toytrain datapack/testdef/max_speed/testdef.yml --nocheck
 #   docker compose run --rm --entrypoint pytest toytrain
@@ -36,6 +38,10 @@ services:
     ports:
       - "${TSQ_PORT:-8640}:8640"
     volumes:
+      # the sequencer's configuration, read at each start: mounted rather than copied into the image, so that an
+      # edit on the host is applied by a restart (keep storage.root under ~/.toytrain-emu, the named volume below,
+      # or mount another volume there: anything else is lost when the container is recreated)
+      - ${TOYTRAIN_CONFIG:-./tsq.dev.yml}:/app/tsq.dev.yml:ro
       # the test definitions and the lab, host folders (git working copies) edited from the host or the Editor
       - ${TOYTRAIN_DATAPACK_DIR:-./datapack}:/app/datapack
       - ${TOYTRAIN_LAB_DIR:-./lab}:/app/lab
