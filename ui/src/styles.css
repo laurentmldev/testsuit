@@ -1038,3 +1038,7 @@ tr.bypassed td { background: var(--warn-soft); }
 /* tsqd: the Plot subtab of the Exploit tab, under its subtabs, fills the rest of the window */
 main.plot-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 main.plot-host .subtabs-row { margin: 0; max-width: none; }
+/* a small data file plotted above its text, in a file browser */
+.file-plot { height: 300px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.file-plot.hidden { height: 0; border: 0; margin: 0; overflow: hidden; }   /* not display: none: its width is known */
+.file-plot-canvas { width: 100%; height: 298px; }

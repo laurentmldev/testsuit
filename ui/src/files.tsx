@@ -12,11 +12,12 @@
 // see <https://www.gnu.org/licenses/>.
 
 // File tree with viewers for text, YAML, CSV, logs and images, plus downloads (sequencer README, section 13.1).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parse } from "yaml";
-import { get, url } from "./api";
+import { get, post, url } from "./api";
 import { CodeEditor, languageOf, type ValueHover } from "./monaco";
 import { classes, openInNewTab, size } from "./util";
+import { CONFIG, PALETTE, plotly, themed, TIME } from "./plot/PlotPage";
 
 export interface Entry {
   name: string;
@@ -150,7 +151,44 @@ export function FileBrowser({ base, query, initial, plot }: { base: string; quer
 }
 
 /** The file on this host and its data format, when the Plot page can open it (GET plot: 404 when not). */
-interface Readable { path: string; format: string; fields: number | null }
+interface Readable { path: string; format: string; fields: number | null; label: string; names: string[] | null; size: number }
+
+// a data file plotted where it is shown: 3 fields or fewer (its times left out), of 2 to 100k values
+const INLINE_FIELDS = 3;
+const INLINE_MIN = 2;
+const INLINE_MAX = 100_000;
+const INLINE_BYTES = 20 << 20;      // a bigger file holds more values: not loaded to find out
+
+/** The fields of a small data file, plotted (2D, against time) by the Plot page's backend; nothing when it has
+ *  too few or too many values. */
+function InlinePlot({ file }: { file: Readable }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
+  const fields = (file.names || []).filter((f) => !TIME.test(f));
+  const key = `${file.path}|${fields.join(",")}`;
+  useEffect(() => {
+    setShown(false);
+    let current = true;
+    const spec = { sources: [file.path], projection: "2d", legend: fields.length > 1, xTimestamp: true, maxPoints: INLINE_MAX,
+      traces: fields.map((f, i) => ({ id: f, fields: [`${file.label}::${f}`], label: "", color: PALETTE[i % PALETTE.length],
+        linestyle: "solid", marker: ",", drawstyle: "default", offset: "", hidden: false })) };
+    Promise.all([plotly(), post<{ figure: any; traces: { points: number; error: string | null }[] }>("plot/figure", spec)])
+      .then(async ([P, answer]) => {
+        const points = Math.max(0, ...answer.traces.map((t) => t.points || 0));
+        if (!current || !answer.figure || points < INLINE_MIN || points > INLINE_MAX || !box.current) return;
+        setShown(true);
+        const { data, layout } = themed(answer.figure, key);
+        // a quick look: sized to its box, no toolbar (the Plot… button has the rest)
+        await P.react(box.current, data, { ...layout, title: undefined, autosize: false, width: box.current.clientWidth, height: 298,
+          margin: { l: 50, r: 20, t: 10, b: 40 } }, { ...CONFIG, displayModeBar: false });
+      })
+      .catch(() => { /* not plotted here: the Plot… button tells why */ });
+    return () => { current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  // plotly marks the div it draws in with classes of its own: React must not set its className again
+  return <div className={classes("file-plot", !shown && "hidden")}><div ref={box} className="file-plot-canvas" /></div>;
+}
 
 export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
   const [text, setText] = useState<string | null>(null);
@@ -206,6 +244,9 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
           </table>
         </details>
       )}
+      {readable && readable.size <= INLINE_BYTES && readable.names
+        && (n => n >= 1 && n <= INLINE_FIELDS)(readable.names.filter((f) => !TIME.test(f)).length)
+        && <InlinePlot key={readable.path} file={readable} />}
       {IMAGE.test(path) && <img className="file-image" src={href} alt={path} />}
       {!IMAGE.test(path) && !isText && <p className="muted">Binary file: download it to open it.</p>}
       {text !== null && /\.(csv|tsv)$/i.test(path) && mode === "auto" && <CsvTable text={text} tab={/\.tsv$/i.test(path)} />}

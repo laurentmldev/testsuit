@@ -26,20 +26,20 @@ const BASE = "plot";
 const STORE = "mxp.plot";
 
 // plotly's default colors: a new trace takes the first one no trace uses
-const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
+export const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"];
 const LINES: [string, string][] = [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["dashdot", "Dash-dot"], ["", "No line"]];
 const MARKERS: [string, string][] = [[",", "None"], [".", "Dot"], ["o", "Circle"], ["x", "Cross"], ["d", "Diamond"], ["*", "Star"], ["2", "Triangle"], ["_", "Horizontal bar"], ["|", "Vertical bar"]];
 const DRAWS: [string, string][] = [["default", "Straight"], ["steps-post", "Steps (post)"], ["steps-pre", "Steps (pre)"], ["steps-mid", "Steps (mid)"]];
 const FILLS: [string, string][] = [["none", "None"], ["solid", "Solid"], ["gradient", "Gradient"]];
 // plotly.js config: drag pans (the wheel zooms), and nothing may leave the page: plotly.js 3 shows a
 // "Share to Plotly Cloud" button by default, uploading the figure (plotlyBackend.PRIVATE_CONFIG)
-const CONFIG = { responsive: true, scrollZoom: true, displaylogo: false, showSendToCloud: false,
+export const CONFIG = { responsive: true, scrollZoom: true, displaylogo: false, showSendToCloud: false,
   plotlyServerURL: "", modeBarButtonsToRemove: ["toImage"] };
 const POINTS: [number, string][] = [[20000, "20k"], [100000, "100k"], [500000, "500k"], [2000000, "2M"]];
 const MAX_LISTED = 400;
 // a data source added with this many fields or fewer, its times left out, is plotted at once
 const AUTO_PLOT = 3;
-const TIME = /^(time|times|timestamps?|date|dates|datetime|time_?s|t)$/i;
+export const TIME = /^(time|times|timestamps?|date|dates|datetime|time_?s|t)$/i;
 
 interface Trace {
   id: string; fields: string[]; label: string; color: string; linestyle: string; marker: string; drawstyle: string;
@@ -69,7 +69,7 @@ function load(): State {
 // ── plotly.js, served by mxp webui from the plotly package ─────────────
 
 let plotlyLoading: Promise<any> | null = null;
-function plotly(): Promise<any> {
+export function plotly(): Promise<any> {
   const w = window as any;
   if (w.Plotly) return Promise.resolve(w.Plotly);
   plotlyLoading ||= new Promise((resolve, reject) => {
@@ -83,7 +83,7 @@ function plotly(): Promise<any> {
 }
 
 /** The figure in the colors of the page (light or dark), filling its box. */
-function themed(fig: any, uirevision: string): any {
+export function themed(fig: any, uirevision: string): any {
   const css = getComputedStyle(document.documentElement);
   const v = (n: string) => css.getPropertyValue(n).trim();
   const text = v("--text"), grid = v("--border"), panel = v("--panel");

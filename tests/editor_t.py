@@ -971,7 +971,8 @@ def test_api(repos, tmp_path):
         run_dir = Path(seq.store.get_run(run["id"])["dir"])
         (run_dir / "speed.csv").write_text("time,speed\n0,1\n1,2\n")
         readable = requests.get(f"{url}/plot/runs/{run['id']}/speed.csv").json()
-        assert readable == {"path": str((run_dir / "speed.csv").resolve()), "format": "csv", "fields": 2}, readable
+        assert readable == {"path": str((run_dir / "speed.csv").resolve()), "format": "csv", "fields": 2, "label": "speed.csv",
+                            "names": ["time", "speed"], "size": 19}, readable
         assert requests.get(f"{url}/plot/runs/{run['id']}/datapack.yml").status_code == 404
         assert requests.get(f"{url}/plot/runs/{run['id']}/../../../etc/passwd").status_code == 404
         assert requests.get(f"{url}/plot/runs/nope/speed.csv").status_code == 404
