@@ -726,6 +726,35 @@ def test_bypassed_selftest_check(tmp_path, no_git):
     assert not ended["ok"] and not ended["bypassed"]
 
 
+def test_bypassed_passing_selftest_check(tmp_path, no_git):
+    """A check that passes now can be bypassed ahead (it fails once in a while): the check carries its bypass, a run
+    that sees it pass stays conform; once it fails, the component stays usable and the run is not conform."""
+    bench = Bench(tmp_path, stages=1)
+    flag = tmp_path / "flaky_ok"
+    flag.write_text("")
+    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
+    types["models"]["counter_host"]["selftest"] = [{"id": "flaky", "run": f"test -e {flag}"}]
+    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        bypassed = await seq.bypass_check("counter_1", "flaky", 2, "fails once in a while", "laurent")
+        [passing] = await run_until_done(seq, [seq.submit(bench.build())["id"]])
+        flag.unlink()
+        [failing_test] = await seq.selftest("counter_1")
+        [failing] = await run_until_done(seq, [seq.submit(bench.build())["id"]])
+        await seq.close()
+        return bypassed, passing, failing_test, failing
+    bypassed, passing, failing_test, failing = asyncio.run(main())
+    check = next(c for c in bypassed["checks"] if c["id"] == "flaky")
+    assert bypassed["ok"] and check["ok"] and check["bypassed"]["reason"] == "fails once in a while"
+    assert bypassed["bypassed"] == []                   # nothing relied on it: it passed
+    assert passing["verdict"] == "succeeded" and not any("bypassed" in n for n in passing["nonconform"] or [])
+    assert failing_test["ok"] and failing_test["bypassed"] == ["flaky"]
+    assert failing["verdict"] == "succeeded" and failing["conform"] is False
+    assert any("self-test check 'flaky' of counter_1 failed" in n for n in failing["nonconform"]), failing["nonconform"]
+
+
 def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
     """A failed self-test leaves the component broken while its probe says idle; becoming idle (or being
     probed idle while kept broken) runs a self-test, and the one that passes brings it back."""

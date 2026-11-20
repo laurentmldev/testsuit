@@ -244,17 +244,19 @@ function ProbeStep({ step, index, running }: { step: any; index: number; running
 
 const NOT_BYPASSABLE = ["login", "status"];        // the sequencer refuses them (README section 7.6)
 
-/** The bypass of a failed self-test check: who, until when and why, with End bypass. */
+/** The bypass of a self-test check: who, until when and why, with End bypass. */
 function BypassNote({ comp, check, onChanged }: { comp: string; check: any; onChanged: (result: any) => void }) {
   const b = check.bypassed;
   const end = async () => {
-    if (!window.confirm(`End the bypass of ${check.id}? The component is broken again while this check fails.`)) return;
+    if (!window.confirm(check.ok ? `End the bypass of ${check.id}? It passes now, but the component turns broken the next time it fails.`
+      : `End the bypass of ${check.id}? The component is broken again while this check fails.`)) return;
     const result = await attempt(() => post(`components/${comp}/bypass`, { check: check.id, hours: 0 }), `${comp}: bypass of ${check.id} ended`);
     if (result) onChanged(result);
   };
   return (
     <div className="bypass-note">
-      <span className="badge warn">bypassed</span> until {time(b.until)}{b.by ? <> by <strong>{b.by}</strong></> : null}: {b.reason}
+      <span className="badge warn" title={check.ok ? "It passes now: runs stay conform while it passes" : "It fails: runs that use the component are not conform"}>bypassed</span>
+      {check.ok && <span className="muted"> (passes now)</span>} until {time(b.until)}{b.by ? <> by <strong>{b.by}</strong></> : null}: {b.reason}
       {" "}<button className="small" onClick={end}>End bypass</button>
     </div>
   );
@@ -277,8 +279,12 @@ function BypassForm({ comp, check, onClose, onChanged }: { comp: string; check: 
   return (
     <div className="bypass-form">
       <p className="small">
-        Bypass the failed check <code>{check.id}</code> of <code>{comp}</code>: the component stays usable while it fails.
-        Every run that uses it in the meantime is <strong>not conform</strong>, and its results say why.
+        {check.ok
+          ? <>Bypass the check <code>{check.id}</code> of <code>{comp}</code>, which passes now: if it fails once in a while
+            in the meantime, the component stays usable. A run whose self-test sees it fail is <strong>not conform</strong>,
+            and its results say why; a run that sees it pass stays conform.</>
+          : <>Bypass the failed check <code>{check.id}</code> of <code>{comp}</code>: the component stays usable while it fails.
+            Every run that uses it in the meantime is <strong>not conform</strong>, and its results say why.</>}
       </p>
       <div className="bypass-fields">
         <label>For <input type="number" min={1} max={72} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} /> hours</label>
@@ -294,10 +300,11 @@ function BypassForm({ comp, check, onClose, onChanged }: { comp: string; check: 
   );
 }
 
-/** The checks of a self-test; with `comp`, a failed check can be bypassed for a while (and its bypass ended). */
+/** The checks of a self-test; with `comp`, a check (failed, or passing but failing once in a while) can be bypassed
+ *  for a while, and its bypass ended. */
 function Checks({ checks, comp, onChanged, brief }: { checks: any[]; comp?: string; onChanged?: (result: any) => void; brief?: boolean }) {
   const [bypassing, setBypassing] = useState<string | null>(null);
-  const can = (c: any) => comp && onChanged && !c.ok && !c.skipped && !c.bypassed && !NOT_BYPASSABLE.includes(c.id);
+  const can = (c: any) => comp && onChanged && !c.skipped && !c.bypassed && !NOT_BYPASSABLE.includes(c.id) && !NOT_BYPASSABLE.includes(c.spec?.builtin);
   const picked = checks.find((c) => c.id === bypassing);
   return (
     <>
@@ -314,7 +321,9 @@ function Checks({ checks, comp, onChanged, brief }: { checks: any[]; comp?: stri
                 {brief ? c.detail : <pre>{c.detail}</pre>}
                 {c.bypassed && comp && onChanged && <BypassNote comp={comp} check={c} onChanged={onChanged} />}
                 {can(c) && bypassing !== c.id && (
-                  <div><button className="small" title="Keep the component usable while this check fails, for some hours (runs are then not conform)"
+                  <div><button className="small" title={c.ok
+                    ? "This check passes now: keep the component usable if it fails once in a while, for some hours (a run that sees it fail is not conform)"
+                    : "Keep the component usable while this check fails, for some hours (runs are then not conform)"}
                     onClick={() => setBypassing(c.id)}>Bypass…</button></div>
                 )}
               </td>
@@ -421,7 +430,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="banner warn">
               Bypassed self-test check{bypasses.length > 1 ? "s" : ""}: {bypasses.map(([check, b], i) => (
                 <span key={check}>{i > 0 && "; "}<code>{check}</code> until {time(b.until)}{b.by ? ` by ${b.by}` : ""} ({b.reason})</span>
-              ))}. Runs that use this component are not conform.
+              ))}. Runs that use this component while a bypassed check fails are not conform.
             </div>
           )}
           {!live && !failure && selftest && (
