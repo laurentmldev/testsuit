@@ -1420,7 +1420,27 @@ class Editor:
         for problem in comment_problems(pipeline):
             line, column = _find_line(text, problem)
             problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
+        for name, problem in self._criteria_problems(session, rel):
+            line, column = _find_line(text, name)
+            problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
         return problems
+
+    def _criteria_problems(self, session: EditSession, testdef_rel: str) -> list[tuple[str, str]]:
+        """(criteria, problem) for each criteria an exploit step names that is not there: the datapack could
+        not be generated (paths relative to the test definition)."""
+        from testsuit.sequencer.exploitstep import pipeline_exploit_steps
+        path = self.path(session, testdef_rel)
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return []
+        out = []
+        for step in pipeline_exploit_steps(raw.get("pipeline") if isinstance(raw, dict) else None, path.parent):
+            for name in step["criteria"]:
+                if not (path.parent / name).exists():
+                    out.append((name, f"step '{step['id']}': criteria '{name}' not found (exploit criteria are "
+                                      "scenario folders, relative to the test definition)"))
+        return out
 
     def _mismatches(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                     setup_path: Path | None = None) -> list[str]:
@@ -1631,7 +1651,8 @@ class Editor:
                       for slot, count in _input_counts(setup_raw, setup_config).items()
                       if count and slot in flat["used"] and slot not in flat["deployed"]]
         return (problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
-                + [f"inputs: {p}" for p in undeployed])
+                + [f"inputs: {p}" for p in undeployed]
+                + [f"criteria: {p}" for _, p in self._criteria_problems(session, testdef_rel)])
 
     def _datapack_keys(self, session: EditSession, testdef_rel: str, setup_config: str | None) -> dict | None:
         """The keys a datapack of this test definition would hold (its ``context.yml``), unresolved: their

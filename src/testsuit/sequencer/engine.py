@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import shlex
+import shutil
 import socket
 import sys
 import time
@@ -158,13 +159,15 @@ class StepRecord:
     lab_command: dict | None = None
     # an upload running now (http body_file): {"sent": bytes, "total": bytes}, for the Run page's progress bar
     progress: dict | None = None
+    # an exploit step's results: {folder, report, status, checks: [{criteria, scenario, check, status}]}
+    exploit: dict | None = None
 
     @property
     def key(self) -> str:
         return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None or k != "progress"}
+        return {k: v for k, v in self.__dict__.items() if v is not None or k not in ("progress", "exploit")}
 
 
 class Aborted(Exception):
@@ -335,6 +338,8 @@ class StepRunner:
                 spec = {"python": self.step.python}
             elif action == "http":
                 spec = {"http": self.step.http}
+            elif action == "exploit":
+                return await self.exploit(render(self.step.exploit, keys, self.fs.id), keys, timeout)
             elif action == "do":
                 spec = self.command(self.step.do)
             elif action in ("push", "pull"):
@@ -479,6 +484,50 @@ class StepRunner:
             self.note("the script raised an exception: error, not failed")
             return ERROR, "python exception"
         return verdict, reason
+
+    async def exploit(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
+        """Criteria checked on outputs of the run (SPEC section 6.8): exploit_runner on the sequencer host, on the
+        criteria the datapack holds and the files of the run folder the data entries match. Succeeded when every
+        check is met, failed when one is not, error when exploit_runner could not run them."""
+        from testsuit.sequencer import exploitstep as xs
+        xs.check_exploit(spec, f"step '{self.fs.id}'")
+        criteria = [str(c) for c in xs.as_list(spec["criteria"])]
+        folders = [self.ctx.bag / "definition" / xs.definition_target(c) for c in criteria]
+        absent = [c for c, f in zip(criteria, folders) if not f.exists()]
+        if absent:
+            self.note(f"criteria not in the datapack: {', '.join(absent)}")
+            return ERROR, f"criteria not in the datapack: {', '.join(absent)}"
+        data, missing = xs.data_paths(self.ctx.bag, [str(d) for d in xs.as_list(spec["data"])], list(self.ctx.bound))
+        for entry in missing:
+            self.note(f"no file of the run matches '{entry}'")
+        if not data:
+            return ERROR, "no data to check: " + ", ".join(missing)
+        work = self.ctx.bag / xs.RUN_FOLDER / self.fs.id
+        if work.exists():                              # a retry starts again
+            shutil.rmtree(work)
+        work.mkdir(parents=True)
+        sessions = xs.session_names(criteria)
+        title = str(spec.get("name") or f"{keys.get('testdef', {}).get('name') or self.ctx.datapack.name} - {self.fs.id}")
+        config = xs.write_config(work, title, str(spec.get("description") or ""), folders, sessions, data, keys)
+        self.note("criteria: " + ", ".join(criteria))
+        self.note("data: " + ", ".join(p.relative_to(self.ctx.bag).as_posix() for p in data))
+        verdict, reason = await self.shell(xs.command(config, work), dict(render(self.step.env, keys, self.fs.id)),
+                                           timeout, False, {"exit": ["any"]})
+        self.record.exploit = xs.read_checks(work, sessions, criteria)
+        if verdict != SUCCEEDED:                       # did not complete: crash, timeout, cancel
+            return verdict, reason
+        checks = self.record.exploit.get("checks") or []
+        bad = list(xs.iter_bad(checks))
+        status = self.record.exploit.get("report") and f", report {self.record.exploit['report']}" or ""
+        if self.record.exit_status == 0:
+            self.note(f"{len(checks)} check(s) met{status}")
+            return SUCCEEDED, ""
+        if self.record.exit_status == xs.EXIT_FAILED:
+            for c in bad:
+                self.note(f"{c['status']}: {c['criteria']} {c['check'] or c['scenario']}")
+            return FAILED, f"{len(bad)} of {len(checks)} check(s) not met"
+        self.note(f"exploit_runner ended with exit status {self.record.exit_status}{status}")
+        return ERROR, f"exploit_runner exit status {self.record.exit_status}"
 
     def via_place(self, name: str) -> tuple:
         """The component a command's via names, its transport and remote root (bound with the component)."""

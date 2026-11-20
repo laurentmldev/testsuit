@@ -860,9 +860,10 @@ slot_types:
     configurations:
       standard:
         inputs:
-          - {source: templates/exploit.yml, target: exploit.yml}
-          - {source: "{{ testdef.path }}/criteria/", target: scenario/, method: copy}
+          - {source: scripts/check_data.py, target: check_data.py, method: copy}   # its own checks (a python step)
 ```
+
+The criteria are not inputs of a slot: the exploit steps of the pipeline name them, and the datapack holds those only (section 8.3).
 
 `extends` and `commands` in a slot type, or `commands` in a slot, are refused with what to write instead. A command only this test needs is a `run:` step of the pipeline, on the slot (section 8.3).
 
@@ -906,12 +907,16 @@ pipeline:
         - {from: "test_run:actuator/output/actuator.log", to: "analysis/input/data/"}
       steps:
         - {id: deploy, slot: analysis, do: deploy}
-        - id: analyse                      # a command of this test only: a run step on the slot
+        - id: check_data                   # a command of this test only: a python step on the slot
           slot: analysis
           needs: [deploy]
-          run: "exploit_runner {{ slot.input_dir }}/exploit.yml"
+          python: {script: "{{ slot.input_dir }}/check_data.py", args: ["{{ slot.input_dir }}/data"]}
+        - id: analyse                      # the criteria, on outputs of the test run (exploit step, below)
+          needs: [check_data]
+          exploit:
+            criteria: [criteria/speed]     # scenario folders, relative to the test definition
+            data: ["test_run:logger/output/logger.csv", "test_run:actuator/output/actuator.log"]
           timeout: 15m
-          expect: {exit: [0]}              # exit 0: criteria ok, else failed
       finally:
         - {id: collect, slot: analysis, do: collect}
 ```
@@ -940,7 +945,7 @@ A card can also be given as its text only. A card pinned to a step that its phas
 
 Step fields:
 - target: `slot`, or `for_each` (a list of slots, `slots` for all the slots of the phase, or a role); the step runs on the lab component bound to each slot;
-- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
+- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `exploit` (criteria on outputs of the run, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
 - options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
 
 `expect` gives the expected result of a step: `exit` (exit codes, default `[0]`), and optionally `stdout` or `stderr` (regex). A step that ran but did not give the expected result is `failed`. A step that could not run or did not finish normally is `error`: a crash (killed by a signal), a timeout, a transport failure, an unreachable or broken component, or an internal sequencer error.
@@ -972,7 +977,26 @@ Step fields:
 - **Where**: on a `linux_system` component, through its transport like any command, in the same process group and pid file, so `kill` stops it, with `interpreter`, else the component's `tsq_python` variable, else `python3`. The target needs nothing but a Python 3 interpreter, not testsuit. Without a slot, it runs on the sequencer host in the run folder (relative paths such as `data/logger/output/logger.csv` work), with the daemon's own interpreter by default, so testsuit and its libraries are there; still as a separate process, never inside `tsqd`, so a script cannot block the daemon or crash it.
 - **Help in the Editor**: the step palette offers **Python script** next to **shell command**, the step and command forms switch between a script file (with its arguments) and inline code edited as Python, and `tsq validate` lists each python step with its script.
 
-The toy-train example has one: `check_data` in the exploit phase of its test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before `exploit_runner` judges it.
+The toy-train example has one: `check_data` in the exploit phase of its test definitions runs `setup/scripts/check_data.py`, deployed with the analysis inputs, to check that the test run collected complete data before its criteria judge it.
+
+**Exploit steps** ([SPEC](SPEC.md) section 6.8). `exploit` binds criteria (mexploit scenarios) to the run contents they check, in the pipeline, where the steps that produce those contents are:
+
+```yaml
+- id: speed_criteria
+  needs: [collect]
+  exploit:
+    criteria: [criteria/max_speed]                      # scenario folders, relative to the test definition
+    data: ["test_run:telemetry/output/telemetry.csv",   # [<phase>:]<slot or *>/<path> of the run folder,
+           "test_run:propulsion/output/*.propj"]        # globs allowed; templates allowed
+    name: "Max speed criteria"                          # title of the report (optional)
+```
+
+- **Binding, known before the run**: `criteria` is never a template, so the tools read it from the pipeline as written. The datapack copies only the criteria its exploit steps name (into `definition/`), and generating it fails when one is missing. The Datapacks tab lists them per step with the data each one reads, and the scenarios of the test definition no step uses ("left out of the datapack"); the criteria editor marks each scenario with the steps that check it.
+- **Run**: no `slot`: on the sequencer host, as a separate process (`python -m testsuit.cli.exploit_runner` with tsqd's interpreter, so the criteria plugins installed there are available). One exploit_runner session per criteria entry, on every file or folder the data entries match; the scenarios are rendered with the step's keys (`keys.yml`). Its configuration and results stay in the run folder, under `data/_sequencer/exploit/<step>/`, and so in the results datapack.
+- **Result**: `succeeded` when every check is met, `failed` when one is not, `error` when they cannot be judged (no data matches, a criteria entry missing, exploit_runner crashed, timeout). Each check's status is recorded with the step: the Run page shows them next to its log, with a link to the HTML report, and the step's node counts the checks met.
+- **Help in the Editor**: the palette offers **check criteria**; its form picks the scenario folders of the workspace and proposes the outputs of each phase as data.
+
+The `run: exploit_runner <config>` step of earlier versions still works, but the tools cannot tell which criteria it uses.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.5), `tcp`, `http` (a request and its `expect`, section 7.4), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -1276,7 +1300,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - comment cards (section 8.3), like sticky notes on the graph of a phase or a sub-pipeline: **comment** in the palette (*anywhere*) adds one in the middle of the graph shown; a click selects it and edits its text (Markdown), its width and the step it is pinned to (**Pinned to**, or nothing for a free card; the card stays where it is) in the panel on the right; dragging it moves it (its `x`/`y` are written in the file, from its step when it is pinned); Delete, or **Delete** in its panel, removes it. A card pinned to a step that is deleted stays, free, where it was; one pinned to a step that is renamed follows the new id, and one pinned to steps grouped into a sub-pipeline is pinned to the `uses` step that replaces them. They are never run, and the run page (and the pipeline preview of the Datapacks tab) shows the cards of each phase under its frame, read-only, a pinned one naming its step;
 - validation as `tsq validate` (cycles, unknown ids, components outside the phase), and a flattened view of the whole pipeline with every command expanded for the chosen setup configuration.
 
-**Criteria.** The criteria of a test definition (its mexploit scenarios, `criteria/<name>/*.mexploit.yml`) and their unit tests (`criteria_utests/<name>/utests.yml`) open in the criteria editor, the same one `mxp webui` serves on its own ([exploit README](../exploit/README.md#the-web-ui-mxp-webui-and-in-tsqd)): **open the criteria editor** in the **Criteria** section of a test definition on the Datapacks tab (with the last result of their unit tests), or **Open in the criteria editor** on such a file in the Editor. It completes and checks the scenarios as they are typed, with the keys of the test definition, and runs their unit tests on the tsqd host (one `mxp` process per case). Its changes are saved in the session and pushed with the rest.
+**Criteria.** The criteria of a test definition (its mexploit scenarios, `criteria/<name>/*.mexploit.yml`) and their unit tests (`criteria_utests/<name>/utests.yml`) open in the criteria editor, the same one `mxp webui` serves on its own ([exploit README](../exploit/README.md#the-web-ui-mxp-webui-and-in-tsqd)): **open the criteria editor** in the **Criteria** section of a test definition on the Datapacks tab (the criteria its exploit steps check, per step with the data each reads, the last result of their unit tests, and the scenarios no step uses), or **Open in the criteria editor** on such a file in the Editor. It completes and checks the scenarios as they are typed, with the keys of the test definition, and runs their unit tests on the tsqd host (one `mxp` process per case). Its changes are saved in the session and pushed with the rest.
 
 **Help while filling the files.** Defining roles, components, inventories, pipelines and templates takes knowing a lot of names, so every form helps with them:
 - each field shows its help in the panel on the right when pointed at or focused, starting with the name of its key in the YAML file (`tsq_label`), written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);

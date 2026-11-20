@@ -63,6 +63,8 @@ export interface ScenarioInfo {
   /** the dictionaries of its test definition */
   dictionaries: string[];
   utests: string[];
+  /** the exploit steps of the test definitions' pipelines that check it (none: no datapack holds it) */
+  used_by?: { testdef: string; phase?: string; subpipeline?: string; id: string }[];
 }
 
 export interface Overview {

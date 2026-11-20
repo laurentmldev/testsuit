@@ -30,7 +30,7 @@ from testsuit.datatools.datapack.model import FORMER_PHASE, FORMER_STEP, former_
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-BUILTIN_ACTIONS = ("do", "run", "python", "http", "push", "pull", "delay", "wait_for", "uses")
+BUILTIN_ACTIONS = ("do", "run", "python", "http", "exploit", "push", "pull", "delay", "wait_for", "uses")
 PYTHON_KEYS = ("script", "code", "args", "interpreter")
 
 
@@ -73,6 +73,7 @@ class Step(BaseModel):
     run: str | None = None
     python: dict | None = None
     http: dict | str | None = None
+    exploit: dict | None = None                  # criteria checked on outputs of the run (exploitstep.py)
     push: dict | None = None
     pull: dict | None = None
     delay: str | float | None = None
@@ -123,6 +124,12 @@ class Step(BaseModel):
         if action == "http":
             from testsuit.sequencer.httpcall import normalize
             normalize(self.http, f"step '{self.id}'")
+        if action == "exploit":
+            from testsuit.sequencer.exploitstep import check_exploit
+            check_exploit(self.exploit, f"step '{self.id}'")
+            if self.slot or self.for_each is not None:
+                raise SequencerError(f"step '{self.id}': an 'exploit' step runs on the sequencer host, it has no "
+                                     "'slot' nor 'for_each' (its 'data' names the slots' files)")
         if action in ("do", "push", "pull") and not (self.slot or self.for_each):
             raise SequencerError(f"step '{self.id}': '{action}' needs a 'slot' or 'for_each'")
         if self.slot and self.for_each is not None:
@@ -462,6 +469,21 @@ def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
     return problems
 
 
+def exploit_data_problems(fs: FlatStep, phase: Phase, phase_ids: list[str], needs: Needs) -> None:
+    """The data an exploit step reads: the phase and slot of each entry exist (templates are checked at run time)."""
+    from testsuit.sequencer.exploitstep import as_list, parse_data
+    for entry in as_list(fs.step.exploit.get("data")):
+        if "{{" in str(entry):
+            continue
+        source_phase, slot, _ = parse_data(str(entry))
+        if source_phase and source_phase not in phase_ids:
+            raise SequencerError(f"phase '{phase.id}': step '{fs.id}': exploit data '{entry}' names unknown phase "
+                                 f"'{source_phase}'")
+        if slot != "*" and slot != "_sequencer" and slot not in needs.slots:
+            raise SequencerError(f"phase '{phase.id}': step '{fs.id}': exploit data '{entry}' names unknown slot "
+                                 f"'{slot}' (setup slots: {', '.join(needs.slots) or 'none'})")
+
+
 def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
     """Structural checks done at submission: phases, needs, sub-pipelines, resources, literal targets."""
     phase_ids = [p.id for p in pipeline.phases]
@@ -496,6 +518,8 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
                 hint = " ('components' is now 'slots')" if fs.step.for_each == "components" else ""
                 raise SequencerError(f"phase '{phase.id}': step '{fs.id}': for_each '{fs.step.for_each}' is neither "
                                      f"'slots', a role, nor a list of slots of the phase{hint}")
+            if fs.step.exploit is not None:
+                exploit_data_problems(fs, phase, phase_ids, needs)
             outside = [t for t in targets if t not in held]
             if outside:
                 raise SequencerError(f"phase '{phase.id}': step '{fs.id}' targets slot(s) {outside} "

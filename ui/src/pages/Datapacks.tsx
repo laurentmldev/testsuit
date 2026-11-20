@@ -217,45 +217,73 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
   );
 }
 
-/** The criteria (mexploit scenarios) of the test definition, their unit tests and last coverage. */
+/** The criteria (mexploit scenarios) the test definition checks: those its exploit steps name, with the data each
+ *  step reads, their unit tests and last coverage; then the scenarios of its folder that no step uses. */
 function Criteria({ sid, testdef }: { sid: string; testdef: string }) {
   const [ov, setOv] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     get(`edit/sessions/${sid}/criteria`).then(setOv).catch((e) => setError(e.message));
   }, [sid, testdef]);
-  const mine = (ov?.scenarios || []).filter((s: any) => s.testdef === testdef);
   const folder = testdef.split("/").slice(0, -1).join("/");
   const open = (file?: string) => navigate(`criteria/${sid}`, { scope: folder || undefined, file });
   if (error) return <Section title="Criteria"><pre className="error-box">{error}</pre></Section>;
-  if (ov && !mine.length) return null;
+  const steps: any[] = (ov?.exploit_steps || []).filter((s: any) => s.testdef === testdef);
+  const scenarios: any[] = ov?.scenarios || [];
+  // the scenarios a criteria entry names: its folder, or the scenario folders under it
+  const scenariosOf = (c: any) => scenarios.filter((s) => s.path === c.folder || s.path.startsWith(c.folder + "/"));
+  const used = new Set(steps.flatMap((st) => st.criteria.flatMap((c: any) => scenariosOf(c).map((s) => s.path))));
+  const unused = scenarios.filter((s) => s.testdef === testdef && !used.has(s.path));
+  if (ov && !steps.length && !unused.length) return null;
+  const where = (st: any) => st.subpipeline ? `sub-pipeline ${st.subpipeline}` : `${st.phase}${st.part === "finally" ? " (finally)" : ""}`;
   return (
-    <Section title={<>Criteria <span className="muted small">{ov ? `${mine.length} scenario(s), checked on the results` : ""}</span></>}
+    <Section title={<>Criteria <span className="muted small">{ov ? `${used.size} scenario(s) checked by ${steps.length} exploit step(s)` : ""}</span></>}
       actions={<button className="link small" onClick={() => open()}>open the criteria editor</button>}>
       {!ov && <Spinner text="Reading the criteria…" />}
-      {mine.length > 0 && (
-        <table className="kv">
+      {ov && !steps.length && (
+        <p className="hint-box small">No step of the pipeline checks criteria: add a <strong>check criteria</strong> step (<code>exploit</code>) after the steps that collect the outputs to check.
+          The datapack holds only the criteria such steps name.</p>
+      )}
+      {steps.length > 0 && (
+        <table className="grid compact">
+          <thead><tr><th>Step</th><th>Criteria</th><th>Unit tests</th><th>Data</th></tr></thead>
           <tbody>
-            {mine.map((s: any) => {
-              const utests = (ov.utests || []).filter((u: any) => s.utests.includes(u.path));
-              const last = utests.find((u: any) => u.last)?.last;
+            {steps.flatMap((st: any) => st.criteria.map((c: any, i: number) => {
+              const found = scenariosOf(c);
               return (
-                <tr key={s.path}>
-                  <td><button className="link" onClick={() => open(s.files[0])}>{s.name}</button> <span className="muted small">{s.files.length} file(s)</span></td>
+                <tr key={`${st.phase}|${st.subpipeline}|${st.id}|${c.path}`}>
+                  {i === 0 && <td rowSpan={st.criteria.length}><strong>{st.id}</strong><div className="muted small">{where(st)}</div></td>}
                   <td>
-                    {!utests.length && <span className="badge warn" title="No utests.yml for this scenario: its checks are not tested">no unit tests</span>}
-                    {utests.length > 0 && !last && <span className="badge">{utests.reduce((n: number, u: any) => n + (u.cases?.length || 0), 0)} unit-test case(s), not run in this server</span>}
-                    {last && <span className={classes("badge", last.ok && last.fully_covered ? "ok" : last.ok ? "warn" : "bad")}>
-                      {last.cases_ok}/{last.cases} case(s) as expected, {last.fully_covered ? "every check covered" : `${Object.values(last.coverage).filter((c) => c !== "covered").length} check(s) not covered`}</span>}
+                    {!c.exists && <span className="badge bad" title="The datapack cannot be generated: no such folder next to the test definition">not found</span>}{" "}
+                    {found.length === 1 ? <button className="link mono small" onClick={() => open(found[0].files[0])}>{c.path}</button> : <code className="small">{c.path}</code>}
+                    {found.length > 1 && <div className="small">{found.map((s) => <button key={s.path} className="link small" onClick={() => open(s.files[0])}>{s.name}</button>)}</div>}
+                    {c.exists && !found.length && <div className="muted small">no *.mexploit.yml file there</div>}
                   </td>
+                  <td>{found.map((s) => <UtestBadge key={s.path} ov={ov} scenario={s} />)}</td>
+                  {i === 0 && <td rowSpan={st.criteria.length}>{st.data.map((d: string) => <div key={d}><code className="small">{d}</code></div>)}</td>}
                 </tr>
               );
-            })}
+            }))}
           </tbody>
         </table>
       )}
+      {unused.length > 0 && (
+        <p className="muted small">Not checked by this pipeline (left out of the datapack): {unused.map((s, i) => (
+          <span key={s.path}>{i > 0 && ", "}<button className="link small" onClick={() => open(s.files[0])}>{s.path.slice(folder.length + 1) || s.name}</button></span>
+        ))}</p>
+      )}
     </Section>
   );
+}
+
+/** A scenario's unit tests and the last result of them in this server. */
+function UtestBadge({ ov, scenario }: { ov: any; scenario: any }) {
+  const utests = (ov.utests || []).filter((u: any) => scenario.utests.includes(u.path));
+  const last = utests.find((u: any) => u.last)?.last;
+  if (!utests.length) return <span className="badge warn" title="No utests.yml for this scenario: its checks are not tested">no unit tests</span>;
+  if (!last) return <span className="badge">{utests.reduce((n: number, u: any) => n + (u.cases?.length || 0), 0)} unit-test case(s), not run in this server</span>;
+  return <span className={classes("badge", last.ok && last.fully_covered ? "ok" : last.ok ? "warn" : "bad")}>
+    {last.cases_ok}/{last.cases} case(s) as expected, {last.fully_covered ? "every check covered" : `${Object.values(last.coverage).filter((c) => c !== "covered").length} check(s) not covered`}</span>;
 }
 
 function FileLink({ path, edit }: { path?: string | null; edit: (f: string) => void }) {

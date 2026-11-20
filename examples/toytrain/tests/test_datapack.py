@@ -89,8 +89,9 @@ def test_sample_datapack(sample_copy, test):
     assert (pack / "data" / "pilot" / "input" / "app" / "FIRMWARE.txt").is_file()
     events = yaml.safe_load((pack / "data" / "piezo" / "input" / "piezo_sim.yml").read_text())["events"]
     assert len(events) == (1 if test == "front_contact" else 0)
-    criteria = pack / "data" / "analysis" / "input" / "scenario" / "toytrain" / test / f"{test}.mexploit.yml"
-    assert criteria.is_file()
+    # only the criteria the exploit step names, in the definition (sequencer SPEC, section 6.8)
+    assert (pack / "definition" / "criteria" / test / f"{test}.mexploit.yml").is_file()
+    assert sorted(p.name for p in (pack / "definition" / "criteria").iterdir()) == [test]
     assert (pack / "data" / "analysis" / "input" / "check_data.py").is_file()   # the python step's script
 
     # the sequencer fields are kept as written: the pipeline is rendered at run time
