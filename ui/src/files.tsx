@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { parse } from "yaml";
 import { get, url } from "./api";
 import { CodeEditor, languageOf, type ValueHover } from "./monaco";
-import { classes, navigate, size } from "./util";
+import { classes, openInNewTab, size } from "./util";
 
 export interface Entry {
   name: string;
@@ -189,8 +189,8 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
           <button className="small" onClick={() => setMode(mode === "auto" ? "raw" : "auto")}>{mode === "auto" ? "raw text" : "table"}</button>
         )}
         {readable && (
-          <button className="small" onClick={() => navigate("exploit/plot", { source: readable.path })}
-            title={`Open it in the Plot subtab of the Exploit tab (read as ${readable.format}${readable.fields != null ? `, ${readable.fields} field${readable.fields === 1 ? "" : "s"}` : ""})`}>Plot…</button>
+          <button className="small" onClick={() => openInNewTab({ path: "exploit/plot", query: { source: readable.path } })}
+            title={`Open it in the Plot subtab of the Exploit tab, in a new browser tab (read as ${readable.format}${readable.fields != null ? `, ${readable.fields} field${readable.fields === 1 ? "" : "s"}` : ""})`}>Plot…</button>
         )}
         <a className="button small" href={href} download={path.split("/").pop()}>Download</a>
       </div>

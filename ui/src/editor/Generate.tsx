@@ -395,7 +395,8 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
               {posted.conform === false && <> (non-conform: {(posted.problems || []).join("; ")})</>}
             </div>
           )}
-          <div className="dialog-browser"><FileBrowser base={`edit/sessions/${sid}/datapack/${result.name}/files`} initial="datapack.yml" /></div>
+          <div className="dialog-browser"><FileBrowser base={`edit/sessions/${sid}/datapack/${result.name}/files`} initial="datapack.yml"
+            plot={`plot/datapacks/${sid}/${result.name}`} /></div>
           <details><summary>Log of the datapack tool{logWarnings(result.log)}</summary><LiveLog lines={result.log.split("\n")} /></details>
         </>
       )}

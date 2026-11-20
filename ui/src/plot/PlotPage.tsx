@@ -37,6 +37,9 @@ const CONFIG = { responsive: true, scrollZoom: true, displaylogo: false, showSen
   plotlyServerURL: "", modeBarButtonsToRemove: ["toImage"] };
 const POINTS: [number, string][] = [[20000, "20k"], [100000, "100k"], [500000, "500k"], [2000000, "2M"]];
 const MAX_LISTED = 400;
+// a data source added with this many fields or fewer, its times left out, is plotted at once
+const AUTO_PLOT = 3;
+const TIME = /^(time|times|timestamps?|date|dates|datetime|time_?s|t)$/i;
 
 interface Trace {
   id: string; fields: string[]; label: string; color: string; linestyle: string; marker: string; drawstyle: string;
@@ -171,6 +174,7 @@ export function PlotPage() {
   const plotBox = useRef<HTMLDivElement>(null);
   const view = useRef<{ x?: number[]; y?: number[] }>({});
   const roots: Root[] = info?.roots || [];
+  const fresh = useRef<Set<string>>(new Set());                // sources just added: plotted at once when small
 
   useEffect(() => { get<Info>("exploit").then(setInfo).catch(() => setInfo(null)); }, []);
   useEffect(() => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch { /* full */ } }, [state]);
@@ -185,7 +189,22 @@ export function PlotPage() {
     if (!sources.length) return;
     setOpening(true);
     post<Sources>(`${BASE}/sources`, { paths: sources })
-      .then((s) => { setFound(s); setPicked((p) => p.filter((f) => s.fields.includes(f))); })
+      .then((s) => {
+        setFound(s); setPicked((p) => p.filter((f) => s.fields.includes(f)));
+        // a source just added with 3 fields or fewer (its times left out): its fields plotted at once (2D)
+        const auto: string[] = [];
+        s.sources.forEach((src, i) => {
+          if (!fresh.current.has(sources[i])) return;
+          const fields = s.fields.filter((f) => fileOf(f) === src.label && f !== options.index && !TIME.test(paramOf(f)));
+          if (fields.length && fields.length <= AUTO_PLOT) auto.push(...fields);
+        });
+        fresh.current.clear();
+        if (auto.length && options.projection === "2d") setState((st) => {
+          const shown = new Set(st.traces.flatMap((t) => t.fields));
+          const used = st.traces.map((t) => t.color);
+          return { ...st, traces: [...st.traces, ...auto.filter((f) => !shown.has(f)).map((f) => newTrace([f], used))] };
+        });
+      })
       .catch((e) => setSourceError(e.message))
       .finally(() => setOpening(false));
   }, [sources]);
@@ -277,7 +296,10 @@ export function PlotPage() {
     } catch (e: any) { notify(e.message, "error"); }
   };
 
-  const addSources = (p: string[]) => setState((s) => ({ ...s, sources: [...s.sources, ...p.filter((x) => !s.sources.includes(x))] }));
+  const addSources = (p: string[]) => {
+    for (const x of p) if (!sources.includes(x)) fresh.current.add(x);
+    setState((s) => ({ ...s, sources: [...s.sources, ...p.filter((x) => !s.sources.includes(x))] }));
+  };
   const removeSource = (p: string) => setState((s) => ({ ...s, sources: s.sources.filter((x) => x !== p) }));
   // ?source=<path>: a data file opened from elsewhere (the Plot… button of a file of a run in tsqd), added to the
   // sources and its fields shown; taken out of the address then, so that reloading the page does not add it again
