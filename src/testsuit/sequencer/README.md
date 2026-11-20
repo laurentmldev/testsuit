@@ -17,6 +17,8 @@ A sample configuration, a toy train on a one-stage lab with a simulated environm
 
 **Keys.** [Section 8.5](#85-keys-overview) lists the template keys available at generation, in pipeline steps and in lab commands.
 
+**Condensed specification.** [SPEC.md](SPEC.md) states the same design tersely, RFC-style: concepts, data model, execution semantics and interfaces, without the tutorial parts.
+
 **Where to start.** [Section 2](#2-user-manual) is the user manual: the key concepts, then what to do for each use case. The data model is in [section 4.3](#43-data-model).
 
 Contents:
