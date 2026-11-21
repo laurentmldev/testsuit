@@ -15,7 +15,7 @@
 // A small glyph before the name tells them apart everywhere, the hover spells the kind out.
 // The colour gives the side: lab (what exists) or datapack (what a test needs). The shape gives what it is,
 // a component and the slot bound to it sharing the square, a stage and a stage slot a group of squares
-// (the components it holds). Filled: a lab thing that is there; outlined: a slot, still to be filled;
+// (the components it holds), a role a list of commands. Filled: a lab thing that is there; outlined: a slot, still to be filled;
 // dashed: a class or type, of which those are instances.
 import type { ReactNode } from "react";
 
@@ -25,12 +25,12 @@ const S = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLineca
 const D = { ...S, strokeDasharray: "2 1.4" };
 const F = { fill: "currentColor", stroke: "currentColor", strokeWidth: 1.3, strokeLinejoin: "round" as const };
 const SQUARE = { x: "2.5", y: "2.5", width: "7", height: "7", rx: "1.5" };
-const GROUP = <><rect x="1" y="1" width="4.4" height="4.4" rx="1" /><rect x="6.6" y="1" width="4.4" height="4.4" rx="1" /><rect x="3.8" y="6.6" width="4.4" height="4.4" rx="1" /></>;
+const GROUP = <><rect x="1.2" y="1.2" width="3.6" height="3.6" rx="0.8" /><rect x="7.2" y="1.2" width="3.6" height="3.6" rx="0.8" /><rect x="4.2" y="7.2" width="3.6" height="3.6" rx="0.8" /></>;
 
 export const KINDS: Record<Kind, { label: string; family: "lab" | "test" | "pipeline"; draw: ReactNode }> = {
   component: { label: "lab component", family: "lab", draw: <rect {...F} {...SQUARE} /> },
   component_class: { label: "component class", family: "lab", draw: <rect {...D} {...SQUARE} /> },
-  role: { label: "lab role", family: "lab", draw: <g {...S}><circle cx="6" cy="6" r="4" /><circle cx="6" cy="6" r="1" fill="currentColor" /></g> },
+  role: { label: "lab role", family: "lab", draw: <path {...S} d="M1.5 2l1.3 1-1.3 1M1.5 5l1.3 1-1.3 1M1.5 8l1.3 1-1.3 1M5 3h5.5M5 6h5.5M5 9h5.5" /> },
   stage: { label: "lab stage", family: "lab", draw: <g {...F}>{GROUP}</g> },
   stage_type: { label: "stage type", family: "lab", draw: <g {...D}>{GROUP}</g> },
   slot: { label: "slot", family: "test", draw: <rect {...S} {...SQUARE} /> },
