@@ -559,12 +559,12 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
 }
 
 /** Where a lab command is defined, as the editor opens it: the file, its item, and the command to open there. The
- *  sources are those of the lab's resolution ("model M", "host H", "stage S"); a command its component lacks, or
+ *  sources are those of the lab's resolution ("class M", "host H", "stage S"); a command its component lacks, or
  *  defined in a file this lab session cannot edit, opens its component in the inventory. */
 function commandPlace(ctx: any, lc: { name: string; component: string; source: string }) {
   const [kind, ...rest] = String(lc.source || "").split(" ");
   const name = rest.join(" ");
-  if (kind === "model" && ctx?.lab?.library?.[name]?.source)
+  if (kind === "class" && ctx?.lab?.library?.[name]?.source)
     return { file: ctx.lab.library[name].source, item: `component:${name}`, command: lc.name };
   if (kind === "stage" && ctx?.inventory) return { file: ctx.inventory, item: `stage:${name}`, command: lc.name };
   if (kind === "host" && ctx?.inventory) return { file: ctx.inventory, item: `host:${name}`, command: lc.name };
@@ -572,7 +572,7 @@ function commandPlace(ctx: any, lc: { name: string; component: string; source: s
 }
 
 /** The lab command a failed 'do:' step ran, and a button opening the lab editor (in a new tab) on it, where it is
- *  defined: its model, its stage's or its own overrides in the inventory, or a host it extends. */
+ *  defined: its class, its stage's or its own overrides in the inventory, or a host it extends. */
 function EditLabCommand({ record }: { record: any }) {
   const lc = record?.lab_command;
   if (!lc || !["failed", "error"].includes(record.state)) return null;
@@ -715,7 +715,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
               <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>
             </div>
             {s.slots.length > 0 && (
-              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.type || "any type"})`).join(", ")}</div>
+              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.class || "any class"})`).join(", ")}</div>
             )}
             {s.problem ? <div className="small bad-text">{s.problem}</div> : (
               <table className="grid compact">
@@ -745,7 +745,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
           <div key={n.logical} className="need">
             <div className="need-head">
               <code>{n.logical}</code> <span className="muted">role</span> <code>{n.role}</code>
-              {n.type && <><span className="muted">type</span> <code>{n.type}</code></>}
+              {n.class && <><span className="muted">class</span> <code>{n.class}</code></>}
               <span className={classes("chip", color)}>{label}{n.bound && <> on {labelOf(n.bound)}</>}</span>
               <span className="spacer" />
               <span className="muted small">{n.phases.length ? `phases ${n.phases.join(", ")}` : "used by no phase"}</span>

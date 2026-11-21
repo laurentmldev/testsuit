@@ -328,13 +328,13 @@ function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: strin
         <p className="small">Stage slots: {Object.entries(data.stage_slots).map(([s, t]: [string, any]) => <span key={s} className="chip">{s}: {t}</span>)}</p>
       )}
       <table className="grid compact">
-        <thead><tr><th>Role</th><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Needs</th><th /></tr></thead>
+        <thead><tr><th>Role</th><th>Slot</th><th>Slot class</th><th>Configuration</th><th>Stage slot</th><th>Needs</th><th /></tr></thead>
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>
               <td>{c.role || <span className="muted">none</span>}</td>
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
-              <td><code>{c.type}</code></td>
+              <td><code>{c.class}</code></td>
               <td>{c.configuration}</td>
               <td>{c.stage_slot || <span className="muted small">ad hoc</span>}</td>
               <td>{c.needs.join(", ")}</td>

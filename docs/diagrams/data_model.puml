@@ -52,7 +52,7 @@ package "Tests side (tests repositories, test authors)" as testside {
   class "Slot" as LComp #DCE9FA;line:3A78C2;line.bold;text:1F4E8C {
     role
   }
-  class "Slot type" as DpType {
+  class "Slot class" as DpType {
     inputs (template, copy, generate)
   }
   class "Dictionary" as Dict {

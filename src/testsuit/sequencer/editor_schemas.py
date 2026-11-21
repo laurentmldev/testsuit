@@ -17,7 +17,7 @@ The descriptions are the contextual help of the Editor: the YAML view shows them
 completion, and the forms show them next to each field. ``defaultSnippets`` are the blocks the
 YAML view proposes when a new item is started.
 
-``schemas(context)`` fills in what depends on the lab and the workspace: slot types, roles,
+``schemas(context)`` fills in what depends on the lab and the workspace: slot classes, roles,
 stage types, transports, commands, importers, generators, slots.
 """
 from __future__ import annotations
@@ -304,20 +304,20 @@ SELFTEST = h(
                                                                    "timeout": "20s"}}]})
 
 COMPONENT = h(
-    "A component model: how it implements the commands of a role, how its state is monitored, its self-test and its "
-    "transport. A model `extends` another one and redefines only what differs (section 7.2). The lab components of "
-    "the inventory extend a model with `tsq_extends`.",
+    "A component class: how it implements the commands of a role, how its state is monitored, its self-test and its "
+    "transport. A class `extends` another one and redefines only what differs (section 7.2). The lab components of "
+    "the inventory extend a class with `tsq_extends`.",
     type="object", additionalProperties=False,
     properties={
-        "extends": h("The parent model: `linux_system` for anything reachable over SSH (deploy, collect and "
+        "extends": h("The parent class: `linux_system` for anything reachable over SSH (deploy, collect and "
                      "kill built in), `component` for something that is not a Linux system (a switch, an instrument "
-                     "driven through its own API), or another model of the library.", type="string"),
+                     "driven through its own API), or another class of the library.", type="string"),
         "roles": h("The roles it supports (section 7.2): it must implement every command each lists. Inherited by "
-                   "the models extending it, unless they list their own. A host extending a model with "
+                   "the classes extending it, unless they list their own. A host extending a class with "
                    "one role has that role; with several, it picks one with `tsq_role`. Leave out for a base "
-                   "model (`rpi5` hardware) whose hosts give their role.", type="array",
+                   "class (`rpi5` hardware) whose hosts give their role.", type="array",
                    items={"type": "string"}),
-        "description": h("What this model is: shown in the Editor when a lab component extends it.", type="string"),
+        "description": h("What this class is: shown in the Editor when a lab component extends it.", type="string"),
         "transport": h("How the sequencer talks to this component: `ssh` (default), `local` (on the "
                        "sequencer host), or a plugin transport. The inventory variable `tsq_transport` overrides it.",
                        type="string"),
@@ -353,7 +353,7 @@ ROLE = h(
         "extends": h("The parent role: its commands are offered too. `linux_system` (deploy, collect, kill) for "
                      "anything reachable over SSH, `component` (no command) otherwise.", type="string"),
         "description": h("What this role is: shown in the Editor when a role is chosen.", type="string"),
-        "inputs": h("The inputs a component of this role expects, in its input folder: slot types "
+        "inputs": h("The inputs a component of this role expects, in its input folder: slot classes "
                     "bound to the role get them by default (section 7.1). A role extending another one adds to its "
                     "inputs, or redefines one by name.", type="array", items=h(
                         "An input the role expects.", type="object", required=["name"], additionalProperties=False,
@@ -378,7 +378,7 @@ ROLE = h(
                              "description": h("What it holds (Markdown): shown in the Editor where data is picked.",
                                               type="string")})),
         "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
-                      "models.", type="object",
+                      "classes.", type="object",
                       properties={name: h(f"**{name}**: {text}", type=["string", "null"])
                                   for name, text in COMMAND_NAMES.items()},
                       additionalProperties=h("What the command does.", type=["string", "null"])),
@@ -391,11 +391,11 @@ ROLE = h(
 LIBRARY_FILE = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Lab library file",
     **h("A file of the lab library (the `tsq_library` folders of the inventory): `roles` (abstract: the commands "
-        "offered) and/or `models` (component models, concrete: their implementations), by name."),
-    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["models"]}],
+        "offered) and/or `classes` (component classes, concrete: their implementations), by name."),
+    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["classes"]}],
     "properties": {"roles": h("Lab roles, by name. The built-in `component` and `linux_system` cannot be redefined.",
                               type="object", additionalProperties=ROLE),
-                   "models": h("Component models, by name. The built-in `component` and `linux_system` cannot be "
+                   "classes": h("Component classes, by name. The built-in `component` and `linux_system` cannot be "
                                "redefined.", type="object", additionalProperties=COMPONENT)},
 }
 
@@ -440,7 +440,7 @@ VARS = {
                   "role (`role: pilot` binds a host with role pilot, or a role extending it, in the stage). Several "
                   "components of a stage can have the same role: each slot gets its own.",
                   type="string"),
-    "tsq_extends": h("The component model this host is (section 7.2): a model of the library, or another host. "
+    "tsq_extends": h("The component class this host is (section 7.2): a class of the library, or another host. "
                      "It gives the implementations of the commands, the status probe and the self-test "
                      "(default `linux_system`).", type="string"),
     "tsq_lock": LOCK,
@@ -518,9 +518,9 @@ INVENTORY = {
                                **_group(0)["properties"],
                                "vars": h("Variables of every host (defaults).", type=["object", "null"],
                                          properties={**VARS, "tsq_library": h(
-                                             "Folders of the lab library (roles and component models), relative to "
+                                             "Folders of the lab library (roles and component classes), relative to "
                                              "this file.", type=["array", "string"], items={"type": "string"},
-                                             examples=[["roles/", "models/"]]),
+                                             examples=[["roles/", "classes/"]]),
                                              "tsq_hosts": h(
                                              "The lab's host names: a table `name: address` (an IP address or a "
                                              "DNS name). A component's address (`ansible_host`) can be one of "
@@ -564,15 +564,15 @@ INPUT = h(
                      {"label": "generate", "body": {"source": "${1:source}", "target": "${2:target}",
                                                     "method": "generate", "generator": "${3:name}"}}])
 
-SLOT_TYPE = h(
-    "A slot type: the inputs each configuration of it gets (section 8.2). The commands come from "
+SLOT_CLASS = h(
+    "A slot class: the inputs each configuration of it gets (section 8.2). The commands come from "
     "the lab role of the slot's `role`.",
     type="object", required=["configurations"], additionalProperties=False,
     properties={
         "description": h("What this slot is in the test.", type="string"),
         "role": h("The lab role its slots have: the inputs that role expects are proposed for each "
                   "configuration, and missing ones reported.", type="string"),
-        "configurations": h("Configurations of the slot type, by name (`standard`...): the inputs of each.",
+        "configurations": h("Configurations of the slot class, by name (`standard`...): the inputs of each.",
                             type="object", additionalProperties={
                                 "type": "object", "additionalProperties": False,
                                 "properties": {"inputs": h("Input files of the slot.", type="array", items=INPUT)}},
@@ -583,10 +583,10 @@ SLOT_TYPE = h(
 SLOT = h(
     "A slot: what the test needs, bound at activation to a lab component with the same `role` "
     "(in the lab stage bound to its `stage_slot` when given, among the ad hoc lab components otherwise).",
-    type="object", required=["type", "configuration"], additionalProperties=False,
+    type="object", required=["class", "configuration"], additionalProperties=False,
     properties={"name": h("Name shown in logs and the UI.", type="string"),
-                "type": h("Its slot type (`slot_types` of this setup).", type="string"),
-                "configuration": h("Configuration of that type to use (its inputs).", type="string"),
+                "class": h("Its slot class (`slot_classes` of this setup).", type="string"),
+                "configuration": h("Configuration of that class to use (its inputs).", type="string"),
                 "stage_slot": h("Stage slot it belongs to (`stage_slots` of this configuration): the slots of a stage slot are bound in "
                            "one lab stage. Leave out for an ad hoc "
                            "slot.", type="string"),
@@ -615,7 +615,7 @@ SETUP_CONFIGURATION = h(
 
 SETUP = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Datapack setup",
-    **h("A setup file (datapack side): where the inputs come from, the slot types and the "
+    **h("A setup file (datapack side): where the inputs come from, the slot classes and the "
         "configurations the test definitions choose from."),
     "type": "object", "required": ["id", "configurations"], "additionalProperties": False,
     "properties": {
@@ -646,7 +646,7 @@ SETUP = {
                                                                  "version": h("Version (git tag...).", type="string"),
                                                                  "postprocess": {"type": "array",
                                                                                  "items": {"type": "string"}}}}}}}}}}),
-        "slot_types": h("Slot types, by name.", type="object", additionalProperties=SLOT_TYPE),
+        "slot_classes": h("Slot classes, by name.", type="object", additionalProperties=SLOT_CLASS),
         "configurations": h("Setup configurations, by name: a test definition picks one with `setup_config`.",
                             type="object", additionalProperties=SETUP_CONFIGURATION),
     },
@@ -855,13 +855,13 @@ def schemas(context: dict) -> dict:
             commands.setdefault(cmd, f"{(info or {}).get('description') or COMMAND_NAMES.get(cmd, '')}\n\nroles: ")
             commands[cmd] += name + " "
     ws = context.get("workspace") or {}
-    logical = {c: f"{c} ({v.get('type', '')}, role {v.get('role', '')})"
+    logical = {c: f"{c} ({v.get('class', '')}, role {v.get('role', '')})"
                for s in ws.get("setups") or [] for cfg in (s.get("configurations") or {}).values()
                for c, v in (cfg.get("slots") or {}).items()}
     stage_slots = {st: f"lab stage type {ty}" for s in ws.get("setups") or []
               for cfg in (s.get("configurations") or {}).values() for st, ty in (cfg.get("stage_slots") or {}).items()}
-    dp_types = {t: f"slot type: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
-                for t, v in (s.get("slot_types") or {}).items()}
+    dp_types = {t: f"slot class: {v.get('description') or ', '.join(v.get('configurations') or [])}" for s in ws.get("setups") or []
+                for t, v in (s.get("slot_classes") or {}).items()}
     subs = {n: "sub-pipeline" for n in ws.get("subpipelines") or []}
     importers = {i: i for i in context.get("importers") or []}
     generators = {g: g for g in context.get("generators") or []}
@@ -899,8 +899,8 @@ def schemas(context: dict) -> dict:
         if "role" in props and "configuration" in props and component_tags:
             props["tags"]["items"] = {"type": "string", **_choices(component_tags, False)}
         if "role" in props and "configuration" in props and dp_types:
-            props["type"].update(_choices(dp_types, False))
-        if "role" in props and "configurations" in props and roles:          # a slot type
+            props["class"].update(_choices(dp_types, False))
+        if "role" in props and "configurations" in props and roles:          # a slot class
             props["role"].update(_choices(roles, False))
         if "importer" in props and importers:
             props["importer"].update(_choices(importers, False))

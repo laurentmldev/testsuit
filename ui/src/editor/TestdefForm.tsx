@@ -74,12 +74,12 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         </Field>
         {config && (
           <table className="grid compact">
-            <thead><tr><th>Slot</th><th>Slot type</th><th>Configuration</th><th>Stage slot</th><th>Role</th><th>Needs</th></tr></thead>
+            <thead><tr><th>Slot</th><th>Slot class</th><th>Configuration</th><th>Stage slot</th><th>Role</th><th>Needs</th></tr></thead>
             <tbody>
               {Object.entries<any>(config.slots || {}).map(([id, c]) => (
                 <tr key={id}>
                   <td><code>{id}</code> <span className="muted small">{c.name}</span></td>
-                  <td>{c.type}</td><td>{c.configuration}</td>
+                  <td>{c.class}</td><td>{c.configuration}</td>
                   <td>{c.stage_slot ? `${c.stage_slot} (${config.stage_slots?.[c.stage_slot] || "?"})` : <span className="muted">ad hoc</span>}</td>
                   <td>{c.role}</td><td className="small">{(c.needs || []).join(", ")}</td>
                 </tr>

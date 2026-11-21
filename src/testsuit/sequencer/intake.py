@@ -138,6 +138,6 @@ def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
         if not slot.stage_slot and not [c for c in inv.adhoc if lab.fits(c, slot.role, slot.tags)]:
             problems.append(f"slot '{slot.id}': no ad hoc component with role '{slot.role}'"
                             + (f" tagged {', '.join(slot.tags)}" if slot.tags else "") + " in the lab")
-        if slot.type and slot.type not in datapack.needs.slot_types:
-            problems.append(f"slot '{slot.id}': type '{slot.type}' not in the setup's slot types")
+        if slot.slot_class and slot.slot_class not in datapack.needs.slot_classes:
+            problems.append(f"slot '{slot.id}': class '{slot.slot_class}' not in the setup's slot classes")
     return problems

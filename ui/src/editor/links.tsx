@@ -46,7 +46,7 @@ export function ItemLink({ kind, name, label }: { kind: ItemKind; name: string; 
   const session = useSession();
   if (!name) return null;
   const text = label ?? (kind === "host" ? hostLabel(session.ctx, name) : name);
-  const what = kind === "host" ? "inventory component" : kind === "component" ? "model" : kind;
+  const what = kind === "host" ? "inventory component" : kind === "component" ? "class" : kind;
   const file = itemFile(session, kind, name);
   if (!file) return <code>{text}</code>;
   return (

@@ -51,8 +51,8 @@ The datapack side and the lab side use disjoint vocabularies; a term of one neve
 | **slot**: one resource needed, typed by a role | **component**: one managed element (host, instrument, emulation) |
 | **stage slot**: a group of slots to be bound inside one stage, typed by a stage type | **stage**: a named set of components, unit of locking; typed by a **stage type** |
 | **ad hoc slot**: a slot in no stage slot | **ad hoc component**: a component in no stage |
-| **slot type**: the inputs of a slot, per configuration | **lab role**: abstract set of named commands |
-| **setup configuration**: the named set of slots and stage slots | **component model**: implementation of the commands of some roles |
+| **slot class**: the inputs of a slot, per configuration | **lab role**: abstract set of named commands |
+| **setup configuration**: the named set of slots and stage slots | **component class**: implementation of the commands of some roles |
 | **test definition**: setup + dictionaries + pipeline | **lab inventory**: stages, components, variables |
 
 Other terms:
@@ -74,7 +74,7 @@ Other terms:
 - All functionality MUST be reachable from the CLI and the REST API. The web UI is a client of the REST API and the kernel MUST NOT depend on it.
 - The lab definition and the test definitions are YAML files in git repositories. The sequencer reads them; only the optional Editor (§12.4) writes them.
 
-Modules (`src/testsuit/sequencer/`): `config` (tsq.yml), `inventory`, `library` (roles, models, command resolution), `lab` (git state, reload), `model` (pipeline), `intake`, `store`, `scheduler`, `monitor` (probes, self-test), `engine` (steps, DAG), `sequencer` (run lifecycle), `results`, `transports/`, `api`, `editor*`, `daemon`.
+Modules (`src/testsuit/sequencer/`): `config` (tsq.yml), `inventory`, `library` (roles, classes, command resolution), `lab` (git state, reload), `model` (pipeline), `intake`, `store`, `scheduler`, `monitor` (probes, self-test), `engine` (steps, DAG), `sequencer` (run lifecycle), `results`, `transports/`, `api`, `editor*`, `daemon`.
 
 ---
 
@@ -126,8 +126,8 @@ Sequencer variables (prefix `tsq_`, plus the standard `ansible_host`, `ansible_u
 | Variable | Level | Semantics |
 |---|---|---|
 | `tsq_stage_type` | group | makes the group a stage of that type |
-| `tsq_extends` | host | the component model (or another host) it extends. Default `linux_system` |
-| `tsq_role` | host | its role, when the model supports several roles or none |
+| `tsq_extends` | host | the component class (or another host) it extends. Default `linux_system` |
+| `tsq_role` | host | its role, when the class supports several roles or none |
 | `tsq_commands`, `tsq_status`, `tsq_selftest`, `tsq_collect` | host, group | overrides (§4.4) |
 | `tsq_transport` | any | `ssh` (default), `local`, or a plugin's |
 | `tsq_remote_root` | any | folder of the component's inputs, outputs and pid files |
@@ -140,11 +140,11 @@ Sequencer variables (prefix `tsq_`, plus the standard `ansible_host`, `ansible_u
 | `tsq_library` | `all.vars` | folders of the lab library (§4.2) |
 | `tsq_description`, `tsq_label`, `tsq_icon`, `tsq_links` | | documentation and diagram only; MUST NOT affect execution, locking or binding. A `tsq_links` target absent from the inventory MUST fail the load |
 
-Removed names (`tsq_type`, `tsq_types`; library key `components:`) MUST be refused with the replacement named.
+Removed names (`tsq_type`, `tsq_types`; library keys `components:` and `models:`) MUST be refused with the replacement named.
 
-### 4.2 Library: roles and models
+### 4.2 Library: roles and classes
 
-Library files (in `tsq_library` folders) hold `roles:`, `models:` or both. Plugins MAY register roles and models in Python.
+Library files (in `tsq_library` folders) hold `roles:`, `classes:` or both. Plugins MAY register roles and classes in Python.
 
 A **lab role** is abstract:
 
@@ -162,13 +162,13 @@ roles:
 
 `outputs` MUST stay in the output folder (no `..`). After a `do: collect` step succeeds on a slot, every output of its role not `optional` MUST be present in `data/<slot>/output/` (a pattern: at least one match of its type), else the step is `failed` naming the missing ones; an optional one missing is only noted in the log. The Editor proposes the outputs of each slot's role as `exploit` data (§6.8).
 
-A **component model** is concrete:
+A **component class** is concrete:
 
 ```yaml
-models:
-  <model>:
-    extends: <model>                # inherits implementations, status, self-test, roles
-    roles: [<role>, ...]            # roles it supports; inherited unless redefined; none for a base model
+classes:
+  <class>:
+    extends: <class>                # inherits implementations, status, self-test, roles
+    roles: [<role>, ...]            # roles it supports; inherited unless redefined; none for a base class
     transport: <name>
     commands: {<name>: <implementation>, ...}
     status: {probe: <implementation>, states: {<state>: <rule>, ...}, via: <ref>, interval: <duration>}
@@ -177,14 +177,14 @@ models:
 
 Constraints (checked at load; a violation MUST fail the load unless marked *warning*):
 
-- A model MUST implement every command of every role it lists.
+- A class MUST implement every command of every role it lists.
 - A host MUST implement every command of its role. Implementing a command its role does not list is a *warning*.
-- A host's role is: the single role its model supports; else `tsq_role`, which MUST be one of the model's roles when the model lists any.
+- A host's role is: the single role its class supports; else `tsq_role`, which MUST be one of the class's roles when the class lists any.
 - `extends` chains MUST be acyclic.
 
 ### 4.3 Built-ins
 
-| Name | As role | As model |
+| Name | As role | As class |
 |---|---|---|
 | `component` | root, no commands | state `unknown` unless a `status` probe is defined |
 | `linux_system` (extends `component`) | `deploy`, `collect`, `kill` | `deploy`: SFTP `data/<slot>/input/` → `<input_dir>`; `collect`: `<output_dir>` → `data/<slot>/output/`; `kill`: §10.2. State: `offline` if SSH fails, `running` while a process group of the sequencer is alive, else `idle` |
@@ -193,12 +193,12 @@ Constraints (checked at load; a violation MUST fail the load unless marked *warn
 
 The set of commands of a component is the command set of its role and all its ancestor roles. The implementation of each is resolved in this order, the later entry winning:
 
-1. the model chain, root first;
+1. the class chain, root first;
 2. `tsq_commands` of the component's stage group;
 3. `tsq_commands` of the host;
 4. an inline action in a pipeline step (§6.3).
 
-A datapack MUST NOT define commands. `commands` or `extends` in a slot type, and `commands` in a slot, MUST be refused.
+A datapack MUST NOT define commands. `commands` or `extends` in a slot class, and `commands` in a slot, MUST be refused.
 
 ### 4.5 Command implementations
 
@@ -258,7 +258,7 @@ States: `offline` (unreachable), `idle`, `configured` (deployed, not started), `
 
 Before deploying anything, once its resources are locked, a run MUST self-test every bound component in parallel (when `selftest.before_each_run`).
 
-- Checks are cumulative along the model chain: `component`: probe answers and state ∉ {`broken`, `offline`}; `linux_system`: + SSH login, `<remote_root>/<component>/` writable, free disk ≥ `min_free_space`, clock offset ≤ `max_clock_offset` (default 1s); models and hosts add `selftest` entries.
+- Checks are cumulative along the class chain: `component`: probe answers and state ∉ {`broken`, `offline`}; `linux_system`: + SSH login, `<remote_root>/<component>/` writable, free disk ≥ `min_free_space`, clock offset ≤ `max_clock_offset` (default 1s); classes and hosts add `selftest` entries.
 - Under `status.via`, the `linux_system` checks are `skipped`, and `run` checks execute on the `via` component.
 - **Pass**: results are written to `selftest.yml`; the run proceeds.
 - **Fail**: nothing is deployed; failing components are marked `broken` or `offline`; the run's locks are released and the run returns to the head of its priority in the queue. After `selftest.max_attempts` failures the run ends with verdict `error`.
@@ -288,8 +288,8 @@ A datapack is the BagIt zip built by the `datapack` tool from a test definition.
 ### 5.1 Setup
 
 ```yaml
-slot_types:
-  <slot type>:
+slot_classes:
+  <slot class>:
     role: <role>                       # OPTIONAL; Editor uses the role's `inputs`
     configurations:
       <name>:
@@ -301,14 +301,14 @@ configurations:                        # setup configurations
     stage_slots:
       <id>: {type: <stage type>, tags: [...]}
     slots:
-      <id>: {type: <slot type>, configuration: <name>, role: <role>,
+      <id>: {class: <slot class>, configuration: <name>, role: <role>,
              stage_slot: <id>, tags: [...], needs: [<slot>...]}
 ```
 
 - `method: generate` calls a registered generator `fn(source, target, keys, options, slot)`; an unregistered name is executed as a script relative to the setup folder with `source target keys.json`.
 - `needs` orders slot generation topologically (cycles MUST be rejected). A dependent slot sees `slots.<id>.input_dir` and `read_input('<id>/<file>')`.
 - Templates are rendered at **generation**, before binding: a run-time key (§7) in an input template MUST be an error that says so.
-- Legacy names (`component_types`, `components`, `stages`, `realms`, `stage`, `realm`, step `component`, `for_each: components`) MUST be refused with the replacement.
+- Legacy names (`component_types`, `slot_types`, a slot's `type`, `components`, `stages`, `realms`, `stage`, `realm`, step `component`, `for_each: components`) MUST be refused with the replacement.
 
 ### 5.2 Test definition
 
@@ -454,9 +454,9 @@ All templates are Jinja2 (the `datapack` tool's environment, `StrictUndefined`).
 | Key | Generation | Steps (run time) | Lab only (probe, self-test, manual) |
 |---|---|---|---|
 | dictionary keys, `<dataset>.{path,version}`, `testdef.*`, `setup.*`, `datapack.*` | ✓ | ✓ (frozen in `context.yml`) | |
-| `slot.{id,name,type,configuration,input_dir}` | ✓ | | |
+| `slot.{id,name,class,configuration,input_dir}` | ✓ | | |
 | `slots.<id>.{id,input_dir}`, `read_input()` | needed slots | | |
-| `slot.{id,name,type,role,stage_slot,component,input_dir,output_dir,remote_root}`, `slots.<id>.*` | | ✓ | |
+| `slot.{id, name, class,role,stage_slot,component,input_dir,output_dir,remote_root}`, `slots.<id>.*` | | ✓ | |
 | `stage_slots.<id>.stage` | | ✓ | |
 | `component.{id,host,host_alias,label,role,extends,stage,vars,input_dir,output_dir,remote_root,state}` | | bound component | the component |
 | `remote_root` | | ✓ | ✓ |
@@ -568,7 +568,7 @@ The reason of a step `error` (crash, timeout, killed, transport) MUST be kept.
 
 ### 10.2 Remote process control
 
-On `linux_system` components every started command MUST run in its own process group (`setsid -w sh -c ...` over SSH, a new session locally), with the group id in `<remote_root>/.tsq/<run>/<component>/<step>.pid`. `kill` sends `SIGKILL` to `-<pgid>` for each pid file; a group is alive while `ps` lists a non-zombie member. Target requirements: a POSIX shell, `setsid`, `ps`. Other models override `kill`.
+On `linux_system` components every started command MUST run in its own process group (`setsid -w sh -c ...` over SSH, a new session locally), with the group id in `<remote_root>/.tsq/<run>/<component>/<step>.pid`. `kill` sends `SIGKILL` to `-<pgid>` for each pid file; a group is alive while `ps` lists a non-zombie member. Target requirements: a POSIX shell, `setsid`, `ps`. Other classes override `kill`.
 
 ### 10.3 Daemon restart
 
@@ -659,7 +659,7 @@ Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`)
 | Registration | Contract | Built in |
 |---|---|---|
 | `register_transport(name, cls)` | `run(cmd, env, timeout, detach)`, `put`, `get`, `signal`, `is_alive` | `ssh` (AsyncSSH), `local` |
-| `register_role(name, def)`, `register_component(name, def)` | roles and models in Python | `component`, `linux_system` |
+| `register_role(name, def)`, `register_component(name, def)` | roles and classes in Python | `component`, `linux_system` |
 | `register_state_probe(name, fn)` | `status.probe` kinds | `run`, `http` |
 | `register_step_type(name, cls)` | step actions | `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |

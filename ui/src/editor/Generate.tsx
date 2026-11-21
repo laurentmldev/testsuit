@@ -329,7 +329,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
             </Field>
           )}
           {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} versions={versions} onChange={setVersions} datasets={datasets} setDatasets={setDatasets} />}
-          <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot type, as the queue does on posting.">
+          <Field label="Check against the lab" help="Also check that the lab has the lab stages and roles the setup asks for, and run the checks of each slot class, as the queue does on posting.">
             <Toggle value={check} onChange={setCheck} label="check (slower)" />
           </Field>
           <Field label="Keys set by hand" help="Values given for this generation only, over the dictionaries (`datapack --set key=value`): nothing is written to the files. Setting a key no dictionary defines keeps the datapack conform. Overriding a defined key makes the datapack **non-conform**. Both are recorded in its `datapack.yml` and `baseline.yml`. A value is read as YAML: `3` is a number, `true` a boolean; quote it to keep it as text. The keys set here are remembered in this browser for each test definition (one with none remembered starts from those last set for another): check them before generating.">

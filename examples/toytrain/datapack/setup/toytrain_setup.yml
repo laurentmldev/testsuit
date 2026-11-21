@@ -32,7 +32,7 @@ datarepositories:
           - id: toytrain_sim
             version: "{{ toytrain_sim_version }}"
 
-slot_types:
+slot_classes:
 
   pilot_app:                                  # CALC-Pilot application
     role: pilot                                 # the inputs the lab role expects: app/ and pilot.yml
@@ -82,10 +82,10 @@ configurations:
     stage_slots:
       train: {type: toytrain}                 # bound to train_1 (the only lab stage of this type)
     slots:
-      pilot:       {name: CALC-Pilot, type: pilot_app, configuration: standard, stage_slot: train, role: pilot}
-      telemetry:   {name: CALC-TM, type: telemetry_app, configuration: standard, stage_slot: train, role: telemetry}
-      acquisition: {name: AU, type: acquisition_app, configuration: standard, stage_slot: train, role: acquisition}
-      propulsion:  {name: Simulated propulsion, type: propulsion_sim, configuration: standard, role: propulsion_sim}
-      piezo:       {name: Simulated piezo sensors, type: piezo_sim, configuration: standard, role: piezo_sim}
-      analysis:    {name: Exploitation, type: exploit, configuration: standard, role: sequencer}
+      pilot:       {name: CALC-Pilot, class: pilot_app, configuration: standard, stage_slot: train, role: pilot}
+      telemetry:   {name: CALC-TM, class: telemetry_app, configuration: standard, stage_slot: train, role: telemetry}
+      acquisition: {name: AU, class: acquisition_app, configuration: standard, stage_slot: train, role: acquisition}
+      propulsion:  {name: Simulated propulsion, class: propulsion_sim, configuration: standard, role: propulsion_sim}
+      piezo:       {name: Simulated piezo sensors, class: piezo_sim, configuration: standard, role: piezo_sim}
+      analysis:    {name: Exploitation, class: exploit, configuration: standard, role: sequencer}
   emulated: *toytrain_slots                   # a dev host: everything emulated by local processes (README, emulated mode)

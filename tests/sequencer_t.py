@@ -55,7 +55,7 @@ LAB_ROLES = {                                            # abstract: the command
 }
 
 LAB_COMPONENTS = {                                       # concrete: how they are implemented
-    "models": {
+    "classes": {
         "counter_host": {
             "extends": "linux_system",
             "roles": ["dut"],                            # the roles it implements: its hosts are duts
@@ -74,7 +74,7 @@ SETUP = {
     "id": "bench_setup",
     "name": "Counter bench",
     "dictionaries": ["globals.yml"],
-    "slot_types": {
+    "slot_classes": {
         "dut_app": {"configurations": {"standard": {"inputs": [
             {"source": "files/app.sh", "target": "app.sh", "method": "copy"},
             {"source": "files/conf.txt", "target": "conf.txt"}]}}},
@@ -84,9 +84,9 @@ SETUP = {
     "configurations": {"bench": {
         "stage_slots": {"bench": {"type": "counter_bench"}},
         "slots": {
-            "dut": {"name": "Device under test", "type": "dut_app", "configuration": "standard", "stage_slot": "bench",
+            "dut": {"name": "Device under test", "class": "dut_app", "configuration": "standard", "stage_slot": "bench",
                     "role": "dut"},
-            "analysis": {"name": "Analysis", "type": "analysis", "configuration": "standard", "role": "sequencer"},
+            "analysis": {"name": "Analysis", "class": "analysis", "configuration": "standard", "role": "sequencer"},
         }}},
 }
 
@@ -124,7 +124,7 @@ class Bench:
         self.root = root
         lab = root / "lab"
         inventory = {"all": {
-            "vars": {"tsq_transport": "local", "tsq_library": ["roles/", "models/"]},
+            "vars": {"tsq_transport": "local", "tsq_library": ["roles/", "classes/"]},
             "hosts": {"seq_host": {"tsq_role": "sequencer", "tsq_lock": "none",
                                    "tsq_remote_root": str(root / "remote" / "seq_host")}},
             "children": {f"bench_{i}": {"vars": {"tsq_stage_type": "counter_bench"}, "hosts": {
@@ -133,7 +133,7 @@ class Bench:
                 for i in range(1, stages + 1)}}}
         write(lab / "inventory.yml", yaml.safe_dump(inventory))
         write(lab / "roles" / "bench.yml", yaml.safe_dump(LAB_ROLES))
-        write(lab / "models" / "bench.yml", yaml.safe_dump(LAB_COMPONENTS))
+        write(lab / "classes" / "bench.yml", yaml.safe_dump(LAB_COMPONENTS))
         self.config = Config.model_validate({
             "lab": {"folder": str(lab), "inventory": "inventory.yml", "require_tag": False},
             "storage": {"root": str(root / "storage"), "min_free_space": "1MB"},
@@ -349,15 +349,15 @@ def test_roles_and_components(bench):
                                                         "version"]
     lab_folder = Path(bench.config.lab.folder)
     components = copy.deepcopy(LAB_COMPONENTS)
-    del components["models"]["counter_host"]["commands"]["ready"]
-    components["models"]["counter_host"]["commands"]["reset"] = {"run": "true"}
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
-    with pytest.raises(SequencerError, match="model 'counter_host' .* does not implement ready, listed by its role 'dut'"):
+    del components["classes"]["counter_host"]["commands"]["ready"]
+    components["classes"]["counter_host"]["commands"]["reset"] = {"run": "true"}
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(components))
+    with pytest.raises(SequencerError, match="class 'counter_host' .* does not implement ready, listed by its role 'dut'"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False, strict=False)
     assert lab.extra_commands["counter_1"] == ["reset"]
-    del components["models"]["counter_host"]["roles"]          # a base: its hosts give their role
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
+    del components["classes"]["counter_host"]["roles"]          # a base: its hosts give their role
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(components))
     with pytest.raises(SequencerError, match="'counter_1': no role: give tsq_role"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     inventory = yaml.safe_load(bench.config.inventory_file.read_text())
@@ -372,11 +372,11 @@ def test_roles_and_components(bench):
     roles["roles"]["spare"] = {"extends": "linux_system", "commands": {"start": "Starts it."}}
     write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(roles))
     components = copy.deepcopy(LAB_COMPONENTS)
-    components["models"]["counter_host"]["roles"] = ["dut", "spare"]
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
+    components["classes"]["counter_host"]["roles"] = ["dut", "spare"]
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(components))
     del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match=r"'counter_2': its model 'counter_host' supports several roles "
+    with pytest.raises(SequencerError, match=r"'counter_2': its class 'counter_host' supports several roles "
                                              r"\(dut, spare\): pick one with tsq_role"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "spare"
@@ -386,19 +386,22 @@ def test_roles_and_components(bench):
     assert lab.extra_commands == {}            # what counter_host implements for 'dut' is no extra on a 'spare'
     inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"] = "sequencer"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its model 'counter_host' "
+    with pytest.raises(SequencerError, match="role 'sequencer' \\(tsq_role\\) is not one its class 'counter_host' "
                                              "supports: dut, spare"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     del inventory["all"]["children"]["bench_2"]["hosts"]["counter_2"]["tsq_role"]
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    components["models"]["counter_host"]["roles"] = ["dut", "nope"]
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
+    components["classes"]["counter_host"]["roles"] = ["dut", "nope"]
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(components))
     with pytest.raises(SequencerError, match="component 'counter_host' .*: unknown role 'nope'"):
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump({"components": LAB_COMPONENTS["models"]}))
-    with pytest.raises(SequencerError, match="'components' is now 'models'"):      # the former name
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump({"components": LAB_COMPONENTS["classes"]}))
+    with pytest.raises(SequencerError, match="'components' is now 'classes'"):      # the former name
         load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(LAB_COMPONENTS))
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump({"models": LAB_COMPONENTS["classes"]}))
+    with pytest.raises(SequencerError, match="'models' is now 'classes'"):          # the former name
+        load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(LAB_COMPONENTS))
     roles = copy.deepcopy(LAB_ROLES)
     roles["roles"]["dut"]["commands"]["start"] = {"run": "x"}
     write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(roles))
@@ -418,14 +421,14 @@ def test_roles_and_components(bench):
     del inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_type"]
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_role"] = "nope"
     write(bench.config.inventory_file, yaml.safe_dump(inventory))
-    with pytest.raises(SequencerError, match="role 'nope' \\(tsq_role\\) is not one its model"):
+    with pytest.raises(SequencerError, match="role 'nope' \\(tsq_role\\) is not one its class"):
         load_lab(Path(bench.config.lab.folder), bench.config.inventory_file, require_tag=False)
 
     setup = copy.deepcopy(SETUP)
     setup["configurations"]["bench"]["slots"]["dut"]["role"] = "counter"
     needs = needs_from_setup(setup, "bench")
     assert "slot 'dut': role 'counter' is not a role of the lab" in check_against_lab(SimpleNamespace(needs=needs), lab)
-    setup["slot_types"]["dut_app"]["extends"] = "counter_host"
+    setup["slot_classes"]["dut_app"]["extends"] = "counter_host"
     with pytest.raises(SequencerError, match="'extends' is gone"):
         needs_from_setup(setup, "bench")
     write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
@@ -460,7 +463,7 @@ def test_run_succeeded(bench):
     # a 'do:' step says which lab command it ran and where it is defined: the Run page opens the editor there
     start = next(s for s in record["steps"] if s["phase"] == "test_run" and s["id"] == "start")
     assert start["lab_command"] == {"name": "start", "component": concrete, "source": start["lab_command"]["source"]}
-    assert start["lab_command"]["source"].startswith("model ")
+    assert start["lab_command"]["source"].startswith("class ")
     selftest = yaml.safe_load(read_member(run, "selftest.yml"))
     assert all(r["ok"] for r in selftest["attempts"])
     seq_store = Store(bench.config.storage_path("database"))
@@ -494,7 +497,7 @@ sys.exit(0 if count >= keys["min_count"] else 1)
 def python_bench(bench: Bench, exploit_steps: list) -> dict:
     """The bench pipeline whose exploit phase runs the given steps, check.py among the analysis inputs."""
     setup = copy.deepcopy(SETUP)
-    setup["slot_types"]["analysis"]["configurations"]["standard"]["inputs"].append(
+    setup["slot_classes"]["analysis"]["configurations"]["standard"]["inputs"].append(
         {"source": "files/check.py", "target": "check.py", "method": "copy"})
     write(bench.dp / "setup" / "bench_setup.yml", yaml.safe_dump(setup))
     write(bench.dp / "setup" / "files" / "check.py", CHECK_PY)
@@ -796,9 +799,9 @@ def test_repost(bench):
 def test_selftest_failure(tmp_path, no_git):
     """A broken component is marked broken, the run requeued, then ends in error after max_attempts."""
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["selftest"] = [{"id": "probe", "run": "test -e /nonexistent/x"}]
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["selftest"] = [{"id": "probe", "run": "test -e /nonexistent/x"}]
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -822,9 +825,9 @@ def test_bypassed_selftest_check(tmp_path, no_git):
     not conform, its run.yml and selftest.yml saying why; ending the bypass breaks the component again."""
     from testsuit.sequencer.util import SequencerError
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["selftest"] = [{"id": "clock_ok", "run": "test -e /nonexistent/x"}]
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["selftest"] = [{"id": "clock_ok", "run": "test -e /nonexistent/x"}]
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -864,9 +867,9 @@ def test_bypassed_passing_selftest_check(tmp_path, no_git):
     bench = Bench(tmp_path, stages=1)
     flag = tmp_path / "flaky_ok"
     flag.write_text("")
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["selftest"] = [{"id": "flaky", "run": f"test -e {flag}"}]
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["selftest"] = [{"id": "flaky", "run": f"test -e {flag}"}]
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -892,9 +895,9 @@ def test_failed_selftest_keeps_broken_until_one_passes(tmp_path, no_git):
     probed idle while kept broken) runs a self-test, and the one that passes brings it back."""
     bench = Bench(tmp_path, stages=1)
     flag = tmp_path / "healthy"
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"test -e {flag}"}]
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"test -e {flag}"}]
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def until(seq, state):
         for _ in range(200):
@@ -931,11 +934,11 @@ def test_probe_report_while_running(tmp_path, no_git):
     from testsuit.sequencer.api import create_app
     bench = Bench(tmp_path, stages=1)
     gate = tmp_path / "gate"
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["status"] = {
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["status"] = {
         "probe": {"run": ["echo first", f"while [ ! -e {gate} ]; do sleep 0.05; done; echo second"]},
         "states": {"idle": {"regex": "second"}}}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -969,12 +972,12 @@ def test_probe_report(tmp_path, no_git):
     (or that none did), and why; a component kept broken says so, with its failed self-test checks."""
     bench = Bench(tmp_path, stages=1)
     answer = tmp_path / "answer"
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["status"] = {
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["status"] = {
         "probe": {"run": f"cat {answer}"},
         "states": {"running": {"regex": "^RUN"}, "idle": {"regex": "^IDLE"}, "offline": {"exit": "nonzero"}}}
-    types["models"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"grep -q OK {answer}"}]
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types["classes"]["counter_host"]["selftest"] = [{"id": "healthy", "run": f"grep -q OK {answer}"}]
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -1019,14 +1022,14 @@ def test_probe_via(tmp_path, no_git):
     roles = yaml.safe_load((tmp_path / "lab" / "roles" / "bench.yml").read_text())
     roles["roles"]["obc"] = {"extends": "component"}
     write(tmp_path / "lab" / "roles" / "bench.yml", yaml.safe_dump(roles))
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["obc"] = {
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["obc"] = {
         "extends": "component", "roles": ["obc"],
         "status": {"via": "dut", "probe": {"run": f"cat {psu}; echo from {{{{ via.id }}}} to {{{{ component.host }}}}; "
                                            "echo {{ stage.roles.dut.id }} {{ lab.components.seq_host.vars.tsq_role }}"},
                    "states": {"running": {"regex": "^ON"}, "idle": {"regex": "^OFF"}}},
         "selftest": [{"id": "login", "builtin": "login"}, {"id": "psu", "run": f"test -f {psu}"}]}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -1059,9 +1062,9 @@ def test_probe_via(tmp_path, no_git):
         == "counter_1"
 
     # several checks: each runs whatever the others gave, and the rules see all their outputs
-    types["models"]["obc"]["status"]["probe"] = {"run": [f"cat {psu}", "echo DOWN; exit 3", "echo UP"]}
-    types["models"]["obc"]["status"]["states"] = {"broken": {"regex": "^ON[\\s\\S]*DOWN"}, "idle": {"regex": "^OFF"}}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types["classes"]["obc"]["status"]["probe"] = {"run": [f"cat {psu}", "echo DOWN; exit 3", "echo UP"]}
+    types["classes"]["obc"]["status"]["states"] = {"broken": {"regex": "^ON[\\s\\S]*DOWN"}, "idle": {"regex": "^OFF"}}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def checks():
         seq = bench.sequencer()
@@ -1074,8 +1077,8 @@ def test_probe_via(tmp_path, no_git):
     assert [s["ok"] for s in ran] == [True, False, True] and ran[1]["exit"] == 3
     assert report["state"] == "broken" and report["detail"] == "1 of 3 checks failed" and "2 OK, 1 failed" in report["why"]
 
-    types["models"]["obc"]["status"]["via"] = "nobody"
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types["classes"]["obc"]["status"]["via"] = "nobody"
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
     from testsuit.sequencer.util import SequencerError
     with pytest.raises(SequencerError, match="goes via 'nobody'"):
         bench.sequencer()
@@ -1086,7 +1089,7 @@ def test_commands_via(tmp_path, no_git):
     file are there, and stop (a signal) and the end of the run reach it there."""
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
-    start = dict(LAB_COMPONENTS["models"]["counter_host"]["commands"]["start"], via="seq_host")
+    start = dict(LAB_COMPONENTS["classes"]["counter_host"]["commands"]["start"], via="seq_host")
     inventory["all"]["children"]["bench_1"]["hosts"]["counter_1"]["tsq_commands"] = {"start": start}
     write(tmp_path / "lab" / "inventory.yml", yaml.safe_dump(inventory))
 
@@ -1139,7 +1142,7 @@ def test_lab_view(tmp_path, no_git):
     bench = Bench(tmp_path, stages=1)
     inventory = yaml.safe_load((tmp_path / "lab" / "inventory.yml").read_text())
     hosts = inventory["all"]["children"]["bench_1"]["hosts"]
-    start = dict(LAB_COMPONENTS["models"]["counter_host"]["commands"]["start"], via="seq_host")
+    start = dict(LAB_COMPONENTS["classes"]["counter_host"]["commands"]["start"], via="seq_host")
     hosts["counter_1"].update(tsq_commands={"start": start}, tsq_icon="embedded")
     hosts["obc_1"] = {"tsq_transport": "local", "tsq_role": "sequencer", "tsq_lock": "none", "tsq_icon": "icons/obc.svg",
                       "tsq_status": {"via": "dut", "probe": {"run": "echo {{ lab.components.seq_host.host }}"}},
@@ -1237,21 +1240,21 @@ def test_lab_file_changes(tmp_path, no_git):
         write(lab_folder / "notes.md", "not read by the lab")
         write(lab_folder / "scripts" / "x.yml", "outside the library")
         assert seq.lab.changes()["changed"] is False
-        bench_yml = lab_folder / "models" / "bench.yml"
+        bench_yml = lab_folder / "classes" / "bench.yml"
         later = bench_yml.stat().st_mtime_ns + 10**9
         os.utime(bench_yml, ns=(later, later))
-        write(lab_folder / "models" / "more.yaml", "models: {}")
+        write(lab_folder / "classes" / "more.yaml", "classes: {}")
         assert (await routes["/lab/changes"]())["changed"] is False        # asked again within 1 s: as it was
         changes = seq.lab.changes()
-        assert changes["changed"] and changes["modified"] == ["models/bench.yml"]
-        assert changes["added"] == ["models/more.yaml"] and changes["removed"] == []
+        assert changes["changed"] and changes["modified"] == ["classes/bench.yml"]
+        assert changes["added"] == ["classes/more.yaml"] and changes["removed"] == []
         await seq.reload_lab()
         assert (await routes["/lab/changes"]())["changed"] is False        # another lab: looked at again
-        (lab_folder / "models" / "more.yaml").unlink()
+        (lab_folder / "classes" / "more.yaml").unlink()
         inventory = lab_folder / "inventory.yml"
         inventory.write_text(inventory.read_text() + "\n")
         changes = seq.lab.changes()
-        assert changes["removed"] == ["models/more.yaml"] and changes["modified"] == ["inventory.yml"]
+        assert changes["removed"] == ["classes/more.yaml"] and changes["modified"] == ["inventory.yml"]
         await seq.close()
     asyncio.run(main())
 
@@ -1269,9 +1272,9 @@ def test_manual_command_keys_set_by_hand(tmp_path, no_git):
     """A command run by hand can be given keys: one the lab does not define, or one it defines (an override)."""
     from testsuit.sequencer.util import SequencerError
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["commands"]["say"] = {"run": "echo speed={{ params.speed }} host={{ component.host }}"}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["commands"]["say"] = {"run": "echo speed={{ params.speed }} host={{ component.host }}"}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -1321,11 +1324,11 @@ def test_comments_are_never_run(tmp_path, no_git):
     from testsuit.sequencer.util import SequencerError
     note = "Why: {{ params.nowhere }} would fail here; {{ lab.components.seq_host.host }} is not used. {% if %}"
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["commands"]["say"] = {"run": "echo said", "comments": note}
-    types["models"]["counter_host"]["status"] = {"probe": {"run": "echo RUN"}, "states": {"running": {"regex": "^RUN"}},
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["commands"]["say"] = {"run": "echo said", "comments": note}
+    types["classes"]["counter_host"]["status"] = {"probe": {"run": "echo RUN"}, "states": {"running": {"regex": "^RUN"}},
                                                  "comments": note}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -1346,11 +1349,11 @@ def test_comments_are_never_run(tmp_path, no_git):
     assert templates({"run": "x", "comments": "y"}) == ["x"] and templates({"myplugin": 1, "comments": "y"}) == ["myplugin 1"]
     assert without_comments({"run": "x", "comments": "y"}) == {"run": "x"} and without_comments(None) is None
     with pytest.raises(SequencerError, match="command 'start': 'comments' must be text"):
-        ComponentDef.from_dict("t", {"commands": {"start": {"run": "x", "comments": ["a"]}}}, "models.yml")
+        ComponentDef.from_dict("t", {"commands": {"start": {"run": "x", "comments": ["a"]}}}, "classes.yml")
     with pytest.raises(SequencerError, match="status: 'comments' must be text"):
-        ComponentDef.from_dict("t", {"status": {"probe": {"run": "x"}, "comments": {"a": 1}}}, "models.yml")
+        ComponentDef.from_dict("t", {"status": {"probe": {"run": "x"}, "comments": {"a": 1}}}, "classes.yml")
     library = schemas({})["library"]
-    model = library["properties"]["models"]["additionalProperties"]["properties"]
+    model = library["properties"]["classes"]["additionalProperties"]["properties"]
     assert model["commands"]["additionalProperties"]["properties"]["comments"]["type"] == "string"
     assert model["status"]["properties"]["comments"]["type"] == "string"
 
@@ -1411,9 +1414,9 @@ def test_manual_commands_do_not_wait_for_a_component_that_does_not_answer(tmp_pa
     the same lookup; an expression that fails (1 + 'a') is shown as an error of its segment, not a failure."""
     import time as clock
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["commands"]["add"] = {"run": "echo {{ 1 + params.speed }}"}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["commands"]["add"] = {"run": "echo {{ 1 + params.speed }}"}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -1444,11 +1447,11 @@ def test_manual_command(tmp_path, no_git):
     """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
     from testsuit.sequencer.util import SequencerError
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["commands"]["start"] = {"run": "sleep 30", "detach": True}
-    types["models"]["counter_host"]["commands"]["check"] = {"run": "echo host={{ component.host }}; exit 3"}
-    types["models"]["counter_host"]["commands"]["lines"] = {"run": "cd /\nexport X=kept\necho \"$PWD $X\"\nfalse\necho after"}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["commands"]["start"] = {"run": "sleep 30", "detach": True}
+    types["classes"]["counter_host"]["commands"]["check"] = {"run": "echo host={{ component.host }}; exit 3"}
+    types["classes"]["counter_host"]["commands"]["lines"] = {"run": "cd /\nexport X=kept\necho \"$PWD $X\"\nfalse\necho after"}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -2313,8 +2316,8 @@ def test_same_role_and_tags(bench):
     roles["roles"]["fast_dut"] = {"extends": "dut"}
     write(lab_folder / "roles" / "bench.yml", yaml.safe_dump(roles))
     components = copy.deepcopy(LAB_COMPONENTS)
-    components["models"]["counter_host"]["roles"] = ["dut", "fast_dut"]
-    write(lab_folder / "models" / "bench.yml", yaml.safe_dump(components))
+    components["classes"]["counter_host"]["roles"] = ["dut", "fast_dut"]
+    write(lab_folder / "classes" / "bench.yml", yaml.safe_dump(components))
     inventory = yaml.safe_load(bench.config.inventory_file.read_text())
     stage_1, stage_2 = inventory["all"]["children"]["bench_1"], inventory["all"]["children"]["bench_2"]
     # the fast one first: the slot of role dut, listed first, must still leave it to the fast_dut slot
@@ -2333,7 +2336,7 @@ def test_same_role_and_tags(bench):
         setup = copy.deepcopy(SETUP)
         config = setup["configurations"]["bench"]
         config["stage_slots"]["bench"] = {"type": "counter_bench", **(stage_slot or {})}
-        config["slots"] = {k: {"type": "dut_app", "configuration": "standard", "stage_slot": "bench", **v}
+        config["slots"] = {k: {"class": "dut_app", "configuration": "standard", "stage_slot": "bench", **v}
                            for k, v in slots.items()}
         needs = needs_from_setup(setup, "bench")
         binding, why = find_binding(lab, needs, [Phase(id="p", stage_slots=["bench"])], Availability(), "run")
@@ -2580,11 +2583,11 @@ def test_http_extract():
 def test_http_probe(tmp_path, no_git, api):
     """A status probe can be an HTTP request: its states match the answer, exit 0 when it is the expected one."""
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["status"] = {
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["status"] = {
         "probe": {"http": {"url": f"{api.url}/status", "expect": {"json": {"state": "ready"}}}},
         "states": {"idle": {"exit": 0}, "running": {"regex": "busy"}, "offline": {"regex": "odd"}}}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -2604,11 +2607,11 @@ def test_http_probe(tmp_path, no_git, api):
 def test_http_probe_extract(tmp_path, no_git, api):
     """A probe's states can match a part of the JSON answer ('extract')."""
     bench = Bench(tmp_path, stages=1)
-    types = yaml.safe_load((tmp_path / "lab" / "models" / "bench.yml").read_text())
-    types["models"]["counter_host"]["status"] = {
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["classes"]["counter_host"]["status"] = {
         "probe": {"http": {"url": f"{api.url}/status", "extract": ".state"}},
         "states": {"idle": {"regex": "^ready$"}, "running": {"regex": "^busy$"}, "offline": {"regex": "^odd$"}}}
-    write(tmp_path / "lab" / "models" / "bench.yml", yaml.safe_dump(types))
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
 
     async def main():
         seq = bench.sequencer()
@@ -2757,7 +2760,7 @@ def test_stage_bound_with_components_out_of_service(bench):
     lab = load_lab(lab_folder, bench.config.inventory_file, require_tag=False)
     setup = copy.deepcopy(SETUP)
     config = setup["configurations"]["bench"]
-    config["slots"] = {"a": {"type": "dut_app", "configuration": "standard", "stage_slot": "bench", "role": "dut"}}
+    config["slots"] = {"a": {"class": "dut_app", "configuration": "standard", "stage_slot": "bench", "role": "dut"}}
     needs = needs_from_setup(setup, "bench")
     phases = [Phase(id="p", stage_slots=["bench"])]
 

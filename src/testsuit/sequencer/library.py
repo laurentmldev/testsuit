@@ -22,7 +22,7 @@
   component too, which extends a library component or another host (``tsq_extends``).
 
 Built-in roles and components: ``component`` (the abstract root, no command) and ``linux_system``
-(deploy, collect and kill, built in). Library files hold ``roles:`` and/or ``components:``.
+(deploy, collect and kill, built in). Library files hold ``roles:`` and/or ``classes:`` (component classes).
 """
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ class Library:
             self.component_chain(name)
             for role, missing in self.check_component(name).items():
                 if missing:
-                    raise SequencerError(f"model '{name}' ({components[name].source}) does not implement "
+                    raise SequencerError(f"class '{name}' ({components[name].source}) does not implement "
                                          f"{', '.join(missing)}, listed by its role '{role}'")
 
     @classmethod
@@ -289,13 +289,14 @@ class Library:
                 raise SequencerError(f"lab library folder not found: '{folder}'")
             for path in sorted(list(folder.rglob("*.yml")) + list(folder.rglob("*.yaml"))):
                 data = load_yaml(path) or {}
-                if isinstance(data, dict) and "components" in data:
-                    raise SequencerError(f"'{path}': 'components' is now 'models' (component models): rename the key")
-                if not isinstance(data, dict) or not ({"roles", "models"} & set(data)) \
-                        or set(data) - {"roles", "models"}:
-                    raise SequencerError(f"'{path}': expected 'roles' and/or 'models' (a lab library file)")
+                for former in ("components", "models"):
+                    if isinstance(data, dict) and former in data:
+                        raise SequencerError(f"'{path}': '{former}' is now 'classes' (component classes): rename the key")
+                if not isinstance(data, dict) or not ({"roles", "classes"} & set(data)) \
+                        or set(data) - {"roles", "classes"}:
+                    raise SequencerError(f"'{path}': expected 'roles' and/or 'classes' (a lab library file)")
                 for kind, pool, builtins, make in (("roles", roles, BUILTIN_ROLES, RoleDef.from_dict),
-                                                   ("models", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
+                                                   ("classes", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
                     entries = data.get(kind) or {}
                     if not isinstance(entries, dict):
                         raise SequencerError(f"'{path}': '{kind}' must be a mapping, by name")
@@ -400,13 +401,13 @@ class Library:
         given = str(component.vars.get("tsq_role") or "")
         if given:
             if roles and given not in roles:
-                raise SequencerError(f"role '{given}' (tsq_role) is not one its model '{component.extends}' "
+                raise SequencerError(f"role '{given}' (tsq_role) is not one its class '{component.extends}' "
                                      f"supports: {', '.join(roles)}")
             return given
         if len(roles) == 1:
             return roles[0]
         if roles:
-            raise SequencerError(f"its model '{component.extends}' supports several roles ({', '.join(roles)}): "
+            raise SequencerError(f"its class '{component.extends}' supports several roles ({', '.join(roles)}): "
                                  "pick one with tsq_role")
         raise SequencerError(f"no role: give tsq_role, or extend a component that lists its roles "
                              f"('{component.extends}' lists none)")
@@ -435,7 +436,7 @@ class Library:
         for c in chain:
             if c is own:
                 continue                                      # its own commands come after the stage's
-            label = f"host {c.name}" if c.host else f"model {c.name}"
+            label = f"host {c.name}" if c.host else f"class {c.name}"
             for cmd, spec in c.commands.items():
                 commands[cmd] = dict(spec)
                 sources[cmd] = label

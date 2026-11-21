@@ -220,7 +220,7 @@ def test_workspace_session(repos):
     assert {"start", "stop", "ready", "deploy"} <= set(palette["slots"]["dut"]["commands"])
     start_cmd = palette["slots"]["dut"]["commands"]["start"]
     assert start_cmd["from"] == "role dut" and start_cmd["description"] == "Starts the counter."
-    assert start_cmd["implementations"]["counter_1"]["from"] == "model counter_host"
+    assert start_cmd["implementations"]["counter_1"]["from"] == "class counter_host"
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
@@ -444,7 +444,7 @@ def test_generation_errors_and_stop(repos):
             {"id": "push", "slot": "dut", "push": {"from": "data/dut/input", "to": "/tmp/in"}}, {"id": "start", "slot": "dut", "do": "start"}]}]}})
     assert not [p for p in editor.synthesis(session, "testdef/count/testdef.yml")["problems"] if p.startswith("inputs:")]
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
-    inputs = setup["slot_types"]["dut_app"]["configurations"]["standard"]["inputs"]
+    inputs = setup["slot_classes"]["dut_app"]["configurations"]["standard"]["inputs"]
 
     # what the sequencer would refuse at posting (a phase naming a slot the setup does not have): listed before generating
     editor.write(session, "testdef/count/testdef.yml", data={
@@ -786,7 +786,7 @@ def test_lab_session(repos):
     assert described["library"]["counter_host"]["used_by"] == ["counter_1", "counter_2"]
     host = described["components"]["counter_1"]
     assert host["chain"] == ["component", "linux_system", "counter_host", "counter_1"]
-    assert host["commands"]["deploy"]["from"] == "model linux_system" and host["missing"] == []
+    assert host["commands"]["deploy"]["from"] == "class linux_system" and host["missing"] == []
     assert described["library"]["counter_host"]["roles"] == ["dut"] and described["roles"]["dut"]["implemented_by"] == ["counter_host"]
     assert (host["role"], host["role_given"], host["role_choices"]) == ("dut", "", ["dut"])   # the role of its component
 
@@ -859,20 +859,20 @@ def test_renaming_roles_and_components(repos):
     editor.write(session, "other.yml", content=other)
     editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
     assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == \
-        ["models/bench.yml"]                                  # the roles its components list
-    assert editor.read(session, "models/bench.yml")["data"]["models"]["counter_host"]["roles"] == ["counter_dut"]
+        ["classes/bench.yml"]                                  # the roles its components list
+    assert editor.read(session, "classes/bench.yml")["data"]["classes"]["counter_host"]["roles"] == ["counter_dut"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
     assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
     assert "tsq_role: dut" not in editor.read(session, "inventory.yml")["content"]
     assert editor.read(session, "other.yml")["content"] == other
 
-    components = editor.read(session, "models/bench.yml")["data"]
-    components["models"]["counter_app"] = components["models"].pop("counter_host")
-    editor.write(session, "models/bench.yml", data=components)
+    components = editor.read(session, "classes/bench.yml")["data"]
+    components["classes"]["counter_app"] = components["classes"].pop("counter_host")
+    editor.write(session, "classes/bench.yml", data=components)
     assert editor.context(session)["lab_error"]
     assert editor.rename_references(session, "component", "counter_host", "counter_app",
-                                    skip="models/bench.yml") == ["inventory.yml"]
+                                    skip="classes/bench.yml") == ["inventory.yml"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None and ctx["lab"]["library"]["counter_app"]["used_by"] == ["counter_1", "counter_2"]
 
@@ -1022,16 +1022,16 @@ def test_schemas_match_the_datapack_models():
     """Every key the Editor's forms offer in a setup or a test definition is one the datapack tool accepts."""
     from testsuit.datatools.datapack import model
     from testsuit.sequencer import editor_schemas as schemas
-    for schema, cls in ((schemas.SLOT_TYPE, model.SlotType), (schemas.SLOT, model.Slot),
+    for schema, cls in ((schemas.SLOT_CLASS, model.SlotClass), (schemas.SLOT, model.Slot),
                         (schemas.SETUP_CONFIGURATION, model.SetupConfiguration), (schemas.INPUT, model.InputFile),
                         (schemas.SETUP, model.Setup), (schemas.TESTDEF, model.Testdef)):
-        assert set(schema.get("properties") or {}) <= set(cls.model_fields), cls.__name__
-    model.SlotType(configurations={}, description="a counter")
+        assert set(schema.get("properties") or {}) <= {f.alias or n for n, f in cls.model_fields.items()}, cls.__name__
+    model.SlotClass(configurations={}, description="a counter")
 
 
 def test_setup_type_role_inputs(repos):
-    """A slot type bound to a lab role: the inputs the role requires and a configuration lacks are
-    warned about, and so is a slot of another role using that type."""
+    """A slot class bound to a lab role: the inputs the role requires and a configuration lacks are
+    warned about, and so is a slot of another role using that class."""
     editor = repos.editor
     session = editor.open("workspace0", local=True)
     lab, _ = editor.lab_for(session)
@@ -1040,12 +1040,12 @@ def test_setup_type_role_inputs(repos):
         {"name": "extra/", "type": "folder", "optional": False, "description": "How to make it."},
         {"name": "notes.txt", "type": "file", "optional": True, "description": ""}]
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
-    setup["slot_types"]["dut_app"]["role"] = "dut"
-    setup["configurations"]["bench"]["slots"]["analysis"]["type"] = "dut_app"
+    setup["slot_classes"]["dut_app"]["role"] = "dut"
+    setup["configurations"]["bench"]["slots"]["analysis"]["class"] = "dut_app"
     editor.write(session, "setup/bench_setup.yml", data=setup)
     messages = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
-    assert "type 'dut_app', configuration 'standard': no input 'extra/', which its role dut expects" in messages, messages
+    assert "slot class 'dut_app', configuration 'standard': no input 'extra/', which its role dut expects" in messages, messages
     assert not any("'app.sh'" in m or "notes.txt" in m for m in messages), messages
-    assert any(m.startswith("slot 'analysis': role 'sequencer', but its type 'dut_app' is for role 'dut'") for m in messages), messages
+    assert any(m.startswith("slot 'analysis': role 'sequencer', but its class 'dut_app' is for role 'dut'") for m in messages), messages
     described = editor.context(session)["lab"]["roles"]["dut"]["inputs"]
     assert [i["name"] for i in described] == ["app.sh", "extra/", "notes.txt"] and described[1]["from"] == "dut"

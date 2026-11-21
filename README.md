@@ -127,7 +127,7 @@ An unknown field in a scenario is a warning when it runs, in its log and in the 
 
 ## Datapacks
 
-The `datapack` command builds the input files of every slot of a test setup and packs them in a zip. A test definition names a setup and its configuration; the setup declares data repositories (datasets imported by importers such as `git`), slot types with their input files, and configurations listing the slots (each bound at run time to a lab component by the test sequencer):
+The `datapack` command builds the input files of every slot of a test setup and packs them in a zip. A test definition names a setup and its configuration; the setup declares data repositories (datasets imported by importers such as `git`), slot classes with their input files, and configurations listing the slots (each bound at run time to a lab component by the test sequencer):
 
 ```yaml
 # testdef.yml

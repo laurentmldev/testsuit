@@ -308,7 +308,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
             "logical": logical, "type": stage_type, "phases": used_by("stage_slots", logical),
             "bound": binding.stage_slots.get(logical),
             "tags": needs.stage_slot_tags.get(logical, []),
-            "slots": [{"logical": lc.id, "type": lc.type, "role": lc.role, "tags": lc.tags, "name": lc.name}
+            "slots": [{"logical": lc.id, "class": lc.slot_class, "role": lc.role, "tags": lc.tags, "name": lc.name}
                       for lc in needs.in_stage_slot(logical)],
             "problem": None if candidates else f"no stage of type '{stage_type}' in the lab",
             "candidates": candidates})
@@ -324,7 +324,7 @@ def resource_overview(lab: Lab, needs: Needs, phases: list[Phase], avail: Availa
             candidates.append({**comp_facts(comp), "bound": bound,
                                "why": None if bound else adhoc_problem(comp, avail, run_id)})
         slots.append({
-            "logical": lc.id, "type": lc.type, "role": lc.role, "tags": lc.tags, "name": lc.name,
+            "logical": lc.id, "class": lc.slot_class, "role": lc.role, "tags": lc.tags, "name": lc.name,
             "phases": used_by("slots", lc.id), "bound": binding.slots.get(lc.id),
             "problem": None if candidates else f"no ad hoc component with role '{lc.role}' in the lab",
             "candidates": candidates})

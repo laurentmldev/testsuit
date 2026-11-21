@@ -79,7 +79,7 @@ datarepositories:                      # datasets imported before generating, by
             version: "{{ toytrain_sw_version }}"
             postprocess: [finalize]     # processors run on the imported folder
 
-slot_types:                            # the inputs of each kind of slot, by configuration
+slot_classes:                            # the inputs of each kind of slot, by configuration
   pilot_app:
     configurations:
       standard:
@@ -99,14 +99,14 @@ configurations:                        # what a test uses: its slots, of these t
   sim_bench:
     stage_slots: {train: {type: toytrain}}  # for the test sequencer: slots bound in one lab stage
     slots:
-      pilot:     {name: CALC-Pilot, type: pilot_app, configuration: standard, stage_slot: train, role: pilot}
-      telemetry: {type: telemetry_app, configuration: standard, stage_slot: train, role: telemetry,
+      pilot:     {name: CALC-Pilot, class: pilot_app, configuration: standard, stage_slot: train, role: pilot}
+      telemetry: {class: telemetry_app, configuration: standard, stage_slot: train, role: telemetry,
                   needs: [pilot]}      # generated after pilot, can read its inputs
 ```
 
-`stage_slots`, `stage_slot`, `role`, `tags` (on a slot or a stage slot: the lab component or stage must have them all) and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a stage slot groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot types therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
+`stage_slots`, `stage_slot`, `role`, `tags` (on a slot or a stage slot: the lab component or stage must have them all) and the test definition's `pipeline` are for the test sequencer: the datapack tool checks them and keeps them as written. The role binds a slot to a lab component, and the lab role gives its commands; a stage slot groups slots that must be bound in the same lab stage ([sequencer README](../../sequencer/README.md), sections 7 and 8). A setup's slot classes therefore only declare inputs: `extends` and `commands` there are refused, with what to write instead.
 
-The former names are refused, with the current one: `component_types` (now `slot_types`), a configuration's `components` (now `slots`), `stages` and `realms` (now `stage_slots`), a slot's `stage` and `realm` (now `stage_slot`).
+The former names are refused, with the current one: `component_types` and `slot_types` (now `slot_classes`), a configuration's `components` (now `slots`), `stages` and `realms` (now `stage_slots`), a slot's `stage` and `realm` (now `stage_slot`) and its `type` (now `class`).
 
 [model.py](model.py) holds the schemas of both files. Unknown fields are errors, to catch typos.
 
@@ -122,7 +122,7 @@ Every string of these files, and every template, can use keys with Jinja2: `{{ t
    - `testdef.{id, name, file, path, setup_file, setup_config}`;
    - `setup.{id, name, file, path, configuration}`;
    - `datapack.{name, user, host, timestamp, nocheck}`;
-   - while the files of a slot are rendered, `slot.{id, name, type, configuration, input_dir}` and, for the slots it `needs`, `slots.<id>.input_dir`.
+   - while the files of a slot are rendered, `slot.{id, name, class, configuration, input_dir}` and, for the slots it `needs`, `slots.<id>.input_dir`.
 
 A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), resolved on first use, so a dictionary may reference one loaded after it. A value made of a single expression keeps its type, so lists and numbers can be shared too. An undefined key is an error, and so is a circular reference. A dotted name (`bench.version: v1.2`) is read as nested keys.
 
@@ -151,7 +151,7 @@ The generation refuses to start until each is given (`--set operator.name="J. Do
 
 ### Inputs
 
-Each input of a slot type puts `source` at `target` in the slot's input folder:
+Each input of a slot class puts `source` at `target` in the slot's input folder:
 
 | `method` | What it does |
 |---|---|

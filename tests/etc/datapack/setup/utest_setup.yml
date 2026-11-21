@@ -5,7 +5,7 @@ name: "Setup for {{ testdef.name }}"
 dictionaries:
   - globals.yml
 
-slot_types:
+slot_classes:
   comp1:
     configurations:
       standard:
@@ -30,7 +30,7 @@ slot_types:
 configurations:
   nominal:
     slots:
-      mycmp1: {name: Comp One, type: comp1, configuration: standard}
-      mycmp2: {name: Comp Two, type: comp1, configuration: standard}
+      mycmp1: {name: Comp One, class: comp1, configuration: standard}
+      mycmp2: {name: Comp Two, class: comp1, configuration: standard}
   other:
     slots: {}
