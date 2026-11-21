@@ -65,3 +65,33 @@ export function Named({ kind, name, detail, className, children }: {
 
 /** "slot pilot": the kind before the name, in plain text (sentences, hover texts). */
 export const kindName = (kind: Kind, name: string) => `${KINDS[kind].label} ${name}`;
+
+const LEGEND: { title: string; kinds: Kind[] }[] = [
+  { title: "Lab", kinds: ["component", "component_class", "role", "stage", "stage_type"] },
+  { title: "Datapack", kinds: ["slot", "slot_class", "stage_slot"] },
+  { title: "Pipeline", kinds: ["phase", "command"] },
+];
+
+/** What the glyphs mean: a button of the top bar, opening the legend. */
+export function KindLegend() {
+  return (
+    <details className="kind-legend">
+      <summary title="What the small glyphs before names mean">legend</summary>
+      <div className="kind-legend-pop">
+        <div className="kind-legend-cols">
+          {LEGEND.map((g) => (
+            <div key={g.title}>
+              <div className={`kind-legend-title nk-${KINDS[g.kinds[0]].family}`}>{g.title}</div>
+              {g.kinds.map((k) => <div key={k}><KindIcon kind={k} /> {KINDS[k].label}</div>)}
+            </div>
+          ))}
+        </div>
+        <p className="muted small">
+          The colour gives the side: the lab (what exists) or the datapack (what a test needs). Filled: in the
+          lab; outlined: a slot, to be filled with a lab component; dashed: a class or a type. A component and its
+          slot are squares, a stage and its stage slot a group of squares, a role a list of commands.
+        </p>
+      </div>
+    </details>
+  );
+}

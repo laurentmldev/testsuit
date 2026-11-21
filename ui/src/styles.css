@@ -1062,3 +1062,14 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .combo.with-kind > .kind-icon { position: absolute; left: 8px; top: 10px; margin: 0; pointer-events: none; }
 .combo.with-kind > input { padding-left: 24px; }
 .run-binding { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+
+/* the legend of the kind glyphs, from the top bar */
+.kind-legend { position: relative; }
+.kind-legend > summary { list-style: none; cursor: pointer; color: var(--accent); }
+.kind-legend > summary::-webkit-details-marker { display: none; }
+.kind-legend-pop { position: absolute; right: 0; top: 26px; z-index: 60; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 10px 14px; width: 420px; max-width: calc(100vw - 32px); font-size: 12.5px; color: var(--text); }
+.kind-legend-cols { display: flex; gap: 22px; }
+.kind-legend-cols > div > div { line-height: 22px; white-space: nowrap; }
+.kind-legend-title { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.kind-legend-pop p { margin: 8px 0 0; white-space: normal; }
