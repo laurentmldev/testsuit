@@ -229,7 +229,7 @@ class Pipeline(_Model):
 @dataclass
 class LogicalSlot:
     id: str
-    slot_class: str                              # its slot class ('class' in the setup, from its 'slot_classes')
+    slot_class: str                              # its slot class (from the setup's 'slot_classes')
     name: str = ""
     stage_slot: str = ""                              # its stage slot, '' for an ad hoc slot
     role: str = ""                               # a type of the lab: binds to a lab component, which gives the commands
@@ -287,7 +287,7 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
         if not slot.get("role"):
             raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' has no role "
                                  "(needed to bind it to a lab component)")
-        slots[slot_id] = LogicalSlot(id=slot_id, slot_class=slot.get("class", ""), name=slot.get("name", ""),
+        slots[slot_id] = LogicalSlot(id=slot_id, slot_class=slot.get("slot_class", ""), name=slot.get("name", ""),
                                      stage_slot=stage_slot, role=slot["role"],
                                      tags=tag_list(slot.get("tags"), f"setup configuration '{configuration}': slot '{slot_id}'"))
     return Needs(stage_slots=stage_slots, slots=slots, slot_classes=setup.get("slot_classes") or {},

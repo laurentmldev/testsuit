@@ -280,7 +280,7 @@ function SlotClassForm({ doc, name, value, update, onRenamed, onDeleted }: {
     if (v === undefined || v === "") delete d.slot_classes[name][k];
     else d.slot_classes[name][k] = v;
   });
-  const usedBy = Object.entries<any>((doc.data?.configurations) || {}).flatMap(([c, cfg]) => Object.entries<any>(cfg?.slots || {}).filter(([, comp]) => comp?.class === name).map(([id]) => `${id} (${c})`));
+  const usedBy = Object.entries<any>((doc.data?.configurations) || {}).flatMap(([c, cfg]) => Object.entries<any>(cfg?.slots || {}).filter(([, comp]) => comp?.slot_class === name).map(([id]) => `${id} (${c})`));
   const [newName, setNewName] = useState(name);
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const configs: Record<string, any> = t.configurations || {};
@@ -293,7 +293,7 @@ function SlotClassForm({ doc, name, value, update, onRenamed, onDeleted }: {
           if (newName === name || idProblem(newName, Object.keys(doc.data.slot_classes || {}))) return setNewName(name);
           update((d) => {
             d.slot_classes = Object.fromEntries(Object.entries(d.slot_classes).map(([k, v]) => [k === name ? newName : k, v]));
-            for (const cfg of Object.values<any>(d.configurations || {})) for (const comp of Object.values<any>(cfg?.slots || {})) if (comp?.class === name) comp.class = newName;
+            for (const cfg of Object.values<any>(d.configurations || {})) for (const comp of Object.values<any>(cfg?.slots || {})) if (comp?.slot_class === name) comp.slot_class = newName;
           });
           onRenamed(newName);
         }} /></h3>
@@ -436,7 +436,7 @@ export function PreviewDialog({ setupPath, source, type, onClose }: { setupPath:
     setTestdef(td);
     const setup = (ctx.workspace?.setups || []).find((s: any) => s.path === setupPath);
     const cfg = setup?.configurations?.[testdefs.find((t: any) => t.path === td)?.setup_config];
-    const slot = Object.entries<any>(cfg?.slots || {}).find(([, c]) => c.class === type)?.[0];
+    const slot = Object.entries<any>(cfg?.slots || {}).find(([, c]) => c.slot_class === type)?.[0];
     setResult(await attempt(() => post(`edit/sessions/${sid}/preview`, { testdef: td, source: path, slot })));
   };
   useEffect(() => {
@@ -488,7 +488,7 @@ function RoleCommands({ role }: { role?: string }) {
 function typeForRole(data: any, role: string): string {
   for (const cfg of Object.values<any>(data.configurations || {}))
     for (const c of Object.values<any>(cfg?.slots || {}))
-      if (c?.role === role && c?.class && data.slot_classes?.[c.class]) return c.class;
+      if (c?.role === role && c?.slot_class && data.slot_classes?.[c.slot_class]) return c.slot_class;
   return `${slug(role)}_app`;
 }
 
@@ -529,7 +529,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     update((d) => {
       d.configurations[name].slots ||= {};
       const t = Object.keys(types)[0];
-      d.configurations[name].slots[id] = { class: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", ...(stage ? { stage_slot: stage } : {}), role: "" };
+      d.configurations[name].slots[id] = { slot_class: t || "", configuration: Object.keys(types[t]?.configurations || {})[0] || "standard", ...(stage ? { stage_slot: stage } : {}), role: "" };
     });
   };
   /** The slots of one stage slot (or the ad hoc ones), with roles narrowed to its lab stage type. */
@@ -543,7 +543,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           {ids.map((id) => {
             const c = comps[id];
             const roles = roleChoices(ctx, st ? { stageType: st } : { adhoc: true });
-            const typeConfigs = Object.keys(types[c?.class]?.configurations || {});
+            const typeConfigs = Object.keys(types[c?.slot_class]?.configurations || {});
             return (
               <tr key={id}>
                 <td>
@@ -553,8 +553,8 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                 <td><code>{id}</code>{!stage && c?.stage_slot && <div className="error-text small">stage slot '{c.stage_slot}' is not declared</div>}</td>
                 <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
                 <td>
-                  <Combo value={c?.class} onChange={(v) => setComp(id, "class", v)} choices={typeOptions} strict />
-                  {c?.class && types[c.class] && <button className="link small" onClick={() => onOpenType(c.class)}>open</button>}
+                  <Combo value={c?.slot_class} onChange={(v) => setComp(id, "slot_class", v)} choices={typeOptions} strict />
+                  {c?.slot_class && types[c.slot_class] && <button className="link small" onClick={() => onOpenType(c.slot_class)}>open</button>}
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
                 <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
@@ -589,7 +589,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       const t = typeForRole(d, role);
       d.slot_classes[t] ||= newType(ctx, role);
       const id = freeName(slug(role), Object.keys(c.slots));
-      c.slots[id] = { name: role, class: t, configuration: Object.keys(d.slot_classes[t].configurations || { standard: 1 })[0], stage_slot: stage, role };
+      c.slots[id] = { name: role, slot_class: t, configuration: Object.keys(d.slot_classes[t].configurations || { standard: 1 })[0], stage_slot: stage, role };
     });
     const cells = (id: string) => {
       const c = comps[id];
@@ -598,10 +598,10 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           <td><code>{id}</code></td>
           <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
           <td>
-            <Combo value={c?.class} onChange={(v) => setComp(id, "class", v)} choices={typeOptions} strict />
-            {c?.class && types[c.class] && <button className="link small" onClick={() => onOpenType(c.class)}>open</button>}
+            <Combo value={c?.slot_class} onChange={(v) => setComp(id, "slot_class", v)} choices={typeOptions} strict />
+            {c?.slot_class && types[c.slot_class] && <button className="link small" onClick={() => onOpenType(c.slot_class)}>open</button>}
           </td>
-          <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={Object.keys(types[c?.class]?.configurations || {}).map((x) => ({ value: x }))} strict /></td>
+          <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={Object.keys(types[c?.slot_class]?.configurations || {}).map((x) => ({ value: x }))} strict /></td>
           <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
           {tagsCell(id)}
         </>
@@ -716,7 +716,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
             const t = typeForRole(d, role);
             d.slot_classes[t] ||= newType(ctx, role);
             const id = freeName(slug(role), Object.keys(c.slots));
-            c.slots[id] = { name: role, class: t, configuration: Object.keys(d.slot_classes[t].configurations || { standard: 1 })[0], stage_slot: stage, role };
+            c.slots[id] = { name: role, slot_class: t, configuration: Object.keys(d.slot_classes[t].configurations || { standard: 1 })[0], stage_slot: stage, role };
           }
         })}>+ Stage slot</button>
       </Section>
@@ -761,7 +761,7 @@ function FromLab({ data, config, initial, onClose, onApply }: { data: any; confi
       const t = typeForRole(draft, role);
       draft.slot_classes[t] ||= { configurations: { standard: { inputs: [] } } };
       const id = freeName(slug(role), Object.keys(c.slots));
-      c.slots[id] = { name: role, class: t, configuration: Object.keys(draft.slot_classes[t].configurations || { standard: 1 })[0], ...(mode === "stage" ? { stage_slot: logical } : {}), role };
+      c.slots[id] = { name: role, slot_class: t, configuration: Object.keys(draft.slot_classes[t].configurations || { standard: 1 })[0], ...(mode === "stage" ? { stage_slot: logical } : {}), role };
     }
     onApply(draft);
   };

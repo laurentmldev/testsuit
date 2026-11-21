@@ -22,7 +22,7 @@
   component too, which extends a library component or another host (``tsq_extends``).
 
 Built-in roles and components: ``component`` (the abstract root, no command) and ``linux_system``
-(deploy, collect and kill, built in). Library files hold ``roles:`` and/or ``classes:`` (component classes).
+(deploy, collect and kill, built in). Library files hold ``roles:`` and/or ``component_classes:``.
 """
 from __future__ import annotations
 
@@ -291,12 +291,12 @@ class Library:
                 data = load_yaml(path) or {}
                 for former in ("components", "models"):
                     if isinstance(data, dict) and former in data:
-                        raise SequencerError(f"'{path}': '{former}' is now 'classes' (component classes): rename the key")
-                if not isinstance(data, dict) or not ({"roles", "classes"} & set(data)) \
-                        or set(data) - {"roles", "classes"}:
-                    raise SequencerError(f"'{path}': expected 'roles' and/or 'classes' (a lab library file)")
+                        raise SequencerError(f"'{path}': '{former}' is now 'component_classes': rename the key")
+                if not isinstance(data, dict) or not ({"roles", "component_classes"} & set(data)) \
+                        or set(data) - {"roles", "component_classes"}:
+                    raise SequencerError(f"'{path}': expected 'roles' and/or 'component_classes' (a lab library file)")
                 for kind, pool, builtins, make in (("roles", roles, BUILTIN_ROLES, RoleDef.from_dict),
-                                                   ("classes", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
+                                                   ("component_classes", components, BUILTIN_COMPONENTS, ComponentDef.from_dict)):
                     entries = data.get(kind) or {}
                     if not isinstance(entries, dict):
                         raise SequencerError(f"'{path}': '{kind}' must be a mapping, by name")

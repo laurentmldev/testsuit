@@ -123,7 +123,7 @@ export function NewFileDialog({ onClose, onCreated }: { onClose: () => void; onC
       };
     } else if (kind === "setup") {
       data = { id: slug(id || name), name: name || id, dictionaries: [], configurations: { default: { stage_slots: {}, slots: {} } }, slot_classes: {} };
-    } else if (kind === "library") data = { roles: {}, classes: {} };
+    } else if (kind === "library") data = { roles: {}, component_classes: {} };
     else if (kind === "subpipelines") data = { subpipelines: {} };
     else if (kind === "dictionary") content = `# Keys for the templates and commands: {{ ${slug(id || name || "section")}.example }}\n${slug(id || name || "section")}:\n  example: value\n`;
     else content = "# Rendered with the datapack keys: type {{ to get them.\n";

@@ -144,7 +144,7 @@ Removed names (`tsq_type`, `tsq_types`; library keys `components:` and `models:`
 
 ### 4.2 Library: roles and classes
 
-Library files (in `tsq_library` folders) hold `roles:`, `classes:` or both. Plugins MAY register roles and classes in Python.
+Library files (in `tsq_library` folders) hold `roles:`, `component_classes:` or both. Plugins MAY register roles and classes in Python.
 
 A **lab role** is abstract:
 
@@ -165,7 +165,7 @@ roles:
 A **component class** is concrete:
 
 ```yaml
-classes:
+component_classes:
   <class>:
     extends: <class>                # inherits implementations, status, self-test, roles
     roles: [<role>, ...]            # roles it supports; inherited unless redefined; none for a base class
@@ -301,7 +301,7 @@ configurations:                        # setup configurations
     stage_slots:
       <id>: {type: <stage type>, tags: [...]}
     slots:
-      <id>: {class: <slot class>, configuration: <name>, role: <role>,
+      <id>: {slot_class: <slot class>, configuration: <name>, role: <role>,
              stage_slot: <id>, tags: [...], needs: [<slot>...]}
 ```
 
@@ -454,9 +454,9 @@ All templates are Jinja2 (the `datapack` tool's environment, `StrictUndefined`).
 | Key | Generation | Steps (run time) | Lab only (probe, self-test, manual) |
 |---|---|---|---|
 | dictionary keys, `<dataset>.{path,version}`, `testdef.*`, `setup.*`, `datapack.*` | ✓ | ✓ (frozen in `context.yml`) | |
-| `slot.{id,name,class,configuration,input_dir}` | ✓ | | |
+| `slot.{id,name,slot_class,configuration,input_dir}` | ✓ | | |
 | `slots.<id>.{id,input_dir}`, `read_input()` | needed slots | | |
-| `slot.{id, name, class,role,stage_slot,component,input_dir,output_dir,remote_root}`, `slots.<id>.*` | | ✓ | |
+| `slot.{id,name,slot_class,role,stage_slot,component,input_dir,output_dir,remote_root}`, `slots.<id>.*` | | ✓ | |
 | `stage_slots.<id>.stage` | | ✓ | |
 | `component.{id,host,host_alias,label,role,extends,stage,vars,input_dir,output_dir,remote_root,state}` | | bound component | the component |
 | `remote_root` | | ✓ | ✓ |

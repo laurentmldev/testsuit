@@ -79,7 +79,7 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
               {Object.entries<any>(config.slots || {}).map(([id, c]) => (
                 <tr key={id}>
                   <td><code>{id}</code> <span className="muted small">{c.name}</span></td>
-                  <td>{c.class}</td><td>{c.configuration}</td>
+                  <td>{c.slot_class}</td><td>{c.configuration}</td>
                   <td>{c.stage_slot ? `${c.stage_slot} (${config.stage_slots?.[c.stage_slot] || "?"})` : <span className="muted">ad hoc</span>}</td>
                   <td>{c.role}</td><td className="small">{(c.needs || []).join(", ")}</td>
                 </tr>

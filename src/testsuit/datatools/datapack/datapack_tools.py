@@ -44,8 +44,8 @@ Keys always available (they override dictionary keys of the same name):
 - ``setup.{id, name, file, path, configuration}``
 - ``datapack.{name, user, host, timestamp, nocheck}``
 - ``<dataset id>.{path, version}`` for every imported dataset
-- ``slot.{id, name, class, configuration, input_dir}`` while rendering the files of a slot, and
-  ``slots.<id>.{id, name, class, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
+- ``slot.{id, name, slot_class, configuration, input_dir}`` while rendering the files of a slot, and
+  ``slots.<id>.{id, name, slot_class, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
 
 ``datapack.output_dir`` (from a dictionary, or the ``output_dir`` argument) is where the zip is written.
 

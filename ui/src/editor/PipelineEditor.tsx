@@ -721,7 +721,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected, onCommen
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.class}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
+          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.slot_class}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
               onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})${typeof i.spec?.comments === "string" && i.spec.comments.trim() ? `: ${i.spec.comments.trim().replace(/\s*\n\s*/g, " ")}` : ""}`).join("")}` })}>
@@ -861,7 +861,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     onChange(next);
   };
   const comps: Choice[] = (palette ? Object.entries<any>(palette.slots) : []).filter(([id]) => isSub || held.includes(id))
-    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.class}${c.stage_slot ? ` · stage_slot ${c.stage_slot}` : " · ad hoc"}` }));
+    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.slot_class}${c.stage_slot ? ` · stage_slot ${c.stage_slot}` : " · ad hoc"}` }));
   const roles = [...new Set(comps.map((c) => palette.slots[c.value].role))];
   const targetMode = step.slot ? "slot" : step.for_each === "slots" ? "all" : Array.isArray(step.for_each) ? "list"
     : typeof step.for_each === "string" && roles.includes(step.for_each) ? "role" : typeof step.for_each === "string" ? "expr" : "none";

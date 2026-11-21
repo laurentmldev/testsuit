@@ -137,7 +137,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                            "slots": flat.phase.slots, "groups": flat.groups, "steps": steps,
                            "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
         return {"phases": phases, "stage_slots": dp.needs.stage_slots,
-                "slots": {c.id: {"class": c.slot_class, "role": c.role, "stage_slot": c.stage_slot, "name": c.name}
+                "slots": {c.id: {"slot_class": c.slot_class, "role": c.role, "stage_slot": c.stage_slot, "name": c.name}
                           for c in dp.needs.slots.values()}}
 
     @app.get("/runs/{run_id}/resources")

@@ -104,7 +104,7 @@ def _step_keys(lab: Lab, needs, binding, context: dict, phase: str, params: dict
     values where only the run knows them (its id, folders): what matters is which names are defined."""
     def slot_keys(slot_id: str) -> dict:
         lc = needs.slots[slot_id]
-        return {"id": lc.id, "name": lc.name or lc.id, "class": lc.slot_class, "role": lc.role, "stage_slot": lc.stage_slot,
+        return {"id": lc.id, "name": lc.name or lc.id, "slot_class": lc.slot_class, "role": lc.role, "stage_slot": lc.stage_slot,
                 "component": binding.slots.get(slot_id, "") if binding else "", "input_dir": "<remote root>/<slot>/input",
                 "output_dir": "<remote root>/<slot>/output", "remote_root": "<remote root>"}
 
@@ -144,7 +144,7 @@ def _input_counts(setup_raw: dict, config: str) -> dict[str, int]:
     counts = {}
     for slot_id, slot in slots.items():
         slot = slot if isinstance(slot, dict) else {}
-        cfg = (((types.get(slot.get("class")) or {}).get("configurations") or {}).get(slot.get("configuration")) or {})
+        cfg = (((types.get(slot.get("slot_class")) or {}).get("configurations") or {}).get(slot.get("configuration")) or {})
         counts[str(slot_id)] = len([i for i in cfg.get("inputs") or [] if isinstance(i, dict)])
     return counts
 
@@ -261,7 +261,7 @@ def _missing_keys(value: Any, keys: dict) -> list[str]:
 RUNTIME_KEYS = {
     "slot.id": "the step's slot (setup configuration)",
     "slot.name": "its name",
-    "slot.class": "its slot class",
+    "slot.slot_class": "its slot class",
     "slot.role": "its role",
     "slot.stage_slot": "its stage slot (setup configuration), '' for an ad hoc slot",
     "slot.component": "id of the lab component it is bound to",
@@ -892,8 +892,8 @@ class Editor:
             return "testdef"
         if "configurations" in data and ({"slot_classes", "component_types", "datarepositories"} & set(data)):
             return "setup"
-        if ({"roles", "classes", "models", "components"} & set(data)) and not set(data) - {"roles", "classes", "models", "components"}:
-            return "library"                 # (models:, components: former names of classes, refused when loaded)
+        if ({"roles", "component_classes", "models", "components"} & set(data)) and not set(data) - {"roles", "component_classes", "models", "components"}:
+            return "library"                 # (models:, components: former names of component_classes, refused when loaded)
         if "subpipelines" in data:
             return "subpipelines"
         return "dictionary"
@@ -1010,7 +1010,7 @@ class Editor:
         if kind not in ("role", "component"):
             raise SequencerError(f"rename: 'role' or 'component', not '{kind}'")
         host_key = "tsq_role" if kind == "role" else "tsq_extends"
-        section = "roles" if kind == "role" else "classes"
+        section = "roles" if kind == "role" else "component_classes"
 
         def follow(node: Any, keys: tuple[str, ...]) -> bool:
             changed = False
@@ -1057,7 +1057,7 @@ class Editor:
             else:
                 hit = follow((data or {}).get(section), ("extends",))
                 if kind == "role":
-                    hit = follow((data or {}).get("classes"), ("roles",)) or hit
+                    hit = follow((data or {}).get("component_classes"), ("roles",)) or hit
             if hit:
                 self.write(session, f["path"], data=data)
                 changed.append(f["path"])
@@ -1214,8 +1214,8 @@ class Editor:
                         result["subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
                         # only these can be used by another test definition (pipeline.include)
                         result["shared_subpipelines"].setdefault(sub, {"file": rel, **self._sub_summary(spec)})
-                elif "all" not in data and not (({"roles", "classes", "models", "components"} & set(data))
-                                                 and not set(data) - {"roles", "classes", "models", "components"}):
+                elif "all" not in data and not (({"roles", "component_classes", "models", "components"} & set(data))
+                                                 and not set(data) - {"roles", "component_classes", "models", "components"}):
                     result["dictionaries"].append(rel)
         return result
 
@@ -1231,7 +1231,7 @@ class Editor:
         for name, cfg in (data.get("configurations") or {}).items():
             cfg = cfg if isinstance(cfg, dict) else {}
             stage_slots = {s: (v.get("type") if isinstance(v, dict) else v) for s, v in (cfg.get("stage_slots") or {}).items()}
-            slots = {c: {k: v.get(k) for k in ("name", "class", "configuration", "stage_slot", "role", "needs")}
+            slots = {c: {k: v.get(k) for k in ("name", "slot_class", "configuration", "stage_slot", "role", "needs")}
                      for c, v in (cfg.get("slots") or {}).items() if isinstance(v, dict)}
             configurations[name] = {"stage_slots": stage_slots, "slots": slots}
         types = {}
@@ -1511,7 +1511,7 @@ class Editor:
             raise SequencerError(f"no slot '{slot}' in setup configuration '{testdef.setup_config}'")
         comp = slots[slot] if isinstance(slots[slot], dict) else {}
         generation = {**context,
-                      "slot": {"id": slot, "name": comp.get("name", ""), "class": comp.get("class", ""),
+                      "slot": {"id": slot, "name": comp.get("name", ""), "slot_class": comp.get("slot_class", ""),
                                "configuration": comp.get("configuration", ""), "input_dir": f"<{slot} input folder>"},
                       "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []}}
         def shown(origin: str) -> str:
@@ -1727,16 +1727,16 @@ class Editor:
                                  "message": str(e)})
                 continue
             for comp_id, comp in ((cfg or {}).get("slots") or {}).items():
-                type_role = (types.get(comp.get("class")) or {}).get("role")
+                type_role = (types.get(comp.get("slot_class")) or {}).get("role")
                 if type_role and comp.get("role") and comp["role"] != type_role:
                     where = yamledit.locate(text, ["configurations", cfg_name, "slots", comp_id, "role"]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "warning",
                                      "message": f"slot '{comp_id}': role '{comp['role']}', but its class "
-                                                f"'{comp['class']}' is for role '{type_role}'"})
-                if comp.get("class") in types and comp.get("configuration") not in (types[comp["class"]].get("configurations") or {}):
+                                                f"'{comp['slot_class']}' is for role '{type_role}'"})
+                if comp.get("slot_class") in types and comp.get("configuration") not in (types[comp["slot_class"]].get("configurations") or {}):
                     where = yamledit.locate(text, ["configurations", cfg_name, "slots", comp_id]) or (1, 1)
                     problems.append({"file": rel, "line": where[0], "column": where[1], "severity": "error",
-                                     "message": f"slot '{comp_id}': class '{comp['class']}' has no configuration "
+                                     "message": f"slot '{comp_id}': slot class '{comp['slot_class']}' has no configuration "
                                                 f"'{comp.get('configuration')}'"})
             for problem in check_against_lab(SimpleNamespace(needs=needs), lab):
                 name = re.search(r"slot '([^']+)'", problem)
@@ -1879,7 +1879,7 @@ class Editor:
         result = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, rel, setup_config))
         result["setup"] = self.rel(session, setup_path)
         result["logical"] = {"stage_slots": needs.stage_slots,
-                             "slots": {c.id: {"class": c.slot_class, "stage_slot": c.stage_slot, "role": c.role, "name": c.name}
+                             "slots": {c.id: {"slot_class": c.slot_class, "stage_slot": c.stage_slot, "role": c.role, "name": c.name}
                                        for c in needs.slots.values()}}
         return result
 
@@ -1924,7 +1924,7 @@ class Editor:
                               "help": info["description"] or _command_help(cmd),
                               "implementations": implementations.get(cmd, {})}
                         for cmd, info in sorted(offered.items())}
-            slots[lc.id] = {"name": lc.name, "class": lc.slot_class, "stage_slot": lc.stage_slot, "role": lc.role,
+            slots[lc.id] = {"name": lc.name, "slot_class": lc.slot_class, "stage_slot": lc.stage_slot, "role": lc.role,
                                  "role_known": lc.role in lab.library.roles, "commands": commands}
         workspace = self.scan_workspace(session.folder, session.folder) if session.kind == "workspace" else {}
         own = (raw.get("pipeline") or {}).get("subpipelines") or {}
@@ -2001,7 +2001,7 @@ class Editor:
             rows.append({"key": name, "value": text[:200], "origin": origin})
         return {"keys": rows, "error": error, "runtime": RUNTIME_KEYS,
                 "user_keys": {name: spec.model_dump() for name, spec in testdef.user_keys.items()},
-                "datapack": {"slot.id": "id of the slot being generated (also slot.name, slot.class, slot.configuration)",
+                "datapack": {"slot.id": "id of the slot being generated (also slot.name, slot.slot_class, slot.configuration)",
                              "slot.input_dir": "its input folder in the datapack",
                              "slots.<id>.input_dir": "input folder of a slot it needs",
                              "read_input('<id>/<file>')": "text of an input of a slot it needs"}}
@@ -2022,13 +2022,13 @@ class Editor:
         slots = ((raw.get("configurations") or {}).get(testdef.setup_config) or {}).get("slots") or {}
         if slot is None:                              # the first slot with this template as an input
             for slot_id, item in slots.items():
-                cfg = ((raw.get("slot_classes") or {}).get(item.get("class")) or {}).get("configurations") or {}
+                cfg = ((raw.get("slot_classes") or {}).get(item.get("slot_class")) or {}).get("configurations") or {}
                 inputs = (cfg.get(item.get("configuration")) or {}).get("inputs") or []
                 if any(path in _find_sources(str(i.get("source", "")), [builder.testdef_dir, setup_dir]) for i in inputs):
                     slot = slot_id
                     break
         comp = slots.get(slot or "", {})
-        extra = {"slot": {"id": slot or "", "name": comp.get("name", ""), "class": comp.get("class", ""),
+        extra = {"slot": {"id": slot or "", "name": comp.get("name", ""), "slot_class": comp.get("slot_class", ""),
                           "configuration": comp.get("configuration", ""), "input_dir": f"<{slot} input folder>"},
                  "slots": {n: {"id": n, "input_dir": f"<{n} input folder>"} for n in comp.get("needs") or []},
                  "read_input": lambda p: f"<read_input('{p}'): available when the datapack is generated>"}
@@ -2082,7 +2082,7 @@ class Editor:
         components = []
         for comp_id, comp in (cfg.get("slots") or {}).items():
             comp = comp if isinstance(comp, dict) else {}
-            configuration = ((types.get(comp.get("class")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
+            configuration = ((types.get(comp.get("slot_class")) or {}).get("configurations") or {}).get(comp.get("configuration")) or {}
             inputs = []
             for item in configuration.get("inputs") or []:
                 if not isinstance(item, dict):
@@ -2096,7 +2096,7 @@ class Editor:
                                "files": [shown(f) for f in found[:20]],
                                "holds_datapack": any(builder.work.resolve().is_relative_to(f.resolve()) for f in found),
                                "dataset": next((d for d in re.findall(r"\{\{\s*(\w+)\.path\s*\}\}", source)), None)})
-            components.append({"id": comp_id, "name": comp.get("name", ""), "class": comp.get("class", ""),
+            components.append({"id": comp_id, "name": comp.get("name", ""), "slot_class": comp.get("slot_class", ""),
                                "configuration": comp.get("configuration", ""),
                                "stage_slot": comp.get("stage_slot"), "role": comp.get("role"), "needs": comp.get("needs") or [],
                                "inputs": inputs})
@@ -2122,10 +2122,10 @@ class Editor:
         if config not in (raw.get("configurations") or {}):
             problems.append(f"no setup configuration '{config}' in {shown(builder.setup_file)}")
         for comp in components:
-            if comp["class"] not in types:
-                problems.append(f"slot '{comp['id']}': no slot class '{comp['class']}'")
-            elif comp["configuration"] not in ((types[comp["class"]] or {}).get("configurations") or {}):
-                problems.append(f"slot '{comp['id']}': no configuration '{comp['configuration']}' for class '{comp['class']}'")
+            if comp["slot_class"] not in types:
+                problems.append(f"slot '{comp['id']}': no slot class '{comp['slot_class']}'")
+            elif comp["configuration"] not in ((types[comp["slot_class"]] or {}).get("configurations") or {}):
+                problems.append(f"slot '{comp['id']}': no configuration '{comp['configuration']}' for class '{comp['slot_class']}'")
             for number, item in enumerate(comp["inputs"], 1):
                 item["dataset"] = item["dataset"] if item["dataset"] in ids else None
                 where = f"slot '{comp['id']}', input {number}"

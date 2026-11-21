@@ -129,7 +129,7 @@ class BoundSlot:
 
     def keys(self) -> dict:
         """The ``slot`` key: the datapack's slot, and the lab component it is bound to."""
-        return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "class": self.logical.slot_class,
+        return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "slot_class": self.logical.slot_class,
                 "role": self.logical.role, "stage_slot": self.stage_slot, "component": self.concrete.id,
                 "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root}
 

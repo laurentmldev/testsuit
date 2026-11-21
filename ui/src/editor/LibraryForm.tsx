@@ -21,10 +21,10 @@ import { CommandEditor, CommandsEditor, CommentsField, CommentsNote, HttpEditor,
 import { ItemLink, ItemLinks, useItemRequest, type CommandRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
 
-const TP = ["classes", "_"];
+const TP = ["component_classes", "_"];
 const RP = ["roles", "_"];
 type Kind = "role" | "component";
-const SECTION: Record<Kind, string> = { role: "roles", component: "classes" };
+const SECTION: Record<Kind, string> = { role: "roles", component: "component_classes" };
 
 const STARTERS: { id: string; label: string; description: string; body: (base: string) => any }[] = [
   {
@@ -64,7 +64,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   const { ctx } = session;
   const data = doc.data || {};
   const roles: Record<string, any> = data.roles || {};
-  const components: Record<string, any> = data.classes || {};
+  const components: Record<string, any> = data.component_classes || {};
   const first: { kind: Kind; name: string } | null = Object.keys(roles).length ? { kind: "role", name: Object.keys(roles)[0] }
     : Object.keys(components).length ? { kind: "component", name: Object.keys(components)[0] } : null;
   const [sel, setSel] = useState<{ kind: Kind; name: string } | null>(first);
@@ -130,11 +130,11 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       if (spec === undefined || !file) return;
       const draft = clone(data);
       if (mode === "move") {
-        delete draft.classes[self].commands[name];
-        if (!Object.keys(draft.classes[self].commands).length) delete draft.classes[self].commands;
+        delete draft.component_classes[self].commands[name];
+        if (!Object.keys(draft.component_classes[self].commands).length) delete draft.component_classes[self].commands;
       }
       if (file === doc.path) {
-        const t = ((draft.classes ||= {})[target] ||= {});
+        const t = ((draft.component_classes ||= {})[target] ||= {});
         t.commands = { ...(t.commands || {}), [as]: spec };
         api.setData(draft);
         if (target !== self) notify(`${mode === "copy" ? "Copied" : "Moved"} ${name} to ${target}${as !== name ? ` as ${as}` : ""}`, "info");
@@ -143,7 +143,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       await api.flush?.();
       const done = await attempt(async () => {
         const { version } = await get(`edit/sessions/${session.sid}/files/${file}`);
-        return put(`edit/sessions/${session.sid}/files/${file}`, { data: spec, at: ["classes", target, "commands", as], base: version });
+        return put(`edit/sessions/${session.sid}/files/${file}`, { data: spec, at: ["component_classes", target, "commands", as], base: version });
       });
       if (!done) return;
       if (mode === "move") api.setData(draft);

@@ -8,7 +8,7 @@
 # - an account 'tsq' with the lab key, and sudo rights limited to the commands below;
 # - the toy-train software installed as systemd services, configured from <remote_root>/<component>/input/.
 
-classes:
+component_classes:
 
   arduino_unoq:
     # Arduino UNO Q: Debian on its MPU (reached over SSH like any Linux system) and a microcontroller

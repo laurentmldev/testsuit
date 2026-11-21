@@ -214,7 +214,7 @@ def _edit(path, old, new):
     ("testdef/values.yml", "beta: Hello world", "beta: \"{{ value.gamma }}\"\n  gamma: \"{{ value.beta }}\"", "circular reference"),
     ("setup/utest_setup.yml", "source: utest_ref_files/ref2.txt", "source: utest_ref_files/nope.txt", "input 'utest_ref_files/nope.txt' not found"),
     ("testdef/datapack_utest.yml", "setup_config: nominal", "setup_config: unknown", "no configuration 'unknown'"),
-    ("setup/utest_setup.yml", "class: comp1, configuration: standard}\n  other", "class: comp1, configuration: nope}\n  other", "no configuration 'nope' for slot class 'comp1'"),
+    ("setup/utest_setup.yml", "slot_class: comp1, configuration: standard}\n  other", "slot_class: comp1, configuration: nope}\n  other", "no configuration 'nope' for slot class 'comp1'"),
     ("setup/utest_setup.yml", "            method: copy\n          - source: utest_ref_files/conf_dir", "            methd: copy\n          - source: utest_ref_files/conf_dir", "methd"),
     ("testdef/datapack_utest.yml", "  - overrides.yml", "  - nope.yml", "testdef dictionary not reachable"),
     ("setup/utest_setup.yml", "replace s/sample/replaced/g", "nope", "unknown processor 'nope'"),
@@ -261,8 +261,8 @@ def test_generate_and_needs(tmp_path, no_git):
              "options": {"n": 5}}]}}},
         "tm_t": {"configurations": {"std": {"inputs": [{"source": "files/peer.yml", "target": "peer.yml"}]}}}},
         "configurations": {"c": {"slots": {
-            "telemetry": {"class": "tm_t", "configuration": "std", "needs": ["pilot"]},
-            "pilot": {"class": "pilot_t", "configuration": "std"}}}}}
+            "telemetry": {"slot_class": "tm_t", "configuration": "std", "needs": ["pilot"]},
+            "pilot": {"slot_class": "pilot_t", "configuration": "std"}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
     (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
                                                             "setup_config": "c"}))
@@ -289,8 +289,8 @@ def test_needs_cycle(tmp_path, no_git):
     (root / "testdef").mkdir()
     setup = {"id": "s", "slot_classes": {"t": {"configurations": {"std": {"inputs": []}}}},
              "configurations": {"c": {"slots": {
-                 "a": {"class": "t", "configuration": "std", "needs": ["b"]},
-                 "b": {"class": "t", "configuration": "std", "needs": ["a"]}}}}}
+                 "a": {"slot_class": "t", "configuration": "std", "needs": ["b"]},
+                 "b": {"slot_class": "t", "configuration": "std", "needs": ["a"]}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
     (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
                                                             "setup_config": "c"}))
@@ -307,7 +307,7 @@ def test_former_names_refused():
     assert "setup: 'component_types' is now 'slot_classes'" in found
     assert "configuration 'c': 'realms' is now 'stage_slots'" in found
     assert "configuration 'c', slot 's': 'realm' is now 'stage_slot'" in found
-    assert "configuration 'c', slot 's': 'type' is now 'class'" in found
+    assert "configuration 'c', slot 's': 'type' is now 'slot_class'" in found
     assert former_names({"slot_types": {}}) == ["setup: 'slot_types' is now 'slot_classes'"]
     with pytest.raises(ValueError, match="'realms' is now 'stage_slots'"):
         Phase(id="p", realms=["r"], steps=[])
@@ -381,7 +381,7 @@ def test_datapack_purges_unused_datasets(tmp_path, no_git):
     setup = {"id": "s", "datarepositories": [{"id": "r", "path": str(repo), "purge_after_days": 180, "datasources": [
                  {"id": "src", "importer": "dir", "source": "nowhere", "datasets": [{"id": "sw", "version": "v1"}]}]}],
              "slot_classes": {"t": {"configurations": {"std": {"inputs": []}}}},
-             "configurations": {"c": {"slots": {"a": {"class": "t", "configuration": "std"}}}}}
+             "configurations": {"c": {"slots": {"a": {"slot_class": "t", "configuration": "std"}}}}}
     (root / "setup" / "setup.yml").write_text(yaml.safe_dump(setup, sort_keys=False))
     (root / "testdef" / "t.yml").write_text(yaml.safe_dump({"id": "t", "name": "t", "setup_file": "../setup/setup.yml",
                                                             "setup_config": "c"}))
@@ -438,7 +438,7 @@ def test_dataset_versions_set_by_hand(tmp_path, monkeypatch, capsys):
     setup = {"id": "s", "datarepositories": [{"id": "r", "path": str(repo), "datasources": [
                  {"id": "src", "importer": "dir", "source": "nowhere", "datasets": [{"id": "sw", "version": "v1"}]}]}],
              "slot_classes": {"t": {"configurations": {"std": {"inputs": []}}}},
-             "configurations": {"c": {"slots": {"a": {"class": "t", "configuration": "std"}}}}}
+             "configurations": {"c": {"slots": {"a": {"slot_class": "t", "configuration": "std"}}}}}
     setup_file = root / "setup" / "setup.yml"
     setup_file.write_text(yaml.safe_dump(setup, sort_keys=False))
     written = setup_file.read_text()

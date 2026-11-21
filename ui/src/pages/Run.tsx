@@ -715,7 +715,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
               <span className="muted small">{s.phases.length ? `phases ${s.phases.join(", ")}` : "used by no phase"}</span>
             </div>
             {s.slots.length > 0 && (
-              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.class || "any class"})`).join(", ")}</div>
+              <div className="small muted">slots {s.slots.map((c: any) => `${c.logical} (role ${c.role}, ${c.slot_class || "any class"})`).join(", ")}</div>
             )}
             {s.problem ? <div className="small bad-text">{s.problem}</div> : (
               <table className="grid compact">
@@ -745,7 +745,7 @@ function ResourcesTab({ runId, ended }: { runId: string; ended: boolean }) {
           <div key={n.logical} className="need">
             <div className="need-head">
               <code>{n.logical}</code> <span className="muted">role</span> <code>{n.role}</code>
-              {n.class && <><span className="muted">class</span> <code>{n.class}</code></>}
+              {n.slot_class && <><span className="muted">class</span> <code>{n.slot_class}</code></>}
               <span className={classes("chip", color)}>{label}{n.bound && <> on {labelOf(n.bound)}</>}</span>
               <span className="spacer" />
               <span className="muted small">{n.phases.length ? `phases ${n.phases.join(", ")}` : "used by no phase"}</span>

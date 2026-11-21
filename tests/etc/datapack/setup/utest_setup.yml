@@ -30,7 +30,7 @@ slot_classes:
 configurations:
   nominal:
     slots:
-      mycmp1: {name: Comp One, class: comp1, configuration: standard}
-      mycmp2: {name: Comp Two, class: comp1, configuration: standard}
+      mycmp1: {name: Comp One, slot_class: comp1, configuration: standard}
+      mycmp2: {name: Comp Two, slot_class: comp1, configuration: standard}
   other:
     slots: {}

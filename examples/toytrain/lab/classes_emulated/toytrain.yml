@@ -11,7 +11,7 @@
 #   - AU's GPIO inputs: UDP datagrams from the piezo simulation (--gpio-backend udp://...);
 # - no switch: the loopback interface is the train network.
 
-classes:
+component_classes:
 
   emulated_app:
     # a toy-train application run as a local process

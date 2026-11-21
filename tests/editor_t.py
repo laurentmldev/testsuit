@@ -860,7 +860,7 @@ def test_renaming_roles_and_components(repos):
     editor.write(session, "other_lib/t.yml", content="roles:\n  dut: {extends: linux_system}\n")
     assert editor.rename_references(session, "role", "dut", "counter_dut", skip="roles/bench.yml") == \
         ["classes/bench.yml"]                                  # the roles its components list
-    assert editor.read(session, "classes/bench.yml")["data"]["classes"]["counter_host"]["roles"] == ["counter_dut"]
+    assert editor.read(session, "classes/bench.yml")["data"]["component_classes"]["counter_host"]["roles"] == ["counter_dut"]
     ctx = editor.context(session)
     assert ctx["lab_error"] is None
     assert sorted(ctx["lab"]["roles"]["counter_dut"]["used_by"]) == ["counter_1", "counter_2"]
@@ -868,7 +868,7 @@ def test_renaming_roles_and_components(repos):
     assert editor.read(session, "other.yml")["content"] == other
 
     components = editor.read(session, "classes/bench.yml")["data"]
-    components["classes"]["counter_app"] = components["classes"].pop("counter_host")
+    components["component_classes"]["counter_app"] = components["component_classes"].pop("counter_host")
     editor.write(session, "classes/bench.yml", data=components)
     assert editor.context(session)["lab_error"]
     assert editor.rename_references(session, "component", "counter_host", "counter_app",
@@ -1041,7 +1041,7 @@ def test_setup_type_role_inputs(repos):
         {"name": "notes.txt", "type": "file", "optional": True, "description": ""}]
     setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
     setup["slot_classes"]["dut_app"]["role"] = "dut"
-    setup["configurations"]["bench"]["slots"]["analysis"]["class"] = "dut_app"
+    setup["configurations"]["bench"]["slots"]["analysis"]["slot_class"] = "dut_app"
     editor.write(session, "setup/bench_setup.yml", data=setup)
     messages = [p["message"] for p in editor.check_file(session, "setup/bench_setup.yml")]
     assert "slot class 'dut_app', configuration 'standard': no input 'extra/', which its role dut expects" in messages, messages

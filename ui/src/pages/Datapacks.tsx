@@ -334,7 +334,7 @@ function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: strin
             <tr key={c.id}>
               <td>{c.role || <span className="muted">none</span>}</td>
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
-              <td><code>{c.class}</code></td>
+              <td><code>{c.slot_class}</code></td>
               <td>{c.configuration}</td>
               <td>{c.stage_slot || <span className="muted small">ad hoc</span>}</td>
               <td>{c.needs.join(", ")}</td>

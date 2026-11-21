@@ -391,11 +391,11 @@ ROLE = h(
 LIBRARY_FILE = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Lab library file",
     **h("A file of the lab library (the `tsq_library` folders of the inventory): `roles` (abstract: the commands "
-        "offered) and/or `classes` (component classes, concrete: their implementations), by name."),
-    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["classes"]}],
+        "offered) and/or `component_classes` (concrete: their implementations), by name."),
+    "type": "object", "additionalProperties": False, "anyOf": [{"required": ["roles"]}, {"required": ["component_classes"]}],
     "properties": {"roles": h("Lab roles, by name. The built-in `component` and `linux_system` cannot be redefined.",
                               type="object", additionalProperties=ROLE),
-                   "classes": h("Component classes, by name. The built-in `component` and `linux_system` cannot be "
+                   "component_classes": h("Component classes, by name. The built-in `component` and `linux_system` cannot be "
                                "redefined.", type="object", additionalProperties=COMPONENT)},
 }
 
@@ -583,9 +583,9 @@ SLOT_CLASS = h(
 SLOT = h(
     "A slot: what the test needs, bound at activation to a lab component with the same `role` "
     "(in the lab stage bound to its `stage_slot` when given, among the ad hoc lab components otherwise).",
-    type="object", required=["class", "configuration"], additionalProperties=False,
+    type="object", required=["slot_class", "configuration"], additionalProperties=False,
     properties={"name": h("Name shown in logs and the UI.", type="string"),
-                "class": h("Its slot class (`slot_classes` of this setup).", type="string"),
+                "slot_class": h("Its slot class (`slot_classes` of this setup).", type="string"),
                 "configuration": h("Configuration of that class to use (its inputs).", type="string"),
                 "stage_slot": h("Stage slot it belongs to (`stage_slots` of this configuration): the slots of a stage slot are bound in "
                            "one lab stage. Leave out for an ad hoc "
@@ -855,7 +855,7 @@ def schemas(context: dict) -> dict:
             commands.setdefault(cmd, f"{(info or {}).get('description') or COMMAND_NAMES.get(cmd, '')}\n\nroles: ")
             commands[cmd] += name + " "
     ws = context.get("workspace") or {}
-    logical = {c: f"{c} ({v.get('class', '')}, role {v.get('role', '')})"
+    logical = {c: f"{c} ({v.get('slot_class', '')}, role {v.get('role', '')})"
                for s in ws.get("setups") or [] for cfg in (s.get("configurations") or {}).values()
                for c, v in (cfg.get("slots") or {}).items()}
     stage_slots = {st: f"lab stage type {ty}" for s in ws.get("setups") or []
@@ -899,7 +899,7 @@ def schemas(context: dict) -> dict:
         if "role" in props and "configuration" in props and component_tags:
             props["tags"]["items"] = {"type": "string", **_choices(component_tags, False)}
         if "role" in props and "configuration" in props and dp_types:
-            props["class"].update(_choices(dp_types, False))
+            props["slot_class"].update(_choices(dp_types, False))
         if "role" in props and "configurations" in props and roles:          # a slot class
             props["role"].update(_choices(roles, False))
         if "importer" in props and importers:
