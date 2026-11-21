@@ -20,7 +20,7 @@
   --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d9dde3; --text: #1d2330; --muted: #6a7282;
   --accent: #2f6fde; --accent-soft: #e4edfc; --ok: #1f8a4c; --ok-soft: #e1f4e8; --run: #2f6fde; --run-soft: #e4edfc;
   --bad: #c8372d; --bad-soft: #fbe5e3; --warn: #a86400; --warn-soft: #fdf0d9; --wait: #7a5bc4; --wait-soft: #eee8fa;
-  --idle: #4c8c8c; --code: #f3f4f7; --shadow: 0 6px 24px rgba(20, 30, 50, 0.16);
+  --idle: #4c8c8c; --lab: #5b6b82; --datapack: #c2408f; --code: #f3f4f7; --shadow: 0 6px 24px rgba(20, 30, 50, 0.16);
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: light;
 }
@@ -29,7 +29,7 @@
     --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --border: #343b47; --text: #e3e6ec; --muted: #9098a6;
     --accent: #6c9ef5; --accent-soft: #23324d; --ok: #4cc27f; --ok-soft: #1c3527; --run: #6c9ef5; --run-soft: #23324d;
     --bad: #f0776d; --bad-soft: #43221f; --warn: #e3a64a; --warn-soft: #3e3020; --wait: #ab93e8; --wait-soft: #2f2843;
-    --idle: #7cc0c0; --code: #252a33; --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --idle: #7cc0c0; --lab: #a4b2c6; --datapack: #f07cbf; --code: #252a33; --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
   }
 }
@@ -587,9 +587,9 @@ table.manual-commands td.manual-run { width: 1%; text-align: right; vertical-ali
 
 /* editor session: each kind of file has its colour, used by its group in the file list, the header of the
    open file and its rows; the open file stands out in the list and in its header */
-.kind-inventory, .kind-library { --kind: var(--idle); }
+.kind-inventory, .kind-library { --kind: var(--lab); }
 .kind-testdef, .kind-subpipelines { --kind: var(--accent); }
-.kind-setup { --kind: var(--wait); }
+.kind-setup { --kind: var(--datapack); }
 .kind-dictionary { --kind: var(--warn); }
 .kind-template { --kind: var(--ok); }
 .kind-yaml, .kind-other { --kind: var(--muted); }
@@ -1052,8 +1052,8 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .kind-icon { flex-shrink: 0; vertical-align: -1px; opacity: 0.85; }
 .named > .kind-icon { vertical-align: 0; }
 :not(.named) > .kind-icon { margin-right: 3px; }
-.nk-lab { color: var(--idle); }
-.nk-test { color: var(--wait); }
+.nk-lab { color: var(--lab); }
+.nk-test { color: var(--datapack); }
 .nk-pipeline { color: var(--muted); }
 .tag .kind-icon { margin: 0 1px 0 -3px; }
 .combo-kind { margin-left: auto; font-family: system-ui, sans-serif; font-size: 10.5px; color: var(--muted); }

@@ -14,8 +14,9 @@
 // What a name is: the same word is often a lab role, a component class, a slot and a slot class ("pilot").
 // A small glyph before the name tells them apart everywhere, the hover spells the kind out.
 // The colour gives the side: lab (what exists) or datapack (what a test needs). The shape gives what it is,
-// a component and the slot bound to it sharing theirs, a stage and a stage slot theirs. Filled: a lab thing
-// that is there; outlined: a slot, still to be filled; dashed: a class or type, of which those are instances.
+// a component and the slot bound to it sharing the square, a stage and a stage slot a group of squares
+// (the components it holds). Filled: a lab thing that is there; outlined: a slot, still to be filled;
+// dashed: a class or type, of which those are instances.
 import type { ReactNode } from "react";
 
 export type Kind = "component" | "component_class" | "role" | "stage" | "stage_type" | "slot" | "stage_slot" | "slot_class" | "phase" | "command";
@@ -24,17 +25,16 @@ const S = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLineca
 const D = { ...S, strokeDasharray: "2 1.4" };
 const F = { fill: "currentColor", stroke: "currentColor", strokeWidth: 1.3, strokeLinejoin: "round" as const };
 const SQUARE = { x: "2.5", y: "2.5", width: "7", height: "7", rx: "1.5" };
-const STAGE = { x: "1", y: "2.5", width: "10", height: "7", rx: "1.5" };
-const BAYS = "M3.6 5h1.6v2H3.6zM6.8 5h1.6v2H6.8z";
+const GROUP = <><rect x="1" y="1" width="4.4" height="4.4" rx="1" /><rect x="6.6" y="1" width="4.4" height="4.4" rx="1" /><rect x="3.8" y="6.6" width="4.4" height="4.4" rx="1" /></>;
 
 export const KINDS: Record<Kind, { label: string; family: "lab" | "test" | "pipeline"; draw: ReactNode }> = {
   component: { label: "lab component", family: "lab", draw: <rect {...F} {...SQUARE} /> },
   component_class: { label: "component class", family: "lab", draw: <rect {...D} {...SQUARE} /> },
   role: { label: "lab role", family: "lab", draw: <g {...S}><circle cx="6" cy="6" r="4" /><circle cx="6" cy="6" r="1" fill="currentColor" /></g> },
-  stage: { label: "lab stage", family: "lab", draw: <g><rect {...F} {...STAGE} /><path d={BAYS} fill="var(--panel, #fff)" /></g> },
-  stage_type: { label: "stage type", family: "lab", draw: <g><rect {...D} {...STAGE} /><path {...S} d={BAYS} /></g> },
+  stage: { label: "lab stage", family: "lab", draw: <g {...F}>{GROUP}</g> },
+  stage_type: { label: "stage type", family: "lab", draw: <g {...D}>{GROUP}</g> },
   slot: { label: "slot", family: "test", draw: <rect {...S} {...SQUARE} /> },
-  stage_slot: { label: "stage slot", family: "test", draw: <g {...S}><rect {...STAGE} /><path d={BAYS} /></g> },
+  stage_slot: { label: "stage slot", family: "test", draw: <g {...S}>{GROUP}</g> },
   slot_class: { label: "slot class", family: "test", draw: <rect {...D} {...SQUARE} /> },
   phase: { label: "phase", family: "pipeline", draw: <path {...S} d="M1.5 3h6l3 3-3 3h-6l2-3z" /> },
   command: { label: "command", family: "pipeline", draw: <path {...S} d="M2 3.5L5 6 2 8.5M6 9h4" /> },
