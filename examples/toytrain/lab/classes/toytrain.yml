@@ -1,14 +1,14 @@
-# Component models of the toy-train lab (sequencer README, section 7.2): how each kind of hardware
+# Component classes of the toy-train lab (sequencer README, section 7.2): how each kind of hardware
 # implements the commands of the roles (roles/toytrain.yml), how it is monitored and self-tested.
 # Each lists the roles it supports (roles:) and implements their commands. Inventory hosts are lab components
-# extending these (tsq_extends): a host has the role of its model, or picks one when it lists several. What a given test deploys is in the
+# extending these (tsq_extends): a host has the role of its class, or picks one when it lists several. What a given test deploys is in the
 # datapack setup (its component_types: inputs only).
 #
 # Assumed on the targets (prepared once by the lab operators, not by the tests):
 # - an account 'tsq' with the lab key, and sudo rights limited to the commands below;
 # - the toy-train software installed as systemd services, configured from <remote_root>/<component>/input/.
 
-models:
+component_classes:
 
   arduino_unoq:
     # Arduino UNO Q: Debian on its MPU (reached over SSH like any Linux system) and a microcontroller

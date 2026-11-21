@@ -135,7 +135,7 @@ What to do with the sequencer, in short; the sections after give the details. Th
 Two sides meet when a run starts:
 - **The lab** (lab repository, lab operators) is what exists. A **component** is one element of it: a computer, a switch, a simulator on a server. Components are grouped in **stages**, each of a **stage type** (`bench`): a stage is locked as a whole. A component in no stage is **ad hoc**, locked on its own.
 - **Lab roles** say what a component is for, as the **commands** it offers (`deploy`, `start`, `ready`, `stop`, `collect`, `install`...). Every component has one role, and implements its commands through the **lab component** it extends: the kind of hardware or software it is (`mcu_board`, `sbc`, `linux_system`).
-- **The datapack** (tests repositories, test authors) is what a test needs. A **slot** is one thing it needs, by role ("the controller"); its **slot type** says which input files the slot gets. A **stage slot** is the same for a whole lab stage: it asks for a stage type, and the slots in it are bound in that one stage. A slot in no stage slot is an **ad hoc slot**.
+- **The datapack** (tests repositories, test authors) is what a test needs. A **slot** is one thing it needs, by role ("the controller"); its **slot class** says which input files the slot gets. A **stage slot** is the same for a whole lab stage: it asks for a stage type, and the slots in it are bound in that one stage. A slot in no stage slot is an **ad hoc slot**.
 - **A run** binds each stage slot to a free stage of its type and each slot to the component of its role there (an ad hoc slot to an ad hoc component of its role), locks them, then runs the **pipeline**: phases of steps, each step running a command of its slot's role on the component bound to it.
 
 A test never names a host: the same datapack runs on any stage of the right type, real or emulated. [Vocabulary](#23-vocabulary) defines every term; [section 4.3](#43-data-model) shows how they relate.
@@ -144,7 +144,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 **UC-1 Describe the lab** (lab operator; sections 6 and 7):
 1. In the lab repository, write the inventory: each stage with its stage type and its hosts, and the ad hoc hosts. Give each host its role and the lab component it extends.
-2. Reuse or write the lab roles (`lab/roles/`) and component models (`lab/models/`): a model implements every command of the roles it supports.
+2. Reuse or write the lab roles (`lab/roles/`) and component classes (`lab/classes/`): a class implements every command of the roles it supports.
 3. Check with `tsq lab status`, or in the Editor's lab session, whose problems list shows what is missing. Push, then `tsq lab reload --pull`.
 
 **UC-2 Monitor and maintain the lab** (lab operator; sections 7.5 to 7.7):
@@ -153,7 +153,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 - In maintenance, run its commands by hand with **Commands…** on the Lab page.
 
 **UC-3 Define a test** (test author; sections 5 and 8):
-1. In a setup file, write the slot types with their input files (templates, copies, generators), and a setup configuration with its stage slots and slots, each slot with its role and slot type.
+1. In a setup file, write the slot classes with their input files (templates, copies, generators), and a setup configuration with its stage slots and slots, each slot with its role and slot class.
 2. In a test definition, give the setup file and configuration, the dictionaries, and the pipeline: phases that lock stage slots and ad hoc slots, steps that run a command on a slot, linked by `needs`, with `finally` steps that always run.
 3. In the Editor (workspace session), **Add from the lab** creates the slots for every role of a stage type, the pipeline graph proposes each slot's commands, and the template preview shows a rendered input.
 
@@ -195,12 +195,12 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 | Term | Meaning |
 |---|---|
-| **lab library** | the lab's roles and component models, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/models/`). |
+| **lab library** | the lab's roles and component classes, YAML files in the `tsq_library` folders of the inventory (`lab/roles/`, `lab/classes/`). |
 | **lab role** | abstract: what a component is for, as the list of commands it offers, each with what it does (section 7.1). A role `extends` another one and adds commands. Every component has one; datapacks bind their slots by role and run its commands. |
-| **component model** (**model** in the UI) | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2), written under `models:` in a library file. A model `extends` another one and overrides what differs. A model lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base model lists none. |
-| **lab component** | a component of the inventory (an Ansible host): a real machine, instrument or emulation the runs are bound to. It extends a model (or another lab component) with `tsq_extends`, and can add its own `tsq_commands`. It must implement every command its role lists. |
-| **built-ins** | the role and model `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and model ends up extending (section 7.3). |
-| **`extends`** | the parent of a role (whose commands it offers too) or of a model or lab component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
+| **component class** (**class** in the UI) | concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport (section 7.2), written under `component_classes:` in a library file. A class `extends` another one and overrides what differs. A class lists the roles it supports (`roles: [logger, acquisition]`) and must implement their commands; a base class lists none. |
+| **lab component** | a component of the inventory (an Ansible host): a real machine, instrument or emulation the runs are bound to. It extends a class (or another lab component) with `tsq_extends`, and can add its own `tsq_commands`. It must implement every command its role lists. |
+| **built-ins** | the role and class `component` (no commands) and `linux_system` (deploy by SFTP, collect, kill process trees, status, self-test), which every role and class ends up extending (section 7.3). |
+| **`extends`** | the parent of a role (whose commands it offers too) or of a class or lab component (whose implementations, status and self-test it inherits, overriding or adding some). The chain of parents is the **inheritance chain**. |
 | **command** | a named action on a component: `deploy`, `start`, `ready`, `stop`, `collect`, `kill`, `status`, `version`, or any name a role adds (`install`, `feed`...). Its implementation is a shell `run` (possibly `detach`ed), a `signal`, a `wait_for` or a plugin step type. |
 | **where a command comes from** | the role lists it; its implementation is resolved in this order, last wins: the host's component chain, the stage `tsq_commands`, the host's own `tsq_commands`, and an inline `run:` in a step (section 7.4). The Editor shows the source of each command. |
 | **role** | the job of a component (`controller`, `logger`, `lab_network`...): the role of its lab component when that supports one, else picked with `tsq_role`. A lab role, so a role always offers the same commands, whatever the hardware. Slots are bound to lab components by role: a slot of a role takes a component of that role or of a role extending it. Several components of a stage can have the same role. |
@@ -219,7 +219,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 |---|---|
 | **test definition** (`testdef.yml`) | what one test is: its setup file and setup configuration, its dictionaries and its pipeline. `datapack testdef.yml` builds a datapack from it. |
 | **setup file** and **setup configuration** | the setup describes the slots a test needs and their inputs; a setup has several named configurations (`sim_bench`, `emulated`...), each listing its stage slots and slots. |
-| **slot type** | a type defined in a setup (`slot_types`): the inputs of a slot, by configuration. Its commands come from the slot's lab role. |
+| **slot class** | a type defined in a setup (`slot_classes`): the inputs of a slot, by configuration. Its commands come from the slot's lab role. |
 | **dictionary** | a YAML file of keys (`globals.yml`...) the templates and the pipeline can use. |
 | **template** | an input file rendered with Jinja2 and the datapack keys (`{{ key }}`), one per slot. |
 | **input methods** | how an input file is made: `template`, `copy`, or `generate` (a registered **generator**), optionally followed by `postprocess` **processors** (section 5.1). An **importer** fetches the datasets of a datasource (`importer: git`, a release store...). |
@@ -329,7 +329,7 @@ The `datapack` tool (`testsuit.datatools.datapack`, YAML dictionaries + Jinja2 t
 Today an input is `method: template` (Jinja2) or `method: copy`, optionally followed by `postprocess` processors. A third method, **`generate`**, runs a registered **generator** that produces the target from the source and the keys. Examples: compile the controller's speed profile into the table its microcontroller reads, compute a calibration table, build a network configuration from a topology file.
 
 ```yaml
-slot_types:
+slot_classes:
   controller_app:
     configurations:
       standard:
@@ -354,10 +354,10 @@ A slot can declare `needs: [other_slot, ...]`. Slots are then generated in depen
 configurations:
   sim_bench:
     slots:
-      controller:       {type: controller_app, configuration: standard}
-      acquisition: {type: acquisition_app, configuration: standard}
+      controller:  {slot_class: controller_app, configuration: standard}
+      acquisition: {slot_class: acquisition_app, configuration: standard}
       logger:
-        type: logger_app
+        slot_class: logger_app
         configuration: standard
         needs: [controller, acquisition]   # records what they publish, read from their configurations
 ```
@@ -424,7 +424,7 @@ all:
     ansible_user: tsq                              # standard names, reused by the sequencer
     ansible_ssh_private_key_file: ~/.ssh/id_lab   # key-based auth only, no password prompt
     tsq_remote_root: /opt/testrun                  # default target: <root>/<component>/{input,output}
-    tsq_library: [roles/, models/]                 # lab roles and component models, relative to this file (section 7)
+    tsq_library: [roles/, classes/]                 # lab roles and component classes, relative to this file (section 7)
 
   hosts:                                           # ad hoc components: in no stage
     lab_srv:        {ansible_host: localhost, tsq_transport: local, tsq_role: sequencer, tsq_lock: none}
@@ -462,7 +462,7 @@ all:
 - `tsq_icon` is how the Lab diagram (section 13.1) draws a component: one of its built-in pictures (`server`, `workstation`, `switch`, `router`, `tap`, `embedded`, `board`, `sensor`, `instrument`, `power`, `simulator`, `storage`, `network`, `camera`, `generic`), or an image of the lab repository (`.png`, `.jpg`, `.gif`, `.svg`, `.webp`), relative to the inventory, such as `icons/front_board.png`; the editor uploads one there. Without it, a plain box. Set on a group, it applies to its hosts. An unknown picture or a missing file is an editor warning, never a reason for the lab not to load.
 - `tsq_links` lists the components a component is wired to when its configuration does not say so (a tap between a board and a switch, a serial cable): a host, a list of hosts, or a mapping host: label (`{au: USB GPIO adapter}`). The Lab diagram draws them, with the links it deduces itself: a status probe or a command running `via` another component, and the commands, probe, self-test or variables naming another one (`{{ stage.roles.<role>... }}`, `{{ stage.components.<id>... }}`, `{{ lab.components.<id>... }}`). They are for the diagram only: no command, probe, lock or binding uses them. A host that is not in the inventory stops the lab from loading.
 - `tsq_tags` lists tags, on a host or a stage group: a datapack slot or stage slot asking for `tags` only binds to a component or stage having them all (section 8.1). The id of a component or stage is always one of its tags. Tags on another group apply to its hosts.
-- `tsq_extends` is the component model each host is (section 7.2): a model of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
+- `tsq_extends` is the component class each host is (section 7.2): a class of the library, or another host. It gives the implementations of the commands, the status probe and the self-test. Default `linux_system`. A host can add its own `tsq_commands`, `tsq_status`, `tsq_selftest` and `tsq_collect`, which win over the component's. The lab does not load when a host does not implement a command its role lists; a command a host implements that its role does not list is a warning.
 - Each host has a role, a lab role (section 7.1): the commands it offers. It is the role of its component when that supports one (`controller_1` is a controller, as `mcu_board` supports only that role); when it supports several, `tsq_role` picks one (`sbc`: logger or acquisition); when it lists none (`lab_srv`, a plain `linux_system`), `tsq_role` gives any role. Several components of a stage can have the same role (two loggers): each slot of that role gets its own.
 - `tsq_shell` is the shell the commands of a component run under, on the component (`bash`, `/bin/bash`, `"bash -l"` to read the login profile). By default, steps and commands run under `/bin/sh` (dash on Debian and Ubuntu), whatever the user's login shell, while short checks (probes, self-tests) run under the login shell; with `tsq_shell`, both use it. A POSIX shell is expected: the sequencer's own helpers (pid files, kill) run under it too.
 - `tsq_ssh_host_key` pins the SSH key of a component: its public key (`ssh-ed25519 AAAA...`) or its `SHA256:` fingerprint, or a list of them. The server must then present one of them, and no `known_hosts` file is read for that host, so a changed or spoofed key fails the login loudly. Without it, the `known_hosts` of the user running the sequencer is checked: in a container it is usually empty, and every login fails with *Host key is not trusted*. Declaring the keys in the inventory needs no `known_hosts` mounted in the container, and keeps the lab definition the one source of truth. The sequencer never trusts a key just because the server sent it. To get a key:
@@ -483,7 +483,7 @@ all:
 
   A malformed value stops the lab from loading. A value in a stage group or `all.vars` applies to all its hosts, for hosts cloned from one image.
 - `tsq_type` and `tsq_types` are gone: `tsq_role` and `tsq_extends`, and `tsq_library`, replace them.
-- In a library file, `components:` is now `models:` (component models); a file still using `components:` is refused, with a message saying to rename the key.
+- In a library file, `models:` (and before it `components:`) is now `component_classes:`; a file still using either is refused, with a message saying to rename the key.
 - `tsq_lock` is the lock mode of a component:
   - `exclusive` (default): one datapack at a time;
   - `shared`: several datapacks at once, for passive components such as a network switch nobody configures. In the example, `bench_1` and `bench_2` can run two datapacks at the same time although they share `lab_switch`;
@@ -519,24 +519,24 @@ The [toy-train example](../../../examples/toytrain/README.md#emulated-mode-on-a-
 
 A run on an emulated lab is flagged non-conform against the campaign's expected baseline, whose lab tag it does not match (section 5.3).
 
-## 7. Lab roles, component models and state monitoring
+## 7. Lab roles, component classes and state monitoring
 
 The lab library has two levels, each a hierarchy where one `extends` another:
 - a **lab role** is abstract: what a component is for, as the commands it offers, each with what it does. A datapack binds a slot by role, so the commands it can use are known from the role alone, whatever the hardware;
-- a **component model** (a **model**, under `models:` in the YAML) is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A model lists the roles it supports, and the library checks it implements all their commands. Each lab component of the inventory extends a model (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
+- a **component class** (a **class**, under `component_classes:` in the YAML) is concrete: how a kind of component implements commands, how its state is monitored, its self-test and transport. A class lists the roles it supports, and the library checks it implements all their commands. Each lab component of the inventory extends a class (`tsq_extends`), has its role (or picks one of its roles with `tsq_role`) and must implement every command of that role.
 
 Like classes in object-oriented programming:
 
 | Lab | Object-oriented parallel | Example |
 |---|---|---|
 | lab role | abstract class (an interface): the commands offered, each with what it does, and no implementation | `controller`: `install`, `start`, `stop`, `ready`, `version` |
-| component model | concrete class: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `mcu_board`, extending `linux_system`, supports `controller` |
+| component class | concrete: implements the commands of the roles it supports, adds a status probe and a self-test, and inherits the rest from its parent (`extends`) | `mcu_board`, extending `linux_system`, supports `controller` |
 | lab component (inventory host) | instance of a concrete class (`tsq_extends`), with its own variables: address, remote root, label... It can still override a command (`tsq_commands`), like a per-instance method | `controller_1: {tsq_extends: mcu_board, ansible_host: 10.0.0.21}` |
-| datapack slot | a variable typed by the abstract class: it uses only the commands of the role | `controller: {type: controller_app, stage_slot: bench, role: controller}` in the setup |
+| datapack slot | a variable typed by the abstract class: it uses only the commands of the role | `controller: {slot_class: controller_app, stage_slot: bench, role: controller}` in the setup |
 
 A datapack references roles only. When it is activated, the sequencer picks, for each slot, a free inventory component of the required role (in a free stage of the type its stage slot asks for), and runs the role's commands with that instance's implementation: the same datapack runs on any lab whose instances implement its roles, real hardware or emulation (section 6.2).
 
-Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `models:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
+Both are YAML, in the `tsq_library` folders of the inventory: a library file holds `roles:`, `component_classes:` or both. Plugins can also register them in Python (`register_role`, `register_component`).
 
 ### 7.1 Lab roles
 
@@ -570,7 +570,7 @@ roles:
 - `optional`: whether the component can work without it.
 - `description`: what it is and how to make it, in Markdown, as long as needed.
 
-A role extending another one adds to its inputs, or redefines one by name. In a setup, a slot type names the role of its slots (`role: controller`). Its configurations then start with the inputs that role requires: the Editor adds them when the role is picked, when a configuration is added, and when a type is created for a role. The Editor shows each input's description next to the datapack input that provides it. It warns about a required input a configuration lacks, and about a slot whose role differs from its type's.
+A role extending another one adds to its inputs, or redefines one by name. In a setup, a slot class names the role of its slots (`role: controller`). Its configurations then start with the inputs that role requires: the Editor adds them when the role is picked, when a configuration is added, and when a slot class is created for a role. The Editor shows each input's description next to the datapack input that provides it. It warns about a required input a configuration lacks, and about a slot whose role differs from its type's.
 
 ```yaml
 roles:
@@ -582,11 +582,11 @@ roles:
       - {name: notes.txt, optional: true}
 ```
 
-### 7.2 Component models
+### 7.2 Component classes
 
 ```yaml
-# lab/models/bench.yml
-models:
+# lab/classes/bench.yml
+component_classes:
   sbc:
     extends: linux_system
     roles: [logger, acquisition]           # the roles it supports: it implements their commands
@@ -637,7 +637,7 @@ models:
       start: {run: "sim actuator --config {{ component.input_dir }}/actuator_sim.yml", detach: true}
 ```
 
-`roles` is inherited by the models extending one, unless they list their own; a base model (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/models_emulated/`, and the datapacks bind to it unchanged (section 6.2).
+`roles` is inherited by the classes extending one, unless they list their own; a base class (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/classes_emulated/`, and the datapacks bind to it unchanged (section 6.2).
 
 ### 7.3 Built-ins
 
@@ -660,7 +660,7 @@ A datapack does not redefine commands: what a test runs that the role does not o
 
 **Its output reads line by line.** A step's `run`, and a command run by hand, are traced (`set -x`): each line they run is written to their output, after `+tsq$ `, just before what it prints. Their comment lines (`# ...` alone on a line) show there too, where they are (the sequencer makes each a no-op command, `: '# ...'`), except in a here-document, a `case`, or after a line that goes on (`|`, `&&`, `\`). The step log and the Commands dialog of the Lab page show those lines as a prompt, the dialog as they come. They show the ANSI colors and styles the command prints (`\e[0;32m`, bold, 256 colors and true colors; the other control sequences are dropped, and a `\r` rewrites its line as a terminal does). A line without any is colored by its words: red for an error or a failure (`error`, `fail`, `exception`, a non-zero `exit status`...), with a Python traceback in red down to its exception line, orange for a warning (`warn`, `deprecated`), green for a success (`ok`, `success`, `done`, `passed`). A step's `expect` (`stdout`, `stderr`) is matched against what the command printed, without those lines. Status probes and self-tests are not traced: their answer is what their command prints.
 
-**Its log says what it executes.** Before a `do:` step runs, its log names the lab command and where it comes from: `[tsq <time>] lab command 'deploy' of web-01 (slot node09, role webserver, from role webserver)`, then `run on <host>: <command>` with the command as rendered, its lines kept (indented after the first). The Run page shows both highlighted at the top of the step log, apart from the other notes of the sequencer: the lab command, and where it runs (`run on <host>`), the command itself being shown just below by its traced lines (the raw log keeps it whole). When such a step failed (or ended in error) and the Editor is on, the Run page names its lab command above the log with **Edit the command**: it opens the lab in the Editor (in place, in a new browser tab) on that command, opened for editing where it is defined: its model in the library, the `tsq_commands` of its stage, or those of an inventory host (its own, or of a host it extends); a command its component lacks opens that component in the inventory. Each step records it in `run.yml` as `lab_command` (`name`, `component`, `source`).
+**Its log says what it executes.** Before a `do:` step runs, its log names the lab command and where it comes from: `[tsq <time>] lab command 'deploy' of web-01 (slot node09, role webserver, from role webserver)`, then `run on <host>: <command>` with the command as rendered, its lines kept (indented after the first). The Run page shows both highlighted at the top of the step log, apart from the other notes of the sequencer: the lab command, and where it runs (`run on <host>`), the command itself being shown just below by its traced lines (the raw log keeps it whole). When such a step failed (or ended in error) and the Editor is on, the Run page names its lab command above the log with **Edit the command**: it opens the lab in the Editor (in place, in a new browser tab) on that command, opened for editing where it is defined: its class in the library, the `tsq_commands` of its stage, or those of an inventory host (its own, or of a host it extends); a command its component lacks opens that component in the inventory. Each step records it in `run.yml` as `lab_command` (`name`, `component`, `source`).
 
 A `run` command can run **through another component** too, with `via` (a role of the component's stage, or another host), like a status probe (section 7.5): for a component in a sub-network behind the stage server, `start: {run: "obc-ctl --host {{ component.host }} start", detach: true, via: stage_server}`. Its processes and pid files are on that component, so `signal`, `kill`, an abort and the end of the run stop them there. The component's own host is then not needed to bind it (with an absolute `tsq_remote_root`, the default).
 
@@ -672,7 +672,7 @@ A `run` command can run **through another component** too, with `via` (a role of
 **REST API commands.** A command (or a pipeline step, or a status probe, or a `wait_for`) can be an HTTP request rather than a shell command, for an instrument or a service driven through a REST API:
 
 ```yaml
-models:
+component_classes:
   power_supply:
     extends: component
     roles: [power]
@@ -767,10 +767,10 @@ A lab component gives its checks in `selftest` (a host in `tsq_selftest`), and a
 |---|---|
 | `component` | its `status` probe answers, and the state is not `broken` or `offline` |
 | `linux_system` | the above, plus: SSH login with the lab key, `<remote_root>/<component>/` writable, free disk space above `min_free_space`, clock offset with the sequencer host under `max_clock_offset` (default 1 s) |
-| models | anything specific, for example `app-install --check` on a controller, or a ping of the switch |
+| classes | anything specific, for example `app-install --check` on a controller, or a ping of the switch |
 
 ```yaml
-models:
+component_classes:
   mcu_board:
     extends: linux_system
     selftest:
@@ -817,7 +817,7 @@ The setup configuration (datapack side) lists the **slots** the test needs, each
 
 In the Editor, a stage slot lists one row per slot of each role, with **+ another <role>** while its lab stages have more components for that role. The **Tags** of a slot propose the tags of the lab components it could be bound to (its role or one extending it, in the stages its stage slot can take); those of a stage slot propose the tags of the lab stages of its type. The inventory form sets `tsq_tags` on a component or a stage.
 
-A datapack has slots and stage slots; the lab has components and stages. The former datapack names (`component_types`, a configuration's `components`, `stages` and `realms`, a slot's `stage` and `realm`, a step's `component`, a phase's `components`, `stages` and `realms`, `for_each: components`) are refused, with the current one.
+A datapack has slots and stage slots; the lab has components and stages. The former datapack names (`component_types` and `slot_types`, a configuration's `components`, `stages` and `realms`, a slot's `stage`, `realm` and `type` (now `slot_class`), a step's `component`, a phase's `components`, `stages` and `realms`, `for_each: components`) are refused, with the current one.
 
 ```yaml
 # setup file (datapack)
@@ -826,28 +826,28 @@ configurations:
     stage_slots:
       bench: {type: bench}               # bound to the lab stage bench_1 or bench_2, whichever is free
     slots:
-      controller:  {type: controller_app, configuration: standard, stage_slot: bench, role: controller}
-      logger:      {type: logger_app, configuration: standard, stage_slot: bench, role: logger}
-      acquisition: {type: acquisition_app, configuration: standard, stage_slot: bench, role: acquisition}
-      actuator:    {type: actuator_sim, configuration: standard, role: actuator_sim}   # ad hoc
-      sensor:      {type: sensor_sim, configuration: standard, role: sensor_sim}       # ad hoc
-      analysis:    {type: exploit, configuration: standard, role: sequencer}           # ad hoc: lab_srv
+      controller:  {slot_class: controller_app, configuration: standard, stage_slot: bench, role: controller}
+      logger:      {slot_class: logger_app, configuration: standard, stage_slot: bench, role: logger}
+      acquisition: {slot_class: acquisition_app, configuration: standard, stage_slot: bench, role: acquisition}
+      actuator:    {slot_class: actuator_sim, configuration: standard, role: actuator_sim}   # ad hoc
+      sensor:      {slot_class: sensor_sim, configuration: standard, role: sensor_sim}       # ad hoc
+      analysis:    {slot_class: exploit, configuration: standard, role: sequencer}           # ad hoc: lab_srv
   calibrated:
     stage_slots:
       bench: {type: bench, tags: [rev_b]}  # only a bench stage tagged rev_b
     slots:
-      logger:      {type: logger_app, configuration: standard, stage_slot: bench, role: logger, tags: [calibrated]}
-      logger_2:    {type: logger_app, configuration: standard, stage_slot: bench, role: logger}  # another logger
+      logger:      {slot_class: logger_app, configuration: standard, stage_slot: bench, role: logger, tags: [calibrated]}
+      logger_2:    {slot_class: logger_app, configuration: standard, stage_slot: bench, role: logger}  # another logger
 ```
 
 A datapack can therefore lock several lab stages (one per stage slot) and ad hoc components. Here the analysis runs on the sequencer host (`role: sequencer`); a separate exploitation server would be an ad hoc component with its own role.
 
-### 8.2 Slot types
+### 8.2 Slot classes
 
-Slot types (in the setup file) declare the inputs of the slots, by configuration. They say nothing about commands: a slot gets those of its lab role, implemented by the lab component it is bound to (section 7).
+Slot classes (in the setup file) declare the inputs of the slots, by configuration. They say nothing about commands: a slot gets those of its lab role, implemented by the lab component it is bound to (section 7).
 
 ```yaml
-slot_types:
+slot_classes:
   controller_app:
     configurations:
       standard:
@@ -865,7 +865,7 @@ slot_types:
 
 The criteria are not inputs of a slot: the exploit steps of the pipeline name them, and the datapack holds those only (section 8.3).
 
-`extends` and `commands` in a slot type, or `commands` in a slot, are refused with what to write instead. A command only this test needs is a `run:` step of the pipeline, on the slot (section 8.3).
+`extends` and `commands` in a slot class, or `commands` in a slot, are refused with what to write instead. A command only this test needs is a `run:` step of the pipeline, on the slot (section 8.3).
 
 ### 8.3 Pipeline (test definition)
 
@@ -1075,9 +1075,9 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 |---|---|---|---|
 | dictionary keys, `<dataset>.{path, version}` | yes | yes (frozen in `context.yml`) | no |
 | `testdef.*`, `setup.*`, `datapack.*` | yes | yes (frozen) | no |
-| `slot.{id, name, type, configuration, input_dir}` | the slot being generated | | no |
+| `slot.{id, name, slot_class, configuration, input_dir}` | the slot being generated | | no |
 | `slots.<id>.{id, input_dir}`, `read_input('<id>/<file>')` | the slots it `needs` | | no |
-| `slot.{id, name, type, role, stage_slot, component, input_dir, output_dir, remote_root}` | | the step's slot; `slot.component` is the id of the lab component bound to it | no |
+| `slot.{id, name, slot_class, role, stage_slot, component, input_dir, output_dir, remote_root}` | | the step's slot; `slot.component` is the id of the lab component bound to it | no |
 | `slots.<id>.*` | | the same keys, for any slot of the run (`slots.controller.component`) | no |
 | `stage_slots.<id>.stage` | | the lab stage a stage slot is bound to | no |
 | `component.{id, host, label, role, extends, stage, vars, input_dir, output_dir, remote_root, state}` | | the lab component bound to the step's slot: `id` is its inventory name, `stage` its lab stage, `slot` the slot it is bound to | the component itself |
@@ -1146,7 +1146,7 @@ The Run page says which phase waits, since when, why (one line per missing resou
 1. **Submit**: `tsq submit pack.zip [--priority N]`, or a datapack posted through the REST API (UI, CI).
    - Intake verifies the BagIt checksums (`datapack --verify`) and unzips into `runs/<run_id>/`.
    - It reads the pipeline, commands, resources needed and `context.yml` from the zip only.
-   - It validates them against the lab inventory: stage types, roles, slot types, commands.
+   - It validates them against the lab inventory: stage types, roles, slot classes, commands.
    - The run state is `queued`.
 2. **Activate**: binding and locking (section 9), a check that `storage.min_free_space` is available, then the platform self-test of every locked component (section 7.6). The run state goes `waiting_resources → reserved → selftest → running`. A self-test that fails here puts the run back at the head of the queue, until `selftest.max_attempts`.
 3. **Phases**:
@@ -1303,7 +1303,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 
 **Datapack definitions.**
 - Create a test definition and its setup in one of the `server.workspaces` repositories, or start from an existing one.
-- Helpers: the stage types and roles of the lab; the slot types; input files by method (template, copy, generate), with a preview of a rendered template.
+- Helpers: the stage types and roles of the lab; the slot classes; input files by method (template, copy, generate), with a preview of a rendered template.
 - **Generate** runs the datapack tool on the server, as `datapack <testdef>` would. The UI shows the generated contents and baseline, and can post the datapack to the queue at once. **Keys set by hand** gives values for this generation only (`datapack --set`): each row says whether it sets a key no dictionary defines (the datapack stays conform) or overrides a defined one (the datapack is non-conform), with the value it replaces and the dictionary it comes from. The keys set by hand are remembered in the browser for each test definition; one with none remembered starts from those set the most recently for another test definition of the repository. The undefined keys that its templates (after a failed generation) and the commands of its steps read come as rows to fill in. **Keys to give** has a field for each key the test definition asks at each generation (`user_keys`: free text, or a list to pick from), remembered in the browser too; generating waits until each is given. **Baseline versions** lists each dataset of the baseline with the versions its importer lists: a version picked there is used for this generation only (`datapack --dataset-version id=version`), nothing is written to the files; one other than the version written keeps the datapack conform when it is a tag of its source (the importer confirms the imported data is that tag: a git tag, a release) and makes it non-conform otherwise (a branch, a commit), and both are recorded under `versions_set_by_hand` in its `datapack.yml` and `baseline.yml`. A version is changed in the files in the Editor. The test definition form declares them (**Keys given at each generation**).
 
 **Pipelines.** Create a pipeline or update an existing one, in a test definition or in a shared sub-pipeline file (`pipeline.include`, section 8.4):
@@ -1320,7 +1320,7 @@ The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration t
 - each field shows its help in the panel on the right when pointed at or focused, starting with the name of its key in the YAML file (`tsq_label`), written from the same JSON Schemas the YAML view uses (`editor_schemas.py`);
 - every name field proposes the values that make sense where it is, each with what it is: the roles with their commands and users, the components a host can extend, the roles of the stages of a type, the stage types with the stages that have them, the commands a step can run on the components it targets (with the role that offers each command), the keys a template can use with their values and the file each comes from;
 - what the tests ask of the lab and the lab does not have yet (a role, a stage type) is listed in the inventory form and offered when creating a component;
-- wizards start from what exists: a new stage slot copies another with its slots renamed; **Add from the lab** creates a setup's slots and slot types for every role of a stage type; a new test definition comes with a pipeline that deploys, starts and waits for each slot of its setup configuration in the order of their `needs`, and stops and collects them in `finally`;
+- wizards start from what exists: a new stage slot copies another with its slots renamed; **Add from the lab** creates a setup's slots and slot classes for every role of a stage type; a new test definition comes with a pipeline that deploys, starts and waits for each slot of its setup configuration in the order of their `needs`, and stops and collects them in `finally`;
 - in a form field whose value is rendered with keys (a command, a delay, a timeout, a file to wait for, a step's target...), typing `{{` opens the keys available there, with a quick search: the run-time keys (`component.*`, `run.*`, `params.*`...) and, in a test definition's pipeline, its datapack keys with their values and files. A key the list does not know can still be written as typed;
 - the YAML view has completion and hover help from the schemas (monaco-yaml) and the server's problems as markers; templates complete the datapack keys after `{{` and show a preview rendered for a component.
 

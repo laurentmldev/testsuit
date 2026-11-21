@@ -1,7 +1,7 @@
 # Lab roles of the toy-train lab (sequencer README, section 7.1): what a component is for, as the
 # commands it offers, whatever the hardware. Datapacks bind their logical components by role
 # (role: pilot in a setup) and run these commands in their pipelines (do: start).
-# The component models implement them (models/toytrain.yml on the lab, models_emulated/ on a dev
+# The component classes implement them (classes/toytrain.yml on the lab, classes_emulated/ on a dev
 # host), which list the roles they support: each inventory host is a component (tsq_extends) and has its
 # role, or picks one with tsq_role when it supports several (rpi5: telemetry or acquisition).
 # Built in: component (no command), and linux_system (deploy, collect, kill).

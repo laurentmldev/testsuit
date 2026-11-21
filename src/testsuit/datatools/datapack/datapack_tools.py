@@ -44,8 +44,8 @@ Keys always available (they override dictionary keys of the same name):
 - ``setup.{id, name, file, path, configuration}``
 - ``datapack.{name, user, host, timestamp, nocheck}``
 - ``<dataset id>.{path, version}`` for every imported dataset
-- ``slot.{id, name, type, configuration, input_dir}`` while rendering the files of a slot, and
-  ``slots.<id>.{id, name, type, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
+- ``slot.{id, name, slot_class, configuration, input_dir}`` while rendering the files of a slot, and
+  ``slots.<id>.{id, name, slot_class, input_dir}`` for the slots it needs (and ``read_input('<slot>/<file>')``)
 
 ``datapack.output_dir`` (from a dictionary, or the ``output_dir`` argument) is where the zip is written.
 
@@ -644,20 +644,20 @@ class _Builder:
         former = former_names(raw)                                                    # before rendering: a clear error
         if former:
             raise DatapackError(f"setup '{self.setup_file}': former names: " + "; ".join(former))
-        for type_id, type_def in (raw.get("slot_types") or {}).items():
+        for type_id, type_def in (raw.get("slot_classes") or {}).items():
             for key in ("extends", "commands"):
                 if isinstance(type_def, dict) and key in type_def:
-                    raise DatapackError(f"setup '{self.setup_file}': slot type '{type_id}': '{key}' {GONE}")
+                    raise DatapackError(f"setup '{self.setup_file}': slot class '{type_id}': '{key}' {GONE}")
         for config_id, config in (raw.get("configurations") or {}).items():
             for slot_id, slot in ((config or {}).get("slots") or {}).items():
                 if isinstance(slot, dict) and "commands" in slot:
                     raise DatapackError(f"setup '{self.setup_file}': configuration '{config_id}', slot "
                                         f"'{slot_id}': 'commands' {GONE}")
-        rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "slot_types"}),
-                    "slot_types": {
-                        type_id: keys.render_data(type_def, where=f"slot_types.{type_id}") if isinstance(type_def, dict)
+        rendered = {**keys.render_data({k: v for k, v in raw.items() if k != "slot_classes"}),
+                    "slot_classes": {
+                        type_id: keys.render_data(type_def, where=f"slot_classes.{type_id}") if isinstance(type_def, dict)
                         else type_def
-                        for type_id, type_def in (raw.get("slot_types") or {}).items()}}
+                        for type_id, type_def in (raw.get("slot_classes") or {}).items()}}
         setup = _validate(Setup, rendered, f"setup '{self.setup_file}'")
         if testdef.setup_config not in setup.configurations:
             raise DatapackError(f"no configuration '{testdef.setup_config}' in setup '{self.setup_file}' "
@@ -680,18 +680,18 @@ class _Builder:
         order.sort(key=lambda c: (_depth(c, configured), list(configured).index(c)))
         for comp_id in order:
             component = configured[comp_id]
-            if component.type not in setup.slot_types:
-                raise DatapackError(f"slot '{comp_id}': no slot type '{component.type}' in setup '{self.setup_file}'")
-            comp_type = setup.slot_types[component.type]
+            if component.slot_class not in setup.slot_classes:
+                raise DatapackError(f"slot '{comp_id}': no slot class '{component.slot_class}' in setup '{self.setup_file}'")
+            comp_type = setup.slot_classes[component.slot_class]
             if component.configuration not in comp_type.configurations:
-                raise DatapackError(f"slot '{comp_id}': no configuration '{component.configuration}' for type "
-                                    f"'{component.type}' (available: {', '.join(comp_type.configurations)})")
-            _info("\n" + Fore.LIGHTBLUE_EX + f"[{comp_id}] " + Fore.LIGHTBLACK_EX + f"{component.type} / {component.configuration}")
+                raise DatapackError(f"slot '{comp_id}': no configuration '{component.configuration}' for slot class "
+                                    f"'{component.slot_class}' (available: {', '.join(comp_type.configurations)})")
+            _info("\n" + Fore.LIGHTBLUE_EX + f"[{comp_id}] " + Fore.LIGHTBLACK_EX + f"{component.slot_class} / {component.configuration}")
 
             input_dir = self.work / "data" / comp_id / "input"
             input_dir.mkdir(parents=True)
             (self.work / "data" / comp_id / "output").mkdir()
-            needed = {n: {"id": n, "name": configured[n].name, "type": configured[n].type,
+            needed = {n: {"id": n, "name": configured[n].name, "class": configured[n].slot_class,
                           "input_dir": (self.work / "data" / n / "input").as_posix()} for n in component.needs}
 
             def read_input(path: str, comp_id=comp_id, component=component, data_dir=self.work / "data") -> str:
@@ -702,7 +702,7 @@ class _Builder:
                 if not file.is_relative_to((data_dir / other / "input").resolve()) or not file.is_file():
                     raise DatapackError(f"slot '{comp_id}': read_input('{path}'): no such generated input")
                 return file.read_text(encoding="utf-8")
-            comp_keys = {"id": comp_id, "name": component.name, "type": component.type,
+            comp_keys = {"id": comp_id, "name": component.name, "class": component.slot_class,
                          "configuration": component.configuration, "input_dir": input_dir.as_posix()}
             extra = {**run_time_keys(keys.root), "slot": comp_keys, "slots": needed, "read_input": read_input}
             inputs = []
@@ -772,7 +772,7 @@ class _Builder:
                                **({"generator": input_file.generator} if input_file.generator else {}),
                                "files": [s.as_posix() for s in sources],
                                "keys": {name: dict(k) for name, k in sorted(used.items())}})
-            components[comp_id] = {"name": component.name, "type": component.type,
+            components[comp_id] = {"name": component.name, "class": component.slot_class,
                                    "configuration": component.configuration, "inputs": inputs,
                                    **({"needs": component.needs} if component.needs else {})}
         return {c: components[c] for c in configured}

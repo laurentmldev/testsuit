@@ -129,7 +129,7 @@ class BoundSlot:
 
     def keys(self) -> dict:
         """The ``slot`` key: the datapack's slot, and the lab component it is bound to."""
-        return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "type": self.logical.type,
+        return {"id": self.logical.id, "name": self.logical.name or self.logical.id, "slot_class": self.logical.slot_class,
                 "role": self.logical.role, "stage_slot": self.stage_slot, "component": self.concrete.id,
                 "input_dir": self.input_dir, "output_dir": self.output_dir, "remote_root": self.root}
 
@@ -154,7 +154,7 @@ class StepRecord:
     attempts: int = 0
     log: str = ""
     via: str = ""                                 # the component its command ran through (a command's via)
-    # the lab command a 'do:' step runs: {name, component (lab component id), source ("model M", "host H",
+    # the lab command a 'do:' step runs: {name, component (lab component id), source ("class M", "host H",
     # "stage S", "" when its component has none)}, so the Run page opens where it is defined
     lab_command: dict | None = None
     # an upload running now (http body_file): {"sent": bytes, "total": bytes}, for the Run page's progress bar

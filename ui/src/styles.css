@@ -20,7 +20,7 @@
   --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d9dde3; --text: #1d2330; --muted: #6a7282;
   --accent: #2f6fde; --accent-soft: #e4edfc; --ok: #1f8a4c; --ok-soft: #e1f4e8; --run: #2f6fde; --run-soft: #e4edfc;
   --bad: #c8372d; --bad-soft: #fbe5e3; --warn: #a86400; --warn-soft: #fdf0d9; --wait: #7a5bc4; --wait-soft: #eee8fa;
-  --idle: #4c8c8c; --code: #f3f4f7; --shadow: 0 6px 24px rgba(20, 30, 50, 0.16);
+  --idle: #4c8c8c; --lab: #5b6b82; --datapack: #c2408f; --code: #f3f4f7; --shadow: 0 6px 24px rgba(20, 30, 50, 0.16);
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: light;
 }
@@ -29,7 +29,7 @@
     --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --border: #343b47; --text: #e3e6ec; --muted: #9098a6;
     --accent: #6c9ef5; --accent-soft: #23324d; --ok: #4cc27f; --ok-soft: #1c3527; --run: #6c9ef5; --run-soft: #23324d;
     --bad: #f0776d; --bad-soft: #43221f; --warn: #e3a64a; --warn-soft: #3e3020; --wait: #ab93e8; --wait-soft: #2f2843;
-    --idle: #7cc0c0; --code: #252a33; --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --idle: #7cc0c0; --lab: #a4b2c6; --datapack: #f07cbf; --code: #252a33; --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
   }
 }
@@ -587,9 +587,9 @@ table.manual-commands td.manual-run { width: 1%; text-align: right; vertical-ali
 
 /* editor session: each kind of file has its colour, used by its group in the file list, the header of the
    open file and its rows; the open file stands out in the list and in its header */
-.kind-inventory, .kind-library { --kind: var(--idle); }
+.kind-inventory, .kind-library { --kind: var(--lab); }
 .kind-testdef, .kind-subpipelines { --kind: var(--accent); }
-.kind-setup { --kind: var(--wait); }
+.kind-setup { --kind: var(--datapack); }
 .kind-dictionary { --kind: var(--warn); }
 .kind-template { --kind: var(--ok); }
 .kind-yaml, .kind-other { --kind: var(--muted); }
@@ -1046,3 +1046,30 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .file-plot.hidden { height: 0; border: 0; margin: 0; overflow: hidden; }   /* not display: none: its width is known */
 .file-plot-canvas { width: 100%; height: 298px; }
 .file-plot-note { margin: 0 0 8px; }
+
+/* what a name is (kinds.tsx): a small glyph before it, the kind on hover */
+.named { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.kind-icon { flex-shrink: 0; vertical-align: -1px; opacity: 0.85; }
+.named > .kind-icon { vertical-align: 0; }
+:not(.named) > .kind-icon { margin-right: 3px; }
+.nk-lab { color: var(--lab); }
+.nk-test { color: var(--datapack); }
+.nk-pipeline { color: var(--muted); }
+.tag .kind-icon { margin: 0 1px 0 -3px; }
+.combo-kind { margin-left: auto; font-family: system-ui, sans-serif; font-size: 10.5px; color: var(--muted); }
+.phase-locks { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.combo-value > .kind-icon { margin: 0 -2px 0 0; align-self: center; }
+.combo.with-kind > .kind-icon { position: absolute; left: 8px; top: 10px; margin: 0; pointer-events: none; }
+.combo.with-kind > input { padding-left: 24px; }
+.run-binding { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+
+/* the legend of the kind glyphs, from the top bar */
+.kind-legend { position: relative; }
+.kind-legend > summary { list-style: none; cursor: pointer; color: var(--accent); }
+.kind-legend > summary::-webkit-details-marker { display: none; }
+.kind-legend-pop { position: absolute; right: 0; top: 26px; z-index: 60; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 10px 14px; width: 420px; max-width: calc(100vw - 32px); font-size: 12.5px; color: var(--text); }
+.kind-legend-cols { display: flex; gap: 22px; }
+.kind-legend-cols > div > div { line-height: 22px; white-space: nowrap; }
+.kind-legend-title { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.kind-legend-pop p { margin: 8px 0 0; white-space: normal; }

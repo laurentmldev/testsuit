@@ -18,6 +18,7 @@ import "./styles.css";
 import { get, post, url, useConnected, useResource } from "./api";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
 import { NavIcon } from "./navicons";
+import { KindLegend } from "./kinds";
 import { setAppName, useTabTitle } from "./title";
 import { ACTIVE, QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
@@ -163,6 +164,7 @@ function App() {
               lab {health.data.lab.tag || health.data.lab.commit?.slice(0, 8) || "?"}
             </span>
           )}
+          <KindLegend />
           <a href="https://github.com/laurentmldev/testsuit" target="_blank" rel="noreferrer"
              title="testsuit is free software under the GNU AGPL, version 3 or later: get its source code">source</a>
           <span className={classes("dot", connected ? "on" : "off")} title={connected ? "live updates on" : "no live updates (reconnecting)"} />

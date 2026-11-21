@@ -17,6 +17,7 @@ import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice, type Inherit } from "../fields";
 import { Address, attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
+import { Named } from "../kinds";
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
@@ -122,11 +123,11 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         {stages.map((s) => (
           <div key={s.name}>
             <div className={classes("nav-item", sel.kind === "group" && sel.name === s.name && "selected")} onClick={() => setSel({ kind: "group", name: s.name })}>
-              <strong>{s.name}</strong> <span className="muted small">{s.vars.tsq_stage_type}</span>
+              <strong>{s.name}</strong> {s.vars.tsq_stage_type && <Named kind="stage_type" name={s.vars.tsq_stage_type} className="muted small" />}
             </div>
             {s.hosts.map((h) => (
               <div key={h} className={classes("nav-item sub", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-                <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+                <span title={h}>{hostLabel(inv, h)}</span> {hostRole(ctx, inv, h) ? <Named kind="role" name={hostRole(ctx, inv, h)} className="muted small" /> : <span className="muted small">no role</span>}
               </div>
             ))}
             <div className="nav-item sub add" onClick={() => setWizard({ kind: "member", stage: s.name })}>+ component</div>
@@ -135,7 +136,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         <div className="nav-title">Ad hoc components <button className="small" onClick={() => setWizard({ kind: "adhoc" })}>+ Component</button></div>
         {adhoc.map((h) => (
           <div key={h} className={classes("nav-item", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-            <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+            <span title={h}>{hostLabel(inv, h)}</span> {hostRole(ctx, inv, h) ? <Named kind="role" name={hostRole(ctx, inv, h)} className="muted small" /> : <span className="muted small">no role</span>}
           </div>
         ))}
         {plain.length > 0 && <div className="nav-title">Other groups</div>}
@@ -307,7 +308,7 @@ function DefaultsForm({ inv, update }: { inv: Inv; update: (fn: (d: Inv) => void
       <Field label="SSH key" help={help(["all", "vars", "ansible_ssh_private_key_file"])}><Text mono value={vars.ansible_ssh_private_key_file} onChange={(v) => set("ansible_ssh_private_key_file", v)} /></Field>
       <Field label="Library folders" help={help(["all", "vars", "tsq_library"])}>
         <Text mono value={(Array.isArray(vars.tsq_library) ? vars.tsq_library : vars.tsq_library ? [vars.tsq_library] : []).join(", ")}
-          onChange={(v) => set("tsq_library", v ? v.split(/\s*,\s*/).filter(Boolean) : undefined)} placeholder="roles/, models/" />
+          onChange={(v) => set("tsq_library", v ? v.split(/\s*,\s*/).filter(Boolean) : undefined)} placeholder="roles/, classes/" />
       </Field>
       <Field label="Host names" help={help(["all", "vars", "tsq_hosts"])} wide
         hint="names a component's Address field can use: the sequencer translates them itself">
@@ -349,7 +350,7 @@ function ComponentCard({ name }: { name?: string | null }) {
   if (!c) return null;
   return (
     <div className="type-card">
-      <div><strong>model {name}</strong> <span className="muted small">{c.chain.join(" → ")}</span></div>
+      <div><strong>class {name}</strong> <span className="muted small">{c.chain.join(" → ")}</span></div>
       {c.description && <Markdown text={c.description} />}
       <table className="grid compact">
         <tbody>
@@ -589,9 +590,9 @@ function HostForm({ inv, name, update, onRenamed, onDeleted, focusCommand }: {
           onPick={(v) => setHelp({ title: v, text: ctx.lab.library?.[v]?.description, extra: <ComponentCard name={v} /> })} />
       </Field>
       <Field label="Role" help={help(["all", "hosts", "_", "tsq_role"])}
-        hint={<>{role && <>edit <ItemLink kind="role" name={role} />{" · "}</>}{supported.length === 1 ? `the role of its model: no tsq_role needed` : supported.length > 1 ? `its model supports ${supported.join(", ")}: pick one` : "its model lists no role: give one"}</>}>
+        hint={<>{role && <>edit <ItemLink kind="role" name={role} />{" · "}</>}{supported.length === 1 ? `the role of its class: no tsq_role needed` : supported.length > 1 ? `its class supports ${supported.join(", ")}: pick one` : "its class lists no role: give one"}</>}>
         <Combo value={vars.tsq_role} onChange={(v) => set("tsq_role", v)} choices={supported.length ? roleChoices(ctx).filter((r) => supported.includes(r.value)) : roleChoices(ctx)} strict
-          placeholder={role ? `${role} (${supported.length === 1 ? "from its model" : "inherited"})` : undefined}
+          placeholder={role ? `${role} (${supported.length === 1 ? "from its class" : "inherited"})` : undefined}
           onPick={(v) => setHelp({ title: v, text: ctx.lab.roles?.[v]?.description, extra: <RoleCard name={v} /> })} />
       </Field>
       <Field label="Lock" help={help(["all", "hosts", "_", "tsq_lock"])}>
@@ -776,7 +777,7 @@ function NewHost({ inv, stage, onClose, onCreate }: { inv: Inv; stage: string | 
         <Combo value={role} onChange={setRole} choices={roles} strict />
         <RoleCard name={role} />
       </Field>
-      <Field name="tsq_extends" label="Extends" help="The component model it is (from the lab library, or another component of the inventory): it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the component needs no tsq_role.">
+      <Field name="tsq_extends" label="Extends" help="The component class it is (from the lab library, or another component of the inventory): it implements the commands of the role, and gives the status probe and the self-test. When it supports only this role, the component needs no tsq_role.">
         <Combo value={ext} onChange={setExt} choices={componentChoices(ctx, { hosts: true })} strict placeholder="linux_system (default)" />
         <ComponentCard name={ext} />
       </Field>

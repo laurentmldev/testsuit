@@ -15,10 +15,14 @@
 // file that defines it, on that item (`?file=…&item=<kind>:<name>`, consumed by the form of that file), and on
 // one of its commands opened for editing with `&command=<name>` (the Run page's "Edit the command" of a step).
 import { Fragment, useEffect, type ReactNode } from "react";
+import { KindIcon, type Kind } from "../kinds";
 import { setQuery, useRoute } from "../util";
 import { hostLabel, useSession, type Session } from "./state";
 
 export type ItemKind = "role" | "component" | "host" | "stage";
+
+/** The kind of name each item is (kinds.tsx): the library "components" are the component classes, the hosts the lab components. */
+export const ITEM_KIND: Record<ItemKind, Kind> = { role: "role", component: "component_class", host: "component", stage: "stage" };
 
 /** The session file that defines a role, a library component, an inventory host or stage, when it is editable here. */
 export function itemFile(session: Session, kind: ItemKind, name: string): string | null {
@@ -46,12 +50,12 @@ export function ItemLink({ kind, name, label }: { kind: ItemKind; name: string; 
   const session = useSession();
   if (!name) return null;
   const text = label ?? (kind === "host" ? hostLabel(session.ctx, name) : name);
-  const what = kind === "host" ? "inventory component" : kind === "component" ? "model" : kind;
+  const what = kind === "host" ? "inventory component" : kind === "component" ? "class" : kind;
   const file = itemFile(session, kind, name);
-  if (!file) return <code>{text}</code>;
+  if (!file) return <code title={`${what} ${name}`}><KindIcon kind={ITEM_KIND[kind]} title={`${what} ${name}`} />{text}</code>;
   return (
     <button type="button" className="link item-link" title={`Edit the ${what} ${name} (${file})`}
-      onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code>{text}</code></button>
+      onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code><KindIcon kind={ITEM_KIND[kind]} title={`Edit the ${what} ${name}`} />{text}</code></button>
   );
 }
 

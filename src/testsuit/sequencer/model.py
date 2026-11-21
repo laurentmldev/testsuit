@@ -229,7 +229,7 @@ class Pipeline(_Model):
 @dataclass
 class LogicalSlot:
     id: str
-    type: str                                    # slot type (setup 'slot_types')
+    slot_class: str                              # its slot class (from the setup's 'slot_classes')
     name: str = ""
     stage_slot: str = ""                              # its stage slot, '' for an ad hoc slot
     role: str = ""                               # a type of the lab: binds to a lab component, which gives the commands
@@ -240,7 +240,7 @@ class LogicalSlot:
 class Needs:
     stage_slots: dict[str, str]                       # stage_slot -> lab stage type
     slots: dict[str, LogicalSlot]
-    slot_types: dict[str, dict]                  # slot types (setup file)
+    slot_classes: dict[str, dict]                  # slot classes (setup file)
     stage_slot_tags: dict[str, list[str]] = field(default_factory=dict)   # tags its lab stage must have
 
     def in_stage_slot(self, stage_slot: str) -> list[LogicalSlot]:
@@ -252,10 +252,10 @@ def check_sequencer_fields(setup: dict) -> None:
     former = former_names(setup)
     if former:
         raise SequencerError("; ".join(former))
-    for name, t in (setup.get("slot_types") or {}).items():
+    for name, t in (setup.get("slot_classes") or {}).items():
         for key in ("extends", "commands"):
             if isinstance(t, dict) and key in t:
-                raise SequencerError(f"setup slot type '{name}': '{key}' is gone, the slots' role gives "
+                raise SequencerError(f"setup slot class '{name}': '{key}' is gone, the slots' role gives "
                                      "the commands, implemented by the lab components (move test-specific commands to pipeline steps)")
     for config_name, config in (setup.get("configurations") or {}).items():
         for slot_id, slot in ((config or {}).get("slots") or {}).items():
@@ -287,10 +287,10 @@ def needs_from_setup(setup: dict, configuration: str) -> Needs:
         if not slot.get("role"):
             raise SequencerError(f"setup configuration '{configuration}': slot '{slot_id}' has no role "
                                  "(needed to bind it to a lab component)")
-        slots[slot_id] = LogicalSlot(id=slot_id, type=slot.get("type", ""), name=slot.get("name", ""),
+        slots[slot_id] = LogicalSlot(id=slot_id, slot_class=slot.get("slot_class", ""), name=slot.get("name", ""),
                                      stage_slot=stage_slot, role=slot["role"],
                                      tags=tag_list(slot.get("tags"), f"setup configuration '{configuration}': slot '{slot_id}'"))
-    return Needs(stage_slots=stage_slots, slots=slots, slot_types=setup.get("slot_types") or {},
+    return Needs(stage_slots=stage_slots, slots=slots, slot_classes=setup.get("slot_classes") or {},
                  stage_slot_tags=stage_slot_tags)
 
 

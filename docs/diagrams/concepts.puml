@@ -19,8 +19,8 @@ skinparam frame {
 
 rectangle "**Datapack** (tests side): what a test needs" as dp #FFFFFF {
   frame "**stage slot** bench\nasks for stage type //bench//" as stage_slot {
-    card "**slot** controller\nrole //controller//\nslot type controller_app" as s_pilot
-    card "**slot** logger\nrole //logger//\nslot type logger_app" as s_tm
+    card "**slot** controller\nrole //controller//\nslot class controller_app" as s_pilot
+    card "**slot** logger\nrole //logger//\nslot class logger_app" as s_tm
   }
   card "**ad hoc slot** actuator\nrole //actuator_sim//" as s_prop
 }
