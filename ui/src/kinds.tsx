@@ -22,7 +22,7 @@ import type { ReactNode } from "react";
 export type Kind = "component" | "component_class" | "role" | "stage" | "stage_type" | "slot" | "stage_slot" | "slot_class" | "phase" | "command";
 
 const S = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-const D = { ...S, strokeDasharray: "2 1.4" };
+const D = { ...S, strokeWidth: 1, strokeDasharray: "1 1.6" };   // thinner, short dashes: gaps that show at 12 px
 const F = { fill: "currentColor", stroke: "currentColor", strokeWidth: 1.3, strokeLinejoin: "round" as const };
 const SQUARE = { x: "2.5", y: "2.5", width: "7", height: "7", rx: "1.5" };
 const GROUP = <><rect x="1.2" y="1.2" width="3.6" height="3.6" rx="0.8" /><rect x="7.2" y="1.2" width="3.6" height="3.6" rx="0.8" /><rect x="4.2" y="7.2" width="3.6" height="3.6" rx="0.8" /></>;
