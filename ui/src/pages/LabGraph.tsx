@@ -24,6 +24,7 @@ import {
 import { put, url, useResource } from "../api";
 import { Dialog } from "../fields";
 import { layoutWithRoutes, type Point } from "../graph";
+import { Named } from "../kinds";
 import { ComponentIcon } from "../labicons";
 import { ago, attempt, Badge, classes, navigate, STATE_COLORS, time, ViaTag } from "../util";
 
@@ -145,7 +146,7 @@ function ComponentNode({ data }: NodeProps) {
           <span className={classes("lab-icon xl", color)}><ComponentIcon icon={icon} src={src} size={44} /></span>
           <div className="lab-node-names">
             <strong>{comp.label || comp.id}</strong>
-            <span className="muted small">{[comp.label && comp.label !== comp.id ? comp.id : null, comp.role].filter(Boolean).join(" · ")}</span>
+            <span className="muted small">{comp.label && comp.label !== comp.id && <Named kind="component" name={comp.id} />}{comp.label && comp.label !== comp.id && comp.role && " · "}{comp.role && <Named kind="role" name={comp.role} />}</span>
             <span className="muted small">{comp.host_alias ? `${comp.host_alias} (${comp.host})` : comp.host}</span>
           </div>
         </div>
@@ -206,7 +207,7 @@ function AreaNode({ data }: NodeProps) {
       title={`Stage ${stage.id}${stage.description ? "\n" + stage.description : ""}\nClick its title: details and actions`}>
       <div className="lab-area-head" data-stage={stage.id}>
         <strong>Stage {stage.id}</strong>
-        <code className="small">{stage.type}</code>
+        <code className="small"><Named kind="stage_type" name={stage.type} /></code>
         {stage.hold && <Badge value="hold" title={stage.note || ""} />}
         {stage.maintenance && <Badge value="maintenance" title={stage.note || ""} />}
         {offNote(stage) && <span className="lab-note" title={stage.note}>{stage.note}</span>}
@@ -746,7 +747,7 @@ export function ComponentDialog({ comp, view, labelOf, actions, onClose, onProbe
       <div className="lab-dialog-head">
         <span className={classes("lab-icon big", STATE_COLORS[comp.state] || "muted")}><ComponentIcon icon={icon} src={src} size={44} /></span>
         <div>
-          <div><code>{comp.id}</code> · role <code>{comp.role}</code> · extends <code>{comp.extends}</code> · host <code>{comp.host_alias ? `${comp.host_alias} (${comp.host})` : comp.host}</code> · lock {comp.lock}</div>
+          <div><code><Named kind="component" name={comp.id} /></code> · role <code><Named kind="role" name={comp.role} /></code> · extends <code><Named kind="component_class" name={comp.extends} /></code> · host <code>{comp.host_alias ? `${comp.host_alias} (${comp.host})` : comp.host}</code> · lock {comp.lock}</div>
           <div className="muted small">{comp.stages?.length ? <>in stage{comp.stages.length > 1 ? "s" : ""} {comp.stages.join(", ")}</> : "ad hoc component (in no stage)"}</div>
           {comp.description && <p className="description">{comp.description}</p>}
           {icon?.error && <div className="warning-text">{icon.error}</div>}
@@ -798,7 +799,7 @@ export function StageDialog({ stage, view, labelOf, actions, onClose, onComponen
   const runs = view?.runs || {};
   return (
     <Dialog title={`Stage ${stage.id}`} onClose={onClose} wide footer={<>{actions}<span className="spacer" /></>}>
-      <p>type <code>{stage.type}</code>{stage.hold && <> <Badge value="hold" /></>}{stage.maintenance && <> <Badge value="maintenance" /></>}{stage.note && <span className="muted"> “{stage.note}”</span>}</p>
+      <p>type <code><Named kind="stage_type" name={stage.type} /></code>{stage.hold && <> <Badge value="hold" /></>}{stage.maintenance && <> <Badge value="maintenance" /></>}{stage.note && <span className="muted"> “{stage.note}”</span>}</p>
       {stage.description && <p className="description">{stage.description}</p>}
       <h4>Components</h4>
       <p>{stage.components.map((c: string, i: number) => <span key={c}>{i > 0 && ", "}<button type="button" className="link" onClick={() => onComponent(c)}>{labelOf(c)}</button></span>)}</p>

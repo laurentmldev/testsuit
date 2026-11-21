@@ -22,6 +22,7 @@ import { get, post } from "../api";
 import { COMMENT_WIDTH, CommentNode, commentCard, type CommentCard } from "../comments";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
+import { Named } from "../kinds";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, notify, relPath, slug } from "../util";
 import { ExpectEditor, HttpEditor, httpSummary, PythonEditor, pythonSummary, summary, WaitForEditor } from "./commands";
 import { clone, hostLabel, useSession, useTestKeys, type Doc } from "./state";
@@ -721,7 +722,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected, onCommen
       )}
       {comps.map(([id, c]) => (
         <details key={id} className="palette-group" open={comps.length <= 2}>
-          <summary className="palette-title" title={`role ${c.role} (its lab role gives the commands), inputs of ${c.slot_class}${c.stage_slot ? `, stage_slot ${c.stage_slot}` : ", ad hoc"}`}>{id} <span className="muted small">{c.role}</span></summary>
+          <summary className="palette-title" title={`slot ${id}: role ${c.role} (its lab role gives the commands), inputs of slot class ${c.slot_class}${c.stage_slot ? `, in stage slot ${c.stage_slot}` : ", ad hoc"}`}><Named kind="slot" name={id} /> <Named kind="role" name={c.role} className="muted small" /></summary>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
             <button key={cmd} className="palette-item" onClick={() => onAdd({ id: `${cmd}_${id}`, slot: id, do: cmd })}
               onMouseEnter={() => setHelp({ title: `${cmd} on ${id}`, text: `${info.description || info.help || ""}\n\noffered by ${info.from}${Object.entries<any>(info.implementations || {}).map(([h, i]) => `\n\n- on **${h}**: \`${summary(i.spec)}\` (${i.from})${typeof i.spec?.comments === "string" && i.spec.comments.trim() ? `: ${i.spec.comments.trim().replace(/\s*\n\s*/g, " ")}` : ""}`).join("")}` })}>
@@ -818,8 +819,8 @@ function ExploitEditor({ value, onChange, testdef, phaseIds, phaseSlots, slotRol
       const role = slotRoles[sl];
       const outputs: any[] = ctx.lab?.roles?.[role]?.outputs || [];
       return [
-        ...outputs.map((o) => ({ value: `${ph}:${sl}/output/${o.name}`, description: `${o.optional ? "optional output" : "output"} of role ${role}${o.description ? `: ${o.description}` : ""}` })),
-        { value: `${ph}:${sl}/output/`, description: `everything phase ${ph} collected from ${sl}${outputs.length ? "" : ` (role ${role} lists no outputs)`}` },
+        ...outputs.map((o) => ({ value: `${ph}:${sl}/output/${o.name}`, description: `${o.optional ? "optional output" : "output"} of slot ${sl}, foreseen by its role ${role}${o.description ? `: ${o.description}` : ""}` })),
+        { value: `${ph}:${sl}/output/`, description: `everything phase ${ph} collected from slot ${sl}${outputs.length ? "" : ` (its role ${role} lists no outputs)`}` },
       ];
     }),
     { value: `${ph}:*/output/`, description: `the outputs of every slot, collected in phase ${ph}` },
@@ -861,7 +862,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     onChange(next);
   };
   const comps: Choice[] = (palette ? Object.entries<any>(palette.slots) : []).filter(([id]) => isSub || held.includes(id))
-    .map(([id, c]) => ({ value: id, description: `${c.name || ""} · role ${c.role} · inputs of ${c.slot_class}${c.stage_slot ? ` · stage_slot ${c.stage_slot}` : " · ad hoc"}` }));
+    .map(([id, c]) => ({ value: id, kind: "slot" as const, description: `${c.name || ""} · role ${c.role} · inputs of ${c.slot_class}${c.stage_slot ? ` · stage_slot ${c.stage_slot}` : " · ad hoc"}` }));
   const roles = [...new Set(comps.map((c) => palette.slots[c.value].role))];
   const targetMode = step.slot ? "slot" : step.for_each === "slots" ? "all" : Array.isArray(step.for_each) ? "list"
     : typeof step.for_each === "string" && roles.includes(step.for_each) ? "role" : typeof step.for_each === "string" ? "expr" : "none";
@@ -1041,8 +1042,8 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted, onMove }: 
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete ph[k];
     else ph[k] = v;
   });
-  const stageSlotChoices: Choice[] = Object.entries<any>(palette?.stage_slots || {}).map(([s, t]) => ({ value: s, description: `lab stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.stage_slot === s).map(([id]) => id).join(", ")}` }));
-  const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.stage_slot).map(([id, c]) => ({ value: id, description: `role ${c.role}` }));
+  const stageSlotChoices: Choice[] = Object.entries<any>(palette?.stage_slots || {}).map(([s, t]) => ({ value: s, kind: "stage_slot" as const, description: `stage type ${t}: ${Object.entries<any>(palette.slots).filter(([, c]) => c.stage_slot === s).map(([id]) => id).join(", ")}` }));
+  const adhocChoices: Choice[] = Object.entries<any>(palette?.slots || {}).filter(([, c]) => !c.stage_slot).map(([id, c]) => ({ value: id, kind: "slot" as const, description: `role ${c.role}` }));
   const runOrder = phaseOrder(phases);
   const position = runOrder.indexOf(index);
   const earlier = runOrder.slice(0, position).map((i) => phases[i]);
@@ -1057,7 +1058,8 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted, onMove }: 
         <button className="fold" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"}</button>
         <strong>Phase</strong>
         <input className="inline-name" key={phase.id} defaultValue={phase.id} onBlur={(e) => e.target.value && set("id", slug(e.target.value))} />
-        <span className="muted small">locks {[...(phase.stage_slots || []), ...(phase.slots || [])].join(", ") || "nothing"}</span>
+        <span className="muted small phase-locks">locks {[...(phase.stage_slots || []).map((n: string) => <Named key={"s" + n} kind="stage_slot" name={n} />), ...(phase.slots || []).map((n: string) => <Named key={n} kind="slot" name={n} />)]}
+          {!(phase.stage_slots || []).length && !(phase.slots || []).length && "nothing"}</span>
         <span className="spacer" />
         <button className="small" disabled={position <= 0} onClick={() => onMove(-1)} title="Run it one phase earlier">◀ earlier</button>
         <button className="small" disabled={position >= phases.length - 1} onClick={() => onMove(1)} title="Run it one phase later">later ▶</button>
@@ -1073,8 +1075,8 @@ function PhaseForm({ phase, index, phases, palette, write, onDeleted, onMove }: 
       {open && (
         <div className="phase-fields">
           <Field label="After phases" help={help("needs")}><Tags value={phase.needs} onChange={(v) => set("needs", v)} choices={phases.filter((p) => p.id !== phase.id).map((p) => ({ value: p.id }))} /></Field>
-          <Field label="Stage slots" help={help("stage_slots")}><Tags value={phase.stage_slots} onChange={(v) => set("stage_slots", v)} choices={stageSlotChoices} /></Field>
-          <Field label="Ad hoc slots" help={help("slots")}><Tags value={phase.slots} onChange={(v) => set("slots", v)} choices={adhocChoices} /></Field>
+          <Field label="Stage slots" help={help("stage_slots")}><Tags kind="stage_slot" value={phase.stage_slots} onChange={(v) => set("stage_slots", v)} choices={stageSlotChoices} /></Field>
+          <Field label="Ad hoc slots" help={help("slots")}><Tags kind="slot" value={phase.slots} onChange={(v) => set("slots", v)} choices={adhocChoices} /></Field>
           <Field label="Timeout" help={help("timeout")}><Text value={phase.timeout} onChange={(v) => set("timeout", v)} placeholder="none" /></Field>
           {index > 0 && (
             <Field label="Inputs from earlier phases" help={help("inputs")} wide>
@@ -1172,7 +1174,8 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
     <div className="pad flattened">
       <p>
         Setup <code>{flat.setup}</code>. Binding against the lab (locks ignored):{" "}
-        {flat.binding ? Object.entries<any>({ ...flat.binding.stage_slots, ...flat.binding.slots }).map(([l, c]) => <code key={l}>{l}={c} </code>) : <span className="error-text">no binding</span>}
+        {flat.binding ? <>{Object.entries<any>(flat.binding.stage_slots || {}).map(([l, c]) => <code key={"s" + l}><Named kind="stage_slot" name={l} />=<Named kind="stage" name={c} /> </code>)}
+          {Object.entries<any>(flat.binding.slots || {}).map(([l, c]) => <code key={l}><Named kind="slot" name={l} />=<Named kind="component" name={c}>{hostLabel(ctx, c)}</Named> </code>)}</> : <span className="error-text">no binding</span>}
       </p>
       {flat.problems.length > 0 && <ul className="warn-list">{flat.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
       {(flat.key_problems || []).length > 0 && (
@@ -1190,7 +1193,7 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
                   {i === 0 && <td rowSpan={s.targets.length}><code>{s.part === "finally" ? "finally " : ""}{s.id}</code></td>}
                   {i === 0 && <td rowSpan={s.targets.length} className="small">{s.needs.join(", ")}</td>}
                   {i === 0 && <td rowSpan={s.targets.length}>{s.action}{s.do ? ` ${s.do}` : ""}</td>}
-                  <td>{t.slot ? <>{t.slot}{t.concrete && <span className="muted small" title={t.concrete}> = {hostLabel(ctx, t.concrete)}</span>}</> : "-"}</td>
+                  <td>{t.slot ? <><Named kind="slot" name={t.slot} />{t.concrete && <span className="muted small"> = <Named kind="component" name={t.concrete}>{hostLabel(ctx, t.concrete)}</Named></span>}</> : "-"}</td>
                   <td className="mono small">{t.command ? summary(t.command) : s.action !== "do" ? summary(s.step) : ""}</td>
                   <td className="muted small">{t.source || ""}</td>
                 </tr>

@@ -17,6 +17,7 @@ import { Fragment, useEffect, useState } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, HelpIcon, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug } from "../util";
+import { Named } from "../kinds";
 import { DictionaryDialog } from "./DictionaryDialog";
 import { clone, labRoleChoices, roleChoices, slotTagChoices, stageSlotTagChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
 
@@ -74,7 +75,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         <div className="nav-title">Slot classes <button className="small" onClick={() => setWizard("type")}>+</button></div>
         {Object.keys(types).map((t) => (
           <div key={t} className={classes("nav-item", sel.kind === "type" && sel.name === t && "selected")} onClick={() => setSel({ kind: "type", name: t })}>
-            <strong>{t}</strong> <span className="muted small">{Object.keys(types[t]?.configurations || {}).join(", ")}</span>
+            <strong><Named kind="slot_class" name={t} /></strong> <span className="muted small">{Object.keys(types[t]?.configurations || {}).join(", ")}</span>
           </div>
         ))}
       </div>
@@ -516,7 +517,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete c[k];
     else c[k] = v;
   });
-  const typeOptions: Choice[] = Object.entries(types).map(([t, def]) => ({ value: t, description: [def?.description, `configurations ${Object.keys(def?.configurations || {}).join(", ")}`].filter(Boolean).join(" · ") }));
+  const typeOptions: Choice[] = Object.entries(types).map(([t, def]) => ({ value: t, kind: "slot_class" as const, description: [def?.description, `configurations ${Object.keys(def?.configurations || {}).join(", ")}`].filter(Boolean).join(" · ") }));
   const [newName, setNewName] = useState(name);
   useEffect(() => setNewName(name), [name]);         // another item picked, or created
   const aliased = Object.entries<any>(data.configurations).some(([other, c]) => other !== name && JSON.stringify(c) === JSON.stringify(cfg));
@@ -538,7 +539,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     const st = stage ? stageType(stage) : null;
     return (
       <table className="grid compact components">
-        <thead><tr><th>Role</th><th>Id</th><th>Name</th><th>Class</th><th>Configuration</th><th>Needs</th><th>Tags</th><th /></tr></thead>
+        <thead><tr><th><Named kind="role" name="">Role</Named></th><th><Named kind="slot" name="">Slot id</Named></th><th>Name</th><th><Named kind="slot_class" name="">Class</Named></th><th>Configuration</th><th>Needs</th><th>Tags</th><th /></tr></thead>
         <tbody>
           {ids.map((id) => {
             const c = comps[id];
@@ -550,14 +551,14 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
                   <Combo value={c?.role} onChange={(v) => setComp(id, "role", v)} choices={roles} />
                   <RoleCommands role={c?.role} />
                 </td>
-                <td><code>{id}</code>{!stage && c?.stage_slot && <div className="error-text small">stage slot '{c.stage_slot}' is not declared</div>}</td>
+                <td><code><Named kind="slot" name={id} /></code>{!stage && c?.stage_slot && <div className="error-text small">stage slot '{c.stage_slot}' is not declared</div>}</td>
                 <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
                 <td>
                   <Combo value={c?.slot_class} onChange={(v) => setComp(id, "slot_class", v)} choices={typeOptions} strict />
                   {c?.slot_class && types[c.slot_class] && <button className="link small" onClick={() => onOpenType(c.slot_class)}>open</button>}
                 </td>
                 <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={typeConfigs.map((x) => ({ value: x }))} strict /></td>
-                <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+                <td><Tags kind="slot" value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
                 {tagsCell(id)}
                 <td><button className="icon" onClick={() => update((d) => delete d.configurations[name].slots[id])}>×</button></td>
               </tr>
@@ -595,14 +596,14 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
       const c = comps[id];
       return (
         <>
-          <td><code>{id}</code></td>
+          <td><code><Named kind="slot" name={id} /></code></td>
           <td><input value={c?.name || ""} onChange={(e) => setComp(id, "name", e.target.value)} /></td>
           <td>
             <Combo value={c?.slot_class} onChange={(v) => setComp(id, "slot_class", v)} choices={typeOptions} strict />
             {c?.slot_class && types[c.slot_class] && <button className="link small" onClick={() => onOpenType(c.slot_class)}>open</button>}
           </td>
           <td><Combo value={c?.configuration} onChange={(v) => setComp(id, "configuration", v)} choices={Object.keys(types[c?.slot_class]?.configurations || {}).map((x) => ({ value: x }))} strict /></td>
-          <td><Tags value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
+          <td><Tags kind="slot" value={c?.needs} onChange={(v) => setComp(id, "needs", v)} choices={Object.keys(comps).filter((x) => x !== id).map((x) => ({ value: x }))} placeholder="+" /></td>
           {tagsCell(id)}
         </>
       );
@@ -610,7 +611,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
     if (!labRoles.length && !others.length) return <p className="muted small">No lab stage of this type, so no role to pick.</p>;
     return (
       <table className="grid compact components">
-        <thead><tr><th className="tick" /><th>Role</th><th>Id</th><th>Name</th><th>Class</th><th>Configuration</th><th>Needs</th><th>Tags</th></tr></thead>
+        <thead><tr><th className="tick" /><th><Named kind="role" name="">Role</Named></th><th><Named kind="slot" name="">Slot id</Named></th><th>Name</th><th><Named kind="slot_class" name="">Class</Named></th><th>Configuration</th><th>Needs</th><th>Tags</th></tr></thead>
         <tbody>
           {labRoles.map((role) => {
             const ids = ofRole(role);
@@ -618,7 +619,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
             if (!ids.length) return (
               <tr key={role} className="unused">
                 <td className="tick"><input type="checkbox" checked={false} title="tick to use it" onChange={() => tick(role, true)} /></td>
-                <td>{role}<RoleCommands role={role} /></td>
+                <td><Named kind="role" name={role} /><RoleCommands role={role} /></td>
                 <td colSpan={6} className="muted small">not used by this test</td>
               </tr>
             );
@@ -626,7 +627,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
               <tr key={id}>
                 <td className="tick"><input type="checkbox" checked title="the test uses it: untick to drop it" onChange={() => tick(role, false, id)} /></td>
                 <td>
-                  {role}{i === 0 && <RoleCommands role={role} />}
+                  <Named kind="role" name={role} />{i === 0 && <RoleCommands role={role} />}
                   {i === ids.length - 1 && ids.length < max && <button className="link small" title={`the ${st} stages have up to ${max} components for this role`} onClick={() => tick(role, true)}>+ another {role}</button>}
                   {i >= max && <div className="error-text small">{`the ${st} stages have at most ${max}`}</div>}
                 </td>
@@ -676,7 +677,7 @@ function Configuration({ name, data, update, onAddFromLab, onOpenType, onRenamed
           const st = stageType(s);   // one fold per stage slot, with its slots
           const inStage = Object.keys(comps).filter((id) => comps[id]?.stage_slot === s);
           return (
-            <Section key={s} title={<><code>{s}</code> <span className="muted small">{st || "no lab stage type"} · {inStage.length} slot{inStage.length === 1 ? "" : "s"}</span></>}
+            <Section key={s} title={<><code><Named kind="stage_slot" name={s} /></code> <span className="muted small">{st ? <Named kind="stage_type" name={st} /> : "no lab stage type"} · {inStage.length} slot{inStage.length === 1 ? "" : "s"}</span></>}
               actions={<button className="small danger" onClick={() => {
                 if (inStage.length && !window.confirm(`Remove stage_slot ${s} and its slots ${inStage.join(", ")}?`)) return;
                 update((d) => {
@@ -787,8 +788,8 @@ function FromLab({ data, config, initial, onClose, onApply }: { data: any; confi
           {roles.map((role) => (
             <tr key={role}>
               <td><input type="checkbox" checked={isPicked(role)} onChange={(e) => setPicked({ ...picked, [role]: e.target.checked })} /></td>
-              <td>{role}{existing.has(role) && <span className="muted small"> (already there)</span>}<RoleCommands role={role} /></td>
-              <td><code>{typeForRole(data, role)}</code>{!types[typeForRole(data, role)] && <span className="muted small"> new</span>}</td>
+              <td><Named kind="role" name={role} />{existing.has(role) && <span className="muted small"> (already there)</span>}<RoleCommands role={role} /></td>
+              <td><code><Named kind="slot_class" name={typeForRole(data, role)} /></code>{!types[typeForRole(data, role)] && <span className="muted small"> new</span>}</td>
             </tr>
           ))}
         </tbody>

@@ -17,6 +17,7 @@ import { useMemo, useState, useEffect } from "react";
 import { post } from "../api";
 import { Choices, Combo, Dialog, Field, helpText, KeyValues, Section, Tags, Text, useHelp, type Choice, type Inherit } from "../fields";
 import { Address, attempt, classes, freeName, labId, labIdInput, labIdProblem, Markdown } from "../util";
+import { Named } from "../kinds";
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
@@ -122,11 +123,11 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         {stages.map((s) => (
           <div key={s.name}>
             <div className={classes("nav-item", sel.kind === "group" && sel.name === s.name && "selected")} onClick={() => setSel({ kind: "group", name: s.name })}>
-              <strong>{s.name}</strong> <span className="muted small">{s.vars.tsq_stage_type}</span>
+              <strong>{s.name}</strong> {s.vars.tsq_stage_type && <Named kind="stage_type" name={s.vars.tsq_stage_type} className="muted small" />}
             </div>
             {s.hosts.map((h) => (
               <div key={h} className={classes("nav-item sub", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-                <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+                <span title={h}>{hostLabel(inv, h)}</span> {hostRole(ctx, inv, h) ? <Named kind="role" name={hostRole(ctx, inv, h)} className="muted small" /> : <span className="muted small">no role</span>}
               </div>
             ))}
             <div className="nav-item sub add" onClick={() => setWizard({ kind: "member", stage: s.name })}>+ component</div>
@@ -135,7 +136,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
         <div className="nav-title">Ad hoc components <button className="small" onClick={() => setWizard({ kind: "adhoc" })}>+ Component</button></div>
         {adhoc.map((h) => (
           <div key={h} className={classes("nav-item", sel.kind === "host" && sel.name === h && "selected")} onClick={() => setSel({ kind: "host", name: h })}>
-            <span title={h}>{hostLabel(inv, h)}</span> <span className="muted small">{hostRole(ctx, inv, h) || "no role"}</span>
+            <span title={h}>{hostLabel(inv, h)}</span> {hostRole(ctx, inv, h) ? <Named kind="role" name={hostRole(ctx, inv, h)} className="muted small" /> : <span className="muted small">no role</span>}
           </div>
         ))}
         {plain.length > 0 && <div className="nav-title">Other groups</div>}

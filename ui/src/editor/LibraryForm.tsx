@@ -16,6 +16,7 @@
 import { useState, useEffect } from "react";
 import { Choices, Combo, Dialog, Field, helpText, IdText, Section, Tags, Text, Toggle } from "../fields";
 import { get, post, put } from "../api";
+import { Named } from "../kinds";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, CommentsField, CommentsNote, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
 import { ItemLink, ItemLinks, useItemRequest, type CommandRequest } from "./links";
@@ -159,14 +160,14 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         <div className="nav-title">Roles <button className="small" onClick={() => setCreating("role")}>+ Role</button></div>
         {Object.entries(roles).map(([name, r]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
-            <strong>{name}</strong> <span className="muted small">{r?.extends}</span>
+            <strong>{name}</strong> {r?.extends && <Named kind="role" name={r.extends} detail="extends it" className="muted small" />}
             {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of <ItemLinks kind="host" names={ctx.lab.roles[name].used_by} /></div> : null}
           </div>
         ))}
         <div className="nav-title">Classes <button className="small" onClick={() => setCreating("component")}>+ Class</button></div>
         {Object.entries(components).map(([name, c]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
-            <strong>{name}</strong> <span className="muted small">{c?.extends}</span>
+            <strong>{name}</strong> {c?.extends && <Named kind={ctx.lab.library?.[c.extends] ? "component_class" : "component"} name={c.extends} detail="extends it" className="muted small" />}
             {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles <ItemLinks kind="role" names={ctx.lab.library[name].roles} /></div> : null}
             {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by <ItemLinks kind="host" names={ctx.lab.library[name].used_by} /></div> : null}
           </div>
@@ -393,7 +394,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, fo
           const note = t.roles === undefined && parent?.roles?.length ? `inherited from ${t.extends}` : !roles.length ? "none: a base, whose hosts give their role (tsq_role)" : roles.length > 1 ? "its hosts pick one (tsq_role)" : null;
           return note && <>{roles.length > 0 && " · "}{note}</>;
         })()}</>}>
-        <Tags value={t.roles} onChange={(v) => set("roles", v.length ? v : undefined)} choices={labRoleChoices(ctx)} placeholder="add a role it supports" />
+        <Tags kind="role" value={t.roles} onChange={(v) => set("roles", v.length ? v : undefined)} choices={labRoleChoices(ctx)} placeholder="add a role it supports" />
       </Field>
       {Object.entries<any>(described?.role_missing || {}).filter(([, m]) => m.length).map(([r, m]) => (
         <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {r}: the lab does not load.</div>
