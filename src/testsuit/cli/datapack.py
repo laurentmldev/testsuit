@@ -34,13 +34,16 @@ def main():
     """Generate the datapack of a test definition file: the input files of every component of its setup,
 rendered with Jinja2 from YAML dictionaries, packaged as a zip (BagIt layout).
 
+Given a campaign file (<name>.campaign.yml), generate the datapack of each of its test definitions into one
+folder, with the dataset versions the campaign pins, and a campaign.yml manifest for 'tsq submit-campaign'.
+
 With --verify, check the checksums of an existing datapack zip instead.
 With --check-baseline EXPECTED, check the baseline of an existing datapack zip against an expected baseline.
 
 Return 1 if something went wrong, 0 otherwise
     """,
     formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('file',help="the test definition YAML file (or, with --verify, the datapack zip)")
+    parser.add_argument('file',help="the test definition YAML file, or a campaign file (*.campaign.yml) (or, with --verify, the datapack zip)")
     parser.add_argument('--nocheck',action='store_true',help="Ignore warnings and consistency checks (git tags etc.) for test definition and setup folders.")
     parser.add_argument('--output-dir','-o',help="where to write the datapack zip (default: key 'datapack.output_dir')")
     parser.add_argument('--setup-config','-c',help="setup configuration to use instead of the test definition's 'setup_config'")
@@ -78,8 +81,21 @@ Return 1 if something went wrong, 0 otherwise
             print(Fore.LIGHTGREEN_EX+"datapack is intact"+Style.RESET_ALL)
         sys.exit(1 if problems else 0)
 
+    from testsuit.datatools.datapack.campaign import CampaignError, build_campaign, is_campaign_file
     try:
         expected = None
+        if is_campaign_file(args.file):
+            if args.setup_config or args.dataset_versions or args.baseline:
+                raise DatapackError("--setup-config, --dataset-version and --baseline do not apply to a campaign: "
+                                    "the campaign file gives them (setup_config, datasets, baseline)")
+            from testsuit.datatools.datapack.templating import TemplateError, parse_key_value
+            try:
+                manual_keys = dict(parse_key_value(item) for item in args.set_keys)
+            except TemplateError as e:
+                raise DatapackError(f"--set: {e}") from e
+            build_campaign(expandPath(args.file), args.nocheck, args.output_dir, lenient=args.lenient,
+                           manual_keys=manual_keys)
+            sys.exit(0)
         if args.baseline:
             import yaml
             with open(expandPath(args.baseline), encoding="utf-8") as f:
@@ -97,7 +113,7 @@ Return 1 if something went wrong, 0 otherwise
             dataset_versions[dataset.strip()] = version.strip()
         datapack(expandPath(args.file), args.nocheck, args.output_dir, args.setup_config, expected, lenient=args.lenient,
                  manual_keys=manual_keys, dataset_versions=dataset_versions)
-    except DatapackError as e:
+    except (DatapackError, CampaignError) as e:
         print(Fore.RED+"ERROR: "+str(e)+Style.RESET_ALL)
         sys.exit(1)
     sys.exit(0)

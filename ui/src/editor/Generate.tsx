@@ -531,7 +531,7 @@ function Elapsed({ started, lastLine }: { started: number; lastLine: number }) {
 }
 
 /** " (N warnings)" for the summary of a log that has any. */
-function logWarnings(log: string): string {
+export function logWarnings(log: string): string {
   const n = (log || "").split("\n").filter((line) => logLevel(line) === "log-warn").length;
   return n ? ` (${n} warning${n === 1 ? "" : "s"})` : "";
 }
@@ -545,7 +545,7 @@ function logLevel(line: string): "log-error" | "log-warn" | undefined {
 }
 
 /** The log of the datapack tool, scrolled to its last line while it grows; error lines stand out. */
-function LiveLog({ lines }: { lines: string[] }) {
+export function LiveLog({ lines }: { lines: string[] }) {
   const box = useRef<HTMLPreElement>(null);
   useEffect(() => {
     const el = box.current;

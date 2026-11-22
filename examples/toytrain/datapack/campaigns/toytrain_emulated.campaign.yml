@@ -1,0 +1,12 @@
+# The same campaign on the emulated toy train (tsq.dev.yml): every test definition in its 'emulated' setup
+# configuration, on a dev host.
+id: toytrain_emulated
+name: Toy train regression (emulated)
+description: The regression campaign on the toy train emulated on a dev host.
+priority: 50
+testdefs:
+  - {testdef: ../testdef/max_speed/testdef.yml, setup_config: emulated}
+  - {testdef: ../testdef/front_contact/testdef.yml, setup_config: emulated, priority: 60}
+datasets:
+  toytrain_sw: v0.3.0
+  toytrain_sim: v1.1.0

@@ -1077,3 +1077,36 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .kind-legend-cols > div > div { line-height: 22px; white-space: nowrap; }
 .kind-legend-title { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
 .kind-legend-pop p { margin: 8px 0 0; white-space: normal; }
+
+/* Datapacks: the Test definitions and Campaigns subtabs; a campaign, its dataset versions; a campaign run */
+.datapacks-subtabs { margin: 6px 0 12px; }
+.campaign-pick { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
+.campaign-pick .mono { word-break: break-all; }
+.synthesis.campaign table.baseline code.replaced { text-decoration: line-through; opacity: .6; }
+.synthesis.campaign tr.off td { opacity: .6; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.campaign-progress { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.campaign-progress .bar { display: inline-flex; width: 70px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-2); }
+.campaign-progress .bar span { display: block; height: 100%; }
+.campaign-progress .succeeded { background: var(--ok); }
+.campaign-progress .failed { background: var(--bad); }
+.campaign-progress .error { background: var(--warn); }
+.campaign-progress .running { background: var(--run); }
+.runs-tree tr.campaign-row td { background: var(--panel); border-top: 1px solid var(--border); }
+.runs-tree tr.campaign-child td:first-child { padding-left: 32px; }
+.runs-tree tr.campaign-child td { font-size: 13px; }
+.badge.campaign { background: var(--accent-soft); color: var(--accent); }
+.campaign-page h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0; }
+.campaign-tiles { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.campaign-tiles .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; min-width: 84px; font-size: 12px; color: var(--muted); }
+.campaign-tiles .tile b { display: block; font-size: 20px; color: var(--text, inherit); }
+.campaign-tiles .tile.succeeded b { color: var(--ok); }
+.campaign-tiles .tile.failed b { color: var(--bad); }
+.campaign-tiles .tile.error b { color: var(--warn); }
+.campaign-tiles .tile.running b { color: var(--run); }
+.campaign-runs td { vertical-align: top; }
+.campaign-runs .chip { margin: 0 4px 2px 0; }
+.campaign-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+.campaign-page { overflow-x: auto; }

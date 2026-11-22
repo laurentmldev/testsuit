@@ -60,6 +60,11 @@ writes, and ``{{ <id>.version }}`` gives it; nothing is written to the files. A 
 keeps the datapack conform when it is a tag of the source (the importer confirms the imported data is that tag: a git
 tag, a release), and makes it non-conform otherwise (a branch, a commit). Both are recorded in ``datapack.yml`` and
 ``baseline.yml`` (``versions_set_by_hand``).
+
+A datapack can be generated for a **campaign** (see campaign: ``datapack <file>.campaign.yml``, the ``campaign``
+argument): the campaign gives the version of every dataset the setup imports (one missing is an error), recorded as
+``versions_pinned_by_campaign``, with the campaign file as a source of role ``campaign`` (its git state counts for
+conformity like the test definition's) and the keys ``campaign.{id, name, file}``. Versions cannot be set by hand then.
 """
 from __future__ import annotations
 
@@ -160,6 +165,18 @@ def git_state(folder: Path) -> dict | None:
     except Exception:
         remote = None
     return {"commit": commit, "tag": tag, "clean": not dirty, "repo": remote, "root": repo.working_tree_dir}
+
+
+def _check_git_state(label: str, folder: Path, nocheck: bool) -> dict | None:
+    """The git state of a folder; one that is not a clean tag is an error, or a warning with nocheck."""
+    state = git_state(folder)
+    _info(Fore.LIGHTBLACK_EX + f"{label} folder: " + Style.RESET_ALL + folder.as_posix())
+    if state is None or not state["clean"] or not state["tag"]:
+        why = "not in a git work tree" if state is None else ("has local changes" if not state["clean"] else "is not a git tag")
+        if not nocheck:
+            raise DatapackError(f"{label} folder {why}: '{folder}'. Try again with option '--nocheck' to force.")
+        _warn(f"{label} folder {why}")
+    return state
 
 
 def normalize_dataset_path(version: str) -> str:
@@ -440,8 +457,15 @@ class _Builder:
 
     def __init__(self, testdef_file: Path, nocheck: bool, setup_config: str | None = None,
                  expected_baseline: dict | None = None, lenient: bool = False,
-                 manual_keys: dict | None = None, dataset_versions: dict | None = None) -> None:
+                 manual_keys: dict | None = None, dataset_versions: dict | None = None,
+                 campaign: dict | None = None) -> None:
         self.lenient = lenient
+        # the campaign it is generated for ({id, name, file, git, datasets}): its versions replace the written ones
+        self.campaign = campaign
+        self.versions_pinned: list[dict] = []
+        if campaign is not None and dataset_versions:
+            raise DatapackError("a campaign pins the version of every dataset: no dataset version can be set by hand "
+                                f"({', '.join(sorted(dataset_versions))}); change it in the campaign file")
         # dataset versions set by hand for this generation: dataset id -> version; and what each did (load_setup)
         self.dataset_versions: dict[str, str] = {str(k): str(v).strip() for k, v in (dataset_versions or {}).items()}
         self.versions_by_hand: list[dict] = []
@@ -471,6 +495,9 @@ class _Builder:
                          "timestamp": self.now.strftime("%Y-%m-%d %H:%M:%S"), "nocheck": nocheck},
             "testdef": {"file": testdef_file.as_posix(), "path": self.testdef_dir.as_posix()},
         }
+        if campaign is not None:
+            self.builtin["campaign"] = {"id": campaign.get("id", ""), "name": campaign.get("name", ""),
+                                        "file": campaign.get("file", "")}
 
     def keys(self, with_setup: bool = True, with_datasets: bool = True, with_manual: bool = True) -> Keys:
         """Keys, lowest precedence first: setup dictionaries, datasets, test definition dictionaries, keys set
@@ -525,22 +552,25 @@ class _Builder:
                 _info(Fore.LIGHTBLACK_EX + f"key '{entry['key']}' set by hand to {entry['value']!r} (not defined by a dictionary)")
         return entries
 
-    def _version_by_hand(self, dataset):
-        """The dataset in the version set by hand for this generation; what it changes is recorded."""
-        version = self.dataset_versions[dataset.id]
+    def _version_by_hand(self, dataset, pinned: bool = False):
+        """The dataset in the version set by hand for this generation (pinned: by the campaign); what it changes
+        is recorded."""
+        version = (self.campaign["datasets"] if pinned else self.dataset_versions)[dataset.id]
         if not version:
-            raise DatapackError(f"dataset '{dataset.id}': empty version set by hand")
+            raise DatapackError(f"dataset '{dataset.id}': empty version {'pinned by the campaign' if pinned else 'set by hand'}")
         overrides = version != str(dataset.version)
         entry = {"dataset": dataset.id, "version": version, "overrides": overrides}
         if overrides:
             entry["was"] = str(dataset.version)
-        self.versions_by_hand.append(entry)
+        (self.versions_pinned if pinned else self.versions_by_hand).append(entry)
         return dataset.model_copy(update={"version": version})
 
-    def _check_version_by_hand(self, datasource, record: dict) -> None:
-        """Once imported, whether a version set by hand is a tag of its source (its importer confirms the
-        imported data is that tag): it keeps the datapack conform; anything else (a branch, a commit) does not."""
-        entry = next(e for e in self.versions_by_hand if e["dataset"] == record["id"])
+    def _check_version_by_hand(self, datasource, record: dict, pinned: bool = False) -> None:
+        """Once imported, whether a version set by hand (or pinned by the campaign) is a tag of its source (its
+        importer confirms the imported data is that tag): it keeps the datapack conform; anything else (a branch,
+        a commit) does not."""
+        how = "pinned by the campaign" if pinned else "set by hand"
+        entry = next(e for e in (self.versions_pinned if pinned else self.versions_by_hand) if e["dataset"] == record["id"])
         if not entry["overrides"]:
             return
         try:
@@ -549,10 +579,10 @@ class _Builder:
         except Exception:                                # an importer that cannot tell: not a tag
             entry["tag"] = False
         if entry["tag"]:
-            _info(Fore.LIGHTBLACK_EX + f"     dataset '{record['id']}' set by hand to tag {entry['version']!r} instead of "
+            _info(Fore.LIGHTBLACK_EX + f"     dataset '{record['id']}' {how} to tag {entry['version']!r} instead of "
                   f"{entry['was']!r} (a tag: the datapack stays conform)")
         else:
-            _warn(f"dataset '{record['id']}' set by hand to version {entry['version']!r} instead of {entry['was']!r}: "
+            _warn(f"dataset '{record['id']}' {how} to version {entry['version']!r} instead of {entry['was']!r}: "
                   "not a tag of its source, the datapack is non-conform")
 
     def _load_dictionaries(self, layer: str, files: list[str], base: Path) -> None:
@@ -563,14 +593,7 @@ class _Builder:
             self.dictionaries.append((layer, path))
 
     def _check_git(self, label: str, folder: Path) -> dict | None:
-        state = git_state(folder)
-        _info(Fore.LIGHTBLACK_EX + f"{label} folder: " + Style.RESET_ALL + folder.as_posix())
-        if state is None or not state["clean"] or not state["tag"]:
-            why = "not in a git work tree" if state is None else ("has local changes" if not state["clean"] else "is not a git tag")
-            if not self.nocheck:
-                raise DatapackError(f"{label} folder {why}: '{folder}'. Try again with option '--nocheck' to force.")
-            _warn(f"{label} folder {why}")
-        return state
+        return _check_git_state(label, folder, self.nocheck)
 
     # ── steps ────────────────────────────────────────────────────────────
 
@@ -610,6 +633,13 @@ class _Builder:
         repositories = [_validate(DataRepository, keys.render_data(r, where=f"datarepositories[{i}]"),
                                   f"data repository in '{self.setup_file}'")
                         for i, r in enumerate(raw.get("datarepositories", []))]
+        if self.campaign is not None:                     # the campaign lists every version: none is left to the setup
+            declared = [ds.id for r in repositories for src in r.datasources for ds in src.datasets]
+            missing = [d for d in declared if d not in self.campaign["datasets"]]
+            if missing:
+                raise DatapackError(f"dataset(s) {', '.join(repr(m) for m in missing)} of setup '{self.setup_file}' not "
+                                    f"listed in the campaign: a campaign gives the version of every dataset its test "
+                                    f"definitions import (datasets: of '{self.campaign.get('file')}')")
         for repository in repositories:
             repo_path = _expand(repository.path, setup_dir)
             _info("\n" + Fore.BLUE + "[REPO] " + Style.RESET_ALL + repository.id + Fore.LIGHTBLACK_EX + " -> " + Fore.CYAN + repo_path.as_posix())
@@ -617,13 +647,16 @@ class _Builder:
             for datasource in repository.datasources:
                 _info(Fore.BLUE + " [DATASOURCE] " + Style.RESET_ALL + datasource.id + Fore.LIGHTBLACK_EX + f" ({datasource.importer}) -> " + Fore.CYAN + datasource.source)
                 for dataset in datasource.datasets:
-                    if dataset.id in self.dataset_versions:
-                        dataset = self._version_by_hand(dataset)
+                    pinned = self.campaign is not None
+                    if pinned or dataset.id in self.dataset_versions:
+                        dataset = self._version_by_hand(dataset, pinned)
                     record = import_dataset(repo_path, datasource, dataset, setup_dir, self.nocheck)
                     if record is None:
                         continue
-                    if dataset.id in self.dataset_versions:
-                        self._check_version_by_hand(datasource, record)
+                    if pinned:
+                        record["pinned_by"] = "campaign"
+                    if pinned or dataset.id in self.dataset_versions:
+                        self._check_version_by_hand(datasource, record, pinned)
                     self.datasets.append(record)
                     keys_file = Path(record["path"]) / DATASET_KEYS_FILE
                     if keys_file.is_file():
@@ -839,9 +872,12 @@ class _Builder:
         for layer, path in self.dictionaries:
             if layer != "datasets":
                 sources.append(self._source("dictionary", path, git_state(path.parent)))
+        if self.campaign is not None:
+            sources.append(self._source("campaign", Path(self.campaign["file"]), self.campaign.get("git")))
         for ds in self.datasets:
             sources.append({"role": "dataset", "id": ds["id"], "importer": ds["importer"], "source": ds["source"],
-                            "version": ds["version"], "confirmed": ds.get("confirmed", True)})
+                            "version": ds["version"], "confirmed": ds.get("confirmed", True),
+                            **({"pinned_by": ds["pinned_by"]} if ds.get("pinned_by") else {})})
         files = {}
         for comp_id, comp in components.items():
             input_dir = self.work / "data" / comp_id / "input"
@@ -857,12 +893,18 @@ class _Builder:
                    and all(s.get("clean") and s.get("tag") for s in sources if s["role"] != "dataset")
                    and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset")
                    and not any(k["overrides"] for k in self.set_by_hand)
-                   and not any(v["overrides"] and not v.get("tag") for v in self.versions_by_hand))
+                   and not any(v["overrides"] and not v.get("tag") for v in self.versions_by_hand + self.versions_pinned))
         return {"datapack": {"name": name, "format": FORMAT_VERSION, "conform": conform},
+                **({"campaign": self._campaign_record()} if self.campaign is not None else {}),
                 "sources": sources,
                 **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
                 **({"versions_set_by_hand": self.versions_by_hand} if self.versions_by_hand else {}),
+                **({"versions_pinned_by_campaign": self.versions_pinned} if self.versions_pinned else {}),
                 "tools": tool_versions(), "files": files}
+
+    def _campaign_record(self) -> dict:
+        return {"id": self.campaign.get("id"), "name": self.campaign.get("name") or "",
+                "file": self._relative(self.campaign["file"]) if self.campaign.get("file") else None}
 
     def _set_by_hand_record(self) -> list[dict]:
         return [{**k, **({"origin": self._relative(k["origin"])} if k.get("origin", "").startswith("/") else {})}
@@ -915,6 +957,8 @@ class _Builder:
             "slots": components,
             **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
             **({"versions_set_by_hand": self.versions_by_hand} if self.versions_by_hand else {}),
+            **({"campaign": {**self._campaign_record(), "git": self.campaign.get("git")}} if self.campaign is not None else {}),
+            **({"versions_pinned_by_campaign": self.versions_pinned} if self.versions_pinned else {}),
             **({"skipped": self.skipped} if self.skipped else {}),
         })
         if self.values:
@@ -939,12 +983,16 @@ class _Builder:
         versions = [v["dataset"] for v in self.versions_by_hand if v["overrides"] and not v.get("tag")]
         if versions:
             _warn(f"{len(versions)} dataset version(s) set by hand that are not tags ({', '.join(versions)}): this datapack is non-conform.")
+        pinned = [v["dataset"] for v in self.versions_pinned if v["overrides"] and not v.get("tag")]
+        if pinned:
+            _warn(f"{len(pinned)} dataset version(s) pinned by the campaign that are not tags ({', '.join(pinned)}): this datapack is non-conform.")
         return zip_path
 
 
 def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir: str | os.PathLike | None = None,
              setup_config: str | None = None, expected_baseline: dict | None = None, lenient: bool = False,
-             manual_keys: dict | None = None, dataset_versions: dict | None = None) -> Path:
+             manual_keys: dict | None = None, dataset_versions: dict | None = None,
+             campaign: dict | None = None) -> Path:
     """Generate the datapack of a test definition file.
 
     The datapack contents are left in '.current_datapack' next to the test definition file.
@@ -960,6 +1008,8 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
         dictionary defines keeps the datapack conform, overriding a defined one makes it non-conform
     :param dataset_versions: dataset versions set by hand for this generation, dataset id -> version, instead of
         the one the setup writes: a tag of the source keeps the datapack conform, anything else makes it non-conform
+    :param campaign: the campaign it is generated for (campaign.build_campaign): ``{id, name, file, git, datasets}``;
+        every dataset the setup imports must be in its ``datasets``, whose version replaces the written one
     :return: path of the zip
     :raises DatapackError: if the datapack cannot be generated
     """
@@ -967,7 +1017,7 @@ def datapack(testdef_file: str | os.PathLike, nocheck: bool = False, output_dir:
     load_plugins()
     try:
         return _Builder(Path(testdef_file).resolve(), nocheck, setup_config, expected_baseline, lenient,
-                        manual_keys, dataset_versions).build(output_dir)
+                        manual_keys, dataset_versions, campaign).build(output_dir)
     except TemplateError as e:
         raise DatapackError(str(e)) from e
 

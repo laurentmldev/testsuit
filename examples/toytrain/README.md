@@ -66,6 +66,7 @@ datapack/                              owned by the test authors
   testdef/<test>/criteria/<test>/      exploitation criteria (mexploit)
   testdef/<test>/criteria_utests/<test>/  their unit tests (mxp utest): hand-made recordings, expected statuses
   release_store/                       stand-in for the release server (toytrain-release importer)
+  campaigns/<name>.campaign.yml        test campaigns: both tests, same dataset versions, run together (lab, emulated)
 baseline_expected.yml                  expected baseline of the campaign
 tsq.yml                                main configuration of the lab's sequencer
 tsq.dev.yml                            main configuration of a sequencer on a dev host (emulated mode)

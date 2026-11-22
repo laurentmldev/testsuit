@@ -165,6 +165,11 @@ class Sequencer:
                 pass
         if kind in ("component", "run") and self._wake is not None:
             self._wake.set()
+        if kind == "run" and data.get("state") in DONE_STATES and data.get("run"):
+            try:
+                self._campaign_run_ended(data["run"])
+            except Exception:                            # never in the way of the run's own end
+                log.exception(f"campaign of run {data['run']}")
 
     def end_streams(self) -> None:
         """End the open event streams (GET /events): the server is stopping, and would otherwise wait
@@ -216,21 +221,33 @@ class Sequencer:
             holders=self.store.holders(), usage=self.store.usage())
 
     # ── intake ─────────────────────────────────────────────────────────
-    def submit(self, zip_path: Path, priority: int | None = None, expected_baseline: dict | None = None) -> dict:
-        """Verify, unpack and validate a datapack, and queue it. Non-conform datapacks are accepted, flagged."""
+    def submit(self, zip_path: Path, priority: int | None = None, expected_baseline: dict | None = None,
+               routing: dict | None = None) -> dict:
+        """Verify, unpack and validate a datapack, and queue it. Non-conform datapacks are accepted, flagged.
+        routing: tags its resources must carry over those of its slots (``{stage_tags, component_tags}``)."""
+        fields = self._intake(zip_path, priority, expected_baseline, routing)
+        return self._queue_run(fields)
+
+    def _intake(self, zip_path: Path, priority: int | None, expected_baseline: dict | None,
+                routing: dict | None, campaign_run: str | None = None) -> dict:
+        """Unpack and check a datapack; return the fields of its run record (nothing queued yet)."""
         run_id = new_run_id()
+        while self.store.get_run(run_id) is not None and self.store.get_run(run_id)["id"] == run_id:
+            run_id = new_run_id()                            # several submitted in the same second (a campaign)
         priority = self.config.queue.default_priority if priority is None else int(priority)
         if not 0 <= priority <= 100:
             raise SequencerError("priority must be between 0 and 100")
+        routing = routing if routing and (routing.get("stage_tags") or routing.get("component_tags")) else None
         incoming = self.config.storage_path("incoming") / f"{run_id}.zip"
         shutil.copy2(zip_path, incoming)
         run_dir = self.config.storage_path("runs") / run_id
         try:
             bag = unpack(incoming, run_dir)
-            datapack = load_datapack(bag)
+            datapack = load_datapack(bag, routing)
             problems = check_against_lab(datapack, self.lab)
             if problems:
-                raise SequencerError("the lab cannot run this datapack:\n  " + "\n  ".join(problems))
+                raise SequencerError("the lab cannot run this datapack" + (" with the campaign's routing tags" if routing else "")
+                                     + ":\n  " + "\n  ".join(problems))
         except Exception:
             shutil.rmtree(run_dir, ignore_errors=True)
             incoming.unlink(missing_ok=True)
@@ -243,14 +260,109 @@ class Sequencer:
             nonconform += check_baseline(datapack.baseline, expected, parts=("datapack", "sources", "tools"))
         elif expected:
             nonconform.append("the datapack has no baseline.yml to check against the expected baseline")
-        self.store.add_run(id=run_id, name=datapack.name, testdef=datapack.testdef_id, zip=str(incoming),
-                           dir=str(bag), priority=priority, conform=not nonconform, nonconform=nonconform,
-                           expected_baseline=expected, local=int(self.local), owner=OWNER)
-        run = self.store.get_run(run_id)
-        self.notify("run", {"run": run_id, "state": "queued", "name": datapack.name, "priority": priority,
-                            "conform": not nonconform})
+        return dict(id=run_id, name=datapack.name, testdef=datapack.testdef_id, zip=str(incoming),
+                    dir=str(bag), priority=priority, conform=not nonconform, nonconform=nonconform,
+                    expected_baseline=expected, local=int(self.local), owner=OWNER, routing=routing,
+                    campaign_run=campaign_run)
+
+    def _queue_run(self, fields: dict) -> dict:
+        self.store.add_run(**fields)
+        run = self.store.get_run(fields["id"])
+        self.notify("run", {"run": run["id"], "state": "queued", "name": run["name"], "priority": run["priority"],
+                            "conform": run["conform"], **({"campaign_run": run["campaign_run"]} if run["campaign_run"] else {})})
         self.wake()
         return run
+
+    # ── campaigns ──────────────────────────────────────────────────────
+    def submit_campaign(self, folder: Path, priority: int | None = None) -> dict:
+        """Queue every datapack of a generated campaign (``datapack <file>.campaign.yml``), under one campaign run:
+        all of them, or none when one is refused. priority: for all its runs, instead of the campaign's."""
+        from testsuit.datatools.datapack.campaign import CampaignError, read_manifest
+        try:
+            manifest = read_manifest(folder)
+        except CampaignError as e:
+            raise SequencerError(str(e)) from e
+        folder = folder if folder.is_dir() else folder.parent
+        campaign_id = "c" + new_run_id()
+        while self.store.get_campaign_run(campaign_id) is not None:
+            campaign_id = "c" + new_run_id()
+        routing = manifest.get("routing") or None
+        prepared: list[dict] = []
+        try:
+            for entry in manifest["datapacks"]:
+                wanted = priority if priority is not None else entry.get("priority", manifest.get("priority"))
+                try:
+                    prepared.append(self._intake(folder / entry["zip"], wanted, manifest.get("expected_baseline"),
+                                                 routing, campaign_id))
+                except SequencerError as e:
+                    raise SequencerError(f"campaign '{manifest.get('id')}': {entry.get('testdef')}: {e}") from e
+        except Exception:
+            for fields in prepared:                          # none of them, then
+                shutil.rmtree(self.config.storage_path("runs") / fields["id"], ignore_errors=True)
+                Path(fields["zip"]).unlink(missing_ok=True)
+            raise
+        git = manifest.get("git") or {}
+        conform = bool(manifest.get("conform")) and all(f["conform"] for f in prepared)
+        entries = [{"testdef": e.get("testdef"), "setup_config": e.get("setup_config"), "datapack": e.get("name"),
+                    "run": f["id"]} for e, f in zip(manifest["datapacks"], prepared)]
+        self.store.add_campaign_run(
+            id=campaign_id, campaign=manifest.get("id"), name=manifest.get("name"), title=manifest.get("title"),
+            description=manifest.get("description") or "", file=manifest.get("file"), git=git, conform=conform,
+            priority=priority if priority is not None else manifest.get("priority"), routing=routing,
+            datasets=manifest.get("datasets") or {}, entries=entries,
+            expected_baseline=manifest.get("expected_baseline"), owner=OWNER)
+        self.notify("campaign", {"campaign_run": campaign_id, "campaign": manifest.get("id"), "state": "queued",
+                                 "runs": len(prepared), "conform": conform})
+        for fields in prepared:
+            self._queue_run(fields)
+        return self.campaign_view(campaign_id)
+
+    def require_campaign_run(self, campaign_id: str) -> dict:
+        campaign = self.store.get_campaign_run(campaign_id)
+        if campaign is None:
+            raise SequencerError(f"no campaign run '{campaign_id}'")
+        return campaign
+
+    def campaign_view(self, campaign_id: str, campaign: dict | None = None) -> dict:
+        """A campaign run with its runs and their summary (README, Campaigns)."""
+        from testsuit.sequencer.campaigns import summarize
+        campaign = campaign or self.require_campaign_run(campaign_id)
+        return summarize(campaign, self.store.campaign_runs_of(campaign["id"]))
+
+    def campaign_views(self, limit: int = 200) -> list[dict]:
+        return [self.campaign_view(c["id"], c) for c in self.store.campaign_runs(limit)]
+
+    def _campaign_run_ended(self, run_id: str) -> None:
+        """When the last run of a campaign run ends: its verdict, and its report written with the results."""
+        run = self.store.get_run(run_id)
+        if not run or not run.get("campaign_run"):
+            return
+        view = self.campaign_view(run["campaign_run"])
+        if view["state"] != "done":
+            return
+        from testsuit.sequencer.campaigns import report_html
+        folder = self.config.storage_path("results") / "campaigns" / view["id"]
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "report.html").write_text(report_html(view, base="../"), encoding="utf-8")
+            report = str(folder / "report.html")
+        except OSError as e:
+            log.warning(f"campaign run {view['id']}: writing its report: {e}")
+            report = None
+        self.store.update_campaign_run(view["id"], ended_at=now(), verdict=view["verdict"], report=report)
+        self.notify("campaign", {"campaign_run": view["id"], "campaign": view["campaign"], "state": "done",
+                                 "verdict": view["verdict"]})
+
+    async def abort_campaign(self, campaign_id: str, mode: str) -> dict:
+        """Cancel (or kill) every run of a campaign run that has not ended."""
+        campaign = self.require_campaign_run(campaign_id)
+        for run in self.store.campaign_runs_of(campaign["id"]):
+            if run["state"] not in DONE_STATES:
+                try:
+                    await self.abort(run["id"], mode)
+                except SequencerError as e:
+                    log.warning(f"campaign run {campaign['id']}: {mode} of run {run['id']}: {e}")
+        return self.campaign_view(campaign["id"])
 
     # ── scheduling ─────────────────────────────────────────────────────
     def schedule(self) -> list[str]:
@@ -265,7 +377,7 @@ class Sequencer:
             if run["id"] in self.executions:
                 continue
             try:
-                datapack = load_datapack(Path(run["dir"]))
+                datapack = load_datapack(Path(run["dir"]), run.get("routing"))
             except SequencerError as e:
                 self.finish_without_running(run["id"], f"invalid datapack: {e}")
                 continue
@@ -368,7 +480,7 @@ class Sequencer:
         shutil.rmtree(fresh, ignore_errors=True)
         try:                                                  # unpacked and checked aside: a refusal keeps the old run
             bag = unpack(incoming, fresh)
-            problems = check_against_lab(load_datapack(bag), self.lab)
+            problems = check_against_lab(load_datapack(bag, run.get("routing")), self.lab)
             if problems:
                 raise SequencerError("the lab cannot run this datapack:\n  " + "\n  ".join(problems))
         except Exception:
@@ -382,6 +494,8 @@ class Sequencer:
                               activated_at=None, ended_at=None, waiting_for=None, attempts=0, binding=None,
                               phase=None, results=None, warnings=None, steps=None, abort=None,
                               dir=str(run_dir / bag.name), local=int(self.local), owner=OWNER)
+        if run.get("campaign_run"):                          # its campaign run is not over any more
+            self.store.update_campaign_run(run["campaign_run"], ended_at=None, verdict=None)
         self.notify("run", {"run": run["id"], "state": "queued", "name": run["name"], "priority": run["priority"],
                             "conform": bool(run["conform"]), "reposted": True})
         self.wake()
@@ -819,7 +933,7 @@ class Sequencer:
                 continue
             log.warning(f"run {run['id']} was {run['state']} when the sequencer stopped: killing it")
             try:
-                datapack = load_datapack(Path(run["dir"]))
+                datapack = load_datapack(Path(run["dir"]), run.get("routing"))
                 binding = Binding.from_dict(run["binding"])
                 execution = RunExecution(self, run["id"], datapack, binding)
             except Exception as e:
@@ -1043,6 +1157,11 @@ class RunExecution:
                         "warnings": lab.warnings},
                 "binding": self.binding.as_dict(),
                 "components": self.versions}
+        run = self.store.get_run(self.run_id) or {}
+        if run.get("routing"):                         # the tags its campaign added to the slots' own
+            part["routing"] = run["routing"]
+        if run.get("campaign_run"):
+            part["campaign_run"] = run["campaign_run"]
         return part
 
     async def run_phases(self) -> str:
@@ -1444,6 +1563,8 @@ class RunExecution:
             "activated_at": current["activated_at"], "ended_at": now(), "conform": not problems,
             "nonconform": problems, "binding": self.binding.as_dict(), "phases": self.phase_verdicts,
             "steps": [r.as_dict() for r in (self.ctx.records.values() if self.ctx else [])],
-            "lab_warnings": self.seq.lab.warnings, "abort": self.abort_mode})
+            "lab_warnings": self.seq.lab.warnings, "abort": self.abort_mode,
+            **({"campaign_run": current["campaign_run"]} if current.get("campaign_run") else {}),
+            **({"routing": current["routing"]} if current.get("routing") else {})})
         if not (bag / "selftest.yml").exists():
             dump_yaml(bag / "selftest.yml", {"attempts": self.selftests})

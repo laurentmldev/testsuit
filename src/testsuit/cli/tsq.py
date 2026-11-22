@@ -187,6 +187,53 @@ def cmd_submit(args, client: Client) -> int:
     return 0
 
 
+def cmd_submit_campaign(args, client: Client) -> int:
+    from testsuit.datatools.datapack.campaign import CampaignError, read_manifest
+    folder = Path(args.campaign)
+    folder = folder if folder.is_dir() else folder.parent
+    try:
+        manifest = read_manifest(folder)
+    except CampaignError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    files = [("manifest", ("campaign.yml", open(folder / "campaign.yml", "rb"), "application/yaml"))]
+    files += [("datapacks", (d["zip"], open(folder / d["zip"], "rb"), "application/zip")) for d in manifest["datapacks"]]
+    data = {"priority": str(args.priority)} if args.priority is not None else {}
+    campaign = client.post("/campaigns", files=files, data=data, timeout=1800)
+    print(f"campaign run {campaign['id']} ({campaign['campaign']}): {len(campaign['runs'])} run(s) queued"
+          + ("" if campaign["conform"] else ", NON-CONFORM"))
+    for r in campaign["runs"]:
+        print(f"  {r['run']}  priority {r.get('priority')}  {r.get('testdef')}")
+    if not args.wait:
+        return 0
+    while True:
+        campaign = client.get(f"/campaigns/{campaign['id']}")
+        if campaign["state"] == "done":
+            break
+        time.sleep(5)
+    from testsuit.sequencer.campaigns import report_text
+    print("\n".join(report_text(campaign)))
+    return VERDICT_CODES.get(campaign.get("verdict") or "error", 2)
+
+
+def cmd_campaigns(args, client: Client) -> int:
+    rows = client.get("/campaigns")
+    for row in rows:
+        row["runs"] = "{succeeded}/{total} succeeded".format(**row["counts"])
+    table(rows, ["id", "campaign", "state", "verdict", "conform", "runs", "submitted_at", "ended_at"])
+    return 0
+
+
+def cmd_campaign(args, client: Client) -> int:
+    from testsuit.sequencer.campaigns import report_text
+    if args.cancel or args.kill:
+        view = client.post(f"/campaigns/{args.id}/{'kill' if args.kill else 'cancel'}")
+    else:
+        view = client.get(f"/campaigns/{args.id}")
+    print("\n".join(report_text(view)))
+    return 0
+
+
 def cmd_priority(args, client: Client) -> int:
     run = client.request("PATCH", f"/runs/{args.run}", json={"priority": args.priority}).json()
     print(f"run {run['id']}: priority {run['priority']}")
@@ -464,6 +511,18 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true", help="wait for the verdict: exit code 0, 1 or 2")
     s.add_argument("--follow", action="store_true", help="stream the steps and logs (implies --wait)")
     s.set_defaults(fn=cmd_submit)
+
+    s = sub.add_parser("submit-campaign", help="queue the datapacks of a generated campaign, as one campaign run")
+    s.add_argument("campaign", help="the folder 'datapack <file>.campaign.yml' wrote (or its campaign.yml)")
+    s.add_argument("--priority", type=int, help="for all its runs, instead of the campaign's")
+    s.add_argument("--wait", action="store_true", help="wait for the campaign's verdict: exit code 0, 1 or 2")
+    s.set_defaults(fn=cmd_submit_campaign)
+    sub.add_parser("campaigns", help="campaign runs, newest first").set_defaults(fn=cmd_campaigns)
+    s = sub.add_parser("campaign", help="a campaign run and its runs")
+    s.add_argument("id", help="campaign run id, or a unique prefix")
+    s.add_argument("--cancel", action="store_true", help="cancel its runs that have not ended")
+    s.add_argument("--kill", action="store_true", help="kill its runs that have not ended")
+    s.set_defaults(fn=cmd_campaign)
 
     s = sub.add_parser("priority", help="change the priority of a queued run")
     s.add_argument("run")

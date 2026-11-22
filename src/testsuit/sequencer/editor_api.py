@@ -282,6 +282,32 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
                          bool(body.get("nocheck", True)), bool(body.get("lenient", False)), body.get("keys") or None,
                          body.get("versions") or None)
 
+    @app.post("/edit/sessions/{sid}/campaign/synthesis")
+    async def campaign_synthesis(sid: str, body: dict):
+        return await run(editor.campaign_synthesis, session(sid), str(body["campaign"]))
+
+    @app.post("/edit/sessions/{sid}/campaign/jobs", status_code=201)
+    async def start_generate_campaign(sid: str, body: dict):
+        """Generate every datapack of a campaign (datapack <file>.campaign.yml), in the background: its log and result
+        read as a datapack generation's (/datapack/jobs/{job})."""
+        return await run(editor.start_generate, session(sid), str(body["campaign"]), None,
+                         bool(body.get("nocheck", True)), bool(body.get("lenient", False)), body.get("keys") or None,
+                         None, True)
+
+    @app.post("/edit/sessions/{sid}/campaign/{name}/submit", status_code=201)
+    async def submit_campaign(sid: str, name: str, body: dict | None = None):
+        priority = (body or {}).get("priority")
+        return await run(seq.submit_campaign, editor.generated_campaign(session(sid), name),
+                         int(priority) if priority not in (None, "") else None)
+
+    @app.get("/edit/sessions/{sid}/campaign/{name}/files/{path:path}")
+    async def campaign_file(sid: str, name: str, path: str):
+        folder = editor.generated_campaign(session(sid), name)
+        target = (folder / path).resolve()
+        if not target.is_relative_to(folder.resolve()) or not target.is_file():
+            raise HTTPException(404, f"no '{path}' in campaign {name}")
+        return FileResponse(target, filename=target.name)
+
     @app.get("/edit/sessions/{sid}/datapack/jobs/{job}")
     async def generation_job(sid: str, job: str, since: int = 0):
         return await run(editor.generation_job, session(sid), job, since)

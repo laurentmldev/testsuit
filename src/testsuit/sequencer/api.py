@@ -94,6 +94,43 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             expected = yaml.safe_load(await baseline.read()) if baseline is not None else None
             return await asyncio.to_thread(seq.submit, path, priority, expected)
 
+    # ── campaign runs ────────────────────────────────────────────────────
+    @app.post("/campaigns", status_code=201)
+    async def submit_campaign(manifest: Annotated[UploadFile, File()], datapacks: Annotated[list[UploadFile], File()],
+                              priority: Annotated[int | None, Form()] = None):
+        """Queue a generated campaign: its campaign.yml manifest and every datapack zip it lists."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "campaign.yml").write_bytes(await manifest.read())
+            for upload in datapacks:
+                with open(folder / Path(upload.filename or "datapack.zip").name, "wb") as f:
+                    while chunk := await upload.read(1 << 20):
+                        f.write(chunk)
+            return await asyncio.to_thread(seq.submit_campaign, folder, priority)
+
+    @app.get("/campaigns")
+    async def campaigns(limit: int = 200):
+        return await asyncio.to_thread(seq.campaign_views, limit)
+
+    @app.get("/campaigns/{campaign_id}")
+    async def campaign(campaign_id: str):
+        return await asyncio.to_thread(seq.campaign_view, campaign_id)
+
+    @app.get("/campaigns/{campaign_id}/report", include_in_schema=True)
+    async def campaign_report(campaign_id: str, download: bool = False):
+        """The synthetic report of a campaign run, a self-contained HTML page linking to the runs' pages."""
+        from fastapi.responses import HTMLResponse
+        from testsuit.sequencer.campaigns import report_html
+        view = await asyncio.to_thread(seq.campaign_view, campaign_id)
+        headers = {"Content-Disposition": f'attachment; filename="{view["campaign"]}_{view["id"]}_report.html"'} if download else {}
+        return HTMLResponse(report_html(view, base="../../"), headers=headers)
+
+    @app.post("/campaigns/{campaign_id}/{command}")
+    async def abort_campaign(campaign_id: str, command: str):
+        if command not in ("cancel", "kill"):
+            raise HTTPException(404, f"no campaign command '{command}'")
+        return await seq.abort_campaign(campaign_id, command)
+
     @app.get("/runs")
     async def runs(state: str | None = None, limit: int = 200):
         return seq.store.runs(state.split(",") if state else None, limit)
@@ -123,7 +160,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         run = run_or_404(run_id)
         if not Path(run["dir"]).is_dir():
             raise HTTPException(404, f"run {run['id']}: the run folder is gone (retention), only its records remain")
-        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]))
+        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]), run.get("routing"))
         phases = []
         for flat in dp.phases:
             steps = []
@@ -149,7 +186,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         run = run_or_404(run_id)
         if not Path(run["dir"]).is_dir():
             raise HTTPException(404, f"run {run['id']}: the run folder is gone (retention), only its records remain")
-        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]))
+        dp = await asyncio.to_thread(load_datapack, Path(run["dir"]), run.get("routing"))
         binding = Binding.from_dict(run.get("binding"))
         overview = resource_overview(seq.lab, dp.needs, dp.pipeline.phases, seq.availability(), run["id"], binding)
         return {**overview, "problems": check_against_lab(dp, seq.lab), "state": run["state"],

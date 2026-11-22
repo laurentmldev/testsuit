@@ -17,6 +17,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
+import { CampaignsTab } from "./Campaigns";
 import { KeysExplorer } from "../editor/KeysExplorer";
 import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
 import { DiffView } from "../monaco";
@@ -69,6 +70,8 @@ export function DatapacksPage({ route }: { route: Route }) {
   const selected = route.query.get("def") || testdefs[0]?.path || null;
   const [config, setConfig] = useState<string | null>(null);
   useEffect(() => setConfig(null), [selected]);
+  const view = route.query.get("view") === "campaigns" ? "campaigns" : "testdefs";
+  const campaigns: any[] = ctx?.workspace?.campaigns || [];
 
   if (home.error) return <div className="page"><div className="error-box">{home.error}</div></div>;
   return (
@@ -89,7 +92,15 @@ export function DatapacksPage({ route }: { route: Route }) {
           <button className="primary edit-workspace" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">✎ Edit…</button>
         </div>
       )}
-      <Markdown text={INTRO} className="intro" />
+      {current && (
+        <div className="tabs subtabs datapacks-subtabs">
+          <button className={classes(view === "testdefs" && "selected")} onClick={() => setQuery("view", null)}
+            title="One test definition at a time: what it is made of, its baseline, generating and posting its datapack">Test definitions{ctx ? ` (${testdefs.length})` : ""}</button>
+          <button className={classes(view === "campaigns" && "selected")} onClick={() => setQuery("view", "campaigns")}
+            title="Lists of test definitions generated with the same dataset versions and run together">Campaigns{ctx ? ` (${campaigns.length})` : ""}</button>
+        </div>
+      )}
+      {view === "testdefs" && <Markdown text={INTRO} className="intro" />}
       {repo && sid && ctx && <RepositoryBanners key={repo} repo={repo} onReread={reread} slot={syncSlot} />}
       {!home.data && <Spinner className="block" text="Reading the repositories…" />}
       {home.data && repos.length === 0 && <p className="muted">No tests repository: <strong>Add repository…</strong> clones one from its git URL, or list its folder in <code>server.workspaces</code> in the configuration.</p>}
@@ -97,7 +108,8 @@ export function DatapacksPage({ route }: { route: Route }) {
       {removing && current && <RemoveRepositoryDialog repo={current} onClose={() => setRemoving(false)} onRemoved={() => { setRemoving(false); home.refresh(); navigate("datapacks", {}); }} />}
       {error && <div className="error-box">{error}</div>}
       {repo && !ctx && !error && <Spinner className="block" text="Reading the test definitions…" />}
-      {ctx && (
+      {ctx && sid && view === "campaigns" && <CampaignsTab sid={sid} ctx={ctx} route={route} reread={reread} />}
+      {ctx && view === "testdefs" && (
         <div className="datapacks">
           <nav className="testdef-list">
             {testdefs.length === 0 && <p className="muted small">No test definition in this repository.</p>}
