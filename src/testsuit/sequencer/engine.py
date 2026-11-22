@@ -38,6 +38,7 @@ from testsuit.sequencer import registry
 from testsuit.sequencer.inventory import Component, Stage
 from testsuit.sequencer.model import FlatPhase, FlatStep, LogicalSlot, finally_order, phase_slots
 from testsuit.sequencer.transports import Result, Transport, strict, traced, untraced
+from testsuit.sequencer.cmdparams import PARAMS, command_params, criteria_missing_keys, default_params, exploit_keys, without_params
 from testsuit.sequencer.library import Resolved, without_comments
 from testsuit.sequencer.util import SequencerError, now, parse_duration, render, evaluate
 
@@ -339,9 +340,13 @@ class StepRunner:
             elif action == "http":
                 spec = {"http": self.step.http}
             elif action == "exploit":
+                if self.step.with_:
+                    keys = exploit_keys(f"step '{self.fs.id}'", self.step.with_, keys)
                 return await self.exploit(render(self.step.exploit, keys, self.fs.id), keys, timeout)
             elif action == "do":
                 spec = self.command(self.step.do)
+                keys = self.command_keys(spec, keys)
+                spec = without_params(spec)
             elif action in ("push", "pull"):
                 return await self.transfer(action, render(getattr(self.step, action), keys, self.fs.id))
             else:
@@ -369,6 +374,18 @@ class StepRunner:
         self.note(f"lab command '{name}' of {self.slot.concrete.id} (slot {self.slot.id}, role {self.slot.concrete.role}, "
                   f"from {self.slot.resolved.command_sources.get(name, '?')})")
         return dict(without_comments(spec))           # its comments are notes for the people: never run
+
+    def command_keys(self, spec: dict, keys: dict) -> dict:
+        """The keys a lab command runs with: those of the step, its ``params`` being the command's parameters only
+        (the defaults of its implementation, then the step's ``with:``), never the ones of a sub-pipeline."""
+        name = self.step.do
+        declared = self.slot.resolved.command_params.get(name, {})
+        values = command_params(f"step '{self.fs.id}'", name, self.step.with_, declared, default_params(spec, name), keys)
+        if values:
+            self.note("parameters: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+            if self.record.lab_command is not None:
+                self.record.lab_command["params"] = {k: _plain(v) for k, v in values.items()}
+        return {**keys, PARAMS: values}
 
     async def command_spec(self, spec: dict, keys: dict, timeout: float | None) -> tuple[str, str]:
         """Run a command definition: run, wait_for, signal, builtin, or a plugin step type."""
@@ -525,6 +542,10 @@ class StepRunner:
         if absent:
             self.note(f"criteria not in the datapack: {', '.join(absent)}")
             return ERROR, f"criteria not in the datapack: {', '.join(absent)}"
+        unread = [f"{c} ({file}): {key}" for c, f in zip(criteria, folders) for file, key in criteria_missing_keys(f, keys)]
+        if unread:
+            self.note("criteria read keys nothing defines (give them in the step's 'with', as params.*): " + "; ".join(unread))
+            return ERROR, "criteria read undefined keys: " + "; ".join(unread)
         data, missing = xs.data_paths(self.ctx.bag, [str(d) for d in xs.as_list(spec["data"])], list(self.ctx.bound))
         for entry in missing:
             self.note(f"no file of the run matches '{entry}'")

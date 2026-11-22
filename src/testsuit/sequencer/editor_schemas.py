@@ -204,6 +204,9 @@ COMMAND = h(
         "builtin": h("A built-in command: `deploy` (push the datapack inputs to `<remote_root>/<component>/input`), "
                      "`collect` (pull `<remote_root>/<component>/output` back into the results), `kill` (kill every "
                      "process tree the run started).", type="string", enum=["deploy", "collect", "kill"]),
+        "params": h("Default values of the command's parameters, by name (section 7.2): those its role declares "
+                    "(section 7.1). Templates, rendered at run time with the step's keys; a pipeline step sets them "
+                    "with `with:`. The command reads them as `{{ params.<name> }}`.", type="object"),
         "comments": COMMENTS,
     },
     defaultSnippets=[
@@ -344,6 +347,14 @@ COMPONENT = h(
             "status": {"probe": {"run": "ping -c 1 -W 1 {{ component.host }}"},
                        "states": {"running": {"exit": 0}, "offline": {"exit": "nonzero"}}}}}])
 
+ROLE_COMMAND = h(
+    "A command with parameters (section 7.1): what it does, and the parameters a pipeline step sets with `with:` "
+    "(their default values are in the component classes).", type="object", additionalProperties=False,
+    properties={"description": h("What the command does.", type="string"),
+                "params": h("Its parameters, by name, each with what it is for (no value: the classes give the "
+                            "defaults). The command reads them as `{{ params.<name> }}`.", type="object",
+                            additionalProperties=h("What the parameter is for.", type=["string", "null"]))})
+
 ROLE = h(
     "A lab role: an abstract definition of a component, the commands it offers, by name, with what each does. "
     "Lab components implement them; datapacks bind their slots by role and run its commands. "
@@ -377,11 +388,11 @@ ROLE = h(
                                            type="boolean"),
                              "description": h("What it holds (Markdown): shown in the Editor where data is picked.",
                                               type="string")})),
-        "commands": h("The commands the role offers, by name, with what each does. Implementations are in the "
-                      "classes.", type="object",
-                      properties={name: h(f"**{name}**: {text}", type=["string", "null"])
+        "commands": h("The commands the role offers, by name, with what each does (text), or with its parameters "
+                      "too (`{description, params}`). Implementations are in the classes.", type="object",
+                      properties={name: {"anyOf": [h(f"**{name}**: {text}", type=["string", "null"]), ROLE_COMMAND]}
                                   for name, text in COMMAND_NAMES.items()},
-                      additionalProperties=h("What the command does.", type=["string", "null"])),
+                      additionalProperties={"anyOf": [h("What the command does.", type=["string", "null"]), ROLE_COMMAND]}),
     },
     defaultSnippets=[{"label": "application on a Linux computer", "body": {
         "extends": "linux_system", "description": "${1:what it is}",
@@ -695,7 +706,10 @@ STEP_FIELDS = {
                type=["string", "number"]),
     "wait_for": WAIT_FOR,
     "uses": h("Run a sub-pipeline (`pipeline.subpipelines`, or an included file) as one step.", type="string"),
-    "with": h("Parameters of the sub-pipeline (`uses`), read as `params.*` in it.", type="object"),
+    "with": h("Parameters: of the sub-pipeline (`uses`), read as `params.*` in it; of the lab command (`do`), those "
+              "its role declares, by name (never a plain key); keys of the exploit criteria (`exploit`), as "
+              "`params.<name>` (a plain key the test does not define: a warning). Values are templates, rendered at "
+              "run time with the step's keys.", type="object"),
     "needs": h("Steps that must have ended successfully before this one starts: the edges of the graph. A step "
                "with no `needs` starts with the phase.", type="array", items={"type": "string"}),
     "if": h("Run the step only when this expression is true, otherwise it is `skipped`: `succeeded('<step>')`, "

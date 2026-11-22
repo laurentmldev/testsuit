@@ -187,6 +187,40 @@ def test_exploit_step_criteria_checked(repos):
     overview = editor.criteria(session).overview()
     assert overview["scenarios"][0]["used_by"] == [{"testdef": "testdef/count/testdef.yml", "phase": "run", "id": "check"}]
 
+def test_step_params_and_exploit_keys_checked(repos):
+    """A do: step's with: against the parameters its role declares; an exploit step's with: (no override of a key
+    of the test, a warning for a plain key) and the keys its criteria read that nothing defines."""
+    editor = repos.editor
+    session = editor.open("workspace0")
+    testdef = {"id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+               "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
+                   {"id": "start", "slot": "dut", "do": "start", "with": {"speed": 2}},
+                   {"id": "check", "needs": ["start"], "with": {"params.least": "{{ min_count }}", "extra": 1},
+                    "exploit": {"criteria": ["criteria/count"], "data": ["run:dut/output/*.csv"]}},
+                   {"id": "over", "needs": ["start"], "with": {"min_count": 1},
+                    "exploit": {"criteria": ["criteria/count"], "data": ["run:dut/output/*.csv"]}}]}]}}
+    editor.write(session, "testdef/count/criteria/count/count.mexploit.yml",
+                 content="ok:\n  type: assert\n  expression: '{{ params.least }} >= {{ params.most }}'\n")
+    problems = editor.write(session, "testdef/count/testdef.yml", data=testdef)["problems"]
+    messages = {(p["severity"], p["message"]) for p in problems}
+    assert ("error", "phase 'run', step 'start': command 'start' has no parameter 'speed' (it declares none)") in messages
+    assert any(sev == "warning" and "'extra' is not a 'params.*' key" in m for sev, m in messages), messages
+    assert any(sev == "error" and "step 'over': 'with' key 'min_count' is a key of the test" in m for sev, m in messages)
+    assert any(sev == "error" and "step 'check': criteria 'criteria/count' (count.mexploit.yml) read 'params.most'" in m
+               for sev, m in messages), messages
+    assert not any("params.least" in m for _, m in messages)
+    run = editor.run_problems(session, "testdef/count/testdef.yml")
+    assert any(p.startswith("exploit: ") and "params.most" in p for p in run)
+    assert not any("'extra'" in p for p in run)                       # a warning does not stop the generation
+    # the exploit step form: the keys its criteria read that nothing defines, to give in its with:
+    keys = editor.exploit_keys(session, "testdef/count/testdef.yml", ["criteria/count"], {"params.least": 1})
+    assert keys["missing"] == [{"key": "params.most", "criteria": "criteria/count", "file": "count.mexploit.yml"}]
+    assert keys["problems"] == [] and keys["warnings"] == []
+    keys = editor.exploit_keys(session, "testdef/count/testdef.yml", ["criteria/count"], {"min_count": 1})
+    assert "is a key of the test" in keys["problems"][0]
+    assert {m["key"] for m in keys["missing"]} == {"params.least", "params.most"}
+
+
 def test_workspace_session(repos):
     editor = repos.editor
     session = editor.open("workspace0")

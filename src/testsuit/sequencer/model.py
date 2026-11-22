@@ -79,6 +79,7 @@ class Step(BaseModel):
     delay: str | float | None = None
     wait_for: dict | None = None
     uses: str | None = None
+    # the parameters of a sub-pipeline (uses) or a lab command (do), the keys of exploit criteria (exploit)
     with_: dict = Field(default_factory=dict, alias="with")
     # options
     needs: list[str] = Field(default_factory=list)
@@ -145,6 +146,15 @@ class Step(BaseModel):
             raise SequencerError(f"step '{self.id}': give 'slot' or 'for_each', not both")
         if action == "uses" and (self.slot or self.for_each is not None):
             raise SequencerError(f"step '{self.id}': a 'uses' step has no slot")
+        if self.with_ and action not in ("do", "uses", "exploit"):
+            raise SequencerError(f"step '{self.id}': 'with' gives the parameters of a command (do), of a sub-pipeline "
+                                 f"(uses) or the keys of exploit criteria, not of a '{action}' step")
+        if action == "do":
+            bad = [str(k) for k in self.with_ if not str(k).isidentifier()]
+            if bad:
+                raise SequencerError(f"step '{self.id}': 'with' names the parameters of command '{self.do}' "
+                                     f"({', '.join(bad)} is not a parameter name): a step never overrides a plain key "
+                                     "for a command")
 
 
 class Comment(_Model):

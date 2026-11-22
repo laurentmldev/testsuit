@@ -140,4 +140,33 @@ def check_against_lab(datapack: Datapack, lab: Lab) -> list[str]:
                             + (f" tagged {', '.join(slot.tags)}" if slot.tags else "") + " in the lab")
         if slot.slot_class and slot.slot_class not in datapack.needs.slot_classes:
             problems.append(f"slot '{slot.id}': class '{slot.slot_class}' not in the setup's slot classes")
+    problems += param_problems(datapack, lab)
+    return problems
+
+
+def param_problems(datapack: Datapack, lab: Lab) -> list[str]:
+    """The ``with:`` of the ``do:`` steps against the parameters the role of each slot declares for the command,
+    and those of the ``exploit:`` steps against the datapack's keys (a plain key of the test is never overridden)."""
+    from testsuit.sequencer.cmdparams import exploit_with_problems, step_param_problems
+    problems: list[str] = []
+    context = getattr(datapack, "context", None)
+    for flat in getattr(datapack, "phases", None) or []:
+        for fs in flat.steps + flat.finally_:
+            step = fs.step
+            where = f"phase '{flat.phase.id}', step '{fs.id}'"
+            if step.action == "exploit" and step.with_:
+                problems += exploit_with_problems(where, step.with_, context)[0]
+            if step.action != "do":
+                continue
+            targets = [step.slot] if step.slot else step.for_each if isinstance(step.for_each, list) else \
+                [s.id for s in datapack.needs.slots.values() if s.role == step.for_each] if isinstance(step.for_each, str) else []
+            for target in targets:
+                slot = datapack.needs.slots.get(target)
+                if slot is None or slot.role not in lab.library.roles:
+                    continue
+                params = lab.library.command_params(slot.role)
+                if step.do in params:
+                    for p in step_param_problems(where, step.do, step.with_, params[step.do]):
+                        if p not in problems:
+                            problems.append(p)
     return problems
