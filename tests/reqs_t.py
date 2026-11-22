@@ -318,3 +318,42 @@ def test_editor_requirements_page(tmp_path):
     rows = {r["key"]: r["coverage"] for r in data["coverage"]["requirements"]}
     assert rows == {"REQ-1": "not run", "REQ-2": "uncovered", "REQ-3": "uncovered", "REQ-5": "uncovered"}
     assert data["coverage"]["tests"][0]["origin"] == "testdef/count/testdef.yml"
+
+
+def test_editor_requirements_form(tmp_path, monkeypatch):
+    """The Editor's requirements form: its schema (backends of the plugins), the file kinds, the problems of a file."""
+    from editor_t import Repos
+
+    from testsuit.reqs.backend import describe_req_backends
+    from testsuit.sequencer.editor_schemas import schemas
+    monkeypatch.delenv("REQ_T_TOKEN", raising=False)
+    repos = Repos(tmp_path)
+    editor = repos.editor
+    session = editor.open("workspace0")
+    yaml_backend = next(b for b in describe_req_backends() if b["name"] == "yaml")
+    assert set(yaml_backend["options"]) == {"file", "url"} and "versions" in yaml_backend["capabilities"]
+    ctx = editor.context(session)
+    assert any(b["name"] == "yaml" for b in ctx["req_backends"])
+    backend = schemas(ctx)["requirements"]["properties"]["sources"]["additionalProperties"]["properties"]["backend"]
+    assert "yaml" in backend["enum"]
+
+    # a sources file, and the requirements file its yaml source reads
+    editor.write(session, "reqs/sys.yml", content=yaml.safe_dump(REQS))
+    sources = {"default": "reqs", "sources": {
+        "reqs": {"backend": "yaml", "options": {"file": "reqs/sys.yml"}},
+        "jama": {"backend": "jama", "options": {"url": "https://jama"}},
+        "wiki": {"backend": "yaml", "options": {"file": "reqs/sys.yml"}, "credentials": {"token": "env:REQ_T_TOKEN"}}}}
+    editor.write(session, "requirements.yml", content=yaml.safe_dump(sources, sort_keys=False))
+    assert editor.kind(session, "requirements.yml") == "requirements"
+    assert editor.kind(session, "reqs/sys.yml") == "requirements"
+    assert sorted(editor.scan_workspace(session.folder, session.folder)["requirements"]) == ["reqs/sys.yml",
+                                                                                            "requirements.yml"]
+    problems = editor.check_file(session, "requirements.yml")
+    by = {(p["severity"], p["line"]) for p in problems}
+    assert any("unknown requirements backend 'jama'" in p["message"] and p["severity"] == "error" for p in problems)
+    assert any("REQ_T_TOKEN" in p["message"] and p["severity"] == "warning" for p in problems)
+    assert all(line > 1 for _, line in by)
+    assert editor.check_file(session, "reqs/sys.yml") == []
+    editor.write(session, "reqs/sys.yml", content="requirements:\n  REQ-1: {path: SYS, title: x, colour: red}\n")
+    assert editor.kind(session, "reqs/sys.yml") == "requirements"
+    assert "unknown field(s) colour" in editor.check_file(session, "reqs/sys.yml")[0]["message"]

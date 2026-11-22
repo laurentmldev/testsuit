@@ -44,6 +44,19 @@ SOURCES_FILE = "requirements.yml"
 DEFAULT_SOURCE = "reqs"
 
 
+def is_requirements_file(name: str, data: Any) -> bool:
+    """Whether parsed YAML is a sources file (by its name) or a requirements file of the built-in YAML backend: only
+    ``nodes`` and ``requirements``, each requirement a mapping (with a path, title or description)."""
+    if not isinstance(data, dict):
+        return False
+    if name == SOURCES_FILE and ({"requirements", "sources"} & set(data)):
+        return True
+    reqs = data.get("requirements")
+    return (bool(reqs) and isinstance(reqs, dict) and not set(data) - {"nodes", "requirements"}
+            and all(isinstance(v, dict) for v in reqs.values())
+            and any(set(v) & {"path", "title", "description"} for v in reqs.values()))
+
+
 def repository_root(folder: Path) -> Path | None:
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True,

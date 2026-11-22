@@ -17,7 +17,8 @@
 // of Datapacks (the test definitions of a tests repository, with the tree of the requirements).
 import { Fragment, useMemo, useState } from "react";
 import { url, useResource } from "../api";
-import { classes, Markdown, Spinner } from "../util";
+import { createFile } from "../editor/Session";
+import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
 
 export const STATUSES = ["passed", "failed", "error", "partial", "skipped", "not run", "uncovered"];
 const MARK: Record<string, string> = { passed: "✓", failed: "✗", error: "!", partial: "◐", skipped: "–", "not run": "·", uncovered: "∅" };
@@ -232,6 +233,17 @@ function TreeNode({ node, prefix, rows, selected, onSelect, depth }: { node: any
 const INTRO = `The requirements of this repository (\`requirements.yml\`), and how its test definitions cover them: each test definition by its latest run on this sequencer, else as linked. Test definitions and the checks of their criteria list the requirements they verify with \`reqs\`.`;
 
 /** Datapacks, Requirements: the tree of the requirements of the repository, and their coverage. */
+const STARTER = `# Requirements of the tests (built-in YAML source 'reqs', sequencer README section 10.3).
+# Test definitions and checks of the criteria list those they verify: reqs: [REQ-1]
+nodes:
+  SYS: System
+requirements:
+  REQ-1:
+    path: SYS
+    title: A first requirement
+    description: What is required.
+`;
+
 export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const [source, setSource] = useState<string | null>(null);
   const [campaign, setCampaign] = useState<string>("");
@@ -250,7 +262,15 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
       <Markdown text={INTRO} className="intro" />
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading the requirements…" />}
-      {d && !d.sources_file && <p className="muted">No <code>requirements.yml</code> in this repository: write one at its root, with the requirements themselves (<code>requirements:</code>) or the sources they come from (<code>sources:</code>). See the sequencer README, section 10.3.</p>}
+      {d && !d.sources_file && (
+        <div className="muted">
+          <p>No <code>requirements.yml</code> in this repository: write one at its root, with the requirements themselves (<code>requirements:</code>) or the sources they come from (<code>sources:</code>). See the sequencer README, section 10.3.</p>
+          <button className="primary" onClick={async () => {
+            const ok = await attempt(() => createFile(sid, "requirements.yml", undefined, STARTER), "requirements.yml created");
+            if (ok !== undefined) { res.refresh(); openInNewTab({ path: `edit/${sid}`, query: { file: "requirements.yml" } }); }
+          }}>Create requirements.yml…</button>
+        </div>
+      )}
       {d?.error && <div className="error-box">{d.error}</div>}
       {d?.coverage && (
         <div className="requirements-layout">
@@ -264,7 +284,9 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
               <span>All requirements</span><span className="muted small">{rows.length}</span>
             </button>
             {d.tree.map((n: any) => <TreeNode key={n.id} node={n} prefix="" rows={rows} selected={node} onSelect={setNode} depth={1} />)}
-            <p className="muted small">From <code>{d.sources_file}</code></p>
+            <p className="muted small">From <code>{d.sources_file}</code>
+              {!d.sources_file.startsWith("/") && <> <button className="link small" title="Edit the sources and the requirements in the Editor, in a new browser tab"
+                onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.sources_file } })}>✎ Edit…</button></>}</p>
           </nav>
           <div className="req-main">
             <div className="cov-actions">
