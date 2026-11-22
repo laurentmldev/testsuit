@@ -58,7 +58,7 @@ def test_manual_images_and_answers():
 
     record = ms.waiting_record("plug", MANUAL)
     assert record["title"] == "Plug cable A" and [c["done"] for c in record["checks"]] == [False, False]
-    with pytest.raises(SequencerError, match="tick every check before 'done' \\(2 left"):
+    with pytest.raises(SequencerError, match="tick or bypass every check before 'done' \\(2 left"):
         ms.acknowledge(record, {"outcome": "done"})
     assert ms.acknowledge(record, {"check": 0, "done": True}, by="ann") is None
     assert record["checks"][0]["by"] == "ann"
@@ -68,6 +68,22 @@ def test_manual_images_and_answers():
     assert record["outcome"] == "done" and record["by"] == "bob"
     with pytest.raises(SequencerError, match="already done"):
         ms.acknowledge(record, {"outcome": "failed"})
+    record = ms.waiting_record("plug", MANUAL)
+    with pytest.raises(SequencerError, match="give a comment saying why it is bypassed"):
+        ms.acknowledge(record, {"check": 1, "bypass": True})
+    ms.acknowledge(record, {"check": 0, "comment": "cable a bit loose"}, by="ann")
+    assert record["checks"][0] == {**record["checks"][0], "done": False, "comment": "cable a bit loose", "by": "ann"}
+    ms.acknowledge(record, {"check": 0}, by="ann")                   # ticked, its comment kept
+    assert record["checks"][0]["done"] and record["checks"][0]["comment"] == "cable a bit loose"
+    ms.acknowledge(record, {"check": 1, "bypass": True, "comment": "LED broken, power measured"}, by="bob")
+    assert record["checks"][1]["bypassed"] and not record["checks"][1]["done"]
+    assert ms.bypassed(record) == [record["checks"][1]]
+    ms.acknowledge(record, {"check": 1, "bypass": False})
+    with pytest.raises(SequencerError, match="1 left: Power LED green"):
+        ms.acknowledge(record, {"outcome": "done"})
+    ms.acknowledge(record, {"check": 1, "bypass": True})                # its comment is still its reason
+    ms.acknowledge(record, {"note": "bench 2 only"})
+    assert ms.acknowledge(record, {"outcome": "done"}) == "done" and record["note"] == "bench 2 only"
     steps = [{"phase": "p", "id": "s", "state": "running", "manual": {"title": "T", "since": "now", "outcome": None}},
              {"phase": "p", "id": "u", "state": "running", "manual": {"title": "U", "outcome": "done"}}]
     assert ms.awaiting(steps) == [{"step": "p:s", "title": "T", "since": "now"}]
@@ -120,11 +136,11 @@ def test_manual_step_waits_for_the_operator(tmp_path, monkeypatch):
             record = next(s for s in shown["steps"] if s["id"] == "plug")
             assert record["manual"]["text"].startswith("Plug **cable A** on pin F of plugged.")
             assert record["manual"]["base"] == "definition/"
-            with pytest.raises(Exception, match="tick every check"):
+            with pytest.raises(Exception, match="tick or bypass every check"):
                 await answer(run["id"], "test_run:plug", {"outcome": "done"})
             await answer(run["id"], "test_run:pl", {"check": 0, "by": "ann"})
-            await answer(run["id"], "test_run:plug", {"check": 1, "by": "ann"})
-            done = await answer(run["id"], "test_run:plug", {"outcome": "done", "by": "ann"})
+            await answer(run["id"], "test_run:plug", {"check": 1, "bypass": True, "comment": "LED broken", "by": "ann"})
+            done = await answer(run["id"], "test_run:plug", {"outcome": "done", "note": "on bench 1", "by": "ann"})
             assert done["manual"]["outcome"] == "done"
         [run] = await run_until_done(seq, [run["id"]], during=operator)
         await seq.close()
@@ -133,8 +149,13 @@ def test_manual_step_waits_for_the_operator(tmp_path, monkeypatch):
     assert run["verdict"] == "succeeded" and run["awaiting_manual"] == []
     plug = next(s for s in run["steps"] if s["id"] == "plug")
     assert plug["state"] == "succeeded" and [c["by"] for c in plug["manual"]["checks"]] == ["ann", "ann"]
-    log = (tmp_path / "storage" / "runs" / run["id"]).rglob("plug.log")
-    assert "manual operation done by ann" in next(log).read_text()
+    assert plug["reason"] == "1 check(s) bypassed: Power LED green (LED broken)"
+    log = next((tmp_path / "storage" / "runs" / run["id"]).rglob("plug.log")).read_text()
+    assert "manual operation done by ann" in log and "[bypassed] Power LED green (ann): LED broken" in log
+    assert "comment: on bench 1" in log
+    from testsuit.sequencer.campaigns import run_summary
+    assert run_summary(run)["bypassed_checks"] == [{"step": "test_run:plug", "check": "Power LED green",
+                                                   "comment": "LED broken", "by": "ann"}]
 
 
 def test_manual_step_failed_or_not_answered(tmp_path, monkeypatch):

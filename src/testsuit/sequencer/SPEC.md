@@ -520,8 +520,8 @@ An operation a person does on the bench (plug a cable, press a button) that the 
 
 - The step has no `slot` nor `for_each`; it waits on the sequencer host. `text` or `checks` MUST be given; `title`, `text` and `checks` are rendered with the step's keys.
 - A picture of `text` (`![alt](<path>)`) that is not a web address is a path relative to the test definition, inside its folder (an absolute path or `..` MUST be rejected). Generation MUST copy each into `definition/<path>`; a missing one MUST fail the generation. Pictures of steps in included sub-pipeline files are relative to the test definition too.
-- At run time the step record (§9.3) carries `manual: {title, text, checks: [{text, done, by, at}], base, since, outcome, note, by, at}` (`base`: the folder of the run its pictures are in, `definition/`) while the step is `running`, and the run is listed with `awaiting_manual: [{step, title, since}]` (`GET /runs`, `GET /runs/{id}`).
-- The operator answers with `POST /runs/{id}/manual/{step}` (`tsq manual`): `{check: <index>, done: <bool>}` ticks a check or not; `{outcome: done}` ends it `succeeded` and MUST be refused while a check is not ticked; `{outcome: failed, note}` ends it `failed`, the note as reason. `by` names who answered. Each answer is an event (`step`), so every viewer sees the ticks. No answer within `timeout`: `error`. Cancel and kill end the wait like any step.
+- At run time the step record (§9.3) carries `manual: {title, text, checks: [{text, done, bypassed, comment, by, at}], base, since, note, outcome, by, at}` (`base`: the folder of the run its pictures are in, `definition/`) while the step is `running`, and the run is listed with `awaiting_manual: [{step, title, since}]` (`GET /runs`, `GET /runs/{id}`).
+- The operator answers with `POST /runs/{id}/manual/{step}` (`tsq manual`). On one check (`check: <index>`): `done: <bool>` ticks it or not; `comment` sets its comment; `bypass: true` bypasses it and MUST be refused without a comment (its reason); `bypass: false` undoes it. `note` sets the global comment. `outcome: done` ends it `succeeded` and MUST be refused while a check is neither ticked nor bypassed; its reason names the bypassed checks with their comments. `outcome: failed` ends it `failed` and the global comment is its reason. `by` names who answered. Each answer is an event (`step`), so every viewer sees ticks, bypasses and comments. No answer within `timeout`: `error`. Cancel and kill end the wait like any step. The step log records each check (`[x]`, `[ ]` or `[bypassed]`, who, its comment) and the global comment; the campaign view and report list the bypassed checks of each run.
 - `retries` asks again after a failed answer; `expect`, `detach` and `with` do not apply. A run executed by another process (`tsq run --local`) cannot be answered through tsqd.
 
 ---
@@ -702,7 +702,7 @@ tsq validate <zip | testdef.yml> [--lab F] [--setup-config C]
 tsq run <zip> --local [--follow]
 tsq queue | runs [--state S] | show <run> | logs <run> [--step S] [-f]
 tsq cancel | kill | repost | rerun <run>
-tsq manual <run> [--step S] [--tick N]... [--done | --fail NOTE]
+tsq manual <run> [--step S] [--tick N]... [--bypass N REASON]... [--done [--comment C] | --fail WHY]
 tsq stages | components
 tsq hold | release | maintenance [--note T] | resume <stage | component>
 tsq selftest [<stage | component>]

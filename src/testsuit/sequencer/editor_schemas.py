@@ -687,7 +687,8 @@ EXPLOIT = h("Check criteria (mexploit scenarios) on outputs of the run: exploit_
 
 MANUAL = h("An operation a person does on the bench (plug a cable, press a button): the run waits for the operator. "
            "The Run page opens a dialog with its text and pictures, the All runs list flags the run; the operator "
-           "ticks every check, then answers Done (succeeded) or Failed (failed, with a note). No answer within the "
+           "ticks every check or bypasses it with a reason, may comment each and the whole, then answers Done "
+           "(succeeded) or Failed (failed, with the reason). No answer within the "
            "step's `timeout`: error. No `slot` nor `for_each`.", type="object", additionalProperties=False,
            properties={
                "title": h("Title of the dialog (default: the step id).", type="string"),

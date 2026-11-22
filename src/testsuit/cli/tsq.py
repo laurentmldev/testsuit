@@ -302,7 +302,7 @@ def cmd_manual(args, client: Client) -> int:
     waiting = run.get("awaiting_manual") or []
     if not waiting:
         print(f"run {run['id']} ({run['state']}) waits for no manual operation")
-        return 1 if (args.tick or args.done or args.fail is not None) else 0
+        return 1 if (args.tick or args.bypass or args.done or args.fail is not None) else 0
     step = args.step or (waiting[0]["step"] if len(waiting) == 1 else None)
     if step is None:
         print(f"run {run['id']} waits for {len(waiting)} manual operations, give --step: "
@@ -312,8 +312,12 @@ def cmd_manual(args, client: Client) -> int:
     record = None
     for index in args.tick or []:
         record = client.post(f"/runs/{run['id']}/manual/{step}", json={"check": index - 1, "done": True, "by": by})
+    for index, reason in args.bypass or []:
+        record = client.post(f"/runs/{run['id']}/manual/{step}", json={"check": int(index) - 1, "bypass": True,
+                                                                     "comment": reason, "by": by})
     if args.done or args.fail is not None:
-        body = {"outcome": "done"} if args.done else {"outcome": "failed", "note": args.fail}
+        body = {"outcome": "done", **({"note": args.comment} if args.comment else {})} if args.done else \
+            {"outcome": "failed", "note": args.fail}
         record = client.post(f"/runs/{run['id']}/manual/{step}", json={**body, "by": by})
     if record is None:
         record = next(s for s in run.get("steps") or [] if
@@ -323,7 +327,8 @@ def cmd_manual(args, client: Client) -> int:
     if manual.get("text") and not manual.get("outcome"):
         print("\n".join("  " + line for line in manual["text"].splitlines()))
     for i, check in enumerate(manual.get("checks") or [], 1):
-        print(f"  {i}. [{'x' if check['done'] else ' '}] {check['text']}")
+        mark = "x" if check.get("done") else ("bypassed" if check.get("bypassed") else " ")
+        print(f"  {i}. [{mark}] {check['text']}" + (f": {check['comment']}" if check.get("comment") else ""))
     return 0
 
 
@@ -606,8 +611,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("run")
     s.add_argument("--step", help="'<phase>:<step>' when the run waits for several")
     s.add_argument("--tick", type=int, action="append", metavar="N", help="tick check N (from 1), repeatable")
+    s.add_argument("--bypass", nargs=2, action="append", metavar=("N", "REASON"), help="bypass check N, and why")
+    s.add_argument("--comment", help="a global comment with --done")
     answer = s.add_mutually_exclusive_group()
-    answer.add_argument("--done", action="store_true", help="the operation is done (every check ticked)")
+    answer.add_argument("--done", action="store_true", help="the operation is done (every check ticked or bypassed)")
     answer.add_argument("--fail", metavar="NOTE", help="the operation failed, and why")
     s.set_defaults(fn=cmd_manual)
     for name in ("stages", "components"):

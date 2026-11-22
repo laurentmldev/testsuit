@@ -68,6 +68,10 @@ def run_summary(run: dict) -> dict:
                    "not_met": [c for c in checks if not _check_met(c)]},
         "reports": reports, "results": bool(run.get("results")),
         "awaiting_manual": run.get("awaiting_manual") or [], "rerun_of": run.get("rerun_of"),
+        # checks of manual operations the operator bypassed: the run went on without them
+        "bypassed_checks": [{"step": f"{s.get('phase')}:{s.get('id')}", "check": c.get("text"), "comment": c.get("comment"),
+                             "by": c.get("by")} for s in steps for c in (s.get("manual") or {}).get("checks") or []
+                            if c.get("bypassed")],
     }
 
 
@@ -183,6 +187,8 @@ def report_html(view: dict, base: str = "") -> str:
             detail += f'<div class="muted">{e(r["reason"])}</div>'
         if r.get("nonconform"):
             detail += "".join(f'<div class="warn">non-conform: {e(n)}</div>' for n in r["nonconform"][:3])
+        detail += "".join(f'<div class="warn">bypassed: {e(str(b["check"]))} ({e(str(b.get("comment") or ""))})</div>'
+                          for b in r.get("bypassed_checks") or [])
         if r.get("earlier"):                       # re-runs: the attempts it replaced, each linked
             detail += (f'<div class="muted">attempt {r.get("attempt")}; earlier: '
                        + ", ".join(f'<a href="{run_link(a["run"])}">{e(a["run"])}</a> {badge(a.get("verdict") or a.get("state"))}'

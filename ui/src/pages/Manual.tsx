@@ -34,16 +34,60 @@ function operatorName(): string {
   try { return JSON.parse(localStorage.getItem(AUTHOR) || "{}").name || ""; } catch { return ""; }
 }
 
-/** The dialog of a manual operation: what to do, each check to tick, then Done (once all are ticked) or Failed. */
+const settled = (c: any) => !!(c.done || c.bypassed);
+
+/** One check of a manual operation: tick it, or bypass it with a reason; a comment either way. */
+function CheckRow({ index, check, busy, send }: { index: number; check: any; busy: boolean; send: (body: any) => Promise<any> }) {
+  const [editing, setEditing] = useState(false);
+  const [comment, setComment] = useState<string>(check.comment || "");
+  const [bypassing, setBypassing] = useState(false);
+  useEffect(() => { if (!editing) setComment(check.comment || ""); }, [check.comment]);
+  const save = async (extra: any = {}) => {
+    if (await send({ check: index, comment: comment.trim(), ...extra })) { setEditing(false); setBypassing(false); }
+  };
+  return (
+    <li className={classes(check.done && "done", check.bypassed && "bypassed")}>
+      <div className="manual-check-line">
+        <label>
+          <input type="checkbox" checked={!!check.done} disabled={busy} onChange={(e) => send({ check: index, done: e.target.checked })} />
+          <span>{check.text}</span>
+        </label>
+        {check.bypassed && <span className="badge warn" title="The operator went on without it">bypassed</span>}
+        {settled(check) && check.by && <span className="muted small">{check.by}, {ago(check.at)}</span>}
+        <span className="spacer" />
+        {!editing && <button className="small link" disabled={busy} onClick={() => setEditing(true)}>{check.comment ? "Edit comment" : "Comment"}</button>}
+        {!editing && !check.bypassed && <button className="small" disabled={busy} title="Go on without this check: give the reason, kept with the run"
+          onClick={() => { setBypassing(true); setEditing(true); }}>Bypass…</button>}
+        {check.bypassed && <button className="small" disabled={busy} onClick={() => send({ check: index, bypass: false })}>Undo bypass</button>}
+      </div>
+      {check.comment && !editing && <div className="manual-check-comment small">{check.comment}</div>}
+      {editing && (
+        <div className="manual-check-edit">
+          <input value={comment} autoFocus onChange={(e) => setComment(e.target.value)}
+            placeholder={bypassing ? "why it can be bypassed, e.g. LED broken, power checked with a meter" : "a comment on this check"}
+            onKeyDown={(e) => { if (e.key === "Enter" && comment.trim()) save(bypassing ? { bypass: true } : {}); if (e.key === "Escape") { setEditing(false); setBypassing(false); } }} />
+          {bypassing
+            ? <button className="small primary" disabled={busy || !comment.trim()} onClick={() => save({ bypass: true })}>Bypass</button>
+            : <button className="small primary" disabled={busy} onClick={() => save()}>Save</button>}
+          <button className="small" onClick={() => { setEditing(false); setBypassing(false); setComment(check.comment || ""); }}>Cancel</button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** The dialog of a manual operation: what to do, each check to tick or bypass (with a comment), a global comment, then
+ *  Done (once every check is ticked or bypassed) or Failed. */
 export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: string; record: any; onClose: () => void; onAnswered: (record: any) => void }) {
   const m = record.manual;
   const key = manualKey(record);
   const [by, setBy] = useState(operatorName);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState<string>(m.note || "");
   const [failing, setFailing] = useState(false);
   const [busy, setBusy] = useState(false);
   const checks: any[] = m.checks || [];
-  const left = checks.filter((c) => !c.done).length;
+  const left = checks.filter((c) => !settled(c)).length;
+  const skipped = checks.filter((c) => c.bypassed).length;
   useEffect(() => {
     try { localStorage.setItem(AUTHOR, JSON.stringify({ ...JSON.parse(localStorage.getItem(AUTHOR) || "{}"), name: by.trim() })); } catch { /* storage off */ }
   }, [by]);
@@ -55,7 +99,7 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
     return result;
   };
   const answer = async (outcome: "done" | "failed") => {
-    if (await send(outcome === "done" ? { outcome } : { outcome, note: note.trim() }, `${m.title}: ${outcome}`)) onClose();
+    if (await send({ outcome, note: note.trim() }, `${m.title}: ${outcome}`)) onClose();
   };
   return (
     <Dialog title={`Manual operation: ${m.title}`} onClose={onClose} wide footer={
@@ -64,7 +108,7 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
         <span className="spacer" />
         {failing ? (
           <>
-            <input className="manual-note" value={note} autoFocus onChange={(e) => setNote(e.target.value)} placeholder="what went wrong, e.g. no cable A on the bench" />
+            <span className="small">The comment above says why it failed.</span>
             <button className="danger" disabled={busy || !note.trim()} onClick={() => answer("failed")}>Fail the step</button>
             <button onClick={() => setFailing(false)}>Back</button>
           </>
@@ -72,7 +116,8 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
           <>
             <button className="danger" disabled={busy} onClick={() => setFailing(true)} title="The operation cannot be done: the step fails, and the run goes on as for any failed step">Failed…</button>
             <button className="primary" disabled={busy || left > 0} onClick={() => answer("done")}
-              title={left ? `Tick the ${left} check(s) left first` : "The operation is done: the run goes on"}>Done</button>
+              title={left ? `Tick or bypass the ${left} check(s) left first` : skipped ? `Done, ${skipped} check(s) bypassed: the run goes on` : "The operation is done: the run goes on"}>
+              {skipped ? `Done (${skipped} bypassed)` : "Done"}</button>
           </>
         )}
       </>
@@ -84,18 +129,16 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
         <Markdown text={m.text} className="manual-text" base={url(`runs/${runId}/files/${m.base || "definition/"}`)} />
         {checks.length > 0 && (
           <ol className="manual-checks">
-            {checks.map((c, i) => (
-              <li key={i} className={classes(c.done && "done")}>
-                <label>
-                  <input type="checkbox" checked={!!c.done} disabled={busy} onChange={(e) => send({ check: i, done: e.target.checked })} />
-                  <span>{c.text}</span>
-                </label>
-                {c.done && c.by && <span className="muted small"> · {c.by}, {ago(c.at)}</span>}
-              </li>
-            ))}
+            {checks.map((c, i) => <CheckRow key={i} index={i} check={c} busy={busy} send={(b) => send(b)} />)}
           </ol>
         )}
-        {checks.length > 0 && <p className="muted small">{left ? `${left} of ${checks.length} check(s) left before Done.` : "Every check is ticked."} Each tick is shared at once with the others looking at this run.</p>}
+        {checks.length > 0 && <p className="muted small">{left ? `${left} of ${checks.length} check(s) left to tick or bypass before Done.` : "Every check is ticked or bypassed."} Ticks, bypasses and comments are shared at once with the others looking at this run.</p>}
+        <label className={classes("manual-global", failing && "required")}>
+          <span className="small">{failing ? "Why it failed (required)" : "Comment on the whole operation (optional)"}</span>
+          <textarea rows={2} value={note} autoFocus={failing} onChange={(e) => setNote(e.target.value)}
+            onBlur={() => note.trim() !== (m.note || "") && send({ note: note.trim() })}
+            placeholder={failing ? "what went wrong, e.g. no cable A on the bench" : "anything the results should say about this operation"} />
+        </label>
       </div>
     </Dialog>
   );

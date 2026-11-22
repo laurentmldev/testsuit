@@ -609,11 +609,17 @@ class StepRunner:
             self.ctx.notify("manual_operation", {"run": self.ctx.run_id, "step": self.record.key, "state": "answered"})
         m = self.record.manual
         who = f" by {m['by']}" if m.get("by") else ""
-        self.note(f"manual operation {outcome}{who}" + "".join(
-            f"\n[{'x' if c['done'] else ' '}] {c['text']}" + (f" ({c['by']})" if c.get("by") else "") for c in checks)
-            + (f"\nnote: {m['note']}" if m.get("note") else ""))
+
+        def line(c: dict) -> str:
+            mark = "x" if c.get("done") else ("bypassed" if c.get("bypassed") else " ")
+            return (f"\n[{mark}] {c['text']}" + (f" ({c['by']})" if c.get("by") else "")
+                    + (f": {c['comment']}" if c.get("comment") else ""))
+        self.note(f"manual operation {outcome}{who}" + "".join(line(c) for c in checks)
+                  + (f"\ncomment: {m['note']}" if m.get("note") else ""))
         if outcome == ms.DONE:
-            return SUCCEEDED, ""
+            skipped = ms.bypassed(m)
+            return SUCCEEDED, (f"{len(skipped)} check(s) bypassed: " + "; ".join(
+                f"{c['text']} ({c['comment']})" for c in skipped) if skipped else "")
         return FAILED, "manual operation failed" + (f": {m['note']}" if m.get("note") else "")
 
     def via_place(self, name: str) -> tuple:

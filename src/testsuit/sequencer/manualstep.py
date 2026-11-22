@@ -112,13 +112,20 @@ def pipeline_manual_images(pipeline: Mapping | None, definition_dir: Path | None
 def waiting_record(step_id: str, spec: Mapping) -> dict:
     """What a step record keeps of a manual operation it waits for (the Run page's dialog)."""
     return {"title": str(spec.get("title") or step_id), "text": str(spec.get("text") or ""),
-            "checks": [{"text": str(c), "done": False} for c in spec.get("checks") or []],
-            "base": "definition/", "since": now(), "outcome": None}
+            "checks": [{"text": str(c), "done": False, "bypassed": False, "comment": ""} for c in spec.get("checks") or []],
+            "base": "definition/", "since": now(), "outcome": None, "note": ""}
+
+
+def settled(check: Mapping) -> bool:
+    """A check that no longer holds Done back: ticked, or bypassed with a reason."""
+    return bool(check.get("done") or check.get("bypassed"))
 
 
 def acknowledge(manual: dict, body: Mapping, by: str = "") -> str | None:
-    """Apply an operator's answer to a manual operation still waiting: ``{"check": i, "done": bool}`` ticks one
-    check, ``{"outcome": "done"|"failed", "note": ...}`` ends it. Returns the outcome when it ends."""
+    """Apply an operator's answer to a manual operation still waiting. On one check (``check``: its index):
+    ``done`` ticks it or not, ``bypass`` bypasses it or not (a bypass needs a ``comment``, its reason), ``comment``
+    sets its comment. On the operation: ``note`` sets the global comment, ``outcome`` ends it (``done`` once every
+    check is ticked or bypassed, or ``failed``). Returns the outcome when it ends."""
     if manual.get("outcome"):
         raise SequencerError(f"this manual operation is already {manual['outcome']}")
     checks = manual["checks"]
@@ -128,18 +135,36 @@ def acknowledge(manual: dict, body: Mapping, by: str = "") -> str | None:
             check = checks[index]
         except (TypeError, ValueError, IndexError):
             raise SequencerError(f"no check {body.get('check')!r}: the operation has {len(checks)}") from None
-        check["done"] = bool(body.get("done", True))
-        check.update({"by": by, "at": now()} if check["done"] else {"by": None, "at": None})
+        if "comment" in body:
+            check["comment"] = str(body.get("comment") or "").strip()
+        if body.get("bypass"):
+            if not check.get("comment"):
+                raise SequencerError(f"check '{check['text']}': give a comment saying why it is bypassed")
+            check.update(bypassed=True, done=False)
+        elif "bypass" in body:
+            check["bypassed"] = False
+        if "done" in body or not ({"comment", "bypass"} & set(body)):
+            check["done"] = bool(body.get("done", True))
+            if check["done"]:
+                check["bypassed"] = False
+        check.update({"by": by, "at": now()} if settled(check) or check.get("comment") else {"by": None, "at": None})
+    if "note" in body:
+        manual["note"] = str(body.get("note") or "").strip()
     outcome = body.get("outcome")
     if outcome is None:
         return None
     if outcome not in (DONE, FAILED):
         raise SequencerError(f"outcome '{outcome}': '{DONE}' or '{FAILED}'")
-    if outcome == DONE and not all(c["done"] for c in checks):
-        left = [c["text"] for c in checks if not c["done"]]
-        raise SequencerError(f"tick every check before 'done' ({len(left)} left: {', '.join(left)})")
-    manual.update(outcome=outcome, note=str(body.get("note") or ""), by=by, at=now())
+    if outcome == DONE and not all(settled(c) for c in checks):
+        left = [c["text"] for c in checks if not settled(c)]
+        raise SequencerError(f"tick or bypass every check before 'done' ({len(left)} left: {', '.join(left)})")
+    manual.update(outcome=outcome, by=by, at=now())
     return outcome
+
+
+def bypassed(manual: Mapping) -> list[dict]:
+    """The checks of a manual operation that were bypassed."""
+    return [c for c in manual.get("checks") or [] if c.get("bypassed")]
 
 
 def awaiting(steps: list[dict] | None) -> list[dict]:

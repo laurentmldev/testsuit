@@ -413,6 +413,7 @@ export function CampaignRunPage({ id }: { id: string }) {
                     {" · "}<a href={url(`runs/${r.run}/logs/${step}`)} target="_blank" rel="noreferrer">log</a></div>}
                   {(r.checks?.not_met || []).slice(0, 3).map((c: any, i: number) => <div key={i} className="muted">✗ <code>{c.criteria}</code> {c.check || c.scenario}</div>)}
                   {!f && r.reason && <div className="muted">{r.reason}</div>}
+                  {(r.bypassed_checks || []).map((b: any, i: number) => <div key={"b" + i} className="warn-text" title={`step ${b.step}${b.by ? `, by ${b.by}` : ""}`}>bypassed: {b.check} <span className="muted">({b.comment})</span></div>)}
                   {(r.nonconform || []).slice(0, 2).map((n: string, i: number) => <div key={i} className="warn-text">non-conform: {n}</div>)}
                   {r.results && <div><a href={url(`runs/${r.run}/files/results.zip?results=true`)}>results zip</a></div>}
                 </td>
