@@ -68,6 +68,7 @@ datapack = "testsuit.cli.datapack:main"
 testsuit-notebooks = "testsuit.cli.notebooks:main"
 evalfile = "testsuit.cli.evalfile:main"
 tsq = "testsuit.cli.tsq:main"
+reqs = "testsuit.cli.reqs:main"
 tsqd = "testsuit.sequencer.daemon:main"
 
 [project.urls]

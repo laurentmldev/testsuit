@@ -323,6 +323,7 @@ setup: <setup file>
 setup_configuration: <name>
 dictionaries: [<file>...]
 user_keys: {<key>: <free text> | [<choice>...]}   # asked at each generation
+reqs: [<requirement>...]                          # OPTIONAL, §5.5
 pipeline: {...}                                   # §6
 ```
 
@@ -335,9 +336,10 @@ pipeline: {...}                                   # §6
 - `tools`: name and version of testsuit, plugins and processing libraries;
 - `files`: each generated file with its sources, method, generator and sha256;
 - `keys_set_by_hand`, `versions_set_by_hand`;
+- `requirements` (§5.5): `{sources_file, sources: [{name, backend, revision}], linked, problems}`;
 - for results only, `run`: sequencer and plugin versions, lab inventory and library git state, the binding, each component's `version` command output (read before the first phase), and for a run of a campaign its `campaign_run` and `routing`.
 
-A datapack is **conform** iff every source is a clean tagged git state, every dataset version is confirmed, no defined key is overridden by hand, and every dataset version set by hand is a tag of its source. `--nocheck` produces `conform: false`.
+A datapack is **conform** iff every source is a clean tagged git state, every dataset version is confirmed, no defined key is overridden by hand, every dataset version set by hand is a tag of its source, and it links no unknown, deleted or rejected requirement (§5.5). `--nocheck` produces `conform: false`.
 
 An **expected baseline** is a partial baseline (values MAY be glob patterns) checked by `datapack --check-baseline`, at build (`--baseline`), at submission (`tsq submit --baseline` or `pipeline.baseline`), and before the first phase for the `run` part.
 
@@ -364,6 +366,27 @@ baseline: <expected baseline file>   # OPTIONAL, replaces the test definitions' 
 - `datapack <file>.campaign.yml` MUST generate the datapack of every entry into one folder with a `campaign.yml` manifest (`id`, `git`, `conform`, `priority`, `routing`, `datasets`, `expected_baseline`, `datapacks: [{testdef, setup_config, priority, zip, conform}]`), or none: a failure MUST leave no folder.
 - Every dataset a setup imports MUST be in `datasets`, else the generation MUST fail naming it. Its version replaces the written one. Versions set by hand MUST be refused. A dataset pinned and imported by no entry is a warning.
 - Each datapack records `versions_pinned_by_campaign` (`{dataset, version, overrides, was, tag}`), `pinned_by: campaign` on its dataset sources, `campaign: {id, name, file}`, and the campaign file as a source of role `campaign` (§5.3). It is conform iff the §5.3 conditions hold, the campaign source included, and each pinned version that overrides the written one is a tag of its source. Keys `campaign.{id, name, file}` are available at generation.
+
+### 5.5 Requirements coverage
+
+A **requirement** is `{id, path, title, description, rationale, tags, comments, version, status, url}`, read from a **source** by a **backend** (§13). Its `path` is node ids joined by `/`. `status` `deleted` or `rejected` makes it **inactive**.
+
+Sources file: `requirements.yml`, the nearest one from the test definition's folder up to the git root of its repository.
+
+```yaml
+default: <source>                    # OPTIONAL, default: the first source
+sources:
+  <source>: {backend: <name>, options: {...}, credentials: {<name>: env:<VARIABLE>}}
+```
+
+Credentials MUST come from the environment; a literal value MUST be refused. A file with `requirements` and no `sources` is the single source `reqs` of the built-in `yaml` backend, whose file is `{nodes: {<path>: <label>}, requirements: {<id>: {path, title, ...}}}` (option `file`: another file; `url`: a link template with `{id}`; default `version`: a hash of the content).
+
+- **Links.** A test definition's `reqs` and any check's `reqs` (a mexploit scenario entry, beside `description`) list references `[<source>:]<id>[@<version>]`. A prefix that names no source is part of the id. `@<version>` pins the version the link was written against.
+- **Snapshot.** Generation MUST resolve every link of the test definition and of the checks of the criteria its exploit steps name (§6.8), and write `definition/requirements.yml`: `{format, default_source, sources, testdef: [<key>], checks: [{step, criteria, scenario, file, check, reqs}], requirements: {<key>: {..., pinned, changed}}, problems, warnings}`. A key is the id, prefixed by its source unless the default one. Scenarios are rendered with the datapack keys, unknown keys empty.
+- An unknown or inactive requirement, a missing sources file, or a source that cannot be read MUST fail the generation; with `--nocheck` the snapshot and the baseline record them and the datapack is not conform. A pinned version that is not the current one is a warning (`changed: true`).
+- **Status of a link** in a run: a check link from its check (`SUCCESS`/`ACCEPTED` → `passed`, `FAILED`/`REJECTED` → `failed`, `ERROR` → `error`), `skipped` when its exploit step was, `error` when the step failed or errored without reporting the check, `not run` otherwise; a test definition link from the verdict (`succeeded` → `passed`, `failed`, `error`).
+- **Status of a requirement** over a set of links (one test, or several runs of a campaign): `failed` if one is, else `error` if one is, `passed` if all are, `partial` if one passed, `skipped` if one was skipped, else `not run`; `uncovered` without links. Inactive requirements are never `uncovered`. A link whose tested version differs from the current one is **changed since**.
+- **Coverage** (`reqs matrix | uncovered <targets> [--paths P... [-r]]`): targets are test definitions, campaign files (their test definitions), datapack and results zips, and folders of zips (a campaign's results). It MUST give both a requirements × tests matrix, rolled up per path node, and a tests × requirements view (each test, its test definition and each check with the requirements it verifies), as text, YAML, CSV or one self-contained HTML page linking to the requirements (`url`), and with `--sequencer` to the runs and their exploit reports. `--paths` adds the requirements under those nodes (with `-r`, their descendants) as rows, `uncovered` when not linked.
 
 ---
 
@@ -722,6 +745,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
 - **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it, an earlier attempt greyed under its re-run; its page shows the report and runs an ended datapack again.
 - **Manual operations**: the step palette and form edit a `manual` step (§6.9). The Run page opens the dialog of the operation the run waits for (its Markdown text and pictures, its checks, Done and Failed); All runs and the campaign page flag the runs that expect one.
+- **Requirements**: the test definition's problems include its unknown or inactive requirements and those of its checks (errors), and pinned versions that changed (warnings) (§5.5).
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---
@@ -738,6 +762,7 @@ Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`)
 | `register_step_type(name, cls)` | step actions | `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | `method: generate` | none |
+| `register_req_backend(name, factory)` | requirements sources (§5.5): `factory(options, credentials, base_dir)` → `tree()`, `list(path, children)`, `get(ids)`, optional `revision()`, `create`/`update` with capability `write`; capabilities `children_query`, `write`, `versions` | `yaml` |
 
 ---
 

@@ -24,6 +24,7 @@ Test definition::
     setup_file: ../../setup/toytrain_setup.yml
     setup_config: sim_bench
     dictionaries: [scenario.yml]          # relative to this file
+    reqs: [REQ-12, jama:SYS-4]            # requirements the test verifies (sequencer SPEC section 5.4)
     pipeline: ...                         # for the test sequencer, not rendered
 
 Setup::
@@ -78,7 +79,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # former names, refused with the current one (no aliases: README section 8)
 FORMER_SETUP = {"component_types": "slot_classes", "slot_types": "slot_classes"}           # setup, top level
@@ -123,7 +124,14 @@ class Testdef(_Model):
     setup_config: str
     dictionaries: list[str] = Field(default_factory=list)
     user_keys: dict[str, UserKey] = Field(default_factory=dict)   # keys given at each generation, by dotted name
+    # requirements the test verifies, [<source>:]<id>[@<version>] (testsuit.reqs); its checks can list their own
+    reqs: list[str] = Field(default_factory=list)
     pipeline: Any = None
+
+    @field_validator("reqs", mode="before")
+    @classmethod
+    def _one_req(cls, value):
+        return [value] if isinstance(value, (str, int)) else value
 
 
 class Dataset(_Model):

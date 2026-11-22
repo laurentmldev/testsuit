@@ -21,6 +21,7 @@ An external library extends testsuit by calling the registration functions:
 - ``testsuit.datatools.datapack.importers.register_data_importer()``
 - ``testsuit.datatools.datapack.processors.register_processor()``
 - ``testsuit.datatools.datapack.generators.register_generator()``
+- ``testsuit.reqs.register_req_backend()`` (requirements sources)
 - ``testsuit.sequencer.registry``: ``register_transport()``, ``register_role()``, ``register_component()``, ``register_state_probe()``,
   ``register_step_type()``, ``register_ready_check()`` (test sequencer)
 

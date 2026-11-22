@@ -1,0 +1,36 @@
+# Requirements of the toy train (built-in YAML source 'reqs', sequencer README section 10.3).
+# Test definitions and checks list those they verify with 'reqs'; 'reqs matrix' builds the coverage.
+nodes:
+  TT: Toy train
+  TT/SPEED: Speed control
+  TT/SAFETY: Safety
+  TT/TM: Telemetry
+requirements:
+  TT-SPD-1:
+    path: TT/SPEED
+    title: Speed limit
+    description: The train speed never exceeds 0.5 m/s, within 5 mm/s.
+    rationale: Above it the train derails in the curves of the test track.
+    tags: [critical]
+  TT-SPD-2:
+    path: TT/SPEED
+    title: Start speed
+    description: The train runs at 0.25 m/s during its first 5 s.
+  TT-SPD-3:
+    path: TT/SPEED
+    title: Smooth acceleration
+    description: The acceleration never exceeds 0.2 m/s².
+  TT-SAF-1:
+    path: TT/SAFETY
+    title: Stop on front contact
+    description: A front contact stops the train within 1 s, and it stays stopped.
+    tags: [critical]
+  TT-SAF-2:
+    path: TT/SAFETY
+    title: Emergency stop button
+    description: The emergency button stops the train within 0.5 s.
+    tags: [critical]
+  TT-TM-1:
+    path: TT/TM
+    title: Continuous telemetry
+    description: CALC-TM records the speed at 20 Hz without gaps.
