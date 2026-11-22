@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS runs (
     submitted_at TEXT, activated_at TEXT, ended_at TEXT,
     conform INTEGER, nonconform TEXT, waiting_for TEXT, attempts INTEGER DEFAULT 0,
     binding TEXT, phase TEXT, results TEXT, expected_baseline TEXT, warnings TEXT,
-    steps TEXT, local INTEGER DEFAULT 0, abort TEXT, owner TEXT, campaign_run TEXT, routing TEXT
+    steps TEXT, local INTEGER DEFAULT 0, abort TEXT, owner TEXT, campaign_run TEXT, routing TEXT,
+    rerun_of TEXT, control TEXT, interventions TEXT
 );
 CREATE TABLE IF NOT EXISTS campaign_runs (
     id TEXT PRIMARY KEY, campaign TEXT, name TEXT, title TEXT, description TEXT, file TEXT, git TEXT,
@@ -60,7 +61,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 ACTIVE_STATES = ("waiting_resources", "reserved", "selftest", "running", "cleaning")
 QUEUED_STATES = ("queued", "waiting_resources")
-JSON_FIELDS = ("nonconform", "binding", "expected_baseline", "warnings", "steps", "routing")
+JSON_FIELDS = ("nonconform", "binding", "expected_baseline", "warnings", "steps", "routing", "control", "interventions")
 CAMPAIGN_JSON_FIELDS = ("git", "routing", "datasets", "entries", "expected_baseline")
 
 
@@ -81,7 +82,7 @@ class Store:
             if "bypass" not in columns:
                 self._db.execute("ALTER TABLE resources ADD COLUMN bypass TEXT")
             columns = {r["name"] for r in self._db.execute("PRAGMA table_info(runs)")}
-            for column in ("campaign_run", "routing"):           # before campaigns
+            for column in ("campaign_run", "routing", "rerun_of", "control", "interventions"):   # older databases
                 if column not in columns:
                     self._db.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT")
 
@@ -99,9 +100,13 @@ class Store:
             return None
         run = dict(row)
         for name in JSON_FIELDS:
-            run[name] = json.loads(run[name]) if run.get(name) else ([] if name in ("nonconform", "warnings", "steps") else None)
+            run[name] = json.loads(run[name]) if run.get(name) else \
+                ([] if name in ("nonconform", "warnings", "steps", "interventions") else None)
         run["conform"] = None if run["conform"] is None else bool(run["conform"])
         run["local"] = bool(run["local"])
+        from testsuit.sequencer.manualstep import awaiting
+        run["awaiting_manual"] = awaiting(run["steps"]) if run.get("state") == "running" else []
+        run["paused"] = (run.get("control") or {}).get("paused") or [] if run.get("state") == "running" else []
         return run
 
     def add_run(self, **fields: Any) -> None:

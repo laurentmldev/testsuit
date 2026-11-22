@@ -290,6 +290,73 @@ def cmd_repost(args, client: Client) -> int:
     return 0
 
 
+def cmd_rerun(args, client: Client) -> int:
+    run = client.post(f"/runs/{args.run}/rerun")
+    print(f"run {run['id']}: {run['state']}, runs again {args.run} in campaign run {run.get('campaign_run')}")
+    return 0
+
+
+def cmd_manual(args, client: Client) -> int:
+    """The manual operations a run waits for; tick checks, answer done or failed."""
+    run = client.get(f"/runs/{args.run}")
+    waiting = run.get("awaiting_manual") or []
+    if not waiting:
+        print(f"run {run['id']} ({run['state']}) waits for no manual operation")
+        return 1 if (args.tick or args.bypass or args.done or args.fail is not None) else 0
+    step = args.step or (waiting[0]["step"] if len(waiting) == 1 else None)
+    if step is None:
+        print(f"run {run['id']} waits for {len(waiting)} manual operations, give --step: "
+              + ", ".join(w["step"] for w in waiting), file=sys.stderr)
+        return 2
+    by = os.environ.get("USER", "")
+    record = None
+    for index in args.tick or []:
+        record = client.post(f"/runs/{run['id']}/manual/{step}", json={"check": index - 1, "done": True, "by": by})
+    if args.redo_from:
+        client.post(f"/runs/{run['id']}/manual/{step}", json={"outcome": "redo", "from": args.redo_from,
+                                                            "note": args.comment or "", "by": by})
+        print(f"{step}: redone from {args.redo_from}")
+        return 0
+    for index, reason in args.bypass or []:
+        record = client.post(f"/runs/{run['id']}/manual/{step}", json={"check": int(index) - 1, "bypass": True,
+                                                                     "comment": reason, "by": by,
+                                                                     "nonconform": args.nonconform})
+    if args.done or args.fail is not None:
+        body = {"outcome": "done", **({"note": args.comment} if args.comment else {})} if args.done else \
+            {"outcome": "failed", "note": args.fail}
+        record = client.post(f"/runs/{run['id']}/manual/{step}", json={**body, "by": by})
+    if record is None:
+        record = next(s for s in run.get("steps") or [] if
+                      f"{s['phase']}:{s['id']}" + (f"[{s['slot']}]" if s.get("slot") else "") == step)
+    manual = record.get("manual") or {}
+    print(f"{step}: {manual.get('title')}" + (f" [{manual['outcome']}]" if manual.get("outcome") else " (waiting)"))
+    if manual.get("text") and not manual.get("outcome"):
+        print("\n".join("  " + line for line in manual["text"].splitlines()))
+    for i, check in enumerate(manual.get("checks") or [], 1):
+        mark = "x" if check.get("done") else ("bypassed" if check.get("bypassed") else " ")
+        print(f"  {i}. [{mark}] {check['text']}" + (f": {check['comment']}" if check.get("comment") else ""))
+    return 0
+
+
+def cmd_step(args, client: Client) -> int:
+    """An operator action on a step of the phase running now (SPEC section 9.7)."""
+    action = args.action.replace("-", "_")
+    run = client.post(f"/runs/{args.run}/steps/{args.step}/{action}",
+                      json={"reason": args.reason or "", "by": os.environ.get("USER", "")})
+    print(f"run {run['id']}: {args.action} {args.step}" + ("" if run["conform"] else " (run not conform)"))
+    return 0
+
+
+def cmd_step_mode(args, client: Client) -> int:
+    body = {"mode": args.mode, **({"breakpoints": args.breakpoint} if args.breakpoint is not None else {})}
+    run = client.post(f"/runs/{args.run}/control", json=body)
+    control = run.get("control") or {}
+    print(f"run {run['id']}: step mode {control.get('mode')}"
+          + (f", breakpoints {', '.join(control.get('breakpoints') or [])}" if control.get("breakpoints") else "")
+          + "".join(f"\n  paused after {p['step']} ({p['verdict']})" for p in run.get("paused") or []))
+    return 0
+
+
 def cmd_resources(args, client: Client) -> int:
     rows = client.get(f"/{args.command}")
     for row in rows:
@@ -562,6 +629,35 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("repost", help="queue an ended run again, its outputs cleaned")
     s.add_argument("run")
     s.set_defaults(fn=cmd_repost)
+    s = sub.add_parser("rerun", help="run a datapack of a campaign run again (a new run, the earlier one kept)")
+    s.add_argument("run")
+    s.set_defaults(fn=cmd_rerun)
+    s = sub.add_parser("manual", help="the manual operation a run waits for: show it, tick checks, answer it")
+    s.add_argument("run")
+    s.add_argument("--step", help="'<phase>:<step>' when the run waits for several")
+    s.add_argument("--tick", type=int, action="append", metavar="N", help="tick check N (from 1), repeatable")
+    s.add_argument("--bypass", nargs=2, action="append", metavar=("N", "REASON"), help="bypass check N, and why")
+    s.add_argument("--nonconform", action="store_true",
+                   help="the checks bypassed by this command make the run non-conform (once the operation is done)")
+    s.add_argument("--comment", help="a global comment with --done or --redo-from")
+    s.add_argument("--redo-from", metavar="STEP", help="run that earlier step (one its redo_from lists) and the next "
+                                                       "ones again, then ask again")
+    answer = s.add_mutually_exclusive_group()
+    answer.add_argument("--done", action="store_true", help="the operation is done (every check ticked or bypassed)")
+    answer.add_argument("--fail", metavar="NOTE", help="the operation failed, and why")
+    s.set_defaults(fn=cmd_manual)
+    s = sub.add_parser("step", help="operator action on a step of the running phase: next (a paused step goes on), "
+                                    "run-again (it and the steps that need it), continue (go on past it)")
+    s.add_argument("run")
+    s.add_argument("step", help="'<phase>:<step>' or '<step>'")
+    s.add_argument("action", choices=["next", "run-again", "continue"])
+    s.add_argument("--reason", help="why (required by continue)")
+    s.set_defaults(fn=cmd_step)
+    s = sub.add_parser("step-mode", help="pause a run after each step, or at breakpoints, or not")
+    s.add_argument("run")
+    s.add_argument("mode", choices=["off", "each", "breakpoints"])
+    s.add_argument("--breakpoint", action="append", metavar="STEP", help="'<phase>:<step>', repeatable")
+    s.set_defaults(fn=cmd_step_mode)
     for name in ("stages", "components"):
         sub.add_parser(name, help=f"{name}: monitored state, lock state, holder").set_defaults(fn=cmd_resources)
     for name in ("hold", "release", "maintenance", "resume"):

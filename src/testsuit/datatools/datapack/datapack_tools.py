@@ -836,6 +836,19 @@ class _Builder:
                 raise DatapackError(f"criteria '{name}' checked by an exploit step of '{self.testdef_file}' not found "
                                     f"(paths are relative to the test definition)")
             copy_criteria(name, source, definition)
+        # the pictures its manual steps show (sequencer SPEC, section 6.9), at the same path
+        from testsuit.sequencer.manualstep import pipeline_manual_images
+        for name in pipeline_manual_images(pipeline, self.testdef_dir):
+            source = self.testdef_dir / name
+            if Path(name).is_absolute() or ".." in Path(name).parts:
+                raise DatapackError(f"picture '{name}' shown by a manual step of '{self.testdef_file}': give a path "
+                                    "relative to the test definition, inside its folder")
+            if not source.is_file():
+                raise DatapackError(f"picture '{name}' shown by a manual step of '{self.testdef_file}' not found "
+                                    f"(paths are relative to the test definition)")
+            target = definition / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
         for layer, path in self.dictionaries:
             target = definition / "dictionaries" / layer / path.name
             if layer == "datasets":

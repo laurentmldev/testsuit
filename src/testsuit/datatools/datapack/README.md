@@ -179,8 +179,10 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
   values.json         where each '{{ expression }}' output is in the rendered files, and the keys it
                       read (the UI shows them on hover); left out for a file that cannot be told
   baseline.yml        where the contents come from, and whether the datapack is conform
-  definition/         the test definition, setup and dictionaries, as written; the criteria its exploit
-                      steps name; requirements.yml, the requirements it and its checks list, as fetched
+  definition/         the test definition, setup and dictionaries, as written; the files its pipeline
+                      refers to: included sub-pipelines, the criteria of its exploit steps, the
+                      pictures of its manual steps (sequencer SPEC sections 6.8 and 6.9);
+                      requirements.yml, the requirements it and its checks list, as fetched
   data/<slot>/input/         the generated files
   data/<slot>/output/        empty, for the results
 ```

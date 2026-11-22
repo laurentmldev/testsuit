@@ -685,6 +685,26 @@ EXPLOIT = h("Check criteria (mexploit scenarios) on outputs of the run: exploit_
             defaultSnippets=[{"label": "criteria on outputs", "body": {
                 "criteria": ["criteria/${1:name}"], "data": ["${2:test_run}:${3:slot}/output/${4:*.csv}"]}}])
 
+MANUAL = h("An operation a person does on the bench (plug a cable, press a button): the run waits for the operator. "
+           "The Run page opens a dialog with its text and pictures, the All runs list flags the run; the operator "
+           "ticks every check or bypasses it with a reason, may comment each and the whole, then answers Done "
+           "(succeeded), Failed (failed, with the reason) or Redo from one of `redo_from`. No answer within the "
+           "step's `timeout`: error. No `slot` nor `for_each`.", type="object", additionalProperties=False,
+           properties={
+               "title": h("Title of the dialog (default: the step id).", type="string"),
+               "text": h("What to do, in Markdown (`**bold**`, lists, links, headings). A picture "
+                         "(`![Pin F](images/pin_f.jpg)`) is a path relative to the test definition, inside its folder: "
+                         "the datapack carries it. Templates allowed.", type="string"),
+               "checks": h("Points the operator acknowledges one by one before Done.", type="array",
+                           items={"type": "string"}, examples=[["Cable A plugged on pin F", "Power LED green"]]),
+               "redo_from": h("Earlier steps of the phase (or of the sub-pipeline) the operator may run again from, "
+                              "when the bench is not right: that step and the steps after it run again, then the "
+                              "operation is asked again.", type="array", items={"type": "string"},
+                              examples=[["power_on"]]),
+           },
+           defaultSnippets=[{"label": "manual operation", "body": {
+               "title": "${1:Plug cable A}", "text": "${2:Plug **cable A** on pin F.}", "checks": ["${3:Cable A plugged}"]}}])
+
 STEP_FIELDS = {
     "id": h("Step id, unique in its phase or sub-pipeline (no `.`, `[` or `/`). Steps of a sub-pipeline appear as "
             "`<uses step>.<id>`.", type="string"),
@@ -698,6 +718,7 @@ STEP_FIELDS = {
     "python": PYTHON,
     "http": HTTP,
     "exploit": EXPLOIT,
+    "manual": MANUAL,
     "push": h("Copy files to the component: `{from: <path in the run folder>, to: <path on the component>}`.",
               type="object"),
     "pull": h("Copy files from the component: `{from: <path on the component>, to: <path in the run folder>}`.",
@@ -726,7 +747,7 @@ STEP_FIELDS = {
     "env": h("Environment variables of the step's command.", type="object"),
 }
 
-STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, "
+STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `python`, `http`, `exploit`, `manual`, `push`, `pull`, `delay`, "
          "`wait_for`, `uses`, or a plugin step type), and options.", type="object", required=["id"],
          properties=STEP_FIELDS, additionalProperties=True,
          defaultSnippets=[
@@ -738,6 +759,8 @@ STEP = h("A step: a target (`slot` or `for_each`), one action (`do`, `run`, `pyt
              {"label": "run Python code", "body": {"id": "${1:check}", "python": {"code": "import sys\n${2:sys.exit(0)}\n"}}},
              {"label": "check criteria", "body": {"id": "${1:criteria}", "exploit": {
                  "criteria": ["criteria/${2:name}"], "data": ["${3:test_run}:${4:slot}/output/${5:*.csv}"]}}},
+             {"label": "manual operation", "body": {"id": "${1:plug_cable}", "manual": {
+                 "title": "${2:Plug cable A}", "text": "${3:Plug **cable A** on pin F.}", "checks": ["${4:Cable A plugged}"]}}},
              {"label": "delay", "body": {"id": "${1:run}", "delay": "${2:30s}", "needs": []}},
              {"label": "wait for a state", "body": {"id": "${1:running}", "wait_for": {
                  "state": "running", "slot": "${2:slot}", "timeout": "20s"}}},

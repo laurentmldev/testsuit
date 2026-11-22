@@ -289,7 +289,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 
 ## 5. Datapack model
 
-A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup, included sub-pipeline files and the criteria its exploit steps name (§6.8), `datapack.yml`, `baseline.yml`).
+A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup, included sub-pipeline files and the criteria its exploit steps name (§6.8) and the pictures its manual steps show (§6.9), `datapack.yml`, `baseline.yml`).
 
 ### 5.1 Setup
 
@@ -421,7 +421,7 @@ pipeline:
   slot: <slot>
   for_each: [<slot>...] | slots | <role> | "{{ params.x }}"
   # action (exactly one)
-  do: <command> | run: <script> | python: {...} | http: {...} | exploit: {...}
+  do: <command> | run: <script> | python: {...} | http: {...} | exploit: {...} | manual: {...}
   | push: ... | pull: ... | delay: <duration> | wait_for: {...} | uses: <sub-pipeline> | <plugin type>: ...
   # options
   needs: [<step>...]
@@ -503,6 +503,28 @@ Binds criteria (mexploit scenarios) to the run contents they check.
 - At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys with its `with`, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
 - Result: `succeeded` on exit 0 (every check met), `failed` on exit 1 (a check not met), `error` otherwise, or when no data entry matches a file (an entry matching nothing is noted in the log), or when a criteria entry is absent from the datapack. `timeout`, `retries`, `env` apply; `expect` and `detach` do not. Without `continue_on_error`, the steps that need an exploit step MUST run even when it does not succeed, and its result MUST still count in the verdict (§9.4); `continue_on_error: false` makes them skipped, `true` leaves it out of the verdict as for any step.
 - The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`.
+
+### 6.9 `manual` action
+
+An operation a person does on the bench (plug a cable, press a button) that the run waits for.
+
+```yaml
+- id: plug_cable
+  needs: [...]
+  manual:
+    title: <text>                      # OPTIONAL, the step id by default
+    text: <Markdown>                   # what to do; templates allowed
+    checks: [<text>...]                # OPTIONAL: acknowledged one by one before done
+    redo_from: [<step id>...]          # OPTIONAL: earlier steps the operator may run again from
+  timeout: <duration>                  # OPTIONAL: no answer by then is an error
+```
+
+- The step has no `slot` nor `for_each`; it waits on the sequencer host. `text` or `checks` MUST be given; `title`, `text` and `checks` are rendered with the step's keys.
+- A picture of `text` (`![alt](<path>)`) that is not a web address is a path relative to the test definition, inside its folder (an absolute path or `..` MUST be rejected). Generation MUST copy each into `definition/<path>`; a missing one MUST fail the generation. Pictures of steps in included sub-pipeline files are relative to the test definition too.
+- At run time the step record (§9.3) carries `manual: {title, text, checks: [{text, done, bypassed, nonconform, comment, by, at}], base, since, note, outcome, by, at}` (`base`: the folder of the run its pictures are in, `definition/`) while the step is `running`, and the run is listed with `awaiting_manual: [{step, title, since}]` (`GET /runs`, `GET /runs/{id}`).
+- The operator answers with `POST /runs/{id}/manual/{step}` (`tsq manual`). On one check (`check: <index>`): `done: <bool>` ticks it or not; `comment` sets its comment; `bypass: true` bypasses it and MUST be refused without a comment (its reason), with `nonconform: <bool>` saying whether going on without it makes the run non-conform (the operator's choice, `false` by default); `bypass: false` undoes it. `note` sets the global comment. `outcome: done` ends it `succeeded` and MUST be refused while a check is neither ticked nor bypassed; its reason names the bypassed checks with their comments, and each one bypassed with `nonconform: true` makes the run non-conform (a non-conformity naming the check, who and why) and is recorded as an intervention `bypass` (§9.7). `outcome: failed` ends it `failed` and the global comment is its reason. `outcome: redo` with `from: <step id>` (one of `redo_from`) runs that step and every step that needs it again (§9.7), this operation included, which is asked again; the global comment is the reason. `by` names who answered. Each answer is an event (`step`), so every viewer sees ticks, bypasses and comments. No answer within `timeout`: `error`. Cancel and kill end the wait like any step. The step log records each check (`[x]`, `[ ]` or `[bypassed]`, who, its comment) and the global comment; the campaign view and report list the bypassed checks of each run.
+- Each `redo_from` id MUST name a step of the same phase (or of the same sub-pipeline) that this step needs, directly or not; validation (intake, `tsq validate`, the Editor) MUST reject any other.
+- `retries` asks again after a failed answer; `expect`, `detach` and `with` do not apply. A run executed by another process (`tsq run --local`) cannot be answered through tsqd.
 
 ---
 
@@ -620,8 +642,19 @@ The reason of a step `error` (crash, timeout, killed, transport) MUST be kept.
 - `POST /campaigns` (`tsq submit-campaign`) takes a generated campaign (§5.4). Each datapack MUST pass intake (§9.1) with the campaign's routing tags and expected baseline; if one fails, none is queued. Runs get the entry's priority, else the campaign's (a priority given at submission overrides both), and record `campaign_run` and `routing`.
 - The campaign run is `queued` while every run is queued, `running` while one has not ended, `done` once all ended. Its verdict is the worst of its runs' (`error` > `failed` > `succeeded`, a cancelled run counting as `error`). It is conform iff the manifest and every run are.
 - When it becomes `done`, its report MUST be written to `storage.results/campaigns/<id>/report.html`. A repost of one of its runs reopens it.
+- `POST /runs/{id}/rerun` (`tsq rerun`) runs a datapack of a campaign run again, when the bench was not set up right for example: a new run of the same zip, unchanged (intake again, same routing, priority and expected baseline), recording `rerun_of`. It takes the place of the ended run in its entry, which keeps the earlier ones in `attempts`; only the last attempt of an entry can be run again, and only once it ended. The campaign run reopens; its state, verdict and counts are those of each entry's last attempt, and the view and the report list the earlier attempts with their verdicts. Changing the datapack of a re-run is not supported.
 - `POST /campaigns/{id}/cancel|kill` aborts each of its runs that has not ended (§10.1).
 - The report gives, per run: test definition, verdict, duration, stages or components bound, exploit checks met and not met, first `failed` or `error` step with its reason, non-conformities, and links to the run, that step's log, the exploit reports and the results zip; and the campaign's git state, conformity, pinned versions and routing tags.
+
+### 9.7 Operator controls
+
+A test with a person in the loop may need a step run again, or the run taken on past a step, while its phase runs. These act on the phase whose steps run now (not on `finally` steps, nor on another phase), and only through the process executing the run (not a `tsq run --local` one).
+
+- **Run again** (`POST /runs/{id}/steps/{step}/run_again`, `tsq step <run> <step> run-again`): the step, ended or running, and every step that needs it, directly or not, run anew. Those still running are stopped first. Their earlier records are kept in `replaced_steps` of `run.yml` (a stopped one as `cancelled`, "stopped by an operator, to run again"), and each new record counts its `passes` (2, 3...). The step log goes on with "run again by an operator: pass N".
+- **Continue anyway** (`.../continue`, `tsq step ... continue --reason R`): a reason MUST be given. A running step is stopped and ends `succeeded` ("continued anyway: R"); a `failed` or `error` step becomes `succeeded` with the same reason (its earlier state kept in it), and the steps it held back run. The run is no longer conform: its non-conformities name the step, who and why.
+- **Step-by-step mode** (`POST /runs/{id}/control {mode, breakpoints}`, `tsq step-mode <run> off|each|breakpoints [--breakpoint S]...`), on a queued or running run: `each` pauses after every step of the main steps of a phase, `breakpoints` after the steps listed (`<phase>:<step>` or `<step>`), `off` pauses no more. A paused step has ended; the steps that need it wait until the operator answers **Next** (`.../next`), **Run again** or **Continue anyway**. Turning a mode off, or a breakpoint away, lets the steps paused for it go on. Cancel and kill end the pauses. The run lists `paused: [{step, verdict, since}]` and `control: {mode, breakpoints}` (`GET /runs`, `GET /runs/{id}`).
+- Every action, Redo from of a manual operation (§6.9) included, is recorded in the run's `interventions: [{at, action, step, by, reason, target?, steps?}]` (`action`: `next`, `run_again`, `continue`, `redo_from`, `bypass`; `steps`: the steps run again), kept in `run.yml`, and sent as an `intervention` event; a pause is a `pause` event. The campaign view and report list the interventions of each run but Next.
+- A repost forgets the interventions; the step mode stays.
 
 ---
 
@@ -655,7 +688,8 @@ data/<slot>/output/     everything collected
 data/<slot>/http/       saved HTTP answers
 data/_sequencer/exploit/<step>/   an exploit step's configuration, keys and exploit_runner results (§6.8)
 logs/                   step logs, sequencer.log
-run.yml                 states, binding, verdict, step results, lab_command, non-conformities, campaign_run, routing
+run.yml                 states, binding, verdict, step results, lab_command, non-conformities, campaign_run, routing,
+                        replaced_steps and interventions (§9.7)
 selftest.yml            self-test results, bypasses
 baseline.yml            completed with the run part (§5.3)
 ```
@@ -680,7 +714,10 @@ tsq priority <run> <N>
 tsq validate <zip | testdef.yml> [--lab F] [--setup-config C]
 tsq run <zip> --local [--follow]
 tsq queue | runs [--state S] | show <run> | logs <run> [--step S] [-f]
-tsq cancel | kill | repost <run>
+tsq cancel | kill | repost | rerun <run>
+tsq manual <run> [--step S] [--tick N]... [--bypass N REASON]... [--nonconform] [--done [--comment C] | --fail WHY | --redo-from S]
+tsq step <run> <step> next | run-again | continue [--reason R]
+tsq step-mode <run> off | each | breakpoints [--breakpoint S]...
 tsq stages | components
 tsq hold | release | maintenance [--note T] | resume <stage | component>
 tsq selftest [<stage | component>]
@@ -699,6 +736,8 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 |---|---|
 | `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` | submit, list, inspect, change priority |
 | `POST /runs/{id}/cancel \| kill \| repost \| retry` | §10, §8.4 |
+| `POST /runs/{id}/rerun`, `POST /runs/{id}/manual/{step}` | run a campaign's datapack again (§9.6), answer a manual operation (§6.9) |
+| `POST /runs/{id}/control`, `POST /runs/{id}/steps/{step}/{next \| run_again \| continue}` | step-by-step mode and breakpoints, operator actions on a step (§9.7) |
 | `POST /campaigns` (multipart manifest, datapacks, priority), `GET /campaigns`, `GET /campaigns/{id}`, `GET /campaigns/{id}/report`, `POST /campaigns/{id}/cancel \| kill` | campaign runs (§9.6) |
 | `GET /runs/{id}/pipeline`, `GET /runs/{id}/logs/{step}`, `GET /runs/{id}/files/{path}` | expanded pipeline, logs, files (HTTP range) |
 | `GET /stages`, `GET /components`, `POST /{stages\|components}/{id}/{hold\|release\|maintenance\|resume}` | resources |
@@ -721,7 +760,9 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Push**: commit in the user's name, optional tag, push with credentials supplied in the request; credentials MUST NOT be stored or logged, and tsqd MUST NOT push with its own credentials (agent, credential helper, `insteadOf` rewrites). A rejected push applies nothing.
 - **Lab changes** apply only on reload (§4.9).
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
-- **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it; its page shows the report.
+- **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it, an earlier attempt greyed under its re-run; its page shows the report and runs an ended datapack again.
+- **Manual operations**: the step palette and form edit a `manual` step (§6.9). The Run page opens the dialog of the operation the run waits for (its Markdown text and pictures, its checks, Done, Failed and Redo from); All runs and the campaign page flag the runs that expect one.
+- **Operator controls** (§9.7): the Run page has a step mode selector (off, after each step, at breakpoints), a banner per paused step (Next, Run again, Continue anyway), the same actions and a breakpoint toggle on the selected step of the running phase, the pass of a step run again, and the list of operator actions; All runs and the campaign page flag paused runs.
 - **Requirements**: the Datapacks page has a Requirements subtab: the path tree of a source (requirements.yml, kind `requirements`), with per node the coverage of its requirements over the latest ended run of each test definition (else the test definition, linked only), optionally restricted to a campaign's test definitions; the requirements of the node (with or without its sub-nodes), each with its text, status and links; and the matrices of §5.5 (`GET /edit/sessions/{id}/requirements[/report]?source=&campaign=`). The test definition's problems include its unknown or inactive requirements and those of its checks (errors), and pinned versions that changed (warnings) (§5.5).
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 

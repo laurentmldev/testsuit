@@ -20,6 +20,8 @@ import { get, post, put, url, useResource } from "../api";
 import { Dialog, Field, IdText, Section, Text, Toggle } from "../fields";
 import { LiveLog, logWarnings } from "../editor/Generate";
 import { ago, attempt, Badge, classes, duration, Markdown, navigate, setQuery, Spinner, time, type Route } from "../util";
+import { ACTION_LABELS, PausedFlag } from "./Operator";
+import { ManualFlag, rerun } from "./Manual";
 
 const CAMPAIGNS_INTRO = `A **campaign** is a list of test definitions generated and run together: one datapack each, all with the **same version of every dataset** they import (the campaign lists each one, no test definition chooses on its own), queued under one campaign run with their **priority** and the **tags** the lab resources must carry. Its runs are grouped under it in **All runs**, with a synthetic report.`;
 
@@ -354,7 +356,7 @@ export function CampaignProgress({ counts }: { counts: any }) {
 
 /** The page of a campaign run (#/campaigns/<id>): its runs at a glance, with links to go deeper, and its report. */
 export function CampaignRunPage({ id }: { id: string }) {
-  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign"]);
+  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause"]);
   const v = view.data;
   if (view.error) return <div className="page"><div className="error-box">{view.error}</div></div>;
   if (!v) return <div className="page"><Spinner className="block" text="Reading the campaign run…" /></div>;
@@ -396,8 +398,12 @@ export function CampaignRunPage({ id }: { id: string }) {
             return (
               <tr key={r.run}>
                 <td><strong>{r.testdef}</strong><div className="muted small mono">{r.testdef_file}{r.setup_config && ` · ${r.setup_config}`}</div></td>
-                <td><a href={`#/runs/${r.run}`}>{r.run}</a><div className="muted small">priority {r.priority}</div></td>
-                <td>{r.state === "done" || r.state === "cancelled" ? <Badge value={r.verdict} /> : <Badge value={r.state} />}</td>
+                <td><a href={`#/runs/${r.run}`}>{r.run}</a><div className="muted small">priority {r.priority}{r.attempt > 1 && <> · attempt {r.attempt}</>}</div>
+                  {(r.earlier || []).map((a: any) => <div key={a.run} className="small muted earlier-attempt" title={a.failed_step ? `${a.failed_step.phase}:${a.failed_step.id}: ${a.failed_step.reason}` : a.reason}>
+                    earlier: <a href={`#/runs/${a.run}`}>{a.run}</a> <Badge value={a.verdict || a.state} /></div>)}</td>
+                <td>{r.state === "done" || r.state === "cancelled" ? <Badge value={r.verdict} /> : <Badge value={r.state} />} <ManualFlag run={r} /> <PausedFlag run={r} />
+                  {(r.state === "done" || r.state === "cancelled") && <div><button className="small" title="Run this datapack again, unchanged (the bench was not set up right, for example): a new run takes its place in the campaign, this one is kept as an earlier attempt"
+                    onClick={() => rerun(r).then(() => view.refresh())}>Run again</button></div>}</td>
                 <td className="small">{r.activated_at ? duration(r.activated_at, r.ended_at) : ""}</td>
                 <td className="small">{(r.stages?.length ? r.stages : [...new Set(Object.values(r.components || {}))]).map((s: any) => <span key={s} className="chip">{s}</span>)}</td>
                 <td className="small">
@@ -409,6 +415,9 @@ export function CampaignRunPage({ id }: { id: string }) {
                     {" · "}<a href={url(`runs/${r.run}/logs/${step}`)} target="_blank" rel="noreferrer">log</a></div>}
                   {(r.checks?.not_met || []).slice(0, 3).map((c: any, i: number) => <div key={i} className="muted">✗ <code>{c.criteria}</code> {c.check || c.scenario}</div>)}
                   {!f && r.reason && <div className="muted">{r.reason}</div>}
+                  {(r.bypassed_checks || []).map((b: any, i: number) => <div key={"b" + i} className="warn-text" title={`step ${b.step}${b.by ? `, by ${b.by}` : ""}`}>bypassed{b.nonconform ? " (non-conform)" : ""}: {b.check} <span className="muted">({b.comment})</span></div>)}
+                  {(r.interventions || []).filter((i: any) => !["next", "bypass"].includes(i.action)).map((i: any, n: number) => <div key={"i" + n} className={i.action === "continue" ? "warn-text" : "muted"} title={time(i.at)}>
+                    {ACTION_LABELS[i.action] || i.action} <code>{i.action === "redo_from" ? i.target : i.step}</code>{i.by ? ` (${i.by})` : ""}{i.reason ? `: ${i.reason}` : ""}</div>)}
                   {(r.nonconform || []).slice(0, 2).map((n: string, i: number) => <div key={i} className="warn-text">non-conform: {n}</div>)}
                   {r.results && <div><a href={url(`runs/${r.run}/files/results.zip?results=true`)}>results zip</a></div>}
                 </td>

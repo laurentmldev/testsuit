@@ -979,7 +979,7 @@ A card can also be given as its text only. A card pinned to a step that its phas
 Step fields:
 - `with`: the parameters of the command of a `do` step (section 7.1), of a sub-pipeline (`uses`, section 8.4), or the keys an `exploit` step gives its criteria (below);
 - target: `slot`, or `for_each` (a list of slots, `slots` for all the slots of the phase, or a role); the step runs on the lab component bound to each slot;
-- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `exploit` (criteria on outputs of the run, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
+- action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `exploit` (criteria on outputs of the run, below), `manual` (an operation a person does on the bench, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
 - options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
 
 **Command parameters.** A `do` step gives the parameters its command declares (section 7.1) with `with:`, so the same command runs several times in other contexts:
@@ -1066,6 +1066,30 @@ roles:
 The exploit step form proposes them. A mandatory one (the default) is also checked after each `do: collect` on a slot of that role: missing, the collect step fails, naming it, so a lost recording reads as such rather than as a criterion failing; an optional one missing is only noted in the step log. The lab editor edits them in the role form (**Expected outputs**).
 
 The `run: exploit_runner <config>` step of earlier versions still works, but the tools cannot tell which criteria it uses.
+
+**Manual operations** ([SPEC](SPEC.md) section 6.9). A `manual` step is something a person does on the bench, such as plugging a cable, that the run waits for:
+
+```yaml
+- id: plug_cable
+  needs: [ready]
+  manual:
+    title: Plug cable A
+    text: |
+      Plug **cable A** on pin F of {{ slots.dut.name }}.
+
+      ![Pin F](images/pin_f.jpg)
+    checks:
+      - Cable A plugged on pin F
+      - Power LED green
+    redo_from: [start]                 # optional: earlier steps the operator may run again from
+  timeout: 30m                         # optional: no answer by then is an error
+```
+
+- **Text**: Markdown (bold, italic, lists, headings, links, code), with the step's keys. A picture is a web address, or a path relative to the test definition and inside its folder: the datapack carries it (`definition/<path>`), and a missing one stops the generation.
+- **Run**: no `slot`: the step waits on the sequencer host. The Run page shows a banner and opens a dialog with the text, its pictures and the checks; the step's node says it waits. **All runs** and the campaign page flag the run (**✋ manual op**). The operator ticks each check, or **bypasses** it with a reason (the bench cannot show it, for example), and says whether going on without it **makes the run non-conform** (unticked by default: the run stays conform), and may comment on any check and on the whole operation; every viewer sees them at once. Then **Done**, possible once every check is ticked or bypassed (`succeeded`; the bypassed checks and their reasons become the step's reason), or **Failed** with the global comment saying why (`failed`, the comment as reason), or, when the step lists `redo_from`, **Redo from** one of those earlier steps: that step and every step after it run again (the bench is not right: power it again, restart the counter...), then the operation is asked again, the global comment kept as the reason ([operator controls](#104-operator-controls)). Each `redo_from` must be a step this one needs, directly or not, in its phase or sub-pipeline. Who did what, and when, is kept with each check and in the step log; the campaign page and report list the bypassed checks of each run. Closed, the dialog stays closed until opened again from the banner.
+- **Without the UI**: `tsq manual <run>` shows the operation, `--tick N` ticks a check, `--bypass N "<reason>"` bypasses one (`--nonconform`: the run is then non-conform), `--done [--comment "<text>"]`, `--fail "<why>"` or `--redo-from <step>` answers (`POST /runs/{id}/manual/{step}`).
+- `retries` asks again after a failed answer. A run of `tsq run --local` runs in another process: tsqd cannot answer it.
+- **Editor**: the palette offers **manual operation**; its form edits the title, the text (with a preview), the checks, one per line, and the steps it may be redone from.
 
 `wait_for` covers ready checks done from outside: `state` (section 7.5), `tcp`, `http` (a request and its `expect`, section 7.4), `file`, `log` (regex), `cmd` (exit 0), each with `timeout` and `interval`.
 
@@ -1249,6 +1273,7 @@ A **campaign** runs a list of test definitions together: the datapack of each on
 3. **Routing**: the campaign's `stage_tags` are added to the tags of every stage slot (or of the stage slots of a given stage type), and its `component_tags` to the slots of each role named. Binding (section 9) then picks only resources carrying all of them. A stage's or component's id is one of its tags, so `stage_tags: [bench_2]` runs everything on `bench_2`. The tags are recorded in the run record, `run.yml` and the `run` part of the results baseline (`routing`). The datapacks themselves are unchanged: the same datapack can be routed elsewhere.
 4. **Runs**: each run goes through the queue as any other: priorities, backfilling and locking are unchanged, and runs of a campaign may run in parallel on different resources. Cancel, kill and repost act on one run; `tsq campaign <id> --cancel` (`POST /campaigns/{id}/cancel|kill`) on every run of the campaign that has not ended.
 5. **Verdict and report**: the campaign run is `queued` while none of its runs has started, `running` while one has not ended, then `done` with the worst verdict of its runs (`error` > `failed` > `succeeded`; a cancelled run counts as `error`). Its report is then written to `storage.results/campaigns/<id>/report.html`. A reposted run reopens its campaign run, whose report is written again when it ends.
+6. **Run a datapack again**: when a run of the campaign went wrong for a reason outside the test (a bench not set up right, a cable missing), **Run again** on its row of the campaign page or on its Run page (`tsq rerun <run>`, `POST /runs/{id}/rerun`) queues a new run of the same datapack zip, unchanged: same routing, priority and expected baseline. It takes the place of the ended run in the campaign, which keeps that one as an earlier attempt: the campaign's state, verdict and counts are those of each datapack's last attempt, and its page and report list the earlier attempts with their verdicts and links. Only the last attempt, once ended, can run again. Changing the datapack before running it again is not supported yet. A run outside a campaign is posted again with **Re-post** instead, which replaces it.
 
 The **report** gives, for each run: its test definition, verdict, duration, the stage or components it ran on, the checks of its exploit steps (met out of total, and those not met), its first failed step with its reason, and its non-conformities. Links lead further: the Run page, the log of the failed step, each exploit report, and the results zip. It also gives the campaign's git state, conformity, dataset versions and tags. The UI shows it as a page (`#/campaigns/<id>`), and `GET /campaigns/{id}/report` serves it as a self-contained HTML page (`?download=true`: as a file).
 
@@ -1290,6 +1315,15 @@ Links use the same key at both levels, `reqs`: on the test definition (`reqs: [R
 - the **Requirements** subtab of **Datapacks** (Editor mode): the path tree of the requirements source, each node with its counts and worst status; a node's requirements (with or without its sub-nodes), their text on a click, and which test definitions and checks cover them, verified by the latest ended run of each test definition. Uncovered requirements are listed too. A campaign filter keeps the test definitions of one campaign. **Report** gives the matrices as one HTML page.
 
 The REST endpoints are `GET /runs/{id}/requirements`, `GET /campaigns/{id}/requirements` and `GET /edit/sessions/{id}/requirements` (JSON), each with `/report` for the HTML page.
+
+### 10.4 Operator controls
+
+A test with a person in the loop may need a step run again even though it succeeded, or the run taken on by hand past a step ([SPEC](SPEC.md) section 9.7). These act on the phase whose steps run now, from the Run page or the command line:
+
+- **Run again** on a step (its side panel when selected, or the banner of a paused step; `tsq step <run> <step> run-again`): the step and every step that needs it run anew; those still running are stopped first. The earlier records are kept (`replaced_steps` in `run.yml`), the new ones show their pass (**pass 2**), and the step log goes on.
+- **Continue anyway** on a running, failed or error step (`tsq step <run> <step> continue --reason "<why>"`): a reason is required. The step ends `succeeded` with that reason and the steps it held back run; the run is then **non-conform**, its non-conformities naming the step, who and why.
+- **Step-by-step mode** (the **Step mode** selector of the Run page, from the queue on; `tsq step-mode <run> off|each|breakpoints [--breakpoint <step>]...`): **pause after each step**, or **at breakpoints**, set with the **Breakpoint** toggle of a selected step. A paused step has ended; a banner says so, with **Next** (the steps after it go on), **Run again** and **Continue anyway**. Back to **off**, the paused steps go on. **All runs** and the campaign page flag paused runs (**⏸ paused**).
+- Every action is listed under **Operator actions** on the Run page, kept in `run.yml` (`interventions`: when, what, on which step, who, why) and in the campaign view and report.
 
 ## 11. Abort and kill
 
@@ -1334,6 +1368,10 @@ tsq run <datapack.zip> --local                              # no daemon: dev mod
 tsq queue                                                   # waiting runs, priorities, what they wait for
 tsq runs [--state running] | tsq show <run> | tsq logs <run> [--step S] [-f]
 tsq cancel <run> | tsq kill <run> | tsq repost <run>
+tsq rerun <run>                                             # run a datapack of a campaign again, the earlier run kept (section 10.2)
+tsq manual <run> [--step S] [--tick N]... [--bypass N REASON]... [--nonconform] [--done [--comment C] | --fail WHY | --redo-from S]   # a manual operation (section 8.3)
+tsq step <run> <step> next | run-again | continue [--reason R]   # operator actions on a step of the running phase (section 10.4)
+tsq step-mode <run> off | each | breakpoints [--breakpoint S]...  # pause after each step, or at breakpoints
 tsq stages | tsq components                                 # monitored state, lock state, holder
 tsq hold | release | maintenance | resume <stage | component>
 tsq selftest [<stage | component>]                          # platform self-test on demand (section 7.6)
@@ -1346,6 +1384,8 @@ tsq config                                                  # settings in use, a
 
 **REST API** (FastAPI, OpenAPI generated):
 - `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` (priority), `POST /runs/{id}/cancel|kill|repost`, `GET /runs/{id}/logs/{step}`;
+- `POST /runs/{id}/manual/{step}` (answer a manual operation: `{check, done}` ticks a check, `{check, bypass: true, comment, nonconform}` bypasses it (`nonconform: true`: the run is then non-conform), `{check, comment}` comments it, `{note}` the global comment, `{outcome: done|failed}` ends it, `{outcome: redo, from}` redoes it from an earlier step, `by` names who), `POST /runs/{id}/rerun` (run a datapack of a campaign again); a run lists the manual operations it waits for in `awaiting_manual`, and a re-run names the run it replaces in `rerun_of`;
+- `POST /runs/{id}/control` (`{mode: off|each|breakpoints, breakpoints}`), `POST /runs/{id}/steps/{step}/next|run_again|continue` (`{reason, by}`): operator controls; a run lists its `paused` steps, its `control` and its `interventions`;
 - `GET /stages`, `GET /components`, `POST /stages/{id}|/components/{id}/hold|release|maintenance|resume`;
 - `GET /components/{id}/probe` (the report of the probe going on now when there is one, `running`, with its steps so far, the last one being the one that runs; else the last probe's report: what was tested, on which host and transport, each command and its answer, the rule that matched and why, plus the last self-test), `POST /components/{id}/probe` (probe now, and return the new report);
 - `GET /runs/{id}/files/{path}` (list or download, with HTTP range requests for large files), the same for queued datapacks and results;
@@ -1379,10 +1419,12 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 | Post a datapack | upload a zip, set its priority and an optional expected baseline; see at once whether it is valid, conform, and which stage types it waits for |
 | See the lab at a glance | the **Diagram** tab of the Lab page, its default, laid out top-down: each stage an area holding its components, the ad hoc components (and those shared by stages) outside every stage area, the components of an area that share an address (`ansible_host`) in a box of that address; each component a card with its picture (`tsq_icon`), name and state; pointing at it floats a detailed card beside it (role, host, description, lock, hold or maintenance, last probe, the command it runs now), a click opens its details and actions, a click on its state its probe report; the run holding a stage on its title (datapack, state, phase); the links between components drawn with horizontal and vertical lines, hopping over the ones they cross: *probe* from the component a probe or command runs through (`via`), *cmd* from the component a command, probe or variable names, *link* for `tsq_links`; a link's details give each probe or command behind it, as it runs (the keys of the lab rendered, each value showing its key when pointed at, as for the commands run by hand), in full. A click on a link type of the legend hides or shows the links of that type (kept in the browser). A click on a stage title or a link gives its details and actions, on a run opens it. **Arrange…** lets a user move cards and stage areas and set a component's opacity (its links follow), saved on the sequencer for every user (`GET|PUT /lab/layout`) until **Automatic layout**. A card outside every stage (or its address box) placed over a stage area is drawn beside that area. The **Table** tab lists them one per row |
 | Manage and monitor components | stages and components with their monitored state, lock state and holder, self-test results, history of state changes; hold, release, maintenance, resume and self-test buttons. The note entered with a hold or a maintenance shows with it while it lasts: on the card in the Diagram (one line, all of it when the card is pointed at) and on the stage title, and in full in the Table. Clicking a component's state opens its probe report: what was tested (probe kind, host, transport, each command), the system's answer and exit status, the state rules with the one that matched, why the state is what it is (a failed self-test keeping it broken, with the failed checks, their command and answer), and a *Probe again* button: the report is cleared at once and each step shows as it starts, then its answer, while the probe runs; in the table, a component being probed says so |
-| Follow a campaign | **All runs** groups the runs of a campaign under one row: its name, a progress bar (runs done out of all, coloured by verdict), its verdict once done, folded once done and open while it runs. Its page (`#/campaigns/<id>`) gives the counts by verdict, one row per run (verdict, duration, where it ran, checks met, first failed step, non-conformities) with links to the run, the step's log, the exploit reports and the results zip, the pinned dataset versions and the tags; **Report** and **Download** give the synthetic report as an HTML page; **Cancel all** cancels its runs that have not ended |
+| Follow a campaign | **All runs** groups the runs of a campaign under one row: its name, a progress bar (runs done out of all, coloured by verdict), its verdict once done, folded once done and open while it runs. Its page (`#/campaigns/<id>`) gives the counts by verdict, one row per run (verdict, duration, where it ran, checks met, first failed step, non-conformities) with links to the run, the step's log, the exploit reports and the results zip, the pinned dataset versions and the tags; **Report** and **Download** give the synthetic report as an HTML page; **Cancel all** cancels its runs that have not ended; **Run again** on an ended run queues its datapack again, unchanged, the earlier attempt kept under it (greyed in All runs) |
+| Do a manual operation | a run whose pipeline waits for a person (a `manual` step, section 8.3) is flagged **✋ manual op** in All runs and on its campaign page; its Run page opens a dialog with what to do (Markdown and pictures) and the checks to tick or bypass with a reason, comments on each and on the whole, then **Done**, **Failed** or **Redo from** an earlier step |
+| Take a run step by step | the **Step mode** of the Run page pauses after each step or at breakpoints: a banner per paused step with **Next**, **Run again** and **Continue anyway**; the same actions on the selected step of the running phase; **⏸ paused** in All runs and on the campaign page; the **Operator actions** list on the Run page |
 | Follow requirements coverage | the **Requirements** tab of a run, the **Requirements** section of a campaign run and its report, and the **Requirements** subtab of Datapacks (section 10.3): statuses per requirement and per test, matrices both ways, links to the requirements, runs and exploit reports |
 | Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
-| Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs, each phase's finally steps in a lane of their own after its steps, and the comment cards of each phase (read-only, under its frame, a pinned one naming its step); cancel and kill, re-post an ended run |
+| Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs, each phase's finally steps in a lane of their own after its steps, and the comment cards of each phase (read-only, under its frame, a pinned one naming its step); cancel and kill, re-post an ended run, or run an ended run of a campaign again (its earlier attempt kept) |
 | Access a datapack's contents | before the run (queued: inputs, definition, keys, baseline), during the run (inputs, outputs collected so far, logs) and after it (the results datapack): a file tree with viewers for text, YAML, CSV and logs, and downloads for the rest, large files included. A file generated from a template lists the keys it used and the dictionary of each (from `datapack.yml`); each `{{ expression }}` output is underlined, and hovering it shows the expression and the keys it read (from the datapack's `values.json`, written since this was added: older datapacks have the list only). Text written by `{% if %}`/`{% for %}` alone has no hover, a loop variable shows its expression with no key, and a file changed by a postprocess or that a filter makes impossible to locate (such as `length` of a value) keeps the list only |
 
 ### 13.2 Editor mode
@@ -1499,10 +1541,12 @@ src/testsuit/sequencer/
   model.py            # pydantic: pipeline, sub-pipelines, phases, steps; resources needed; flattening, validation
   intake.py           # verify zip, unzip, load the embedded definition and context, check against the lab
   store.py            # SQLite: runs, campaign runs, locks, resources (state, maintenance, hold), usage, events
-  campaigns.py        # campaign runs: their runs at a glance, verdict, synthetic report (HTML, text)
+  campaigns.py        # campaign runs: their runs at a glance (earlier attempts of re-runs), verdict, synthetic report
+  exploitstep.py      # the exploit action: criteria of a pipeline, exploit_runner on outputs of the run
+  manualstep.py       # the manual action: its checks and pictures, the operator's answers
   scheduler.py        # binding, backfilling, aging, queue order
   monitor.py          # state probes, expected vs probed state, platform self-test (7.5, 7.6)
-  engine.py           # steps (run, do, delay, wait_for, push, pull, plugins), step DAG, retries, finally
+  engine.py           # steps (run, do, delay, wait_for, manual, push, pull, plugins), step DAG, retries, finally
   sequencer.py        # intake, scheduling loop, run lifecycle, per-phase locking, abort, restart recovery
   results.py          # results datapack, large files, fetch.txt
   transports/         # local, ssh (AsyncSSH, SFTP), process groups and pid files

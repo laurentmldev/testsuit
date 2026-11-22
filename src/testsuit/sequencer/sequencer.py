@@ -319,6 +319,35 @@ class Sequencer:
             self._queue_run(fields)
         return self.campaign_view(campaign_id)
 
+    def rerun(self, run_id: str) -> dict:
+        """Run a datapack of a campaign run again (SPEC section 9.6): a new run of the same datapack zip, unchanged
+        (same routing, priority and expected baseline), that takes the place of the ended one in its campaign run.
+        The earlier attempt is kept, listed with it; the campaign's verdict is that of each entry's last attempt."""
+        run = self.require_run(run_id)
+        if not run.get("campaign_run"):
+            raise SequencerError(f"run {run['id']} is not part of a campaign run: post it again instead (repost)")
+        if run["state"] not in DONE_STATES or run["id"] in self.executions:
+            raise SequencerError(f"run {run['id']} is {run['state']}: only an ended run can be run again")
+        campaign = self.require_campaign_run(run["campaign_run"])
+        entries = campaign.get("entries") or []
+        entry = next((e for e in entries if e.get("run") == run["id"]), None)
+        if entry is None:
+            later = next((e["run"] for e in entries if run["id"] in (e.get("attempts") or [])), None)
+            raise SequencerError(f"run {run['id']} is an earlier attempt" + (f": run {later} took its place, run that "
+                                 "one again" if later else " of its campaign run"))
+        if not Path(run["zip"] or "").is_file():
+            raise SequencerError(f"run {run['id']}: its datapack zip is gone, it cannot run again")
+        fields = self._intake(Path(run["zip"]), run["priority"], run.get("expected_baseline"), run.get("routing"),
+                              campaign["id"])
+        fields["rerun_of"] = run["id"]
+        entry["attempts"] = [*(entry.get("attempts") or []), run["id"]]
+        entry["run"] = fields["id"]
+        self.store.update_campaign_run(campaign["id"], entries=entries, ended_at=None, verdict=None)
+        new = self._queue_run(fields)
+        self.notify("campaign", {"campaign_run": campaign["id"], "campaign": campaign.get("campaign"), "state": "running",
+                                 "rerun": {"run": new["id"], "of": run["id"]}})
+        return new
+
     def require_campaign_run(self, campaign_id: str) -> dict:
         campaign = self.store.get_campaign_run(campaign_id)
         if campaign is None:
@@ -510,13 +539,130 @@ class Sequencer:
         self.store.release(run["id"])
         self.store.update_run(run["id"], state="queued", verdict=None, reason=None, submitted_at=now(),
                               activated_at=None, ended_at=None, waiting_for=None, attempts=0, binding=None,
-                              phase=None, results=None, warnings=None, steps=None, abort=None,
+                              phase=None, results=None, warnings=None, steps=None, abort=None, interventions=None,
                               dir=str(run_dir / bag.name), local=int(self.local), owner=OWNER)
         if run.get("campaign_run"):                          # its campaign run is not over any more
             self.store.update_campaign_run(run["campaign_run"], ended_at=None, verdict=None)
         self.notify("run", {"run": run["id"], "state": "queued", "name": run["name"], "priority": run["priority"],
                             "conform": bool(run["conform"]), "reposted": True})
         self.wake()
+        return self.store.get_run(run["id"])
+
+    def answer_manual(self, run_id: str, step: str, body: dict, by: str = "") -> dict:
+        """The operator's answer to a manual operation a run waits for (SPEC section 6.9): a check ticked or not,
+        or the operation done or failed. step: its record key ('<phase>:<step>'), or a unique prefix of it."""
+        from testsuit.sequencer.manualstep import acknowledge
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        ctx = execution.ctx if execution is not None else None
+        if ctx is None:
+            raise SequencerError(f"run {run['id']} is {run['state']}" + (" (run by another process: tsq run --local)"
+                                 if run.get("local") and run["state"] not in DONE_STATES else "")
+                                 + ": it waits for no manual operation here")
+        keys = [k for k in ctx.manual_waits if k == step] or [k for k in ctx.manual_waits if k.startswith(step)]
+        if len(keys) != 1:
+            waiting = ", ".join(ctx.manual_waits) or "none"
+            raise SequencerError(f"run {run['id']}: no single manual operation '{step}' waiting (waiting: {waiting})")
+        record, answer = ctx.records[keys[0]], ctx.manual_waits[keys[0]]
+        outcome = acknowledge(record.manual, body, by)
+        ctx.notify("step", {"run": run["id"], **record.as_dict()})
+        if outcome and not answer.done():
+            answer.set_result(outcome)
+        return record.as_dict()
+
+    # ── operator controls (SPEC section 9.7) ────────────────────────────
+    def _live(self, run_id: str):
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        if execution is None or execution.ctx is None:
+            raise SequencerError(f"run {run['id']} is {run['state']}" + (" (run by another process: tsq run --local)"
+                                 if run.get("local") and run["state"] not in DONE_STATES else "")
+                                 + ": no step of it runs here now")
+        return run, execution
+
+    def set_control(self, run_id: str, mode: str | None = None, breakpoints: list[str] | None = None) -> dict:
+        """Step-by-step mode of a run, queued or running: 'off', 'each' (pause after every step) or 'breakpoints'
+        (after the steps listed, '<phase>:<step>' or '<step>'). Turning it off lets paused steps go on."""
+        run = self.require_run(run_id)
+        if run["state"] in DONE_STATES:
+            raise SequencerError(f"run {run['id']} is {run['state']}")
+        control = dict(run.get("control") or {})
+        if mode is not None:
+            if mode not in ("off", "each", "breakpoints"):
+                raise SequencerError(f"step mode '{mode}': 'off', 'each' or 'breakpoints'")
+            control["mode"] = mode
+        if breakpoints is not None:
+            control["breakpoints"] = [str(b) for b in breakpoints]
+        control.setdefault("mode", "off")
+        control.setdefault("breakpoints", [])
+        execution = self.executions.get(run["id"])
+        ctx = execution.ctx if execution is not None else None
+        if ctx is not None:
+            ctx.step_mode = {"mode": control["mode"], "breakpoints": control["breakpoints"]}
+            runner = ctx.phase_runner
+            if runner is not None:                       # paused steps the new mode no longer stops at
+                for pause in list(ctx.pauses.values()):
+                    if not runner.pauses_after(pause["step"]):
+                        runner.resume(pause["step"])
+            execution.save_control()
+        else:
+            self.store.update_run(run["id"], control=control)
+        self.notify("run", {"run": run["id"], "state": run["state"], "control": control})
+        return self.store.get_run(run["id"])
+
+    async def step_action(self, run_id: str, step: str, action: str, by: str = "", reason: str = "") -> dict:
+        """An operator action on a step of the phase running now ('<phase>:<step>' or '<step>'): 'next' lets a
+        paused step go on, 'run_again' runs it and the steps that need it again, 'continue' goes on past it (a
+        reason is required, and the run is no longer conform)."""
+        run, execution = self._live(run_id)
+        ctx = execution.ctx
+        runner = ctx.phase_runner
+        if runner is None:
+            raise SequencerError(f"run {run['id']}: no phase is running its steps now")
+        phase, _, step_id = step.rpartition(":")
+        if phase and phase != runner.id:
+            raise SequencerError(f"run {run['id']}: phase '{phase}' is not the one running now ('{runner.id}')")
+        step_id = step_id.split("[")[0]
+        key = f"{runner.id}:{step_id}"
+        if action == "next":
+            if not runner.resume(step_id):
+                raise SequencerError(f"step {key} is not paused")
+            ctx.intervene("next", key, by, reason)
+        elif action == "run_again":
+            ids = await runner.rewind(step_id)
+            ctx.intervene("run_again", key, by, reason, steps=ids)
+        elif action == "continue":
+            if not reason.strip():
+                raise SequencerError("say why the run can go on past this step (reason)")
+            await runner.force(step_id, reason.strip())
+            ctx.intervene("continue", key, by, reason.strip())
+        else:
+            raise SequencerError(f"no step action '{action}': next, run_again or continue")
+        return self.store.get_run(run["id"])
+
+    async def redo_manual(self, run_id: str, step: str, target: str, by: str = "", note: str = "") -> dict:
+        """The answer 'redo from <step>' to a manual operation: run that earlier step (one its 'redo_from' lists)
+        and every step after it again, up to the operation, which is asked again."""
+        run, execution = self._live(run_id)
+        ctx = execution.ctx
+        keys = [k for k in ctx.manual_waits if k == step] or [k for k in ctx.manual_waits if k.startswith(step)]
+        if len(keys) != 1:
+            raise SequencerError(f"run {run['id']}: no single manual operation '{step}' waiting")
+        record, runner = ctx.records[keys[0]], ctx.phase_runner
+        allowed = record.manual.get("redo_from") or []
+        if target not in allowed:
+            raise SequencerError(f"'{target}' is not a step this operation can be redone from"
+                                 + (f" ({', '.join(allowed)})" if allowed else ": it lists none (redo_from)"))
+        if runner is None or runner.id != record.phase:
+            raise SequencerError(f"phase '{record.phase}' is not running its steps now")
+        namespace = record.id.rpartition(".")[0]
+        flat_id = target if any(fs.id == target for fs in runner.flat.steps) else f"{namespace}.{target}"
+        if record.id not in runner.dependants(flat_id):
+            raise SequencerError(f"step '{target}' does not come before '{record.id}': it cannot be redone from there")
+        record.manual.update(outcome="redo", redo_from=allowed, note=note.strip(), by=by, at=now())
+        ids = await runner.rewind(flat_id)
+        ctx.intervene("redo_from", f"{record.phase}:{record.id}", by, note.strip(), target=f"{record.phase}:{flat_id}",
+                      steps=ids)
         return self.store.get_run(run["id"])
 
     def require_run(self, run_id: str) -> dict:
@@ -1058,12 +1204,45 @@ class RunExecution:
             self.seq.notify(kind, data)
             if kind == "step":                         # live steps for other processes (tsq show on a --local run)
                 self.snapshot_steps()
+            elif kind == "intervention":               # an operator action: kept with the run (SPEC section 9.7)
+                self.record_intervention(data)
+            elif kind == "pause":
+                self.save_control()
 
-        return RunContext(run_id=self.run_id, bag=self.datapack.dir, datapack=self.datapack, bound={},
+        control = run.get("control") or {}
+        ctx = RunContext(run_id=self.run_id, bag=self.datapack.dir, datapack=self.datapack, bound={},
                           stage_slot_binding={}, priority=run["priority"], notify=notify, state_of=state_of,
                           expect_state=lambda concrete, state: self.store.set_expected(concrete, state),
                           on_state_mismatch=self.datapack.pipeline.on_state_mismatch,
                           max_output=self.seq.config.storage.max_run_output, lab=self.seq.lab)
+        ctx.step_mode = {"mode": control.get("mode") or "off", "breakpoints": list(control.get("breakpoints") or [])}
+        return ctx
+
+    def save_control(self) -> None:
+        """The step-by-step mode of the run and the steps paused now, for every process and the runs list."""
+        if self.ctx is None:
+            return
+        paused = [{"step": k, "verdict": p["verdict"], "since": p["since"]} for k, p in self.ctx.pauses.items()]
+        self.store.update_run(self.run_id, control={**self.ctx.step_mode, "paused": paused})
+
+    def record_intervention(self, entry: dict) -> None:
+        run = self.store.get_run(self.run_id)
+        fields: dict = {"interventions": self.ctx.interventions}
+        if entry.get("action") == "continue":            # a step's own check overridden: the run is not conform
+            why = (f"step {entry['step']} continued anyway by an operator"
+                   + (f" ({entry['by']})" if entry.get("by") else "") + f": {entry.get('reason')}")
+            known = list(run["nonconform"] or [])
+            if why not in known:
+                fields.update(conform=False, nonconform=[*known, why])
+        if entry.get("action") == "bypass":              # a manual check bypassed, said to make the run non-conform
+            why = (f"check '{entry.get('check')}' of manual step {entry['step']} bypassed"
+                   + (f" by {entry['by']}" if entry.get("by") else "") + f": {entry.get('reason')}")
+            known = list((fields.get("nonconform") or run["nonconform"]) or [])
+            if why not in known:
+                fields.update(conform=False, nonconform=[*known, why])
+        self.store.update_run(self.run_id, **fields)
+        log.warning(f"run {self.run_id}: operator {entry.get('action')} on {entry.get('step')}"
+                    + (f" by {entry['by']}" if entry.get("by") else "") + (f": {entry['reason']}" if entry.get("reason") else ""))
 
     def snapshot_steps(self) -> None:
         if self.ctx is not None:
@@ -1581,6 +1760,8 @@ class RunExecution:
             "activated_at": current["activated_at"], "ended_at": now(), "conform": not problems,
             "nonconform": problems, "binding": self.binding.as_dict(), "phases": self.phase_verdicts,
             "steps": [r.as_dict() for r in (self.ctx.records.values() if self.ctx else [])],
+            **({"replaced_steps": self.ctx.history} if self.ctx and self.ctx.history else {}),
+            **({"interventions": self.ctx.interventions} if self.ctx and self.ctx.interventions else {}),
             "lab_warnings": self.seq.lab.warnings, "abort": self.abort_mode,
             **({"campaign_run": current["campaign_run"]} if current.get("campaign_run") else {}),
             **({"routing": current["routing"]} if current.get("routing") else {})})

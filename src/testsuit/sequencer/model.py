@@ -30,7 +30,7 @@ from testsuit.datatools.datapack.model import FORMER_PHASE, FORMER_STEP, former_
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-BUILTIN_ACTIONS = ("do", "run", "python", "http", "exploit", "push", "pull", "delay", "wait_for", "uses")
+BUILTIN_ACTIONS = ("do", "run", "python", "http", "exploit", "manual", "push", "pull", "delay", "wait_for", "uses")
 PYTHON_KEYS = ("script", "code", "args", "interpreter")
 
 
@@ -74,6 +74,7 @@ class Step(BaseModel):
     python: dict | None = None
     http: dict | str | None = None
     exploit: dict | None = None                  # criteria checked on outputs of the run (exploitstep.py)
+    manual: dict | None = None                   # an operation a person does on the bench (manualstep.py)
     push: dict | None = None
     pull: dict | None = None
     delay: str | float | None = None
@@ -140,6 +141,12 @@ class Step(BaseModel):
             if self.slot or self.for_each is not None:
                 raise SequencerError(f"step '{self.id}': an 'exploit' step runs on the sequencer host, it has no "
                                      "'slot' nor 'for_each' (its 'data' names the slots' files)")
+        if action == "manual":
+            from testsuit.sequencer.manualstep import check_manual
+            check_manual(self.manual, f"step '{self.id}'")
+            if self.slot or self.for_each is not None:
+                raise SequencerError(f"step '{self.id}': a 'manual' step waits on the sequencer host for the "
+                                     "operator, it has no 'slot' nor 'for_each'")
         if action in ("do", "push", "pull") and not (self.slot or self.for_each):
             raise SequencerError(f"step '{self.id}': '{action}' needs a 'slot' or 'for_each'")
         if self.slot and self.for_each is not None:
@@ -488,6 +495,27 @@ def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
     return problems
 
 
+def redo_problems(fs: FlatStep, flat: FlatPhase, phase_id: str) -> None:
+    """The steps a manual operation can be redone from: earlier steps of its phase (not finally) that it needs,
+    directly or not."""
+    if fs in flat.finally_:
+        raise SequencerError(f"phase '{phase_id}': finally step '{fs.id}': a finally step cannot be redone from earlier steps")
+    by_id = {s.id: s for s in flat.steps}
+    ancestors: set[str] = set()
+    todo = list(fs.needs)
+    while todo:
+        current = todo.pop()
+        if current in by_id and current not in ancestors:
+            ancestors.add(current)
+            todo += by_id[current].needs
+    namespace = fs.id.rpartition(".")[0]
+    for target in fs.step.manual.get("redo_from") or []:
+        found = target if target in by_id else f"{namespace}.{target}" if namespace else target
+        if found not in ancestors:
+            raise SequencerError(f"phase '{phase_id}': step '{fs.id}': redo_from '{target}' is not an earlier step it "
+                                 "needs, directly or not, in its phase")
+
+
 def exploit_data_problems(fs: FlatStep, phase: Phase, phase_ids: list[str], needs: Needs) -> None:
     """The data an exploit step reads: the phase and slot of each entry exist (templates are checked at run time)."""
     from testsuit.sequencer.exploitstep import as_list, parse_data
@@ -539,6 +567,8 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
                                      f"'slots', a role, nor a list of slots of the phase{hint}")
             if fs.step.exploit is not None:
                 exploit_data_problems(fs, phase, phase_ids, needs)
+            if fs.step.manual is not None and fs.step.manual.get("redo_from"):
+                redo_problems(fs, flat, phase.id)
             outside = [t for t in targets if t not in held]
             if outside:
                 raise SequencerError(f"phase '{phase.id}': step '{fs.id}' targets slot(s) {outside} "
