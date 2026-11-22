@@ -1279,7 +1279,7 @@ The **report** gives, for each run: its test definition, verdict, duration, the 
 
 ### 10.3 Requirements coverage
 
-Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API, and the built-in backend reads a YAML file of the tests repository.
+Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API. Two backends are built in: `yaml` reads a YAML file of the tests repository, and `reqif` reads a ReqIF export (`.reqif`, or `.reqifz`) of any requirements tool kept in it.
 
 ```yaml
 # requirements.yml, at the root of the tests repository: the requirements themselves (one source, 'reqs')...
@@ -1297,8 +1297,11 @@ requirements:
 default: reqs
 sources:
   reqs: {backend: yaml, options: {file: reqs/requirements.yml, url: "https://wiki/reqs#{id}"}}
+  sys: {backend: reqif, options: {file: reqs/system.reqifz, url: "https://doors.example/rm/{id}"}}
   jama: {backend: jama, options: {url: https://jama.example/rest}, credentials: {token: env:JAMA_TOKEN}}
 ```
+
+**ReqIF** (`backend: reqif`): the OMG interchange format DOORS, DOORS Next, Polarion, Jama, Codebeamer and most other tools export. Export the requirements to the tests repository and commit the file; export again when they change (a test that verified a requirement whose text changed since shows *changed since*). Each specification of the file is a top node of the tree, each heading in it a node under it, and each other object a requirement in the node of the headings above it. The id, title, text (XHTML, kept as text), rationale, status and comments are read from the usual attributes (`ReqIF.ForeignID`, `ReqIF.Name`, `ReqIF.Text`, `ReqIF.ChapterName`, `Status`...); options name others when a tool uses its own (`id_attribute`, `title_attribute`, `description_attribute`, `heading_attribute`, `status_attribute`, `tags_attribute`...), pick specifications (`specifications`), tell headings and requirements by their type (`heading_types`, `requirement_types`), and take the version from an attribute or the date of the last change (`version_attribute: LAST-CHANGE`; default: a hash of the content). The Editor's form lists them with their help.
 
 Links use the same key at both levels, `reqs`: on the test definition (`reqs: [REQ-12, jama:SYS-4@3]`), verified by the run verdict, and on any check of the criteria (`reqs: [REQ-12]` beside its `description`), verified by that check. `@3` pins the version the test was written against.
 
@@ -1313,6 +1316,10 @@ Links use the same key at both levels, `reqs`: on the test definition (`reqs: [R
 - the **Requirements** tab of a run: the requirements its test definition and checks verify, with the run's live step states;
 - the **Requirements** section of a campaign run's page, and of its synthetic report: coverage over all its runs, one column per run;
 - the **Requirements** subtab of **Datapacks** (Editor mode): the path tree of the requirements source, each node with its counts and worst status; a node's requirements (with or without its sub-nodes), their text on a click, and which test definitions and checks cover them, verified by the latest ended run of each test definition. Uncovered requirements are listed too. A campaign filter keeps the test definitions of one campaign. **Report** gives the matrices as one HTML page.
+
+**Editing `requirements.yml`** (Editor mode): the file opens in a form, as test definitions do (and in the YAML view). **Sources** lists each source with its backend (picked among those the loaded plugins register, with their description and capabilities), its label, its options (those the backend declares proposed with their help) and its credentials (each the name of an environment variable: `env:JAMA_TOKEN`), and which one is the default; **Use several sources…** turns a file holding the requirements into the source `reqs` of a sources file. **Tree** gives a label to each node, and **Requirements** is a table of the requirements of the built-in YAML backend (id, path picked in the tree, title, status, tags; a click unfolds description, rationale, comments, version and link), filtered by id, path, title or tag. A file named by the `file` option of a `yaml` source opens in the same form. The Editor's problems list a backend no plugin registers, a file that is not there, an unknown field, and (as warnings) a credential whose variable is not set on the sequencer host. The Requirements subtab of Datapacks has **Edit…** to open it, or **Create requirements.yml…** when there is none.
+
+A backend declares what the form proposes with class attributes: `description` (one line), `options_help` and `credentials_help` (each `{name: help}`).
 
 The REST endpoints are `GET /runs/{id}/requirements`, `GET /campaigns/{id}/requirements` and `GET /edit/sessions/{id}/requirements` (JSON), each with `/report` for the HTML page.
 
@@ -1350,7 +1357,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
-| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml` |
+| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml`, `reqif` |
 
 Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
 

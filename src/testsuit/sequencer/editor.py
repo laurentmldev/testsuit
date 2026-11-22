@@ -50,7 +50,8 @@ from pydantic import ValidationError
 
 from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
                                              is_scenario, is_utests)
-from testsuit.reqs.sources import SOURCES_FILE
+from testsuit.reqs.backend import describe_req_backends
+from testsuit.reqs.sources import is_requirements_file
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
 from testsuit.sequencer.library import without_comments
@@ -916,7 +917,7 @@ class Editor:
             return "yaml"
         if "all" in data and isinstance(data.get("all"), dict):
             return "inventory"
-        if path.name == SOURCES_FILE and ({"requirements", "sources"} & set(data)):
+        if is_requirements_file(path.name, data):
             return "requirements"
         if "setup_file" in data or "pipeline" in data:
             return "testdef"
@@ -938,7 +939,7 @@ class Editor:
             raise SequencerError(f"'{rel}' is not a text file") from e
         kind = self.kind(session, rel, text)
         result = {"path": rel, "kind": kind, "content": text, "version": file_version(path)}
-        if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary"):
+        if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary", "requirements"):
             try:
                 result["data"] = yaml.safe_load(text)
                 result["aliases"] = "*" in text and bool(re.search(r"(^|\s)\*[A-Za-z_]", text))
@@ -1226,7 +1227,7 @@ class Editor:
                     continue
                 if not isinstance(data, dict):
                     continue
-                if name == SOURCES_FILE and ({"requirements", "sources"} & set(data)):
+                if is_requirements_file(name, data):
                     result["requirements"].append(rel)
                     continue
                 if is_campaign_file(rel) or looks_like_campaign(data):
@@ -1315,6 +1316,7 @@ class Editor:
             "state_probes": sorted(registry.state_probes),
             "importers": sorted(importers._importers), "generators": sorted(generators._generators),
             "processors": sorted(processors._processors),
+            "req_backends": describe_req_backends(),
             "runtime_keys": RUNTIME_KEYS,
             "inventory": self.rel(session, self._inventory(session)) if session.kind == "lab" else None,
         }
@@ -1342,10 +1344,41 @@ class Editor:
                 return self.check_setup(session, rel)
             if kind == "subpipelines":
                 return self.check_subpipelines(session, rel, text)
+            if kind == "requirements":
+                return self.check_requirements(session, rel, text)
         except SequencerError as e:
             line, column = _find_line(text, str(e))
             return [{"file": rel, "line": line, "column": column, "severity": "error", "message": str(e)}]
         return []
+
+    def check_requirements(self, session: EditSession, rel: str, text: str) -> list[dict]:
+        """A sources file reads, and so does each of its sources (a backend no plugin registers, a file that is not
+        there; a credential whose variable is not set here is a warning: it may be set where datapacks are generated);
+        a requirements file of the YAML backend reads."""
+        from testsuit.reqs.backend import ReqError, YamlBackend
+        from testsuit.reqs.sources import SOURCES_FILE, Sources
+        path = self.path(session, rel)
+        problems = []
+
+        def add(message: str, severity: str = "error", near: str | None = None) -> None:
+            message = message.replace(str(path.parent) + os.sep, "")
+            line, column = _find_line(text, near or message)
+            problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": message})
+
+        try:
+            if path.name != SOURCES_FILE:
+                YamlBackend({"file": path.name}, None, path.parent)
+                return []
+            sources = Sources(path)
+        except ReqError as e:
+            add(str(e))
+            return problems
+        for name in sources.names:
+            try:
+                sources.backend(name)
+            except ReqError as e:
+                add(str(e), "warning" if "is not set" in str(e) else "error", f"'{name}'")
+        return problems
 
     def _message_file(self, session: EditSession, message: str, default: str) -> tuple[str, str]:
         """The session file a message names, and the message with session-relative paths."""

@@ -15,6 +15,7 @@
 
 - ``model``: a requirement and a node of a requirements tree, and the references to them (``[<source>:]<id>[@<version>]``);
 - ``backend``: the plugin API (``ReqBackend``, ``register_req_backend()``) and the built-in YAML backend;
+- ``reqif``: the built-in ReqIF backend (a ``.reqif`` or ``.reqifz`` export of any requirements tool);
 - ``sources``: the sources file (``requirements.yml`` at the root of the tests repository) and its backends;
 - ``links``: the requirements a test definition and its checks list (``reqs``);
 - ``snapshot``: the requirements of a datapack, fetched at generation (``definition/requirements.yml``);
@@ -23,5 +24,6 @@
 """
 from testsuit.reqs.backend import ReqBackend, get_req_backends, register_req_backend, unregister_req_backend
 from testsuit.reqs.model import Node, Requirement
+from testsuit.reqs import reqif as _reqif  # noqa: F401,E402  (registers the built-in reqif backend)
 
 __all__ = ["Node", "ReqBackend", "Requirement", "get_req_backends", "register_req_backend", "unregister_req_backend"]

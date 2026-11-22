@@ -26,6 +26,9 @@ Example, from an external library::
 
     class JamaBackend(ReqBackend):
         capabilities = frozenset({"children_query"})
+        description = "Jama Connect, through its REST API"            # shown by the Editor's form
+        options_help = {"url": "The REST API of the server.", "project": "The project id."}
+        credentials_help = {"token": "An API token of a reader of the project."}
         def __init__(self, options, credentials, base_dir): ...
         def tree(self) -> list[Node]: ...                       # GET /folders
         def list(self, path, children=False) -> list[Requirement]: ...
@@ -61,6 +64,12 @@ class ReqBackend:
     """Access to the requirements of one tool. Read-only by default."""
 
     capabilities: frozenset[str] = frozenset()
+    # one line on the tool it reads, shown in the Editor's form (default: the first paragraph of the class docstring)
+    description: str = ""
+    # the options of its entry in the sources file, by name, with their help: proposed by the Editor's form
+    options_help: dict[str, str] = {}
+    # the credentials it reads, by name, with their help (their values: 'env:<VARIABLE>')
+    credentials_help: dict[str, str] = {}
 
     def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path) -> None:
         self.options = dict(options or {})
@@ -107,6 +116,19 @@ def unregister_req_backend(name: str) -> None:
 
 def get_req_backends() -> list[str]:
     return list(_backends)
+
+
+def describe_req_backends() -> list[dict[str, Any]]:
+    """The backends registered, with what the Editor's form proposes: capabilities, options and credentials (each
+    with its help), read from the factory when it declares them (a ReqBackend class does)."""
+    out = []
+    for name, factory in sorted(_backends.items()):
+        doc = (factory.__doc__ or "").strip().split("\n\n")[0] if isinstance(factory, type) else ""
+        out.append({"name": name, "description": str(getattr(factory, "description", "") or " ".join(doc.split()).rstrip(":")),
+                    "capabilities": sorted(getattr(factory, "capabilities", ()) or ()),
+                    "options": dict(getattr(factory, "options_help", {}) or {}),
+                    "credentials": dict(getattr(factory, "credentials_help", {}) or {})})
+    return out
 
 
 def create_req_backend(name: str, options: dict, credentials: dict | None, base_dir: Path) -> ReqBackend:
@@ -168,6 +190,12 @@ class YamlBackend(ReqBackend):
     """
 
     capabilities = frozenset({"children_query", "versions"})
+    description = "Built in: requirements written in a YAML file of the tests repository."
+    options_help = {
+        "file": "The YAML file of the requirements, relative to the sources file (default: the sources file itself).",
+        "url": "A link to each requirement in a wiki or another tool, `{id}` replaced by its id "
+               "(`https://wiki/reqs#{id}`).",
+    }
 
     def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path) -> None:
         super().__init__(options, credentials, base_dir)

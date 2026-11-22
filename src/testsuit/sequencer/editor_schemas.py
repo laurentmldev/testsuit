@@ -840,8 +840,55 @@ SUBPIPELINES_FILE = {
                                                        additionalProperties=SUBPIPELINE)},
 }
 
+REQUIREMENT = h(
+    "A requirement of the built-in YAML source, by id (sequencer README section 10.3). Its version, when not given, is "
+    "a hash of its content: a test that verified it before a change shows *changed since*.",
+    type="object", additionalProperties=False, properties={
+        "path": h("Where it sits in the tree of the requirements: node ids joined by `/` (`SYS/BRAKE`).", type="string"),
+        "title": h("A short name, shown beside its id.", type="string"),
+        "description": h("What is required (Markdown).", type="string"),
+        "rationale": h("Why it is required (Markdown, optional).", type="string"),
+        "tags": h("Tags, to sort and filter (`critical`).", type="array", items={"type": "string"}),
+        "comments": h("Free notes (Markdown).", type="string"),
+        "status": h("Its lifecycle status. `deleted` and `rejected` make a link to it a problem, and leave it out of "
+                    "the coverage; any other value is kept as written.", type="string",
+                    examples=["draft", "approved", "deleted", "rejected"]),
+        "version": h("Its version, when managed by hand (default: a hash of its content).", type=["string", "integer"]),
+        "url": h("Where to read it (default: the `url` option of the source, `{id}` replaced).", type="string"),
+    })
+
+SOURCE = h(
+    "A requirements source: the backend that reads a requirements tool, its options and its credentials.",
+    type="object", required=["backend"], additionalProperties=False, properties={
+        "backend": h("The backend: `yaml` (built in: a YAML file of this repository), or one registered by a plugin "
+                     "(`testsuit.reqs.register_req_backend`).", type="string"),
+        "label": h("A readable name, shown in the source picker.", type="string"),
+        "options": h("Options of the backend (a URL, a project, a file...).", type="object"),
+        "credentials": h("Credentials of the backend, by name, each read from an environment variable of the "
+                         "machine that reads the source: `env:<VARIABLE>`. A value written here is refused.",
+                         type="object", additionalProperties=h("`env:<VARIABLE>`", type="string",
+                                                               pattern="^env:[A-Za-z_][A-Za-z0-9_]*$")),
+    })
+
+REQUIREMENTS_FILE = {
+    "$schema": "http://json-schema.org/draft-07/schema#", "title": "Requirements",
+    **h("`requirements.yml`, at the root of the tests repository: the requirements themselves (the one source `reqs` "
+        "of the built-in YAML backend), or the sources they come from (sequencer README section 10.3). A file the "
+        "`file` option of a `yaml` source names holds `nodes` and `requirements` only."),
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "default": h("The source of the references without a prefix (`REQ-12`; `jama:SYS-4` names its source). "
+                     "Default: the first source.", type="string"),
+        "sources": h("The requirements sources, by name: the name is the prefix of the references to them.",
+                     type="object", additionalProperties=SOURCE),
+        "nodes": h("Labels of the nodes of the tree, by path (`SYS/BRAKE: Braking`). Optional: the nodes come from the "
+                   "paths of the requirements.", type="object", additionalProperties={"type": "string"}),
+        "requirements": h("The requirements, by id.", type="object", additionalProperties=REQUIREMENT),
+    },
+}
+
 BASE = {"inventory": INVENTORY, "library": LIBRARY_FILE, "setup": SETUP, "testdef": TESTDEF,
-        "subpipelines": SUBPIPELINES_FILE}
+        "subpipelines": SUBPIPELINES_FILE, "requirements": REQUIREMENTS_FILE}
 
 
 # ── filled in from the lab and the workspace ───────────────────────────────
@@ -978,4 +1025,11 @@ def schemas(context: dict) -> dict:
 
     _walk(result["testdef"], step_fields)
     _walk(result["subpipelines"], step_fields)
+
+    backends = {b["name"]: (b.get("description") or b["name"])
+                + (f"\n\noptions: {', '.join(b['options'])}" if b.get("options") else "")
+                for b in context.get("req_backends") or []}
+    if backends:
+        result["requirements"]["properties"]["sources"]["additionalProperties"]["properties"]["backend"].update(
+            _choices(backends, True))
     return result

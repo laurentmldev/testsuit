@@ -598,6 +598,7 @@ table.manual-commands td.manual-run { width: 1%; text-align: right; vertical-ali
 .kind-template { --kind: var(--ok); }
 .kind-yaml, .kind-other { --kind: var(--muted); }
 .kind-criteria, .kind-utests { --kind: var(--run); }
+.kind-requirements { --kind: var(--wait); }
 .file-tree { padding: 0 0 8px; }
 .file-tree-new { padding: 8px 10px; position: sticky; top: 0; background: var(--panel); z-index: 1; border-bottom: 1px solid var(--border); }
 .tree-group { border-top: 1px solid var(--border); padding-bottom: 4px; }
@@ -1188,3 +1189,18 @@ input.manual-note { flex: 1; min-width: 200px; }
 @media (max-width: 800px) { .requirements-layout { grid-template-columns: 1fr; } .req-tree { position: static; } }
 .req-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
 .campaign-requirements { margin-top: 16px; }
+
+/* requirements form (editor) */
+.req-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.req-toolbar > input { flex: 0 1 280px; min-width: 160px; }
+.req-toolbar .grow, .req-source-head .grow { flex: 1; }
+.req-edit td { vertical-align: top; }
+.req-edit tr.inactive td { opacity: .6; }
+.req-edit tr.inactive td:nth-child(2) input { text-decoration: line-through; }
+.req-edit-detail > td { background: color-mix(in srgb, var(--kind, var(--accent)) 4%, var(--panel)); }
+.req-nodes td { vertical-align: middle; }
+.req-source { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.req-source.default { border-color: color-mix(in srgb, var(--kind, var(--accent)) 60%, var(--border)); }
+.req-source-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.req-source-head > input { font-weight: 600; max-width: 220px; }
+.req-source .kv-row > .muted { align-self: center; }
