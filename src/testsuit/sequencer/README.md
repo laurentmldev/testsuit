@@ -1279,7 +1279,7 @@ The **report** gives, for each run: its test definition, verdict, duration, the 
 
 ### 10.3 Requirements coverage
 
-Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API, and the built-in backend reads a YAML file of the tests repository.
+Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API. Two backends are built in: `yaml` reads a YAML file of the tests repository, and `reqif` reads a ReqIF export (`.reqif`, or `.reqifz`) of any requirements tool kept in it.
 
 ```yaml
 # requirements.yml, at the root of the tests repository: the requirements themselves (one source, 'reqs')...
@@ -1297,8 +1297,11 @@ requirements:
 default: reqs
 sources:
   reqs: {backend: yaml, options: {file: reqs/requirements.yml, url: "https://wiki/reqs#{id}"}}
+  sys: {backend: reqif, options: {file: reqs/system.reqifz, url: "https://doors.example/rm/{id}"}}
   jama: {backend: jama, options: {url: https://jama.example/rest}, credentials: {token: env:JAMA_TOKEN}}
 ```
+
+**ReqIF** (`backend: reqif`): the OMG interchange format DOORS, DOORS Next, Polarion, Jama, Codebeamer and most other tools export. Export the requirements to the tests repository and commit the file; export again when they change (a test that verified a requirement whose text changed since shows *changed since*). Each specification of the file is a top node of the tree, each heading in it a node under it, and each other object a requirement in the node of the headings above it. The id, title, text (XHTML, kept as text), rationale, status and comments are read from the usual attributes (`ReqIF.ForeignID`, `ReqIF.Name`, `ReqIF.Text`, `ReqIF.ChapterName`, `Status`...); options name others when a tool uses its own (`id_attribute`, `title_attribute`, `description_attribute`, `heading_attribute`, `status_attribute`, `tags_attribute`...), pick specifications (`specifications`), tell headings and requirements by their type (`heading_types`, `requirement_types`), and take the version from an attribute or the date of the last change (`version_attribute: LAST-CHANGE`; default: a hash of the content). The Editor's form lists them with their help.
 
 Links use the same key at both levels, `reqs`: on the test definition (`reqs: [REQ-12, jama:SYS-4@3]`), verified by the run verdict, and on any check of the criteria (`reqs: [REQ-12]` beside its `description`), verified by that check. `@3` pins the version the test was written against.
 
@@ -1354,7 +1357,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
-| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml` |
+| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml`, `reqif` |
 
 Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
 

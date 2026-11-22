@@ -379,7 +379,7 @@ sources:
   <source>: {backend: <name>, options: {...}, credentials: {<name>: env:<VARIABLE>}}
 ```
 
-Credentials MUST come from the environment; a literal value MUST be refused. A file with `requirements` and no `sources` is the single source `reqs` of the built-in `yaml` backend, whose file is `{nodes: {<path>: <label>}, requirements: {<id>: {path, title, ...}}}` (option `file`: another file; `url`: a link template with `{id}`; default `version`: a hash of the content).
+Credentials MUST come from the environment; a literal value MUST be refused. A file with `requirements` and no `sources` is the single source `reqs` of the built-in `yaml` backend, whose file is `{nodes: {<path>: <label>}, requirements: {<id>: {path, title, ...}}}` (option `file`: another file; `url`: a link template with `{id}`; default `version`: a hash of the content). The built-in `reqif` backend reads a ReqIF file (`file`: `.reqif`, or `.reqifz`: a zip of them): specifications are top nodes, heading objects (type named like heading, chapter, section or folder, or `heading_types`; else a heading attribute and no text) nodes under them, other objects requirements in the node of their headings; id, title, description (XHTML as text), rationale, status, comments and tags come from the attributes the options name, else the usual ones; enumeration values are their names; version: `version_attribute` (`LAST-CHANGE`), else a hash of the content.
 
 - **Links.** A test definition's `reqs` and any check's `reqs` (a mexploit scenario entry, beside `description`) list references `[<source>:]<id>[@<version>]`. A prefix that names no source is part of the id. `@<version>` pins the version the link was written against.
 - **Snapshot.** Generation MUST resolve every link of the test definition and of the checks of the criteria its exploit steps name (§6.8), and write `definition/requirements.yml`: `{format, default_source, sources, testdef: [<key>], checks: [{step, criteria, scenario, file, check, reqs}], requirements: {<key>: {..., pinned, changed}}, problems, warnings}`. A key is the id, prefixed by its source unless the default one. Scenarios are rendered with the datapack keys, unknown keys empty.
@@ -780,7 +780,7 @@ Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`)
 | `register_step_type(name, cls)` | step actions | `run`, `python`, `http`, `exploit`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | `method: generate` | none |
-| `register_req_backend(name, factory)` | requirements sources (§5.5): `factory(options, credentials, base_dir)` → `tree()`, `list(path, children)`, `get(ids)`, optional `revision()`, `create`/`update` with capability `write`; capabilities `children_query`, `write`, `versions` | `yaml` |
+| `register_req_backend(name, factory)` | requirements sources (§5.5): `factory(options, credentials, base_dir)` → `tree()`, `list(path, children)`, `get(ids)`, optional `revision()`, `create`/`update` with capability `write`; capabilities `children_query`, `write`, `versions`; optional `description`, `options_help`, `credentials_help` (Editor form) | `yaml`, `reqif` |
 
 ---
 

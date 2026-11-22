@@ -357,3 +357,125 @@ def test_editor_requirements_form(tmp_path, monkeypatch):
     editor.write(session, "reqs/sys.yml", content="requirements:\n  REQ-1: {path: SYS, title: x, colour: red}\n")
     assert editor.kind(session, "reqs/sys.yml") == "requirements"
     assert "unknown field(s) colour" in editor.check_file(session, "reqs/sys.yml")[0]["message"]
+
+
+REQIF = """<?xml version="1.0" encoding="UTF-8"?>
+<REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <THE-HEADER><REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Train system</TITLE></REQ-IF-HEADER></THE-HEADER>
+  <CORE-CONTENT><REQ-IF-CONTENT>
+    <DATATYPES>
+      <DATATYPE-DEFINITION-STRING IDENTIFIER="dt-str" LONG-NAME="String" MAX-LENGTH="1000"/>
+      <DATATYPE-DEFINITION-XHTML IDENTIFIER="dt-xhtml" LONG-NAME="XHTML"/>
+      <DATATYPE-DEFINITION-ENUMERATION IDENTIFIER="dt-status" LONG-NAME="Status">
+        <SPECIFIED-VALUES>
+          <ENUM-VALUE IDENTIFIER="st-ok" LONG-NAME="approved"/><ENUM-VALUE IDENTIFIER="st-no" LONG-NAME="rejected"/>
+        </SPECIFIED-VALUES>
+      </DATATYPE-DEFINITION-ENUMERATION>
+    </DATATYPES>
+    <SPEC-TYPES>
+      <SPEC-OBJECT-TYPE IDENTIFIER="t-head" LONG-NAME="Heading">
+        <SPEC-ATTRIBUTES><ATTRIBUTE-DEFINITION-STRING IDENTIFIER="a-chap" LONG-NAME="ReqIF.ChapterName">
+          <TYPE><DATATYPE-DEFINITION-STRING-REF>dt-str</DATATYPE-DEFINITION-STRING-REF></TYPE>
+        </ATTRIBUTE-DEFINITION-STRING></SPEC-ATTRIBUTES>
+      </SPEC-OBJECT-TYPE>
+      <SPEC-OBJECT-TYPE IDENTIFIER="t-req" LONG-NAME="Requirement">
+        <SPEC-ATTRIBUTES>
+          <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="a-id" LONG-NAME="ReqIF.ForeignID"><TYPE><DATATYPE-DEFINITION-STRING-REF>dt-str</DATATYPE-DEFINITION-STRING-REF></TYPE></ATTRIBUTE-DEFINITION-STRING>
+          <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="a-name" LONG-NAME="ReqIF.Name"><TYPE><DATATYPE-DEFINITION-STRING-REF>dt-str</DATATYPE-DEFINITION-STRING-REF></TYPE></ATTRIBUTE-DEFINITION-STRING>
+          <ATTRIBUTE-DEFINITION-XHTML IDENTIFIER="a-text" LONG-NAME="ReqIF.Text"><TYPE><DATATYPE-DEFINITION-XHTML-REF>dt-xhtml</DATATYPE-DEFINITION-XHTML-REF></TYPE></ATTRIBUTE-DEFINITION-XHTML>
+          <ATTRIBUTE-DEFINITION-ENUMERATION IDENTIFIER="a-status" LONG-NAME="Status" MULTI-VALUED="false"><TYPE><DATATYPE-DEFINITION-ENUMERATION-REF>dt-status</DATATYPE-DEFINITION-ENUMERATION-REF></TYPE></ATTRIBUTE-DEFINITION-ENUMERATION>
+        </SPEC-ATTRIBUTES>
+      </SPEC-OBJECT-TYPE>
+      <SPECIFICATION-TYPE IDENTIFIER="t-spec" LONG-NAME="Specification"/>
+    </SPEC-TYPES>
+    <SPEC-OBJECTS>
+      <SPEC-OBJECT IDENTIFIER="o-brake" LAST-CHANGE="2026-01-01T00:00:00Z"><TYPE><SPEC-OBJECT-TYPE-REF>t-head</SPEC-OBJECT-TYPE-REF></TYPE>
+        <VALUES><ATTRIBUTE-VALUE-STRING THE-VALUE="Braking / stopping"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-chap</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING></VALUES>
+      </SPEC-OBJECT>
+      <SPEC-OBJECT IDENTIFIER="o-12" LAST-CHANGE="2026-02-01T00:00:00Z"><TYPE><SPEC-OBJECT-TYPE-REF>t-req</SPEC-OBJECT-TYPE-REF></TYPE>
+        <VALUES>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="SYS-12"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-id</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="Stopping distance"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-name</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+          <ATTRIBUTE-VALUE-XHTML><DEFINITION><ATTRIBUTE-DEFINITION-XHTML-REF>a-text</ATTRIBUTE-DEFINITION-XHTML-REF></DEFINITION>
+            <THE-VALUE><xhtml:div><xhtml:p>The train stops within <xhtml:b>30 m</xhtml:b>.</xhtml:p><xhtml:ul><xhtml:li>dry rail</xhtml:li><xhtml:li>10 m/s</xhtml:li></xhtml:ul></xhtml:div></THE-VALUE>
+          </ATTRIBUTE-VALUE-XHTML>
+          <ATTRIBUTE-VALUE-ENUMERATION><DEFINITION><ATTRIBUTE-DEFINITION-ENUMERATION-REF>a-status</ATTRIBUTE-DEFINITION-ENUMERATION-REF></DEFINITION><VALUES><ENUM-VALUE-REF>st-ok</ENUM-VALUE-REF></VALUES></ATTRIBUTE-VALUE-ENUMERATION>
+        </VALUES>
+      </SPEC-OBJECT>
+      <SPEC-OBJECT IDENTIFIER="o-13" LAST-CHANGE="2026-02-02T00:00:00Z"><TYPE><SPEC-OBJECT-TYPE-REF>t-req</SPEC-OBJECT-TYPE-REF></TYPE>
+        <VALUES>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="SYS-13"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-id</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+          <ATTRIBUTE-VALUE-ENUMERATION><DEFINITION><ATTRIBUTE-DEFINITION-ENUMERATION-REF>a-status</ATTRIBUTE-DEFINITION-ENUMERATION-REF></DEFINITION><VALUES><ENUM-VALUE-REF>st-no</ENUM-VALUE-REF></VALUES></ATTRIBUTE-VALUE-ENUMERATION>
+        </VALUES>
+      </SPEC-OBJECT>
+      <SPEC-OBJECT IDENTIFIER="o-14" LAST-CHANGE="2026-02-03T00:00:00Z"><TYPE><SPEC-OBJECT-TYPE-REF>t-req</SPEC-OBJECT-TYPE-REF></TYPE>
+        <VALUES>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="SYS-14"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-id</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="Brake light"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-name</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+        </VALUES>
+      </SPEC-OBJECT>
+      <SPEC-OBJECT IDENTIFIER="o-intro" LAST-CHANGE="2026-01-01T00:00:00Z"><TYPE><SPEC-OBJECT-TYPE-REF>t-req</SPEC-OBJECT-TYPE-REF></TYPE>
+        <VALUES>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="SYS-1"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-id</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+          <ATTRIBUTE-VALUE-STRING THE-VALUE="Scope"><DEFINITION><ATTRIBUTE-DEFINITION-STRING-REF>a-name</ATTRIBUTE-DEFINITION-STRING-REF></DEFINITION></ATTRIBUTE-VALUE-STRING>
+        </VALUES>
+      </SPEC-OBJECT>
+    </SPEC-OBJECTS>
+    <SPECIFICATIONS>
+      <SPECIFICATION IDENTIFIER="s-sys" LONG-NAME="System"><TYPE><SPECIFICATION-TYPE-REF>t-spec</SPECIFICATION-TYPE-REF></TYPE>
+        <CHILDREN>
+          <SPEC-HIERARCHY IDENTIFIER="h-intro"><OBJECT><SPEC-OBJECT-REF>o-intro</SPEC-OBJECT-REF></OBJECT></SPEC-HIERARCHY>
+          <SPEC-HIERARCHY IDENTIFIER="h-brake"><OBJECT><SPEC-OBJECT-REF>o-brake</SPEC-OBJECT-REF></OBJECT>
+            <CHILDREN>
+              <SPEC-HIERARCHY IDENTIFIER="h-12"><OBJECT><SPEC-OBJECT-REF>o-12</SPEC-OBJECT-REF></OBJECT>
+                <CHILDREN><SPEC-HIERARCHY IDENTIFIER="h-14"><OBJECT><SPEC-OBJECT-REF>o-14</SPEC-OBJECT-REF></OBJECT></SPEC-HIERARCHY></CHILDREN>
+              </SPEC-HIERARCHY>
+              <SPEC-HIERARCHY IDENTIFIER="h-13"><OBJECT><SPEC-OBJECT-REF>o-13</SPEC-OBJECT-REF></OBJECT></SPEC-HIERARCHY>
+            </CHILDREN>
+          </SPEC-HIERARCHY>
+        </CHILDREN>
+      </SPECIFICATION>
+    </SPECIFICATIONS>
+  </REQ-IF-CONTENT></CORE-CONTENT>
+</REQ-IF>
+"""
+
+
+def test_reqif_backend(tmp_path):
+    """The built-in ReqIF backend: specifications and headings as the tree, attributes guessed or named, XHTML text,
+    enumerations, .reqifz archives, versions; through a sources file and its references."""
+    from testsuit.reqs.backend import create_req_backend, describe_req_backends
+    (tmp_path / "system.reqif").write_text(REQIF, encoding="utf-8")
+    b = create_req_backend("reqif", {"file": "system.reqif", "url": "https://doors/{id}?o={identifier}"}, None, tmp_path)
+    assert [n.as_dict() for n in b.tree()] == [{"id": "System", "label": "System", "children": [
+        {"id": "Braking - stopping", "label": "Braking / stopping", "children": []}]}]
+    reqs = {r.id: r for r in b.list("", True)}
+    assert set(reqs) == {"SYS-1", "SYS-12", "SYS-13", "SYS-14"}
+    r12 = reqs["SYS-12"]
+    assert (r12.path, r12.title, r12.status) == ("System/Braking - stopping", "Stopping distance", "approved")
+    assert r12.description == "The train stops within **30 m**.\n- dry rail\n- 10 m/s"
+    assert r12.url == "https://doors/SYS-12?o=o-12" and len(r12.version) == 8
+    assert reqs["SYS-14"].path == r12.path                   # under a requirement: in its node
+    assert reqs["SYS-1"].path == "System" and reqs["SYS-13"].inactive
+    assert [r.id for r in b.list("System", False)] == ["SYS-1"]
+    assert b.get(["SYS-12", "NOPE"])["NOPE"] is None and b.revision()
+
+    # options: another id attribute, the last change as version, one specification
+    b2 = create_req_backend("reqif", {"file": "system.reqif", "id_attribute": "ReqIF.Name",
+                                      "version_attribute": "LAST-CHANGE", "specifications": ["System"]}, None, tmp_path)
+    assert b2.get(["Stopping distance"])["Stopping distance"].version == "2026-02-01T00:00:00Z"
+    with pytest.raises(ReqError, match="no specification 'Other'"):
+        create_req_backend("reqif", {"file": "system.reqif", "specifications": "Other"}, None, tmp_path)
+
+    # a .reqifz archive, through a sources file: references, versions changed since
+    with zipfile.ZipFile(tmp_path / "export.reqifz", "w") as z:
+        z.writestr("export/system.reqif", REQIF)
+    (tmp_path / "requirements.yml").write_text(yaml.safe_dump(
+        {"sources": {"sys": {"backend": "reqif", "options": {"file": "export.reqifz"}}}}), encoding="utf-8")
+    sources = Sources(tmp_path / "requirements.yml")
+    assert sources.backend("sys").get(["SYS-12"])["SYS-12"].description.startswith("The train stops")
+    (tmp_path / "bad.reqif").write_text("<html/>", encoding="utf-8")
+    with pytest.raises(ReqError, match="not a ReqIF file"):
+        create_req_backend("reqif", {"file": "bad.reqif"}, None, tmp_path)
+    reqif = next(d for d in describe_req_backends() if d["name"] == "reqif")
+    assert {"file", "id_attribute", "specifications"} <= set(reqif["options"])
