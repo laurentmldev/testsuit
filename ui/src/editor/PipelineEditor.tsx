@@ -1042,7 +1042,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {action === "exploit" && <ExploitEditor value={step.exploit} onChange={(v) => set("exploit", v)} testdef={testdef} phaseIds={phaseIds || []}
         phaseSlots={phaseSlots || {}} slotRoles={palette ? Object.fromEntries(Object.entries<any>(palette.slots).map(([id, c]) => [id, c.role])) : {}} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
       {action === "exploit" && <ExploitKeys testdef={testdef} criteria={asList(step.exploit?.criteria)} value={step.with} onChange={(v) => set("with", v)} help={help("with")} />}
-      {action === "manual" && <ManualEditor value={step.manual} onChange={(v) => set("manual", v)}
+      {action === "manual" && <ManualEditor value={step.manual} onChange={(v) => set("manual", v)} steps={others}
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "manual", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
@@ -1098,7 +1098,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
 
 /** A manual operation: its title, its text (Markdown, shown as the operator sees it, without the pictures) and its
  *  checks, one per line. */
-function ManualEditor({ value, onChange, help }: { value: any; onChange: (v: any) => void; help: (field?: string) => string | undefined }) {
+function ManualEditor({ value, onChange, help, steps }: { value: any; onChange: (v: any) => void; help: (field?: string) => string | undefined; steps: { value: string; description?: string }[] }) {
   const v = value || {};
   const set = (k: string, x: any) => onChange({ ...v, [k]: x });
   // the checks as typed (an empty line kept while typing the next one), written as a list without empty ones
@@ -1115,6 +1115,8 @@ function ManualEditor({ value, onChange, help }: { value: any; onChange: (v: any
       <Field label="Checks" help={help("checks")} hint="one per line: the operator ticks each before Done" wide>
         <Text multiline value={checks} onChange={(x) => { setChecks(x); set("checks", x.split("\n").map((l) => l.trim()).filter(Boolean)); }}
           placeholder={"Cable A plugged on pin F\nPower LED green"} /></Field>
+      <Field label="Redo from" help={help("redo_from")} hint="earlier steps the operator may run again from, when the bench is not right (each must come before this step)">
+        <Tags value={v.redo_from} onChange={(x) => set("redo_from", x.length ? x : undefined)} choices={steps} /></Field>
     </div>
   );
 }

@@ -164,13 +164,15 @@ class StepRecord:
     exploit: dict | None = None
     # a manual operation: {title, text, checks: [{text, done, by, at}], base, since, outcome, note, by, at}
     manual: dict | None = None
+    passes: int = 1                               # its run in the phase: 2 and more once run again by an operator
 
     @property
     def key(self) -> str:
         return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None or k not in ("progress", "exploit", "manual")}
+        return {k: v for k, v in self.__dict__.items() if (v is not None or k not in ("progress", "exploit", "manual"))
+                and not (k == "passes" and v == 1)}
 
 
 class Aborted(Exception):
@@ -203,6 +205,25 @@ class RunContext:
     _running: dict[str, asyncio.Task] = field(default_factory=dict)
     # the manual operations waiting for the operator: step record key -> the future their answer sets
     manual_waits: dict[str, asyncio.Future] = field(default_factory=dict)
+    # operator controls (SPEC section 9.7): the main steps of the phase running now, step-by-step mode, the steps
+    # paused after they ran ('<phase>:<step>' -> {phase, step, verdict, since, future}), the steps continued anyway
+    # (record key -> reason) and the tasks that execute each record, the records replaced by a run again, and every
+    # operator action
+    phase_runner: Any = None
+    step_mode: dict = field(default_factory=lambda: {"mode": "off", "breakpoints": []})
+    pauses: dict[str, dict] = field(default_factory=dict)
+    forced: dict[str, str] = field(default_factory=dict)
+    step_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    passes: dict[str, int] = field(default_factory=dict)
+    history: list[dict] = field(default_factory=list)
+    interventions: list[dict] = field(default_factory=list)
+
+    def intervene(self, action: str, step: str, by: str = "", reason: str = "", **extra: Any) -> dict:
+        """Record an operator action on the run (an event, kept with the run)."""
+        entry = {"at": now(), "action": action, "step": step, "by": by, "reason": reason, **extra}
+        self.interventions.append(entry)
+        self.notify("intervention", {"run": self.run_id, **entry})
+        return entry
 
     def lock_for(self, concrete: str) -> asyncio.Lock:
         return self._locks.setdefault(concrete, asyncio.Lock())
@@ -983,6 +1004,8 @@ class PhaseRunner:
             if fs.step.goes_on and verdict != SUCCEEDED:
                 verdict = SUCCEEDED
             verdicts[fs.id] = verdict
+            if not in_finally and not self.ctx.abort_mode and self.pauses_after(fs.id):
+                await self.pause(fs, verdict)
         except asyncio.CancelledError:
             verdicts.setdefault(fs.id, ERROR)
             raise
@@ -1007,7 +1030,10 @@ class PhaseRunner:
                 return ERROR
             component = self.ctx.bound[target]
         rec = self.record(fs, target)
+        rec.passes = self.ctx.passes.get(f"{self.id}:{fs.id}", 1)
         runner = StepRunner(self.ctx, self.flat, fs, component, rec)
+        if rec.passes > 1:
+            runner.note(f"run again by an operator: pass {rec.passes}")
         uses_component = component is not None and fs.step.action in ("do", "run", "python", "push", "pull")
         lock = self.ctx.lock_for(component.concrete.id) if uses_component and component.concrete.lock != "none" else None
         try:
@@ -1015,9 +1041,17 @@ class PhaseRunner:
             if lock is not None:
                 await lock.acquire()
             self.set_state(rec, "running")
+            execution = asyncio.ensure_future(runner.execute())
+            self.ctx.step_tasks[rec.key] = execution
             try:
-                verdict, reason = await runner.execute()
-            except (asyncio.CancelledError, SequencerError):
+                verdict, reason = await execution
+            except asyncio.CancelledError:
+                why = self.ctx.forced.pop(rec.key, None)
+                if why is None:
+                    raise
+                runner.note(f"continued anyway by an operator: {why}")
+                verdict, reason = SUCCEEDED, f"continued anyway: {why}"
+            except SequencerError:
                 raise
             except Exception as e:                 # a sequencer bug: the step ends in error, never stays running
                 log.exception(f"run {self.ctx.run_id}: step {rec.key}")
@@ -1035,6 +1069,7 @@ class PhaseRunner:
             self.set_state(rec, ERROR, str(e))
             return ERROR
         finally:
+            self.ctx.step_tasks.pop(rec.key, None)
             if lock is not None and lock.locked():
                 lock.release()
             runner.close()
@@ -1044,18 +1079,151 @@ class PhaseRunner:
         if in_finally:                     # finally steps without needs run in the order written
             steps = finally_order(steps)
         events = {fs.id: asyncio.Event() for fs in steps}
-        tasks = [asyncio.ensure_future(self.run_step(fs, events, verdicts, in_finally)) for fs in steps]
+        tasks = {fs.id: asyncio.ensure_future(self.run_step(fs, events, verdicts, in_finally)) for fs in steps}
+        if not in_finally:                 # the operator controls act on these (rewind, force): run_again replaces tasks
+            self.tasks, self.events, self.verdicts = tasks, events, verdicts
+            self.ctx.phase_runner = self
         self.ctx._running[self.id + (":finally" if in_finally else "")] = asyncio.current_task()
         try:
-            await asyncio.gather(*tasks)
+            while True:
+                pending = [t for t in tasks.values() if not t.done()]
+                if not pending:
+                    break
+                await asyncio.wait(pending)
         except asyncio.CancelledError:
-            for task in tasks:
+            for task in tasks.values():
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
             for fs in steps:
                 verdicts.setdefault(fs.id, ERROR)
             raise
+        finally:
+            if not in_finally and self.ctx.phase_runner is self:
+                self.ctx.phase_runner = None
+                for pause in list(self.ctx.pauses.values()):
+                    if pause["phase"] == self.id and not pause["future"].done():
+                        pause["future"].set_result("next")
         return verdicts
+
+    # ── operator controls (SPEC section 9.7) ────────────────────────────
+    def step_of(self, step_id: str) -> FlatStep:
+        found = next((fs for fs in self.flat.steps if fs.id == step_id), None)
+        if found is None:
+            raise SequencerError(f"phase '{self.id}' has no step '{step_id}' (finally steps cannot be run again)")
+        return found
+
+    def dependants(self, step_id: str) -> list[str]:
+        """The steps that need this one, directly or not, in the order written."""
+        found: set[str] = set()
+        todo = [step_id]
+        while todo:
+            current = todo.pop()
+            for fs in self.flat.steps:
+                if current in fs.needs and fs.id not in found:
+                    found.add(fs.id)
+                    todo.append(fs.id)
+        return [fs.id for fs in self.flat.steps if fs.id in found]
+
+    def pauses_after(self, step_id: str) -> bool:
+        mode = self.ctx.step_mode or {}
+        if mode.get("mode") == "each":
+            return True
+        points = mode.get("breakpoints") or []
+        return mode.get("mode") == "breakpoints" and (f"{self.id}:{step_id}" in points or step_id in points)
+
+    async def pause(self, fs: FlatStep, verdict: str) -> None:
+        """Step-by-step mode: wait after a step for the operator's Next (its dependants wait too)."""
+        key = f"{self.id}:{fs.id}"
+        future = asyncio.get_running_loop().create_future()
+        self.ctx.pauses[key] = {"phase": self.id, "step": fs.id, "verdict": verdict, "since": now(), "future": future}
+        self.ctx.notify("pause", {"run": self.ctx.run_id, "step": key, "verdict": verdict, "state": "paused"})
+        try:
+            await future
+        finally:
+            if self.ctx.pauses.get(key, {}).get("future") is future:
+                del self.ctx.pauses[key]
+            self.ctx.notify("pause", {"run": self.ctx.run_id, "step": key, "state": "resumed"})
+
+    def resume(self, step_id: str | None = None) -> list[str]:
+        """Let paused steps go on (one, or all of this phase)."""
+        done = []
+        for key, pause in list(self.ctx.pauses.items()):
+            if pause["phase"] == self.id and (step_id is None or pause["step"] == step_id) and not pause["future"].done():
+                pause["future"].set_result("next")
+                done.append(key)
+        return done
+
+    async def rewind(self, step_id: str, keep_self: bool = False) -> list[str]:
+        """Run a step of the running phase again, and every step that needs it: those still running are stopped,
+        their records kept in the run's history, and they run anew (pass n+1). keep_self: its dependants only."""
+        if self.ctx.phase_runner is not self or self.ctx.abort_mode:
+            raise SequencerError(f"phase '{self.id}' is not running its steps any more")
+        self.step_of(step_id)
+        ids = ([] if keep_self else [step_id]) + self.dependants(step_id)
+        if not ids:
+            return []
+        # held in the steps' tasks while the steps are replaced, so that the phase does not end in between
+        guard = asyncio.get_running_loop().create_future()
+        self.tasks[f"~rewind {id(guard)}"] = guard
+        old = [self.tasks[i] for i in ids if i in self.tasks and not self.tasks[i].done()]
+        # the records of the steps stopped on the way: kept as stopped by the operator, not as failed by the stop
+        stopped = {key for key, rec in self.ctx.records.items()
+                   if rec.phase == self.id and rec.id in ids and rec.state in ("ready", "running")}
+        for task in old:
+            task.cancel()
+        try:
+            await asyncio.gather(*old, return_exceptions=True)
+        except BaseException:
+            guard.set_result(None)
+            raise
+        ran = set()
+        for key, rec in list(self.ctx.records.items()):
+            if rec.phase == self.id and rec.id in ids:
+                entry = {**rec.as_dict(), "replaced_at": now()}
+                if key in stopped:
+                    entry.update(state="cancelled", reason="stopped by an operator, to run again")
+                self.ctx.history.append(entry)
+                if rec.started or rec.state not in ("pending", "skipped"):
+                    ran.add(rec.id)
+                del self.ctx.records[key]
+        for i in ids:
+            self.verdicts.pop(i, None)
+            self.events[i] = asyncio.Event()
+            if i in ran:                                 # a step that had not started yet runs its first pass
+                self.ctx.passes[f"{self.id}:{i}"] = self.ctx.passes.get(f"{self.id}:{i}", 1) + 1
+        for i in ids:
+            self.tasks[i] = asyncio.ensure_future(self.run_step(self.step_of(i), self.events, self.verdicts, False))
+        guard.set_result(None)
+        del self.tasks[f"~rewind {id(guard)}"]
+        self.ctx.notify("phase", {"run": self.ctx.run_id, "phase": self.id, "state": "running", "run_again": ids})
+        return ids
+
+    async def force(self, step_id: str, reason: str) -> str:
+        """Continue anyway: a running step ends succeeded now; a step that ended without success counts as
+        succeeded, and the steps that need it run (again)."""
+        self.step_of(step_id)
+        running = [r for r in self.ctx.records.values() if r.phase == self.id and r.id == step_id
+                   and r.state in ("ready", "running")]
+        if running:
+            for rec in running:
+                self.ctx.forced[rec.key] = reason
+                task = self.ctx.step_tasks.get(rec.key)
+                if task is not None:
+                    task.cancel()
+            return "running"
+        records = [r for r in self.ctx.records.values() if r.phase == self.id and r.id == step_id]
+        if not records:
+            raise SequencerError(f"step '{self.id}:{step_id}' has not started: nothing to continue past yet")
+        if self.verdicts.get(step_id) == SUCCEEDED and all(r.state == SUCCEEDED for r in records):
+            raise SequencerError(f"step '{self.id}:{step_id}' succeeded already")
+        for rec in records:
+            if rec.state != SUCCEEDED:
+                self.set_state(rec, SUCCEEDED, f"continued anyway: {reason} (was {rec.state}: {rec.reason})")
+        self.verdicts[step_id] = SUCCEEDED
+        paused = self.resume(step_id)
+        if not paused and self.tasks.get(step_id) is not None and self.tasks[step_id].done():
+            await self.rewind(step_id, keep_self=True)       # the steps it held back run now
+        return "ended"
 
     async def run(self, timeout: float | None) -> str:
         self.ctx.notify("phase", {"run": self.ctx.run_id, "phase": self.id, "state": "running"})

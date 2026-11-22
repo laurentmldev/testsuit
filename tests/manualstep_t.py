@@ -241,3 +241,133 @@ def test_campaign_datapack_runs_again(tmp_path, monkeypatch):
     from testsuit.sequencer.campaigns import report_html, report_text
     assert f'#/runs/{entry["earlier"][0]["run"]}' in report_html(view)
     assert "attempt 2 (earlier: " in "\n".join(report_text(view))
+
+
+# ── operator controls (SPEC section 9.7) ──
+
+async def paused(seq, run_id: str, key: str) -> None:
+    while key not in (seq.executions.get(run_id).ctx.pauses if seq.executions.get(run_id) and seq.executions[run_id].ctx else {}):
+        await asyncio.sleep(0.02)
+
+
+def record_of(run: dict, step: str) -> dict:
+    return next(s for s in run["steps"] if s["id"] == step)
+
+
+def test_manual_redo_from(tmp_path, monkeypatch):
+    """the operator answers 'redo from ready': ready and every step up to the operation run again, then it is asked
+    again; the earlier passes are kept"""
+    from testsuit.sequencer.api import create_app
+    bench, zip_path = manual_bench(tmp_path, monkeypatch, manual={**MANUAL, "redo_from": ["ready"]})
+
+    async def main():
+        seq = bench.sequencer()
+        routes = {(r.path, m): r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint") for m in r.methods}
+        answer = routes[("/runs/{run_id}/manual/{step:path}", "POST")]
+        run = seq.submit(zip_path)
+
+        async def operator(seq):
+            await waiting(seq, run["id"])
+            with pytest.raises(Exception, match="'deploy' is not a step this operation can be redone from"):
+                await answer(run["id"], "test_run:plug", {"outcome": "redo", "from": "deploy"})
+            await answer(run["id"], "test_run:plug", {"outcome": "redo", "from": "ready", "note": "wrong pin", "by": "ann"})
+            ctx = seq.executions[run["id"]].ctx
+            while not (ctx.records.get("test_run:plug") and ctx.records["test_run:plug"].passes == 2 and ctx.manual_waits):
+                await asyncio.sleep(0.02)
+            assert ctx.records["test_run:ready[dut]"].passes == 2
+            await answer(run["id"], "test_run:plug", {"check": 0})
+            await answer(run["id"], "test_run:plug", {"check": 1})
+            await answer(run["id"], "test_run:plug", {"outcome": "done"})
+        [run] = await run_until_done(seq, [run["id"]], during=operator)
+        await seq.close()
+        return run
+    run = asyncio.run(main())
+    assert run["verdict"] == "succeeded" and run["conform"] is not None
+    assert record_of(run, "plug")["passes"] == 2 and record_of(run, "deploy").get("passes", 1) == 1
+    [redo] = run["interventions"]
+    assert redo["action"] == "redo_from" and redo["target"] == "test_run:ready" and redo["by"] == "ann"
+    assert redo["steps"] == ["ready", "plug", "run", "stop"] and redo["reason"] == "wrong pin"
+    record = yaml.safe_load((tmp_path / "storage" / "runs" / run["id"]).rglob("run.yml").__next__().read_text())
+    replaced = {(s["id"], s["state"]) for s in record["replaced_steps"]}
+    assert ("ready", "succeeded") in replaced and ("plug", "cancelled") in replaced
+    assert record["interventions"][0]["action"] == "redo_from"
+
+
+def test_redo_from_checked():
+    from testsuit.sequencer.model import Pipeline, flatten_phase, redo_problems  # noqa: F401
+    pipeline = manual_pipeline(manual={**MANUAL, "redo_from": ["stop"]})
+    flat = flatten_phase(Pipeline.model_validate(pipeline).phases[0], Pipeline.model_validate(pipeline))
+    fs = next(f for f in flat.steps if f.id == "plug")
+    with pytest.raises(SequencerError, match="redo_from 'stop' is not an earlier step it needs"):
+        redo_problems(fs, flat, "test_run")
+    with pytest.raises(SequencerError, match="'manual.redo_from' is a list"):
+        ms.check_manual({"text": "x", "redo_from": "ready"}, "step 'plug'")
+
+
+def test_step_mode_run_again_and_continue(tmp_path, monkeypatch):
+    """breakpoints pause the run after a step: run it again, then Next; a step waiting for ever is continued
+    anyway, which makes the run non-conform"""
+    bench, zip_path = manual_bench(tmp_path, monkeypatch)
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(zip_path)
+        with pytest.raises(SequencerError, match="step mode 'sometimes'"):
+            seq.set_control(run["id"], "sometimes")
+        assert seq.set_control(run["id"], "breakpoints", ["test_run:ready"])["control"]["mode"] == "breakpoints"
+
+        async def operator(seq):
+            await paused(seq, run["id"], "test_run:ready")
+            assert seq.store.get_run(run["id"])["paused"][0]["step"] == "test_run:ready"   # flagged in the list
+            with pytest.raises(SequencerError, match="step test_run:start is not paused"):
+                await seq.step_action(run["id"], "start", "next")
+            await seq.step_action(run["id"], "test_run:ready", "run_again", by="ann", reason="LED was off")
+            ctx = seq.executions[run["id"]].ctx
+            while not ("test_run:ready" in ctx.pauses and ctx.records.get("test_run:ready[dut]") and ctx.records["test_run:ready[dut]"].passes == 2):
+                await asyncio.sleep(0.02)
+            await seq.step_action(run["id"], "test_run:ready", "next", by="ann")
+            await waiting(seq, run["id"])
+            with pytest.raises(SequencerError, match="say why"):
+                await seq.step_action(run["id"], "plug", "continue")
+            await seq.step_action(run["id"], "plug", "continue", by="bob", reason="cable checked by hand")
+        [run] = await run_until_done(seq, [run["id"]], during=operator)
+        with pytest.raises(SequencerError, match="no step of it runs here now"):
+            await seq.step_action(run["id"], "plug", "next")
+        await seq.close()
+        return run
+    run = asyncio.run(main())
+    assert run["verdict"] == "succeeded" and run["paused"] == []
+    assert [i["action"] for i in run["interventions"]] == ["run_again", "next", "continue"]
+    assert record_of(run, "plug")["reason"] == "continued anyway: cable checked by hand"
+    assert record_of(run, "ready")["passes"] == 2 and record_of(run, "run")["state"] == "succeeded"
+    assert not run["conform"] and any("continued anyway by an operator (bob)" in n for n in run["nonconform"])
+
+
+def test_continue_past_a_failed_step(tmp_path, monkeypatch):
+    """a step failed while the phase still runs (an operation waits): continued anyway, the steps it held back run"""
+    monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": None, "clean": False})
+    bench = Bench(tmp_path, stages=1)
+    pipeline = manual_pipeline(manual={"text": "Plug it", "checks": []})
+    steps = pipeline["phases"][0]["steps"]
+    steps.insert(4, {"id": "probe", "run": "exit 1", "needs": ["ready"]})
+    next(s for s in steps if s["id"] == "run")["needs"] = ["plug", "probe"]
+    zip_path = bench.build("probed", pipeline)
+
+    async def main():
+        seq = bench.sequencer()
+        run = seq.submit(zip_path)
+
+        async def operator(seq):
+            await waiting(seq, run["id"])
+            ctx = seq.executions[run["id"]].ctx
+            while ctx.records.get("test_run:probe") is None or ctx.records["test_run:probe"].state != "failed":
+                await asyncio.sleep(0.02)
+            await seq.step_action(run["id"], "probe", "continue", reason="probe wired the other way round")
+            assert ctx.records["test_run:probe"].state == "succeeded"
+            seq.answer_manual(run["id"], "test_run:plug", {"outcome": "done"})
+        [run] = await run_until_done(seq, [run["id"]], during=operator)
+        await seq.close()
+        return run
+    run = asyncio.run(main())
+    assert run["verdict"] == "succeeded" and record_of(run, "run")["state"] == "succeeded"
+    assert record_of(run, "probe")["reason"].startswith("continued anyway: probe wired the other way round (was failed")

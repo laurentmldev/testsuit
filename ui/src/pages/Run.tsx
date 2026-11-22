@@ -22,6 +22,7 @@ import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { Named } from "../kinds";
 import { ManualOperations, rerun } from "./Manual";
+import { Interventions, PauseBanners, StepActions, StepModeControl } from "./Operator";
 import { abort, ACTIVE, PriorityInput, repost, RunStateBadge } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -454,7 +455,7 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
 }
 
 export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?: boolean }) {
-  const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation"], (d) => !d.run || String(d.run).startsWith(id));
+  const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation", "pause", "intervention"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
@@ -490,6 +491,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
         <Badge value={r.verdict} />
         <span className="spacer" />
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
+        {live && <StepModeControl run={r} onChanged={run.refresh} />}
         {live && <button onClick={() => abort(r, "cancel")}>Cancel</button>}
         {live && <button className="danger" onClick={() => abort(r, "kill")}>Kill</button>}
         {["done", "cancelled"].includes(r.state) && r.campaign_run && <button title="Run its datapack again in its campaign, unchanged: a new run, this one kept as an earlier attempt"
@@ -510,10 +512,12 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
       {r.campaign_run && <div className="muted small">part of campaign run <a href={`#/campaigns/${r.campaign_run}`}>{r.campaign_run}</a>
         {r.rerun_of && <> · runs again the datapack of run <a href={`#/runs/${r.rerun_of}`}>{r.rerun_of}</a></>}</div>}
       <ManualOperations runId={r.id} records={records} onAnswered={run.refresh} />
+      <PauseBanners run={r} onChanged={run.refresh} />
       {r.reason && <div className="banner warn">{r.reason}</div>}
       {r.wait ? <WaitBanner run={r} onRetry={run.refresh} /> : r.waiting_for && <div className="banner info">Waiting for: {r.waiting_for}</div>}
       {(r.nonconform || []).length > 0 && <details className="small"><summary>Why it is non-conform</summary><ul>{r.nonconform.map((n: string) => <li key={n}>{n}</li>)}</ul></details>}
       {(r.warnings || []).length > 0 && <ul className="warn-list">{r.warnings.map((w: string) => <li key={w}>{w}</li>)}</ul>}
+      <Interventions items={r.interventions} />
       <div className="tabs">
         {tabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => setQuery("tab", key)}>{label}</button>)}
       </div>
@@ -529,6 +533,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
               <>
                 {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
                 {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
+                <StepActions run={r} record={logRecord} part={finals.has(`${logRecord?.phase}:${logRecord?.id}`) ? "finally" : undefined} onChanged={run.refresh} />
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {editor && logRecord && <EditLabCommand record={logRecord} />}
                 <ExploitChecks runId={r.id} record={logRecord} />

@@ -24,6 +24,7 @@ plugging a cable, that the run waits for::
         checks:                                  # each acknowledged by the operator before "Done"
           - Cable A plugged on pin F
           - Power LED green
+        redo_from: [power_on]                    # optional: earlier steps the operator may run again from
       timeout: 30m                               # optional: error when nobody answered by then
 
 The step runs on the sequencer host (no slot) and waits: the Run page opens a dialog with the text, its pictures and
@@ -40,7 +41,7 @@ from typing import Any
 
 from testsuit.sequencer.util import SequencerError, now
 
-MANUAL_KEYS = ("title", "text", "checks")
+MANUAL_KEYS = ("title", "text", "checks", "redo_from")
 # a Markdown picture: ![alt](path "title"), the path without spaces
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 DONE, FAILED = "done", "failed"
@@ -56,6 +57,9 @@ def check_manual(spec: Any, where: str) -> None:
     checks = spec.get("checks", [])
     if not isinstance(checks, list) or not all(isinstance(c, (str, int, float)) and str(c).strip() for c in checks):
         raise SequencerError(f"{where}: 'manual.checks' is a list of non-empty texts")
+    redo = spec.get("redo_from", [])
+    if not isinstance(redo, list) or not all(isinstance(r, str) and r.strip() for r in redo):
+        raise SequencerError(f"{where}: 'manual.redo_from' is a list of ids of earlier steps of its phase")
     if not str(spec.get("text") or "").strip() and not checks:
         raise SequencerError(f"{where}: 'manual' needs a 'text' or 'checks' telling the operator what to do")
     for path in images(spec):
@@ -113,7 +117,8 @@ def waiting_record(step_id: str, spec: Mapping) -> dict:
     """What a step record keeps of a manual operation it waits for (the Run page's dialog)."""
     return {"title": str(spec.get("title") or step_id), "text": str(spec.get("text") or ""),
             "checks": [{"text": str(c), "done": False, "bypassed": False, "comment": ""} for c in spec.get("checks") or []],
-            "base": "definition/", "since": now(), "outcome": None, "note": ""}
+            "base": "definition/", "since": now(), "outcome": None, "note": "",
+            **({"redo_from": [str(r) for r in spec["redo_from"]]} if spec.get("redo_from") else {})}
 
 
 def settled(check: Mapping) -> bool:

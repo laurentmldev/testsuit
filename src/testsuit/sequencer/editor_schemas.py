@@ -688,7 +688,7 @@ EXPLOIT = h("Check criteria (mexploit scenarios) on outputs of the run: exploit_
 MANUAL = h("An operation a person does on the bench (plug a cable, press a button): the run waits for the operator. "
            "The Run page opens a dialog with its text and pictures, the All runs list flags the run; the operator "
            "ticks every check or bypasses it with a reason, may comment each and the whole, then answers Done "
-           "(succeeded) or Failed (failed, with the reason). No answer within the "
+           "(succeeded), Failed (failed, with the reason) or Redo from one of `redo_from`. No answer within the "
            "step's `timeout`: error. No `slot` nor `for_each`.", type="object", additionalProperties=False,
            properties={
                "title": h("Title of the dialog (default: the step id).", type="string"),
@@ -697,6 +697,10 @@ MANUAL = h("An operation a person does on the bench (plug a cable, press a butto
                          "the datapack carries it. Templates allowed.", type="string"),
                "checks": h("Points the operator acknowledges one by one before Done.", type="array",
                            items={"type": "string"}, examples=[["Cable A plugged on pin F", "Power LED green"]]),
+               "redo_from": h("Earlier steps of the phase (or of the sub-pipeline) the operator may run again from, "
+                              "when the bench is not right: that step and the steps after it run again, then the "
+                              "operation is asked again.", type="array", items={"type": "string"},
+                              examples=[["power_on"]]),
            },
            defaultSnippets=[{"label": "manual operation", "body": {
                "title": "${1:Plug cable A}", "text": "${2:Plug **cable A** on pin F.}", "checks": ["${3:Cable A plugged}"]}}])

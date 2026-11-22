@@ -495,6 +495,27 @@ def pipeline_mismatches(pipeline: Pipeline, needs: Needs) -> list[str]:
     return problems
 
 
+def redo_problems(fs: FlatStep, flat: FlatPhase, phase_id: str) -> None:
+    """The steps a manual operation can be redone from: earlier steps of its phase (not finally) that it needs,
+    directly or not."""
+    if fs in flat.finally_:
+        raise SequencerError(f"phase '{phase_id}': finally step '{fs.id}': a finally step cannot be redone from earlier steps")
+    by_id = {s.id: s for s in flat.steps}
+    ancestors: set[str] = set()
+    todo = list(fs.needs)
+    while todo:
+        current = todo.pop()
+        if current in by_id and current not in ancestors:
+            ancestors.add(current)
+            todo += by_id[current].needs
+    namespace = fs.id.rpartition(".")[0]
+    for target in fs.step.manual.get("redo_from") or []:
+        found = target if target in by_id else f"{namespace}.{target}" if namespace else target
+        if found not in ancestors:
+            raise SequencerError(f"phase '{phase_id}': step '{fs.id}': redo_from '{target}' is not an earlier step it "
+                                 "needs, directly or not, in its phase")
+
+
 def exploit_data_problems(fs: FlatStep, phase: Phase, phase_ids: list[str], needs: Needs) -> None:
     """The data an exploit step reads: the phase and slot of each entry exist (templates are checked at run time)."""
     from testsuit.sequencer.exploitstep import as_list, parse_data
@@ -546,6 +567,8 @@ def validate_pipeline(pipeline: Pipeline, needs: Needs) -> list[FlatPhase]:
                                      f"'slots', a role, nor a list of slots of the phase{hint}")
             if fs.step.exploit is not None:
                 exploit_data_problems(fs, phase, phase_ids, needs)
+            if fs.step.manual is not None and fs.step.manual.get("redo_from"):
+                redo_problems(fs, flat, phase.id)
             outside = [t for t in targets if t not in held]
             if outside:
                 raise SequencerError(f"phase '{phase.id}': step '{fs.id}' targets slot(s) {outside} "

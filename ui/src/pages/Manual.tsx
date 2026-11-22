@@ -84,6 +84,9 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
   const [by, setBy] = useState(operatorName);
   const [note, setNote] = useState<string>(m.note || "");
   const [failing, setFailing] = useState(false);
+  const [redoing, setRedoing] = useState(false);
+  const redoFrom: string[] = m.redo_from || [];
+  const [target, setTarget] = useState<string>(redoFrom[0] || "");
   const [busy, setBusy] = useState(false);
   const checks: any[] = m.checks || [];
   const left = checks.filter((c) => !settled(c)).length;
@@ -91,22 +94,35 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
   useEffect(() => {
     try { localStorage.setItem(AUTHOR, JSON.stringify({ ...JSON.parse(localStorage.getItem(AUTHOR) || "{}"), name: by.trim() })); } catch { /* storage off */ }
   }, [by]);
-  const send = async (body: any, success?: string) => {
-    setBusy(true);
+  // quiet: a save on the side (the comment, when it loses the focus) that keeps the buttons enabled, else the click
+  // that moved the focus onto Done, Failed or Redo would land on a button disabled in between
+  const send = async (body: any, success?: string, quiet = false) => {
+    if (!quiet) setBusy(true);
     const result = await attempt(() => post(`runs/${runId}/manual/${encodeURIComponent(key)}`, { ...body, by: by.trim() }), success);
-    setBusy(false);
+    if (!quiet) setBusy(false);
     if (result) onAnswered(result);
     return result;
   };
   const answer = async (outcome: "done" | "failed") => {
     if (await send({ outcome, note: note.trim() }, `${m.title}: ${outcome}`)) onClose();
   };
+  const redo = async () => {
+    if (await send({ outcome: "redo", from: target, note: note.trim() }, `${m.title}: redone from ${target}`)) onClose();
+  };
   return (
     <Dialog title={`Manual operation: ${m.title}`} onClose={onClose} wide footer={
       <>
         <label className="small manual-by">By <input value={by} onChange={(e) => setBy(e.target.value)} placeholder="your name" /></label>
         <span className="spacer" />
-        {failing ? (
+        {redoing ? (
+          <>
+            <label className="small">Redo from <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              {redoFrom.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
+            <span className="small muted">that step and the ones after it run again, then this operation is asked again</span>
+            <button className="primary" disabled={busy || !target} onClick={redo}>Redo</button>
+            <button onClick={() => setRedoing(false)}>Back</button>
+          </>
+        ) : failing ? (
           <>
             <span className="small">The comment above says why it failed.</span>
             <button className="danger" disabled={busy || !note.trim()} onClick={() => answer("failed")}>Fail the step</button>
@@ -114,6 +130,8 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
           </>
         ) : (
           <>
+            {redoFrom.length > 0 && <button disabled={busy} onClick={() => setRedoing(true)}
+              title={`The bench is not right: run ${redoFrom.join(" or ")} again, and the steps after it, then come back here`}>Redo from…</button>}
             <button className="danger" disabled={busy} onClick={() => setFailing(true)} title="The operation cannot be done: the step fails, and the run goes on as for any failed step">Failed…</button>
             <button className="primary" disabled={busy || left > 0} onClick={() => answer("done")}
               title={left ? `Tick or bypass the ${left} check(s) left first` : skipped ? `Done, ${skipped} check(s) bypassed: the run goes on` : "The operation is done: the run goes on"}>
@@ -136,7 +154,7 @@ export function ManualDialog({ runId, record, onClose, onAnswered }: { runId: st
         <label className={classes("manual-global", failing && "required")}>
           <span className="small">{failing ? "Why it failed (required)" : "Comment on the whole operation (optional)"}</span>
           <textarea rows={2} value={note} autoFocus={failing} onChange={(e) => setNote(e.target.value)}
-            onBlur={() => note.trim() !== (m.note || "") && send({ note: note.trim() })}
+            onBlur={() => note.trim() !== (m.note || "") && send({ note: note.trim() }, undefined, true)}
             placeholder={failing ? "what went wrong, e.g. no cable A on the bench" : "anything the results should say about this operation"} />
         </label>
       </div>
@@ -150,7 +168,9 @@ export function ManualOperations({ runId, records, onAnswered }: { runId: string
   const waiting = waitingManual(records);
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [opened, setOpened] = useState<string | null>(null);
-  const shown = waiting.find((s) => manualKey(s) === opened) || waiting.find((s) => !closed.has(manualKey(s)));
+  // closed for this time it is asked: asked again (after a Redo from), it opens again
+  const asked = (s: any) => `${manualKey(s)}@${s.manual.since}`;
+  const shown = waiting.find((s) => manualKey(s) === opened) || waiting.find((s) => !closed.has(asked(s)));
   if (!waiting.length) return null;
   return (
     <>
@@ -162,8 +182,8 @@ export function ManualOperations({ runId, records, onAnswered }: { runId: string
           <button className="small primary" onClick={() => setOpened(manualKey(s))}>Open</button>
         </div>
       ))}
-      {shown && <ManualDialog key={manualKey(shown)} runId={runId} record={shown} onAnswered={onAnswered}
-        onClose={() => { setClosed(new Set([...closed, manualKey(shown)])); setOpened(null); }} />}
+      {shown && <ManualDialog key={asked(shown)} runId={runId} record={shown} onAnswered={onAnswered}
+        onClose={() => { setClosed(new Set([...closed, asked(shown)])); setOpened(null); }} />}
     </>
   );
 }

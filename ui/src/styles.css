@@ -1143,3 +1143,10 @@ input.manual-note { flex: 1; min-width: 200px; }
 .manual-global { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .manual-global textarea { width: 100%; resize: vertical; font: inherit; }
 .manual-global.required textarea { border-color: var(--bad); }
+
+/* operator controls (step-by-step mode, paused steps, step actions) */
+.banner.pause-banner { background: var(--run-soft); border: 1px solid var(--run); }
+.badge.pause-flag { background: var(--run-soft); color: var(--run); white-space: nowrap; text-decoration: none; }
+.step-mode select { margin-left: 4px; }
+.step-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.interventions ul { margin: 4px 0; padding-left: 20px; }
