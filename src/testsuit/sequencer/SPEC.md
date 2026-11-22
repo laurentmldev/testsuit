@@ -704,6 +704,7 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 | `GET /stages`, `GET /components`, `POST /{stages\|components}/{id}/{hold\|release\|maintenance\|resume}` | resources |
 | `GET\|POST /components/{id}/probe`, `POST /components/{id}/bypass`, `GET\|POST /components/{id}/commands[/{cmd}]` | probe report, bypass, manual commands |
 | `POST /selftest`, `GET /lab`, `POST /lab/reload`, `GET /lab/changes`, `GET /lab/view`, `GET\|PUT /lab/layout` | lab |
+| `GET /runs/{id}/requirements[/report]`, `GET /campaigns/{id}/requirements[/report]` | requirements coverage of a run or of a campaign run (§5.5), JSON or one HTML page; `GET /campaigns/{id}/report` includes it |
 | `GET /events` | Server-Sent Events: state changes, log lines |
 | `/edit/...`, `/exploit/...`, `/plot/...` | Editor mode only (§12.4) |
 
@@ -721,7 +722,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Lab changes** apply only on reload (§4.9).
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
 - **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it; its page shows the report.
-- **Requirements**: the test definition's problems include its unknown or inactive requirements and those of its checks (errors), and pinned versions that changed (warnings) (§5.5).
+- **Requirements**: the Datapacks page has a Requirements subtab: the path tree of a source (requirements.yml, kind `requirements`), with per node the coverage of its requirements over the latest ended run of each test definition (else the test definition, linked only), optionally restricted to a campaign's test definitions; the requirements of the node (with or without its sub-nodes), each with its text, status and links; and the matrices of §5.5 (`GET /edit/sessions/{id}/requirements[/report]?source=&campaign=`). The test definition's problems include its unknown or inactive requirements and those of its checks (errors), and pinned versions that changed (warnings) (§5.5).
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---

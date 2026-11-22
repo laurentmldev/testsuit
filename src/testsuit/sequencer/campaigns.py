@@ -132,12 +132,28 @@ table { border-collapse:collapse; width:100%; } th, td { text-align:left; paddin
 th { font-size:12px; color:var(--muted); font-weight:600; }
 .scroll { overflow-x:auto; } dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 16px; margin:0; }
 dt { color:var(--muted); } dd { margin:0; } a { color:var(--run); } .warn { color:var(--err); }
+.passed { background:var(--okbg); color:var(--ok); } .partial { background:var(--runbg); color:var(--run); }
+.skipped { background:var(--card); color:var(--muted); border:1px solid var(--line); } .not-run { color:var(--muted); border:1px solid var(--line); }
+.uncovered { color:var(--bad); border:1px dashed var(--bad); } .changed { color:var(--err); font-size:11px; }
+tr.node td { background:var(--card); font-weight:600; } td.c { text-align:center; }
 """
 
 
-def report_html(view: dict, base: str = "") -> str:
+def requirements_html(cov, view: dict, base: str = "") -> str:
+    """The requirements section of the report: counts per status and the requirements × tests matrix (SPEC §5.5)."""
+    from testsuit.reqs.render import matrix_html, tiles_html
+    if cov is None or not cov.tests:
+        return ""
+    full = f"{base}campaigns/{quote(view['id'])}/requirements/report"
+    return (f'<h2>Requirements</h2><div class="muted">Requirements the test definitions and their checks verify, over the '
+            f'runs of this campaign. <a href="{full}">Full coverage report</a> (with tests × requirements).</div>'
+            + tiles_html(cov) + matrix_html(cov, base))
+
+
+def report_html(view: dict, base: str = "", requirements=None) -> str:
     """The synthetic report of a campaign run (a ``summarize`` view), as one self-contained HTML page. base: the URL of
-    the sequencer's root as seen from where the page is served (links to its UI and API)."""
+    the sequencer's root as seen from where the page is served (links to its UI and API). requirements: the coverage
+    of its runs (testsuit.reqs.coverage.coverage_of_runs), shown when they link requirements."""
     e = html.escape
 
     def badge(value: str | None) -> str:
@@ -208,6 +224,7 @@ def report_html(view: dict, base: str = "") -> str:
 <div class="scroll"><table>
 <thead><tr><th>Test definition</th><th>Verdict</th><th>Duration</th><th>Ran on</th><th>Checks met</th><th>Details</th><th>Links</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div>
+{requirements_html(requirements, view, base)}
 <h2>Baseline</h2>
 <dl>
 <dt>Conform</dt><dd>{"yes" if view.get("conform") else '<span class="warn">no</span>'}</dd>

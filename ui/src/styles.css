@@ -1110,3 +1110,40 @@ dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .campaign-runs .chip { margin: 0 4px 2px 0; }
 .campaign-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
 .campaign-page { overflow-x: auto; }
+
+/* requirements coverage (pages/Requirements.tsx) */
+.cov-badge { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 11.5px; font-weight: 600; white-space: nowrap; background: var(--panel-2); color: var(--muted); }
+.cov-badge.passed { background: var(--ok-soft); color: var(--ok); }
+.cov-badge.failed { background: var(--bad-soft); color: var(--bad); }
+.cov-badge.error { background: var(--warn-soft); color: var(--warn); }
+.cov-badge.partial { background: var(--run-soft); color: var(--run); }
+.cov-badge.not-run { background: none; border: 1px solid var(--border); }
+.cov-badge.uncovered { background: none; color: var(--bad); border: 1px dashed var(--bad); }
+.cov-cell { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; }
+.cov-changed { font-size: 10.5px; color: var(--warn); }
+.cov-tiles { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.cov-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; min-width: 72px; font-size: 12px; color: var(--muted); }
+.cov-tile b { display: block; font-size: 18px; color: var(--text); }
+.cov-tile.passed b { color: var(--ok); } .cov-tile.failed b, .cov-tile.uncovered b { color: var(--bad); }
+.cov-tile.error b { color: var(--warn); } .cov-tile.partial b { color: var(--run); }
+.cov-matrix td.c, .cov-matrix th { text-align: center; }
+.cov-matrix td:first-child, .cov-matrix th:first-child, .cov-matrix td:nth-child(2), .cov-matrix th:nth-child(2) { text-align: left; }
+.cov-node td { background: var(--panel-2); font-weight: 600; }
+.cov-row { cursor: pointer; } .cov-row:hover td, .cov-row.open td { background: var(--accent-soft); }
+.cov-detail td { background: var(--panel); }
+.req-detail { padding: 4px 8px; max-width: 900px; } .req-detail p { margin: 4px 0; }
+.cov-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.cov-actions { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+.cov-actions .spacer { flex: 1; }
+.requirements-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
+.req-tree { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.req-tree select { margin-bottom: 6px; }
+.req-tree-item { display: flex; align-items: center; gap: 6px; text-align: left; border: none; background: none; padding: 4px 8px; border-radius: 6px; }
+.req-tree-item span:first-child { flex: 1; }
+.req-tree-item.active { background: var(--accent-soft); color: var(--accent); }
+.cov-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.cov-dot.passed { background: var(--ok); } .cov-dot.failed, .cov-dot.uncovered { background: var(--bad); }
+.cov-dot.error { background: var(--warn); } .cov-dot.partial { background: var(--run); }
+@media (max-width: 800px) { .requirements-layout { grid-template-columns: 1fr; } .req-tree { position: static; } }
+.req-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+.campaign-requirements { margin-top: 16px; }

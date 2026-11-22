@@ -50,6 +50,7 @@ from pydantic import ValidationError
 
 from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
                                              is_scenario, is_utests)
+from testsuit.reqs.sources import SOURCES_FILE
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
 from testsuit.sequencer.library import without_comments
@@ -915,6 +916,8 @@ class Editor:
             return "yaml"
         if "all" in data and isinstance(data.get("all"), dict):
             return "inventory"
+        if path.name == SOURCES_FILE and ({"requirements", "sources"} & set(data)):
+            return "requirements"
         if "setup_file" in data or "pipeline" in data:
             return "testdef"
         if "configurations" in data and ({"slot_classes", "component_types", "datarepositories"} & set(data)):
@@ -1204,7 +1207,7 @@ class Editor:
         """Test definitions, setups, sub-pipelines, dictionaries and templates of a folder."""
         from testsuit.datatools.datapack.campaign import is_campaign_file, looks_like_campaign
         result = {"testdefs": [], "setups": [], "subpipelines": {}, "subpipeline_files": [], "shared_subpipelines": {},
-                  "dictionaries": [], "templates": [], "campaigns": []}
+                  "dictionaries": [], "templates": [], "campaigns": [], "requirements": []}
         if not folder.is_dir():
             return result
         for dirpath, dirnames, filenames in os.walk(folder):
@@ -1222,6 +1225,9 @@ class Editor:
                 except (yaml.YAMLError, UnicodeDecodeError):
                     continue
                 if not isinstance(data, dict):
+                    continue
+                if name == SOURCES_FILE and ({"requirements", "sources"} & set(data)):
+                    result["requirements"].append(rel)
                     continue
                 if is_campaign_file(rel) or looks_like_campaign(data):
                     result["campaigns"].append({"path": rel, "id": data.get("id"), "name": data.get("name"),
@@ -1462,6 +1468,69 @@ class Editor:
             line, column = _find_line(text, problem)
             problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": problem})
         return problems
+
+    def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None) -> dict:
+        out, cov = self.requirements_coverage(session, source, campaign)
+        return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
+
+    def requirements_coverage(self, session: EditSession, source: str | None = None, campaign: str | None = None):
+        """(description, Coverage or None): the requirements of a tests repository and how its test definitions cover them (Datapacks, Requirements; SPEC
+        §5.5): the tree of a source, every requirement of it, and the coverage by the latest run of each test
+        definition that has one (else as linked). ``campaign``: only the test definitions of that campaign file."""
+        from testsuit.reqs.backend import ReqError
+        from testsuit.reqs.coverage import Coverage, add_sources, add_test, read_testdef, snapshot_of_run, test_of_run
+        from testsuit.reqs.sources import Sources, find_sources_file
+        if session.kind != "workspace":
+            raise SequencerError("requirements are those of a tests repository")
+        testdefs = self.scan_workspace(session.folder, session.folder)["testdefs"]
+        if campaign:
+            from testsuit.datatools.datapack.campaign import load_campaign
+            path = self.path(session, campaign)
+            try:
+                entries = load_campaign(path).testdefs
+            except Exception as e:
+                raise SequencerError(f"campaign '{campaign}': {e}") from e
+            wanted = {self.rel(session, path.parent / e.testdef) for e in entries}
+            testdefs = [t for t in testdefs if t["path"] in wanted]
+        file = find_sources_file(session.folder) or next(
+            (f for f in (find_sources_file(self.path(session, t["path"])) for t in testdefs) if f), None)
+        out: dict[str, Any] = {"sources_file": None, "sources": [], "source": None, "tree": []}
+        if file is None:
+            return out, None
+        out["sources_file"] = self.rel(session, file) if file.is_relative_to(session.folder) else str(file)
+        try:
+            sources = Sources(file)
+            source = source if source in sources.names else sources.default
+            out.update({"sources": sources.names, "source": source, "tree": [n.as_dict() for n in sources.tree(source)]})
+        except ReqError as e:
+            out["error"] = str(e)
+            return out, None
+        latest: dict[str, dict] = {}
+        for run in self.seq.store.runs(["done", "cancelled"], limit=2000):     # newest first
+            if run.get("testdef") and run["testdef"] not in latest and snapshot_of_run(run) is not None:
+                latest[run["testdef"]] = run
+        cov = Coverage()
+        for t in testdefs:
+            run = latest.get(str(t.get("id")))
+            try:
+                if run is not None:
+                    snap = snapshot_of_run(run)
+                    test = test_of_run(run, snap)
+                    found = (snap, test)
+                else:
+                    found = read_testdef(self.path(session, t["path"]))
+            except Exception as e:
+                cov.problems.append(f"{t['path']}: {e}")
+                continue
+            if found is not None:
+                found[1].name = str(t.get("name") or "")
+                found[1].origin = t["path"]
+                add_test(cov, *found)
+        try:
+            add_sources(cov, sources, [f"{source}:"] if source != sources.default else [""], True, live=True)
+        except Exception as e:
+            cov.problems.append(f"requirements of '{source}' not read: {e}")
+        return out, cov
 
     def _reqs_problems(self, session: EditSession, testdef_rel: str, raw: dict) -> list[tuple[str, str]]:
         """(severity, problem) of the requirements the test definition and its checks list (SPEC section 5.4):
