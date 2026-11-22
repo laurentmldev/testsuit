@@ -270,3 +270,51 @@ def test_editor_problems(tmp_path):
         ("warning", "requirements: requirement 'REQ-2' changed since version 1 (now 2)")}
     [line] = [p["line"] for p in problems if "REQ-4' is rejected" in p["message"]]
     assert "REQ-4" in editor.path(session, "testdef/count/testdef.yml").read_text().splitlines()[line - 1]
+
+
+def test_sequencer_and_campaign_report(bench, tmp_path):
+    """tsqd: the coverage of a run (its steps as they are), and the requirements section of the campaign report."""
+    import asyncio
+    from testsuit.sequencer.api import create_app
+    from testsuit.sequencer.campaigns import report_html
+    from testsuit.reqs.coverage import coverage_of_runs
+    zip_path = datapack(_bench(bench, "api", ["REQ-1"], min_count=3), nocheck=True, output_dir=tmp_path / "zips")
+    run = run_one(bench, zip_path)
+
+    async def main():
+        seq = bench.sequencer()
+        routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
+        try:
+            data = await routes["/runs/{run_id}/requirements"](run["id"])
+            page = (await routes["/runs/{run_id}/requirements/report"](run["id"])).body.decode()
+        finally:
+            await seq.close()
+        return data, page
+    data, page = asyncio.run(main())
+    assert data["linked"] and {r["key"]: r["coverage"] for r in data["requirements"]} == {"REQ-1": "passed", "REQ-2": "passed"}
+    [test] = data["tests"]
+    assert test["run"] == run["id"] and test["reports"]["criteria"].endswith("exploit_synthesis.html")
+    assert "Tests × requirements" in page and f'href="../../../#/runs/{run["id"]}"' in page
+    view = {"id": "c1", "campaign": "camp", "runs": [], "counts": {}}
+    html_page = report_html(view, base="../", requirements=coverage_of_runs([{**run, "dir": None}]))
+    assert "<h2>Requirements</h2>" in html_page and "../campaigns/c1/requirements/report" in html_page
+    assert "<h2>Requirements</h2>" not in report_html(view, base="../")
+
+
+def test_editor_requirements_page(tmp_path):
+    from editor_t import Repos
+    repos = Repos(tmp_path)
+    editor = repos.editor
+    session = editor.open("workspace0")
+    assert editor.requirements(session)["sources_file"] is None
+    editor.write(session, "requirements.yml", content=yaml.safe_dump(REQS))
+    testdef = {"id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+               "reqs": ["REQ-1"], "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
+                   {"id": "start", "slot": "dut", "do": "start"}]}]}}
+    editor.write(session, "testdef/count/testdef.yml", data=testdef)
+    assert editor.kind(session, "requirements.yml") == "requirements"
+    data = editor.requirements(session)
+    assert data["sources_file"] == "requirements.yml" and [n["id"] for n in data["tree"]] == ["OTHER", "SYS"]
+    rows = {r["key"]: r["coverage"] for r in data["coverage"]["requirements"]}
+    assert rows == {"REQ-1": "not run", "REQ-2": "uncovered", "REQ-3": "uncovered", "REQ-5": "uncovered"}
+    assert data["coverage"]["tests"][0]["origin"] == "testdef/count/testdef.yml"

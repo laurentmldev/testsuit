@@ -102,7 +102,7 @@ def as_csv(cov: Coverage, view: str = "reqs") -> str:
     return buf.getvalue()
 
 
-_CSS = """
+CSS = """
 :root { --bg:#fff; --fg:#1d2330; --muted:#667085; --line:#e4e7ec; --card:#f8f9fb; --link:#175cd3;
         --ok:#16794c; --okbg:#e7f6ee; --bad:#b42318; --badbg:#fdecea; --err:#93370d; --errbg:#fef0c7;
         --part:#175cd3; --partbg:#e8f0fe; --skip:#475467; --skipbg:#eef0f3; --none:#98a2b3; --nonebg:transparent; }
@@ -130,40 +130,46 @@ tr.node td { background:var(--card); font-weight:600; }
 """
 
 
-def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str = "") -> str:
-    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports."""
+def _badge(status: str | None, stale: bool = False) -> str:
     e = html.escape
-    base = sequencer.rstrip("/") + "/" if sequencer else ""
+    if status is None:
+        return '<span class="muted">–</span>'
+    cls = status.replace(" ", "-")
+    return (f'<span class="badge {cls}" title="{e(status)}">{_MARK[status]} {e(status)}</span>'
+            + ('<div class="changed">changed since</div>' if stale else ""))
 
-    def badge(status: str | None, stale: bool = False) -> str:
-        if status is None:
-            return '<span class="muted">–</span>'
-        cls = status.replace(" ", "-")
-        return (f'<span class="badge {cls}" title="{e(status)}">{_MARK[status]} {e(status)}</span>'
-                + ('<div class="changed">changed since</div>' if stale else ""))
 
-    def req_link(key: str) -> str:
-        url = cov.requirements.get(key, {}).get("url")
-        return f'<a href="{e(url)}"><code>{e(key)}</code></a>' if url else f"<code>{e(key)}</code>"
+def _req_link(cov: Coverage, key: str) -> str:
+    e = html.escape
+    url = cov.requirements.get(key, {}).get("url")
+    return f'<a href="{e(url)}"><code>{e(key)}</code></a>' if url else f"<code>{e(key)}</code>"
 
-    def test_head(t: Test) -> str:
-        label = e(t.testdef)
-        if t.run and base:
-            label = f'<a href="{base}#/runs/{quote(t.run)}">{label}</a>'
-        sub = f'<div class="muted">{e(t.run)}</div>' if t.run else '<div class="muted">not run</div>'
-        return label + sub
 
+def _test_head(t: Test, base: str) -> str:
+    e = html.escape
+    label = e(t.testdef)
+    if t.run and base:
+        label = f'<a href="{base}#/runs/{quote(t.run)}">{label}</a>'
+    return label + (f'<div class="muted">{e(t.run)}</div>' if t.run else '<div class="muted">not run</div>')
+
+
+def tiles_html(cov: Coverage) -> str:
+    e = html.escape
     rows = cov.rows()
     totals: dict[str, int] = {}
     for key in rows:
         s = cov.status(key)
         totals[s] = totals.get(s, 0) + 1
-    tiles = f'<div class="tile"><b>{len(rows)}</b>requirements</div>' + "".join(
-        f'<div class="tile"><b>{totals[s]}</b>{e(s)}</div>' for s in STATUSES if totals.get(s))
+    return (f'<div class="tiles"><div class="tile"><b>{len(rows)}</b>requirements</div>'
+            + "".join(f'<div class="tile"><b>{totals[s]}</b>{e(s)}</div>' for s in STATUSES if totals.get(s)) + "</div>")
 
+
+def matrix_html(cov: Coverage, base: str = "") -> str:
+    """The requirements × tests table, a header row per path node with its counts."""
+    e = html.escape
     by_path = cov.by_path()
     body, last = [], None
-    for key in rows:
+    for key in cov.rows():
         req = cov.requirements.get(key, {})
         path = str(req.get("path", "")).strip("/")
         if path != last:
@@ -171,12 +177,18 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
             body.append(f'<tr class="node"><td colspan="{3 + len(cov.tests)}"><code>{e(path or "(no path)")}</code> '
                         f'<span class="muted">{e(_counts(by_path.get(path, {})))}</span></td></tr>')
         title_text = req.get("title") or str(req.get("description", "")).split("\n")[0][:120]
-        cells = "".join(f'<td class="c">{badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
-        body.append(f"<tr><td>{req_link(key)}</td><td>{e(str(title_text))}</td><td>{badge(cov.status(key))}</td>{cells}</tr>")
-    heads = "".join(f"<th>{test_head(t)}</th>" for t in cov.tests)
-    req_table = (f'<div class="scroll"><table><thead><tr><th>Requirement</th><th>Title</th><th>Coverage</th>{heads}</tr>'
-                 f'</thead><tbody>{"".join(body)}</tbody></table></div>')
+        cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
+        body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
+    heads = "".join(f"<th>{_test_head(t, base)}</th>" for t in cov.tests)
+    return (f'<div class="scroll"><table><thead><tr><th>Requirement</th><th>Title</th><th>Coverage</th>{heads}</tr>'
+            f'</thead><tbody>{"".join(body)}</tbody></table></div>')
 
+
+def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str = "") -> str:
+    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports."""
+    e = html.escape
+    base = sequencer.rstrip("/") + "/" if sequencer else ""
+    by_path = cov.by_path()
     path_rows = "".join(f'<tr><td><code>{e(node or "(all)")}</code></td>'
                         + "".join(f'<td class="c">{counts.get(s, "")}</td>' for s in STATUSES) + "</tr>"
                         for node, counts in by_path.items())
@@ -185,15 +197,15 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
 
     test_rows = []
     for t in cov.tests:
-        verdict = badge({"succeeded": "passed"}.get(t.verdict, t.verdict) if t.verdict in ("succeeded", "failed", "error")
-                        else "not run")
-        test_rows.append(f'<tr class="node"><td colspan="2">{test_head(t)}</td><td>{verdict}</td></tr>')
+        verdict = _badge({"succeeded": "passed"}.get(t.verdict, t.verdict) if t.verdict in ("succeeded", "failed", "error")
+                         else "not run")
+        test_rows.append(f'<tr class="node"><td colspan="2">{_test_head(t, base)}</td><td>{verdict}</td></tr>')
         for where, links in _groups(t).items():
             report = ""
             step = links[0].step
             if base and t.run and step in t.reports:
                 report = f' · <a href="{base}runs/{quote(t.run)}/files/{quote(t.reports[step])}">exploit report</a>'
-            reqs = " ".join(f"{req_link(lk.req)} {badge(lk.status, cov.stale(lk.req, t))}" for lk in links)
+            reqs = " ".join(f"{_req_link(cov, lk.req)} {_badge(lk.status, cov.stale(lk.req, t))}" for lk in links)
             test_rows.append(f"<tr><td></td><td><code>{e(where)}</code>{report}</td><td>{reqs}</td></tr>")
         for p in t.problems:
             test_rows.append(f'<tr><td></td><td colspan="2" class="warn">problem: {e(p)}</td></tr>')
@@ -205,14 +217,14 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
     problems = "".join(f'<li class="warn">{e(p)}</li>' for p in cov.problems)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{e(title)}</title><style>{_CSS}</style></head>
+<title>{e(title)}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{e(title)}</h1>
 <div class="muted">{len(cov.tests)} test(s) · generated {datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
-<div class="tiles">{tiles}</div>
+{tiles_html(cov)}
 {f"<ul>{problems}</ul>" if problems else ""}
 <h2>Requirements × tests</h2>
-{req_table}
+{matrix_html(cov, base)}
 <h2>Coverage by path</h2>
 {path_table}
 <h2>Tests × requirements</h2>

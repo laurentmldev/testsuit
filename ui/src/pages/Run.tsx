@@ -13,6 +13,7 @@
 
 // One run (sequencer README, section 13.1): its pipeline as a live graph of phases, sub-pipelines and steps,
 // the logs of each step, its files before, during and after the run.
+import { RunsCoverage } from "./Requirements";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { get, getText, post, url, useLabels, useResource } from "../api";
@@ -483,6 +484,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
   if (!r) return <div className="page muted">Loading…</div>;
   const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"], ["resources", "Resources"]];
   if (r.results) tabs.push(["results", "Results"]);
+  tabs.push(["requirements", "Requirements"]);
   return (
     <div className="page run-page">
       <div className="page-head">
@@ -571,6 +573,7 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
       )}
       {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} plot={editor ? `plot/runs/${r.id}` : undefined} />}
       {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
+      {tab === "requirements" && <RunsCoverage path={`runs/${r.id}/requirements`} events={["run", "step"]} title="The requirements this test and its checks verify, by this run" />}
       {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" plot={editor ? `plot/runs/${r.id}` : undefined} />}
     </div>
   );

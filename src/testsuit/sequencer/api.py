@@ -124,7 +124,24 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         from testsuit.sequencer.campaigns import report_html
         view = await asyncio.to_thread(seq.campaign_view, campaign_id)
         headers = {"Content-Disposition": f'attachment; filename="{view["campaign"]}_{view["id"]}_report.html"'} if download else {}
-        return HTMLResponse(report_html(view, base="../../"), headers=headers)
+        cov = await asyncio.to_thread(seq.campaign_requirements, campaign_id)
+        return HTMLResponse(report_html(view, base="../../", requirements=cov), headers=headers)
+
+    @app.get("/campaigns/{campaign_id}/requirements")
+    async def campaign_requirements(campaign_id: str):
+        """Requirements coverage of a campaign run's runs (SPEC §5.5): ``linked: false`` when none links any."""
+        cov = await asyncio.to_thread(seq.campaign_requirements, campaign_id)
+        return {"linked": bool(cov.tests), **cov.as_dict()}
+
+    @app.get("/campaigns/{campaign_id}/requirements/report")
+    async def campaign_requirements_report(campaign_id: str, download: bool = False):
+        from fastapi.responses import HTMLResponse
+        from testsuit.reqs.render import as_html
+        view = await asyncio.to_thread(seq.campaign_view, campaign_id)
+        cov = await asyncio.to_thread(seq.campaign_requirements, campaign_id)
+        headers = {"Content-Disposition": f'attachment; filename="{view["campaign"]}_{view["id"]}_requirements.html"'} if download else {}
+        return HTMLResponse(as_html(cov, f"{view.get('title') or view['campaign']}: requirements coverage", "../../../"),
+                            headers=headers)
 
     @app.post("/campaigns/{campaign_id}/{command}")
     async def abort_campaign(campaign_id: str, command: str):
@@ -154,6 +171,23 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             run["running_phase"] = ctx.phase_runner.id if ctx.phase_runner is not None else None
         run["wait"] = seq.wait_info(run)                 # why it, or its next phase, does not start yet
         return run
+
+    @app.get("/runs/{run_id}/requirements")
+    async def run_requirements(run_id: str):
+        """Requirements coverage of a run (SPEC §5.5): ``linked: false`` when it links none."""
+        run_or_404(run_id)
+        cov = await asyncio.to_thread(seq.run_requirements, run_id)
+        return {"linked": bool(cov.tests), **cov.as_dict()}
+
+    @app.get("/runs/{run_id}/requirements/report")
+    async def run_requirements_report(run_id: str, download: bool = False):
+        from fastapi.responses import HTMLResponse
+        from testsuit.reqs.render import as_html
+        run = run_or_404(run_id)
+        cov = await asyncio.to_thread(seq.run_requirements, run_id)
+        headers = {"Content-Disposition": f'attachment; filename="{run["id"]}_requirements.html"'} if download else {}
+        return HTMLResponse(as_html(cov, f"{run.get('testdef') or run['id']}: requirements coverage", "../../../"),
+                            headers=headers)
 
     def python_label(py: dict) -> str:
         if py.get("script"):

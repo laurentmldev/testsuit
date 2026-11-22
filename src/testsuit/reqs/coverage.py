@@ -150,13 +150,14 @@ class Coverage:
 
     def as_dict(self) -> dict:
         return {
-            "requirements": [{"key": k, **{f: v for f, v in self.requirements.get(k, {}).items() if f in (
-                "title", "path", "version", "status", "url")}, "coverage": self.status(k),
-                "tests": {t.key: {"status": t.status(k), **({"stale": True} if self.stale(k, t) else {})}
+            "requirements": [{"key": k, **self.requirements.get(k, {}), "coverage": self.status(k),
+                "tests": {t.key: {"status": t.status(k), **({"changed": True} if self.stale(k, t) else {})}
                           for t in self.tests if t.status(k) is not None}} for k in self.rows()],
             "tests": [{"key": t.key, "testdef": t.testdef, "name": t.name, "origin": t.origin,
-                       **({"run": t.run, "verdict": t.verdict} if t.run else {}),
-                       "links": [{"req": lk.req, "where": lk.where, "status": lk.status} for lk in t.links],
+                       **({"run": t.run, "verdict": t.verdict, "reports": t.reports} if t.run else {}),
+                       "links": [{"req": lk.req, "where": lk.where, "level": lk.level, "step": lk.step,
+                                  "status": lk.status, **({"changed": True} if self.stale(lk.req, t) else {})}
+                                 for lk in t.links],
                        **({"problems": t.problems} if t.problems else {}),
                        **({"warnings": t.warnings} if t.warnings else {})} for t in self.tests],
             "by_path": self.by_path(),
@@ -258,19 +259,59 @@ def _expand(targets: list[Path]) -> list[Path]:
     return out
 
 
+def add_test(cov: Coverage, snap: dict, test: Test, keys: dict[str, int] | None = None) -> None:
+    """Add a test and the requirements of its snapshot (a test key already there gets a #<n> suffix)."""
+    taken = {t.key for t in cov.tests}
+    base, n = test.key, 1
+    while test.key in taken:
+        n += 1
+        test.key = f"{base}#{n}"
+    for key, req in (snap.get("requirements") or {}).items():
+        cov.requirements.setdefault(key, req)
+        test.versions[key] = str(req.get("version", ""))
+    cov.tests.append(test)
+
+
+def add_sources(cov: Coverage, sources: Sources, paths: list[str] | None = None, children: bool = False,
+                live: bool = True) -> None:
+    """The requirements under paths as rows (inactive ones left out), and the current version of every row (live)."""
+    if paths:
+        cov.universe = []
+        for p in paths:
+            source, sep, node = p.partition(":")
+            if not sep or source not in sources.names:
+                source, node = sources.default, p
+            for key, req in sources.list(node, children, source).items():
+                if req.inactive:                # deleted or rejected: nothing to cover
+                    continue
+                cov.universe.append(key)
+                cov.requirements[key] = req.as_dict()
+    if live:
+        refs = {k: sources.ref(k) for k in cov.rows()}
+        try:
+            current = sources.get(refs.values())
+        except Exception as e:
+            cov.problems.append(f"current requirements not read: {e}")
+            current = {}
+        for key, ref in refs.items():
+            req = current.get(ref)
+            if req is not None:
+                cov.current[key] = req.version
+                cov.requirements[key] = {**req.as_dict(), **{k: v for k, v in cov.requirements.get(key, {}).items()
+                                                           if k in ("pinned", "changed")}}
+
+
 def coverage(targets: list[Path], sources_file: Path | None = None, paths: list[str] | None = None,
              children: bool = False, live: bool = True) -> Coverage:
     """Coverage of test definitions, campaign files, datapack and results zips, and folders of zips.
 
     :param sources_file: the sources file (default: the one of the tests repository of the current folder, else of the
-        first target), for the current
-        versions (stale links) and for ``paths``
+        first target), for the current versions (changed since) and for ``paths``
     :param paths: requirement paths (``[<source>:]<path>``) whose requirements are rows even when not linked
     :param children: with paths, their descendants too
     :param live: read the current requirements from the sources (False: only the snapshots)
     """
     cov = Coverage()
-    keys: dict[str, int] = {}
     for path in _expand([Path(t) for t in targets]):
         try:
             found = read_zip(path) if path.suffix == ".zip" else read_testdef(path)
@@ -280,15 +321,7 @@ def coverage(targets: list[Path], sources_file: Path | None = None, paths: list[
         if found is None:
             cov.problems.append(f"{path}: no requirement linked")
             continue
-        snap, test = found
-        n = keys.get(test.key, 0)
-        keys[test.key] = n + 1
-        if n:
-            test.key = f"{test.key}#{n + 1}"
-        for key, req in (snap.get("requirements") or {}).items():
-            cov.requirements.setdefault(key, req)
-            test.versions[key] = str(req.get("version", ""))
-        cov.tests.append(test)
+        add_test(cov, *found)
 
     if live or paths:
         file = sources_file or find_sources_file(Path.cwd()) or (find_sources_file(Path(targets[0])) if targets else None)
@@ -296,30 +329,47 @@ def coverage(targets: list[Path], sources_file: Path | None = None, paths: list[
             if paths:
                 raise ReqError("no requirements.yml found: give the sources file (--sources)")
             return cov
-        sources = Sources(file)
-        if paths:
-            cov.universe = []
-            for p in paths:
-                source, sep, node = p.partition(":")
-                if not sep or source not in sources.names:
-                    source, node = sources.default, p
-                for key, req in sources.list(node, children, source).items():
-                    if req.inactive:                # deleted or rejected: nothing to cover
-                        continue
-                    cov.universe.append(key)
-                    cov.requirements[key] = req.as_dict()
-        if live:
-            refs = {k: sources.ref(k) for k in cov.rows()}
-            try:
-                current = sources.get(refs.values())
-            except Exception as e:
-                cov.problems.append(f"current requirements not read: {e}")
-                current = {}
-            for key, ref in refs.items():
-                req = current.get(ref)
-                if req is not None:
-                    cov.current[key] = req.version
-                    cov.requirements[key] = {**req.as_dict(), **{k: v for k, v in cov.requirements.get(key, {}).items()
-                                                               if k in ("pinned", "changed")}}
+        add_sources(cov, Sources(file), paths, children, live)
     return cov
 
+
+# ── runs of the sequencer ─────────────────────────────────────────────────
+
+def snapshot_of_run(run: dict) -> dict | None:
+    """The requirements snapshot of a run (sequencer run record): from its run folder, else from its results zip."""
+    folder = Path(run["dir"]) if run.get("dir") else None
+    if folder is not None and (folder / "definition" / SNAPSHOT).is_file():
+        try:
+            snap = yaml.safe_load((folder / "definition" / SNAPSHOT).read_text(encoding="utf-8"))
+            return snap if isinstance(snap, dict) else None
+        except (OSError, yaml.YAMLError):
+            return None
+    if run.get("results") and Path(run["results"]).is_file():
+        try:
+            with zipfile.ZipFile(run["results"]) as archive:
+                snap = _member(archive, f"definition/{SNAPSHOT}")
+            return snap if isinstance(snap, dict) else None
+        except (OSError, zipfile.BadZipFile, yaml.YAMLError):
+            return None
+    return None
+
+
+def test_of_run(run: dict, snap: dict) -> Test:
+    """A run as a test: its links with their status (a run not ended: its verdict is not known yet)."""
+    test = Test(key=str(run.get("testdef") or run["id"]), testdef=str(run.get("testdef") or ""), origin=str(run["id"]),
+                links=_links_from_snapshot(snap), problems=list(snap.get("problems") or []),
+                warnings=list(snap.get("warnings") or []))
+    ended = run.get("state") in ("done", "cancelled")
+    apply_run(test, {"run": run["id"], "verdict": (run.get("verdict") or "error") if ended else "",
+                     "steps": run.get("steps") or []})
+    return test
+
+
+def coverage_of_runs(runs: list[dict]) -> Coverage:
+    """Coverage of sequencer runs (a run, or the runs of a campaign run), from their snapshots only."""
+    cov = Coverage()
+    for run in runs:
+        snap = snapshot_of_run(run)
+        if snap is not None:
+            add_test(cov, snap, test_of_run(run, snap))
+    return cov

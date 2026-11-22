@@ -14,6 +14,7 @@
 // Test campaigns (sequencer README, Campaigns): the Campaigns subtab of the Datapacks page (a campaign's test
 // definitions, the dataset versions it pins, its routing tags; generating and posting it whole), and the page of a
 // campaign run (its runs at a glance, the synthetic report).
+import { RunsCoverage } from "./Requirements";
 import { useEffect, useRef, useState } from "react";
 import { get, post, put, url, useResource } from "../api";
 import { Dialog, Field, IdText, Section, Text, Toggle } from "../fields";
@@ -439,6 +440,11 @@ export function CampaignRunPage({ id }: { id: string }) {
             <dt>Git</dt><dd>{v.git?.repo} <code>{v.git?.tag || v.git?.commit?.slice(0, 12) || "not in git"}</code>{v.git && v.git.clean === false && <span className="warn-text"> (local changes)</span>}</dd>
             <dt>Tags</dt><dd>{tags.length ? tags.map((t) => <span key={t} className="chip">{t}</span>) : <span className="muted">none</span>}</dd>
           </dl>
+        </Section>
+      </div>
+      <div className="campaign-requirements">
+        <Section title="Requirements" collapsed>
+          <RunsCoverage path={`campaigns/${v.id}/requirements`} events={["run", "step", "campaign"]} title="The requirements the campaign's test definitions and their checks verify, over its runs" />
         </Section>
       </div>
     </div>
