@@ -250,6 +250,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return await run(editor.synthesis, session(sid), str(body["testdef"]), body.get("setup_config"),
                          bool(body.get("versions", True)), bool(body.get("run_checks", True)))
 
+    @app.post("/edit/sessions/{sid}/exploit_keys")
+    async def exploit_keys(sid: str, body: dict):
+        """The keys the criteria of an exploit step read that nothing defines (the step's ``with:`` gives them)."""
+        return await run(editor.exploit_keys, session(sid), str(body["testdef"]), [str(c) for c in body.get("criteria") or []],
+                         body.get("with") or {}, body.get("setup_config"))
+
     @app.post("/edit/sessions/{sid}/run_problems")
     async def run_problems(sid: str, body: dict):
         """The pipeline and lab checks of a test definition (the last of the checks before generating)."""

@@ -88,13 +88,20 @@ interface GraphApi {
   step: (id: string) => { x: number; y: number } | null;
   card: (i: number) => { x: number; y: number } | null;
 }
+/** The parameters a step gives (`with:`), short, for its node: ` · product=pilot, flags=-O0`. */
+function withLabel(given: any): string {
+  if (!given || typeof given !== "object" || !Object.keys(given).length) return "";
+  const text = Object.entries(given).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ");
+  return ` · ${text.length > 40 ? text.slice(0, 39) + "…" : text}`;
+}
+
 /** Where a card pinned to a step without a place of its own goes: above the step. */
 const PIN_OFFSET = { x: 0, y: -70 };
 
 function label(step: any, plugins: string[]): string {
   const a = stepAction(step, plugins);
   const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
-  const what = a === "do" ? step.do : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "http" ? httpSummary(step.http).slice(0, 40) : a === "delay" ? `delay ${step.delay}`
+  const what = a === "do" ? step.do + withLabel(step.with) : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "http" ? httpSummary(step.http).slice(0, 40) : a === "delay" ? `delay ${step.delay}`
     : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}`
     : a === "exploit" ? `criteria ${asList(step.exploit?.criteria).map((c: string) => c.replace(/\/$/, "").split("/").pop()).join(", ") || "?"}` : a || "no action";
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
@@ -842,6 +849,76 @@ function ExploitEditor({ value, onChange, testdef, phaseIds, phaseSlots, slotRol
   );
 }
 
+/** The parameters a `do:` step gives its command (`with:`): those its role declares, each with the default of
+ *  the class of every lab component its slots can be bound to (a step that gives none takes it). */
+function CommandParams({ declared, defaults, value, onChange, help }: {
+  declared: Record<string, string>; defaults: Record<string, string[]>; value: any; onChange: (v: any) => void; help?: string;
+}) {
+  const own: Record<string, any> = value && typeof value === "object" ? value : {};
+  const names = [...new Set([...Object.keys(declared), ...Object.keys(own)])];
+  if (!names.length) return null;
+  const set = (n: string, x: string) => {
+    const next = { ...own, [n]: x };
+    if (x === "" || x === undefined) delete next[n];
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  return (
+    <Field label="Parameters" help={help} wide hint="values for this step only: templates, run-time keys allowed (slot.*, component.vars.*, params.* of a sub-pipeline)">
+      <table className="grid compact">
+        <tbody>
+          {names.map((n) => {
+            const known = n in declared;
+            const needed = known && own[n] === undefined && (defaults[n] || []).some((d) => d.endsWith(": no default"));
+            return (
+              <tr key={n}>
+                <td><code>{n}</code></td>
+                <td><Text keys mono value={own[n] === undefined ? "" : String(own[n])} onChange={(x) => set(n, x)}
+                  placeholder={(defaults[n] || []).filter((d) => !d.endsWith(": no default")).map((d) => `default ${d}`).join(" · ") || "required: no default"} /></td>
+                <td className={classes("small", known ? (needed ? "error-text" : "muted") : "error-text")}>
+                  {!known ? "not a parameter of this command" : needed ? `needed: ${(defaults[n] || []).filter((d) => d.endsWith(": no default")).join(", ")}` : declared[n]}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Field>
+  );
+}
+
+/** The keys an exploit step gives its criteria (`with:`), as `params.<name>`: those its criteria read that nothing
+ *  defines are proposed, with the problems of the ones given (a key of the test is never overridden). */
+function ExploitKeys({ testdef, criteria, value, onChange, help }: {
+  testdef?: string; criteria: string[]; value: any; onChange: (v: any) => void; help?: string;
+}) {
+  const { sid } = useSession();
+  const [found, setFound] = useState<any>(null);
+  const given = value && typeof value === "object" ? value : {};
+  useEffect(() => {
+    if (!testdef || !criteria.length) return setFound(null);
+    let current = true;
+    const t = setTimeout(() => post<any>(`edit/sessions/${sid}/exploit_keys`, { testdef, criteria, with: given })
+      .then((r) => current && setFound(r)).catch(() => current && setFound(null)), 300);
+    return () => {
+      current = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sid, testdef, JSON.stringify(criteria), JSON.stringify(given)]);
+  const missing: any[] = found?.missing || [];
+  const proposed = [...new Set(missing.map((m) => (m.key.startsWith("params.") ? m.key : `params.${m.key.split(".").pop()}`)))];
+  const notes: string[] = [...(found?.problems || []), ...(found?.warnings || [])];
+  return (
+    <Field label="Keys of the criteria" help={help} wide
+      error={missing.length ? `read by the criteria, defined nowhere: ${[...new Set(missing.map((m) => m.key))].join(", ")}` : null}
+      hint={<>give them as <code>params.&lt;name&gt;</code> and read them as <code>{"{{ params.<name> }}"}</code> in the scenarios: a key of the test is never overridden</>}>
+      <KeyValues keys value={given} onChange={(v) => onChange(Object.keys(v).length ? v : undefined)}
+        known={proposed.filter((k) => !(k in given)).map((k) => ({ value: k, description: "read by the criteria, defined nowhere" }))} />
+      {notes.length > 0 && <ul className="warn-list small">{notes.map((n) => <li key={n}>{n.replace(/^its 'with': /, "")}</li>)}</ul>}
+    </Field>
+  );
+}
+
 function useStepHelp(schemas: any) {
   return (field: string) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, field]);
 }
@@ -875,6 +952,25 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     return names.map((n) => ({ value: n, description: `${sets[0][n].description || sets[0][n].help || ""} (${sets[0][n].from})` }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette, JSON.stringify(targets)]);
+  // the parameters its command declares, with the default of each lab component its slots can be bound to
+  const paramInfo = useMemo(() => {
+    const declared: Record<string, string> = {};
+    const defaults: Record<string, string[]> = {};
+    if (!palette || !step.do) return { declared, defaults };
+    for (const t of targets) {
+      const c = palette.slots[t]?.commands?.[step.do];
+      if (!c) continue;
+      Object.assign(declared, c.params || {});
+      for (const [host, impl] of Object.entries<any>(c.implementations || {}))
+        for (const n of Object.keys(c.params || {})) {
+          const d = impl.spec?.params?.[n];
+          const text = d === undefined ? `${host}: no default` : `${JSON.stringify(d)} (${host})`;
+          if (!(defaults[n] ||= []).includes(text)) defaults[n].push(text);
+        }
+    }
+    return { declared, defaults };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [palette, step.do, JSON.stringify(targets)]);
   const setTarget = (mode: string | null) => {
     const next = { ...step };
     delete next.slot;
@@ -932,6 +1028,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
           <Combo value={step.do} onChange={(v) => set("do", v)} choices={commandChoices} strict={commandChoices.length > 0} />
         </Field>
       )}
+      {action === "do" && <CommandParams declared={paramInfo.declared} defaults={paramInfo.defaults} value={step.with} onChange={(v) => set("with", v)} help={help("with")} />}
       {action === "run" && <Field label="Command" help={help("run")} wide><Text keys mono multiline value={step.run} onChange={(v) => set("run", v)} /></Field>}
       {action === "python" && <PythonEditor value={step.python} onChange={(v) => set("python", v)} uri={`inmemory:///step/${part}/${step.id}.py`}
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "python", ...(f ? [f] : [])])} />}
@@ -939,6 +1036,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "http", ...(f ? [f] : [])])} /></div>}
       {action === "exploit" && <ExploitEditor value={step.exploit} onChange={(v) => set("exploit", v)} testdef={testdef} phaseIds={phaseIds || []}
         phaseSlots={phaseSlots || {}} slotRoles={palette ? Object.fromEntries(Object.entries<any>(palette.slots).map(([id, c]) => [id, c.role])) : {}} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
+      {action === "exploit" && <ExploitKeys testdef={testdef} criteria={asList(step.exploit?.criteria)} value={step.with} onChange={(v) => set("with", v)} help={help("with")} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
       {(action === "push" || action === "pull") && (
@@ -1183,6 +1281,11 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
           {flat.key_problems.map((p: string) => <li key={p}>{p}</li>)}
         </ul>
       )}
+      {(flat.warnings || []).length > 0 && (
+        <ul className="warn-list" title="Warnings: the run is not stopped by them">
+          {flat.warnings.map((p: string) => <li key={p}>warning: {p}</li>)}
+        </ul>
+      )}
       {flat.phases.map((ph: any) => (
         <Section key={ph.id} title={`phase ${ph.id}${ph.needs.length ? ` (after ${ph.needs.join(", ")})` : ""}: ${ph.slots.join(", ")}`}>
           <table className="grid compact">
@@ -1194,7 +1297,8 @@ function Flattened({ testdef, config }: { testdef: string; config: string | null
                   {i === 0 && <td rowSpan={s.targets.length} className="small">{s.needs.join(", ")}</td>}
                   {i === 0 && <td rowSpan={s.targets.length}>{s.action}{s.do ? ` ${s.do}` : ""}</td>}
                   <td>{t.slot ? <><Named kind="slot" name={t.slot} />{t.concrete && <span className="muted small"> = <Named kind="component" name={t.concrete}>{hostLabel(ctx, t.concrete)}</Named></span>}</> : "-"}</td>
-                  <td className="mono small">{t.command ? summary(t.command) : s.action !== "do" ? summary(s.step) : ""}</td>
+                  <td className="mono small">{t.command ? summary(t.command) : s.action !== "do" ? summary(s.step) : ""}
+                    {t.params && <div className="muted">{Object.entries<any>(t.params).map(([k, v]) => `params.${k}=${v === null || v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v)}`).join(" · ")}</div>}</td>
                   <td className="muted small">{t.source || ""}</td>
                 </tr>
               )))}

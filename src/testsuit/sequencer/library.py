@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from testsuit.sequencer import registry
+from testsuit.sequencer.cmdparams import PARAMS, declared_params, default_params, undeclared_reads
 from testsuit.sequencer.inventory import Component, Inventory, Stage
 from testsuit.sequencer.util import SequencerError, load_yaml
 
@@ -161,12 +162,24 @@ def missing_outputs(outputs: list[dict], folder: Path) -> list[str]:
     return missing
 
 
+def _override(base: dict | None, spec: dict) -> dict:
+    """A command implementation over the one it overrides: the new one runs, the default values of the
+    parameters are merged (the new ones win), so an override only gives those it changes."""
+    result = dict(spec)
+    inherited = (base or {}).get(PARAMS)
+    if isinstance(inherited, dict) and inherited:
+        result[PARAMS] = {**inherited, **(spec.get(PARAMS) or {})}
+    return result
+
+
 @dataclass
 class RoleDef:
     name: str
     extends: str = ""
     description: str = ""
     commands: dict[str, str] = field(default_factory=dict)     # name -> what it does
+    # name -> its parameters (name -> what each is for), set by the steps (with:), defaults in the classes
+    params: dict[str, dict[str, str]] = field(default_factory=dict)
     inputs: list[dict] = field(default_factory=list)           # what a component of the role expects as inputs
     outputs: list[dict] = field(default_factory=list)          # what it is foreseen to produce (collected)
     source: str = "<builtin>"
@@ -184,11 +197,25 @@ class RoleDef:
         commands = data.get("commands") or {}
         if isinstance(commands, list):
             commands = {str(c): "" for c in commands}
-        if not isinstance(commands, dict) or any(isinstance(v, dict) for v in commands.values()):
-            raise SequencerError(f"{source}: role '{name}': 'commands' lists names, each with what it does "
-                                 "(`start: start the application`), not how it is done: implementations go in the lab components")
+        if not isinstance(commands, dict):
+            raise SequencerError(f"{source}: role '{name}': 'commands' lists names, each with what it does")
+        texts: dict[str, str] = {}
+        params: dict[str, dict[str, str]] = {}
+        for cmd, value in commands.items():
+            where = f"{source}: role '{name}': command '{cmd}'"
+            if isinstance(value, dict):        # {description, params}: what it does, and the parameters it takes
+                unknown = set(value) - {"description", PARAMS}
+                if unknown:
+                    raise SequencerError(f"{where}: unknown keys {sorted(unknown)} (a role gives what a command does "
+                                         "and its parameters, not how it is done: implementations go in the lab components)")
+                texts[str(cmd)] = str(value.get("description") or "")
+                declared = declared_params(value.get(PARAMS), where)
+                if declared:
+                    params[str(cmd)] = declared
+            else:
+                texts[str(cmd)] = str(value or "")
         return cls(name=name, extends=str(data.get("extends") or ""), description=str(data.get("description") or ""),
-                   commands={str(k): str(v or "") for k, v in commands.items()},
+                   commands=texts, params=params,
                    inputs=_role_inputs(data.get("inputs"), f"{source}: role '{name}'"),
                    outputs=_role_outputs(data.get("outputs"), f"{source}: role '{name}'"), source=source)
 
@@ -222,6 +249,7 @@ class ComponentDef:
             if not isinstance(spec, dict):
                 raise SequencerError(f"{source}: component '{name}': command '{cmd}' must be a mapping")
             _check_comments(spec, f"{source}: component '{name}': command '{cmd}'")
+            default_params(spec, f"{source}: component '{name}': command '{cmd}'")
             if "python" in spec:
                 from testsuit.sequencer.model import check_python
                 check_python(spec["python"], f"{source}: component '{name}': command '{cmd}'")
@@ -254,11 +282,13 @@ class Resolved:
     role: str
     chain: list[str]                         # the components it inherits from, base first, itself last
     transport: str
-    commands: dict[str, dict]
+    commands: dict[str, dict]                # with their default parameter values merged along the chain (params)
     command_sources: dict[str, str]
     status: dict | None
     selftest: list[dict]
     collect: dict
+    # the parameters its role declares for each command (name -> what each is for)
+    command_params: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 class Library:
@@ -330,8 +360,37 @@ class Library:
         commands: dict[str, dict] = {}
         for role in self.role_chain(name):
             for cmd, text in role.commands.items():
-                commands[cmd] = {"description": text or commands.get(cmd, {}).get("description", ""), "from": role.name}
+                commands[cmd] = {"description": text or commands.get(cmd, {}).get("description", ""), "from": role.name,
+                                 "params": {**commands.get(cmd, {}).get("params", {}), **role.params.get(cmd, {})}}
         return commands
+
+    def command_params(self, role: str) -> dict[str, dict[str, str]]:
+        """The parameters of each command a role offers (name -> what each is for), its parents' first."""
+        if role not in self.roles:
+            return {}
+        return {cmd: info["params"] for cmd, info in self.role_commands(role).items()}
+
+    def roles_params(self, roles: list[str]) -> dict[str, dict[str, str]]:
+        """The parameters of each command the given roles offer (a class supporting several: any of them)."""
+        out: dict[str, dict[str, str]] = {}
+        for role in roles:
+            for cmd, params in self.command_params(role).items():
+                out[cmd] = {**out.get(cmd, {}), **params}
+        return out
+
+    def param_problems(self, commands: dict[str, dict], params: dict[str, dict[str, str]], where: str) -> list[str]:
+        """Commands of a role that read, or give a default to, a parameter the role does not declare."""
+        problems = []
+        for cmd, spec in commands.items():
+            if cmd not in params:
+                continue                                  # not a command of its roles: its own (extra_commands)
+            bad = undeclared_reads(spec, params[cmd])
+            if bad:
+                declared = ", ".join(params[cmd]) or "none"
+                problems.append(f"{where}: command '{cmd}' reads or sets parameter(s) {', '.join(bad)} that its role "
+                                f"does not declare (it declares: {declared}); a command reads its parameters as params.*, "
+                                "declared by the role")
+        return problems
 
     def role_outputs(self, name: str) -> list[dict]:
         """The outputs a role foresees, its parents' first (a role redefines one by name), with the role listing it."""
@@ -390,6 +449,11 @@ class Library:
             if role not in self.roles:
                 raise SequencerError(f"component '{name}' ({chain[-1].source}): unknown role '{role}'")
             result[role] = sorted(set(self.role_commands(role)) - implemented)
+        params = self.roles_params(self.component_roles(name))
+        for c in chain:
+            problems = self.param_problems(c.commands, params, f"class '{c.name}' ({c.source})")
+            if problems:
+                raise SequencerError("; ".join(problems))
         return result
 
     def host_role(self, component: Component, hosts: dict[str, ComponentDef] | None = None) -> str:
@@ -438,7 +502,7 @@ class Library:
                 continue                                      # its own commands come after the stage's
             label = f"host {c.name}" if c.host else f"class {c.name}"
             for cmd, spec in c.commands.items():
-                commands[cmd] = dict(spec)
+                commands[cmd] = _override(commands.get(cmd), spec)
                 sources[cmd] = label
             if c.status is not None:
                 status = dict(c.status)
@@ -450,10 +514,10 @@ class Library:
                 selftest[:] = [x for x in selftest if x["id"] != check["id"]] + [dict(check)]
         if stage is not None:
             for cmd, spec in stage.commands.items():
-                commands[cmd] = dict(spec)
+                commands[cmd] = _override(commands.get(cmd), spec)
                 sources[cmd] = f"stage {stage.id}"
         for cmd, spec in own.commands.items():
-            commands[cmd] = dict(spec)
+            commands[cmd] = _override(commands.get(cmd), spec)
             sources[cmd] = f"host {component.id}"
         if own.status is not None:
             status = dict(own.status)
@@ -463,7 +527,8 @@ class Library:
             selftest[:] = [x for x in selftest if x["id"] != check["id"]] + [dict(check)]
         transport = str(component.settings.get("tsq_transport") or transport or "ssh")
         return Resolved(role=component.role, chain=[c.name for c in chain], transport=transport, commands=commands,
-                        command_sources=sources, status=status, selftest=selftest, collect=collect)
+                        command_sources=sources, status=status, selftest=selftest, collect=collect,
+                        command_params=self.command_params(component.role))
 
     def check_host(self, component: Component, stage: Stage | None, hosts: dict[str, ComponentDef]) -> tuple[Resolved, list[str], list[str]]:
         """A host against its role: (resolved, commands of the role it does not implement, commands it
@@ -477,6 +542,9 @@ class Library:
                 normalize(spec["http"], f"command '{name}' (from {resolved.command_sources.get(name, '?')})")
         offered = self.role_commands(resolved.role)
         missing = sorted(set(offered) - set(resolved.commands))
+        problems = self.param_problems(resolved.commands, resolved.command_params, f"component '{component.id}'")
+        if problems:
+            raise SequencerError("; ".join(problems))
         return resolved, missing, self.extra_commands(component, resolved, hosts)
 
     def extra_commands(self, component: Component, resolved: Resolved,

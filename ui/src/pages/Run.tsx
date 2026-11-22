@@ -254,13 +254,16 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
     // an exploit step: how many of its checks are met, once it has run
     const checks: any[] | undefined = step.action === "exploit" ? items[0]?.exploit?.checks : undefined;
     const met = checks ? `${checks.filter(checkMet).length}/${checks.length} checks` : "";
+    // a do: step's command parameters, once it has run (the values it ran with)
+    const params: Record<string, any> | undefined = items.find((i: any) => i.lab_command?.params)?.lab_command?.params;
+    const paramText = params ? Object.entries(params).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ") : "";
     return {
       ...n, data: {
-        ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}${met ? ` · ${met}` : ""}`,
+        ...n.data, label: step.id.split(".").pop(), action: `${step.action === "do" ? step.do : step.action}${target ? ` · ${target}` : ""}${paramText ? ` · ${paramText.length > 40 ? paramText.slice(0, 39) + "…" : paramText}` : ""}${met ? ` · ${met}` : ""}`,
         state, items, part: step.part, selected: isOfStep(selected, phase, step.id),
         selectedSlot: isOfStep(selected, phase, step.id) ? (selected!.match(/\[(.*)\]$/)?.[1] ?? slotOf(items[0])) : null,
         onPickSlot: (slot: string) => onSelect(stepKey(phase, step.id, slot), step, phase),
-        title: `${phase}:${step.id}\n${step.action}${step.do ? " " + step.do : ""}${step.if ? `\nif ${step.if}` : ""}\nneeds: ${step.needs.join(", ") || "-"}\n${items.map((i: any) => `${slotOf(i) || "-"}: ${i.state}${i.reason ? " (" + i.reason + ")" : ""}`).join("\n")}`,
+        title: `${phase}:${step.id}\n${step.action}${step.do ? " " + step.do : ""}${paramText ? `\nparameters: ${paramText}` : ""}${step.if ? `\nif ${step.if}` : ""}\nneeds: ${step.needs.join(", ") || "-"}\n${items.map((i: any) => `${slotOf(i) || "-"}: ${i.state}${i.reason ? " (" + i.reason + ")" : ""}`).join("\n")}`,
       },
     };
   });

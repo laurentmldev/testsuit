@@ -2804,3 +2804,79 @@ def test_run_on_a_stage_with_a_component_in_maintenance(bench):
     done = asyncio.run(main())
     assert done["verdict"] == "succeeded", done
     assert done["binding"]["stage_slots"]["bench"] == "bench_1" and done["binding"]["left_out"] == ["spare"]
+
+
+def params_bench(tmp_path) -> "Bench":
+    """The bench whose dut role offers 'say', with two parameters: 'word' (no default) and 'times' (2 in the class)."""
+    bench = Bench(tmp_path, stages=1)
+    roles = copy.deepcopy(LAB_ROLES)
+    roles["roles"]["dut"]["commands"]["say"] = {"description": "Says a word.",
+                                                "params": {"word": "What to say", "times": "How many times"}}
+    write(tmp_path / "lab" / "roles" / "bench.yml", yaml.safe_dump(roles))
+    classes = copy.deepcopy(LAB_COMPONENTS)
+    classes["component_classes"]["counter_host"]["commands"]["say"] = {
+        "run": "for i in $(seq {{ params.times }}); do echo said {{ params.word }}; done", "params": {"times": 2}}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(classes))
+    return bench
+
+
+def test_command_params(tmp_path, no_git):
+    """The same lab command run twice with other parameters (with:, run-time keys allowed), its class's default
+    for those a step does not give; an exploit step gives its criteria a key they read as params.*."""
+    bench = params_bench(tmp_path)
+    write(bench.dp / "testdef" / "said" / "criteria" / "count" / "count.mexploit.yml",
+          COUNT_CRITERIA.replace("{{ min_count }}", "{{ params.least }}"))
+    pipeline = copy.deepcopy(PIPELINE)
+    pipeline["phases"][0]["steps"][4:4] = [
+        {"id": "say_a", "slot": "dut", "do": "say", "needs": ["ready"], "with": {"word": "alpha"}},
+        {"id": "say_b", "slot": "dut", "do": "say", "needs": ["ready"],
+         "with": {"word": "{{ slot.id }}-{{ min_count }}", "times": 1}}]
+    pipeline["phases"][1] = {"id": "exploit", "needs": ["test_run"], "steps": [
+        {"id": "to_csv", "python": {"code": TO_CSV}},
+        {"id": "criteria", "needs": ["to_csv"], "with": {"params.least": "{{ min_count }}"},
+         "exploit": {"criteria": "criteria/count", "data": "test_run:dut/output/*.csv"}}]}
+    run = run_one(bench, bench.build("said", pipeline=pipeline, min_count=3))
+    assert (run["verdict"], run["reason"]) == ("succeeded", ""), read_member(run, "logs/exploit/criteria.log")
+    log_a = read_member(run, "logs/test_run/say_a[dut].log")
+    assert log_a.splitlines().count("said alpha") == 2 and "parameters: times=2, word=alpha" in log_a
+    assert read_member(run, "logs/test_run/say_b[dut].log").splitlines().count("said dut-3") == 1
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    say_b = next(s for s in record["steps"] if s["id"] == "say_b")
+    assert say_b["lab_command"]["params"] == {"word": "dut-3", "times": 1}
+    keys = yaml.safe_load(read_member(run, "data/_sequencer/exploit/criteria/keys.yml"))
+    assert keys["params"]["least"] == 3
+
+
+def test_command_params_refused(tmp_path, no_git):
+    """A parameter the role does not declare refuses the datapack; one with no value, or criteria reading a key
+    nothing defines, make the step an error; an exploit step never overrides a key of the test."""
+    bench = params_bench(tmp_path)
+    seq = bench.sequencer()
+    unknown = copy.deepcopy(PIPELINE)
+    unknown["phases"][0]["steps"].append({"id": "say", "slot": "dut", "do": "say", "needs": ["ready"],
+                                          "with": {"word": "a", "loud": True}})
+    with pytest.raises(Exception, match="command 'say' has no parameter 'loud'"):
+        seq.submit(bench.build("loud", pipeline=unknown))
+    override = copy.deepcopy(PIPELINE)
+    override["phases"][1]["steps"].append({"id": "x", "with": {"min_count": 1},
+                                           "exploit": {"criteria": "criteria/count", "data": "dut/output/x.csv"}})
+    write(bench.dp / "testdef" / "override" / "criteria" / "count" / "count.mexploit.yml", COUNT_CRITERIA)
+    with pytest.raises(Exception, match="'min_count' is a key of the test"):
+        seq.submit(bench.build("override", pipeline=override))
+    asyncio.run(seq.close())
+    missing = copy.deepcopy(PIPELINE)
+    missing["phases"][0]["steps"][4:4] = [{"id": "say", "slot": "dut", "do": "say", "needs": ["ready"]}]
+    run = run_one(bench, bench.build("no_word", pipeline=missing, min_count=3))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    say = next(s for s in record["steps"] if s["id"] == "say")
+    assert say["state"] == "error" and "needs a value for 'word'" in say["reason"]
+    missing = copy.deepcopy(PIPELINE)
+    missing["phases"][1] = {"id": "exploit", "needs": ["test_run"], "steps": [
+        {"id": "to_csv", "python": {"code": TO_CSV}},
+        {"id": "criteria", "needs": ["to_csv"], "exploit": {"criteria": "criteria/count", "data": "test_run:dut/output/*.csv"}}]}
+    write(bench.dp / "testdef" / "missing" / "criteria" / "count" / "count.mexploit.yml",
+          COUNT_CRITERIA.replace("{{ min_count }}", "{{ params.least }}"))
+    run = run_one(bench, bench.build("missing", pipeline=missing, min_count=3))
+    record = yaml.safe_load(read_member(run, "run.yml"))
+    states = {s["id"]: (s["state"], s["reason"]) for s in record["steps"]}
+    assert states["criteria"][0] == "error" and "params.least" in states["criteria"][1]

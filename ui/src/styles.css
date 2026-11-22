@@ -160,6 +160,10 @@ td .description { margin: 2px 0 0; max-width: 40ch; }
 .row-actions { margin: 0; }
 .commands .row-actions { flex-wrap: nowrap; justify-content: flex-end; }
 .commands td.mono { overflow-wrap: anywhere; }
+.role-params { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+.role-params .param-row { display: flex; align-items: center; gap: 6px; }
+.role-params .param-row code { white-space: nowrap; }
+.role-params .param-row input { flex: 1; min-width: 0; }
 /* a command opened: its row and its details read as one block, the details indented under it */
 .commands .disclosure { display: inline-block; width: 1.1em; color: var(--muted); }
 .commands tr.clickable > td:first-child { white-space: nowrap; }

@@ -242,6 +242,33 @@ def _eval_expression(expression: str, keys: dict, where: str) -> dict:
                 **extra}
 
 
+class _Anything(dict):
+    """A run-time key whose sub-keys are not known here: any of them is defined."""
+
+    def __contains__(self, key) -> bool:
+        return True
+
+    def __getitem__(self, key):
+        return _Anything()
+
+    def get(self, key, default=None):
+        return _Anything()
+
+
+def _criteria_key_problems(where: str, step, definition_dir: Path, keys: dict) -> list[str]:
+    """The keys the criteria of an exploit step read (their scenario files) that neither the step's keys nor
+    its ``with:`` define: its checks would fail on them."""
+    from testsuit.sequencer.cmdparams import criteria_missing_keys
+    from testsuit.sequencer.exploitstep import as_list
+    problems = []
+    for name in as_list((step.exploit or {}).get("criteria")):
+        for file, key in criteria_missing_keys(definition_dir / str(name), keys):
+            hint = "" if key.startswith("params.") else f", as 'params.{key.split('.')[-1]}' (read it so in the criteria)"
+            problems.append(f"{where}: criteria '{name}' ({file}) read '{key}', which no dictionary, run-time key nor "
+                            f"the step's 'with' defines: give it in the step's 'with'{hint}")
+    return problems
+
+
 def _missing_keys(value: Any, keys: dict) -> list[str]:
     """The keys the templates of a value (strings, lists and dicts) read that ``keys`` does not define."""
     from testsuit.datatools.datapack.templating import undefined_keys
@@ -1084,7 +1111,7 @@ class Editor:
                 outputs = lib.role_outputs(name)
             except SequencerError:                        # extends a role that is not there (renamed?): itself only
                 chain = [name]
-                commands = {c: {"description": d, "from": name} for c, d in r.commands.items()}
+                commands = {c: {"description": d, "from": name, "params": r.params.get(c, {})} for c, d in r.commands.items()}
                 inputs = [{**i, "from": name} for i in r.inputs]
                 outputs = [{**o, "from": name} for o in r.outputs]
             roles[name] = {"extends": r.extends, "description": r.description, "source": r.source, "chain": chain,
@@ -1415,10 +1442,11 @@ class Editor:
         lab, _ = self.lab_for(session)
         for problem in check_against_lab(SimpleNamespace(needs=needs), lab):
             problems.append({"file": rel, "line": 1, "column": 1, "severity": "warning", "message": f"lab: {problem}"})
-        flat = self._flatten(lab, needs, pipeline, flats)
-        for problem in flat["problems"]:
-            line, column = _find_line(text, problem)
-            problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
+        flat = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, rel, None), self.path(session, rel).parent)
+        for severity, found in (("error", flat["problems"] + flat["exploit_problems"]), ("warning", flat["warnings"])):
+            for problem in found:
+                line, column = _find_line(text, problem)
+                problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": problem})
         for problem in comment_problems(pipeline):
             line, column = _find_line(text, problem)
             problems.append({"file": rel, "line": line, "column": column, "severity": "warning", "message": problem})
@@ -1645,7 +1673,7 @@ class Editor:
                 context = deep_merge(context, expand_dotted_keys({str(k): v for k, v in by_hand.items() if str(k).strip()}))
             except Exception:                       # a name that is not one: the generation says so
                 pass
-        flat = self._flatten(lab, needs, pipeline, flats, context)
+        flat = self._flatten(lab, needs, pipeline, flats, context, self.path(session, testdef_rel).parent)
         if missing is not None:
             missing += flat["missing_keys"]
         undeployed = [f"slot '{slot}': {count} input(s) generated for it, but no step deploys them (do: deploy, or a "
@@ -1653,6 +1681,7 @@ class Editor:
                       for slot, count in _input_counts(setup_raw, setup_config).items()
                       if count and slot in flat["used"] and slot not in flat["deployed"]]
         return (problems + [f"pipeline: {p}" for p in flat["problems"]] + [f"keys: {p}" for p in flat["key_problems"]]
+                + [f"exploit: {p}" for p in flat["exploit_problems"]]
                 + [f"inputs: {p}" for p in undeployed]
                 + [f"criteria: {p}" for _, p in self._criteria_problems(session, testdef_rel)])
 
@@ -1786,13 +1815,20 @@ class Editor:
 
     # ── pipelines ────────────────────────────────────────────────────────
 
-    def _flatten(self, lab: Lab, needs, pipeline, flats, context: dict | None = None) -> dict:
+    def _flatten(self, lab: Lab, needs, pipeline, flats, context: dict | None = None,
+                 definition_dir: Path | None = None) -> dict:
         """The pipeline bound to the lab. With ``context`` (the datapack keys): ``key_problems``, the keys the
-        commands of its steps read that nothing defines at run time (the step would fail on them)."""
+        commands of its steps read that nothing defines at run time (the step would fail on them), and, with
+        ``definition_dir`` (the test definition's folder), ``exploit_problems`` and ``warnings``: the keys exploit
+        steps give (``with:``) and those their criteria read that nothing defines."""
+        from testsuit.sequencer.cmdparams import PARAMS, default_params, exploit_keys, exploit_with_problems, \
+            step_param_problems, without_params
         from testsuit.sequencer.model import phase_slots
         from testsuit.sequencer.scheduler import Availability, find_binding
         problems: list[str] = []
         key_problems: list[str] = []
+        exploit_problems: list[str] = []
+        warnings: list[str] = []
         missing_keys: list[str] = []                  # those that can be set by hand: not the keys of the run
         deployed: set[str] = set()                    # the slots a step deploys inputs to (do: deploy, push)
         used: set[str] = set()                        # the slots a step acts on
@@ -1816,6 +1852,29 @@ class Editor:
                         targets = [c for c in held if c in needs.slots and needs.slots[c].role == step.for_each]
                     else:
                         targets = [str(step.for_each)] if step.for_each else []
+                    where = f"phase '{flat.phase.id}', step '{fs.id}'"
+                    if step.action == "do":                # its parameters against the role of each slot
+                        for target in targets:
+                            lc = needs.slots.get(target)
+                            if lc is not None and lc.role in lab.library.roles and step.do in lab.library.role_commands(lc.role):
+                                for p in step_param_problems(where, step.do, step.with_, lab.library.command_params(lc.role)[step.do]):
+                                    if p not in problems:
+                                        problems.append(p)
+                    if step.action == "exploit" and context is not None:
+                        errors, warns = exploit_with_problems(where, step.with_, context)
+                        exploit_problems += errors
+                        warnings += warns
+                        if not errors and definition_dir is not None:
+                            base = _step_keys(lab, needs, binding, context, flat.phase.id, fs.params, None, {})
+                            for name in _missing_keys(step.with_, base):
+                                exploit_problems.append(f"{where}: its 'with' reads '{name}', which no dictionary nor "
+                                                        "run-time key defines")
+                            try:                       # the values do not matter here: which names are defined
+                                keys = exploit_keys(where, {k: "<value>" for k in step.with_}, base)
+                            except SequencerError as e:
+                                exploit_problems.append(str(e))
+                                keys = base
+                            exploit_problems += _criteria_key_problems(where, step, definition_dir, keys)
                     expanded = []
                     for target in targets or [None]:
                         entry: dict[str, Any] = {"slot": target}
@@ -1841,6 +1900,15 @@ class Editor:
                                                         f"({concrete.id}, role {concrete.role}) has no command '{step.do}' (it has: "
                                                         f"{', '.join(sorted(resolved.commands)) or 'none'})")
                                     entry.update(command=spec, source=resolved.command_sources.get(step.do))
+                                    if spec is not None:
+                                        declared = resolved.command_params.get(step.do, {})
+                                        defaults = default_params(spec, step.do)
+                                        for p in step_param_problems(where + f" on slot '{target}' ({concrete.id})", step.do,
+                                                                     step.with_, declared, defaults):
+                                            if "needs a value" in p:
+                                                problems.append(p)
+                                        if declared:
+                                            entry["params"] = {n: step.with_.get(n, defaults.get(n)) for n in declared}
                                     if isinstance(spec, dict) and spec.get("builtin") == "deploy":
                                         deployed.add(target)
                         if context is not None and (target is None or "concrete" in entry):
@@ -1850,9 +1918,20 @@ class Editor:
                                          lab.inventory.stages.get(binding.stage_slots.get(needs.slots[target].stage_slot, ""))) \
                                     if target is not None else None
                                 keys = _step_keys(lab, needs, binding, context, flat.phase.id, fs.params, bound, spec)
+                                checked = {"spec": without_comments(spec), "env": step.env, "timeout": step.timeout}
+                                if step.action == "do":        # its parameters: rendered with the step's keys
+                                    given = {**default_params(spec, step.do), **step.with_}
+                                    checked = {"params": given, "env": step.env, "timeout": step.timeout}
+                                    command_keys = {**keys, PARAMS: {n: f"<{n}>" for n in
+                                                                     [*resolved.command_params.get(step.do, {}), *given]}}
+                                    for name in _missing_keys(without_comments(without_params(spec)), command_keys):
+                                        message = (f"{where}: command '{step.do}' of slot '{target}' ({entry['concrete']}) "
+                                                   f"reads '{name}', which no dictionary nor run-time key defines")
+                                        if message not in key_problems:
+                                            key_problems.append(message)
                                 what = (f"command '{step.do}' of slot '{target}' ({entry['concrete']})" if step.action == "do"
                                         else f"its '{step.action}'" + (f" on slot '{target}'" if target else ""))
-                                for name in _missing_keys({"spec": without_comments(spec), "env": step.env, "timeout": step.timeout}, keys):
+                                for name in _missing_keys(checked, keys):
                                     settable = name.split(".")[0] not in RUN_KEY_NAMES
                                     if settable and name not in missing_keys:
                                         missing_keys.append(name)
@@ -1870,13 +1949,15 @@ class Editor:
                            "slots": held, "groups": flat.groups, "steps": rows,
                            "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
-                "key_problems": key_problems, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
+                "key_problems": key_problems, "exploit_problems": exploit_problems, "warnings": warnings, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
 
     def flatten(self, session: EditSession, rel: str, setup_config: str | None = None) -> dict:
         """The pipeline as the sequencer runs it: sub-pipelines expanded, every command resolved against the lab."""
         _, _, _, setup_path, needs, pipeline, flats = self._testdef_parts(session, rel, setup_config)
         lab, _ = self.lab_for(session)
-        result = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, rel, setup_config))
+        result = self._flatten(lab, needs, pipeline, flats, self._datapack_keys(session, rel, setup_config),
+                               self.path(session, rel).parent)
+        result["key_problems"] += result["exploit_problems"]
         result["setup"] = self.rel(session, setup_path)
         result["logical"] = {"stage_slots": needs.stage_slots,
                              "slots": {c.id: {"slot_class": c.slot_class, "stage_slot": c.stage_slot, "role": c.role, "name": c.name}
@@ -1921,7 +2002,7 @@ class Editor:
                         implementations.setdefault(cmd, {})[host.id] = {"spec": resolved.commands[cmd],
                                                                          "from": resolved.command_sources.get(cmd, "")}
             commands = {cmd: {"description": info["description"], "from": f"role {info['from']}",
-                              "help": info["description"] or _command_help(cmd),
+                              "help": info["description"] or _command_help(cmd), "params": info.get("params", {}),
                               "implementations": implementations.get(cmd, {})}
                         for cmd, info in sorted(offered.items())}
             slots[lc.id] = {"name": lc.name, "slot_class": lc.slot_class, "stage_slot": lc.stage_slot, "role": lc.role,
@@ -1940,6 +2021,28 @@ class Editor:
                 "stage_slots": needs.stage_slots, "slots": slots, "subpipelines": subs,
                 "shared_subpipelines": (workspace.get("shared_subpipelines") or {}),
                 "step_types": sorted(registry.step_types), "ready_checks": sorted(registry.ready_checks)}
+
+    def exploit_keys(self, session: EditSession, testdef_rel: str, criteria: list[str], given: dict | None = None,
+                     setup_config: str | None = None) -> dict:
+        """The keys the criteria of an exploit step read that neither the test (its dictionaries), the run nor the
+        step's ``with:`` (``given``) define, for the exploit step form to propose them; ``problems`` and
+        ``warnings``: those of its ``with:``."""
+        from testsuit.sequencer.cmdparams import criteria_missing_keys, exploit_keys, exploit_with_problems
+        context = self._datapack_keys(session, testdef_rel, setup_config) or {}
+        given = dict(given or {})
+        errors, warnings = exploit_with_problems("its 'with'", given, context)
+        keys: dict = {**context, **{name: _Anything() for name in RUN_KEY_NAMES if name not in context}}
+        keys["params"] = {}
+        try:
+            keys = exploit_keys("its 'with'", {k: "<value>" for k in given}, keys) if not errors else keys
+        except SequencerError:
+            pass
+        folder = self.path(session, testdef_rel).parent
+        missing = []
+        for name in criteria:
+            for file, key in criteria_missing_keys(folder / str(name), keys):
+                missing.append({"key": key, "criteria": name, "file": file})
+        return {"missing": missing, "problems": errors, "warnings": warnings}
 
     # ── keys, template preview, datapack generation ──────────────────────
 

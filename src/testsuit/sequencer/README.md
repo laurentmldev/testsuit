@@ -564,6 +564,23 @@ roles:
   sequencer:   {extends: linux_system}     # the sequencer host: where the exploitation runs
 ```
 
+**Command parameters.** A role can declare the parameters a command takes, so that a pipeline runs the same command several times in other contexts (one compiler, three products): the command is then a mapping with its `description` and its `params`, each named with what it is for. The role gives no value: the component classes give the defaults where they implement the command (section 7.2), the pipeline steps set them with `with:` (section 8.3), and the command reads them as `params.<name>`.
+
+```yaml
+roles:
+  builder:
+    extends: linux_system
+    commands:
+      compile:
+        description: Builds one product.
+        params:
+          product: The product to build    # what it is for: no value here
+          flags:   Compiler flags
+      clean: Cleans the build folder.
+```
+
+A role extending another one can add parameters to a command it inherits (`compile: {params: {jobs: Parallel jobs}}`).
+
 **Expected inputs.** A role can list the inputs a component of that role expects in its input folder, under `inputs`. Each one has:
 - `name`: its path there, which is the `target` of the datapack input. A folder ends with `/`.
 - `type`: `file` (the default) or `folder`.
@@ -636,6 +653,22 @@ component_classes:
     commands:
       start: {run: "sim actuator --config {{ component.input_dir }}/actuator_sim.yml", detach: true}
 ```
+
+**Default parameter values.** A command implementing one with parameters (section 7.1) gives their default values under `params`, and reads them as `params.<name>`:
+
+```yaml
+component_classes:
+  gcc_host:
+    extends: linux_system
+    roles: [builder]
+    commands:
+      compile:
+        run: "make -C {{ component.input_dir }}/src {{ params.product }} CFLAGS='{{ params.flags }}'"
+        params: {flags: "-O2"}             # product has no default: every step gives it
+      clean: {run: "make -C {{ component.input_dir }}/src clean"}
+```
+
+A default is a template, rendered at run time with the step's keys. A command overriding another one (a class extending it, a stage or a host `tsq_commands`, section 7.4) keeps the defaults it does not give. A command of a role reads only the parameters its role declares, and gives a default only to those: the lab check refuses the others (`command 'compile' reads or sets parameter(s) target that its role does not declare`).
 
 `roles` is inherited by the classes extending one, unless they list their own; a base class (`sim_base`) lists none. An inventory host extends one of them (`controller_1: {tsq_extends: mcu_board}`, a controller), or another host. The same roles can be implemented by other components in another lab: an emulated lab can implement them with local processes, as the toy-train example does in `lab/classes_emulated/`, and the datapacks bind to it unchanged (section 6.2).
 
@@ -794,7 +827,7 @@ component_classes:
 
 A component in maintenance (or in a stage in maintenance) can have its commands run by hand, to check or fix it. Use the **Commands…** button on the Lab page, or `GET /components/<id>/commands` and `POST /components/<id>/commands/<command>`. It is refused while a run holds the component. The keys set by hand in that dialog are remembered in the browser for each component: it opens again with the last ones.
 
-- **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`params`, `slot`, `slots`), so a command that needs one does not render unless the key is set by hand. A command with `via` runs through that component.
+- **`run` commands** run with the keys of the lab, as a status probe does: `component.*` (with `component.vars`), `via`, `stage.*` and `lab.*`. There are no datapack keys (`slot`, `slots`), so a command that needs one does not render unless the key is set by hand. A command's parameters (section 7.1) take their defaults as `params.*`; one without a default, or another value, is set by hand (`params.product`). A command with `via` runs through that component.
 - **Keys set by hand.** The dialog's **Keys set by hand** gives values for the commands run from it (`{"keys": {"params.speed": 3}}` in the body of the `POST`; `POST /components/<id>/commands` with the same body shows the commands as they would run, without running any). A key can be one the lab does not define (the dialog proposes the undefined keys its commands read), or one it defines, which is then overridden for these commands only: the lab files are not changed. A value is read as YAML (`3` is a number). Each row says which of the two it is, with the value it replaces.
 - **A detached command** (`detach: true`, such as `start`) keeps running. Its pid file goes under `<root>/.tsq/manual/<component>/`.
 - **`signal` commands and the built-in `kill`** stop the processes started by hand there.
@@ -944,9 +977,22 @@ A card can also be given as its text only. A card pinned to a step that its phas
 ```
 
 Step fields:
+- `with`: the parameters of the command of a `do` step (section 7.1), of a sub-pipeline (`uses`, section 8.4), or the keys an `exploit` step gives its criteria (below);
 - target: `slot`, or `for_each` (a list of slots, `slots` for all the slots of the phase, or a role); the step runs on the lab component bound to each slot;
 - action, one of: `do` (a named command), `run` (inline shell), `python` (a Python script, below), `http` (a REST API call, section 7.4), `exploit` (criteria on outputs of the run, below), `push` / `pull`, `delay`, `wait_for`, or a plugin step type;
 - options: `needs`, `if`, `expect`, `timeout`, `retries`, `detach`, `continue_on_error`, `env`.
+
+**Command parameters.** A `do` step gives the parameters its command declares (section 7.1) with `with:`, so the same command runs several times in other contexts:
+
+```yaml
+- {id: build_pilot, slot: builder, do: compile, with: {product: pilot}}
+- {id: build_tm,    slot: builder, do: compile, with: {product: telemetry, flags: "-O0"}, needs: [build_pilot]}
+- {id: build_mine,  slot: builder, do: compile, with: {product: "{{ slot.id }}-{{ testdef.id }}"}}
+```
+
+- **Values**: templates, rendered at run time with the step's keys, so the run-time keys work (`slot.*`, `component.vars.*`, `stage.*`, `run.id`, the `params.*` of an enclosing sub-pipeline). A parameter a step does not give takes the default of the component class bound to its slot.
+- **Only parameters**: a command reads its parameters as `params.*`, and only them (not those of an enclosing sub-pipeline: pass them on, `with: {product: "{{ params.product }}"}`). A step never overrides a plain key of the test for a command: `with:` names parameters, never dotted keys.
+- **Checks**: a name the role does not declare is an error of the datapack (refused when it is posted, and listed by the Editor); a parameter with neither a value nor a default on the lab component the slot would be bound to is listed by the Editor, and makes the step `error` at run time, naming it. The step log says the values it ran with (`parameters: flags=-O0, product=telemetry`), and the Run page shows them with the lab command.
 
 `expect` gives the expected result of a step: `exit` (exit codes, default `[0]`), and optionally `stdout` or `stderr` (regex). A step that ran but did not give the expected result is `failed`. A step that could not run or did not finish normally is `error`: a crash (killed by a signal), a timeout, a transport failure, an unreachable or broken component, or an internal sequencer error.
 
@@ -991,10 +1037,19 @@ The toy-train example has one: `check_data` in the exploit phase of its test def
     name: "Max speed criteria"                          # title of the report (optional)
 ```
 
+- **Keys of the criteria**: `with:` on the step gives keys that its criteria read and the test does not define (a threshold for this step only). Write them as `params.<name>`, the way commands read their parameters, and read them as `{{ params.<name> }}` in the scenarios:
+
+  ```yaml
+  - id: speed_criteria
+    with: {params.speed_limit: 0.5, params.tolerance: "{{ speed.tolerance * 2 }}"}
+    exploit: {criteria: [criteria/max_speed], data: ["test_run:telemetry/output/telemetry.csv"]}
+  ```
+
+  A value is a template, rendered with the step's keys. A plain key (not `params.*`) is accepted with a warning, when the test does not define it; a key the test defines (its dictionaries, `testdef.*`...) is an error: an exploit step never overrides the test's value. A key the criteria read that neither the test, the run nor `with:` defines is an error too: listed by the Editor and the checks before generating, and the step is `error` at run time, naming it.
 - **Binding, known before the run**: `criteria` is never a template, so the tools read it from the pipeline as written. The datapack copies only the criteria its exploit steps name (into `definition/`), and generating it fails when one is missing. The Datapacks tab lists them per step with the data each one reads, and the scenarios of the test definition no step uses ("left out of the datapack"); the criteria editor marks each scenario with the steps that check it.
 - **Run**: no `slot`: on the sequencer host, as a separate process (`python -m testsuit.cli.exploit_runner` with tsqd's interpreter, so the criteria plugins installed there are available). One exploit_runner session per criteria entry, on every file or folder the data entries match; the scenarios are rendered with the step's keys (`keys.yml`). Its configuration and results stay in the run folder, under `data/_sequencer/exploit/<step>/`, and so in the results datapack.
 - **Result**: `succeeded` when every check is met, `failed` when one is not, `error` when they cannot be judged (no data matches, a criteria entry missing, exploit_runner crashed, timeout). The steps that need it run anyway (other criteria, a report), while its result still counts in the run verdict; `continue_on_error: false` makes them skipped instead, and `true` leaves it out of the verdict as for any step. Each check's status is recorded with the step: the Run page shows them next to its log, with a link to the HTML report, and the step's node counts the checks met.
-- **Help in the Editor**: the palette offers **check criteria**; its form picks the scenario folders of the workspace and proposes as data, for each phase, the outputs the lab role of each of its slots foresees, then the slot's whole output folder. Any sub-folder, file or pattern (`test_run:logger/output/run_*.csv`) can be typed.
+- **Help in the Editor**: the palette offers **check criteria**; its form picks the scenario folders of the workspace and proposes as data, for each phase, the outputs the lab role of each of its slots foresees, then the slot's whole output folder. Any sub-folder, file or pattern (`test_run:logger/output/run_*.csv`) can be typed. Its **Keys of the criteria** propose, as `params.<name>`, the keys the chosen criteria read that nothing defines, and say which of those given are refused or warned about. For a `do` step, the form shows a **Parameters** field per parameter of the command, with the default of each lab component its slot can be bound to (or that it has none); the step's node shows the values (`install · profile=fast`), and the role and class forms of the lab editor edit the parameters and their defaults.
 
 **Foreseen outputs of a role** ([SPEC](SPEC.md) section 4.2). A lab role lists, next to the inputs it expects, the outputs its components write in their output folder: a name, a folder (ending with `/`) or a glob pattern, each with what it holds.
 
@@ -1086,7 +1141,7 @@ Every template (`{{ ... }}`) sees keys that depend on where it is rendered. Data
 | `lab.components.<host>`, `lab.stages.<stage>` | | yes | yes |
 | `via.{id, host, vars}` | | | in a probe or command with `via`: the component it runs on |
 | `run.{id, dir, priority}`, `phase.id` | | yes | no |
-| `params.<name>` | | in a sub-pipeline: its parameters | no |
+| `params.<name>` | | in a sub-pipeline: its parameters; in a lab command: its own parameters only (defaults of the class, `with:` of the step); in exploit criteria: those of the sub-pipeline and the step's `with:` | in a command run by hand: the defaults of its parameters |
 | `succeeded('<step>')`, `failed`, `errored`, `skipped`, `verdict` | | in `if:` | no |
 
 `input_dir` and `output_dir` are the same in `slot` and `component`: `<remote_root>/<slot>/input` and `/output` on the lab component (under `<remote_root>/.tsq/<run>/` for a shared or unlocked component). A step with no slot (a `run` or `python` on the sequencer host) has no `slot`, `component` or `stage` key. The Editor completes these keys after `{{` in every field rendered with them, with this help.
@@ -1249,7 +1304,7 @@ tsq config                                                  # settings in use, a
   - `POST /edit/repositories` (add a tests repository: `url`, `branch` (required, cloned alone), `name`, `path`, and the user's credentials for this clone only), `DELETE /edit/repositories/{id}` (only a clean one), `GET /edit/repositories/{id}/status` (git state, local changes, commits ahead and behind, last push from the Editor, a stamp of its files), `POST /edit/repositories/{id}/pull` (credentials optional);
   - `GET /edit` (repositories, sessions, last pushes), `POST /edit/sessions` (scratch clone of a repository, or `local: true` to edit it in place), `GET|DELETE /edit/sessions/{id}`;
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `GET` gives the file's `version`, a hash of its content; a `PUT` of `data` merges it into the file, keeping its comments; a `PUT` with `base: <version>` is refused, 409 with the file as it is now in `current`, when the file is another version), `GET .../version/{path}`, `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
-  - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `POST /edit/reachability`;
+  - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `.../exploit_keys` (the keys the criteria of an exploit step read that nothing defines), `POST /edit/reachability`;
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
   - `GET .../diff`, `POST .../push` (the user's credentials in the request body, required, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.

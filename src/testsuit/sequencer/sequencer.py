@@ -39,6 +39,7 @@ from testsuit.sequencer.engine import (DEFAULT_STOP_GRACE, ERROR, FAILED, SKIPPE
                                        StepRecord, StepRunner, worst)
 from testsuit.sequencer.intake import Datapack, check_against_lab, load_datapack, unpack
 from testsuit.sequencer.lab import Lab, checkout, load_lab, pull_lab
+from testsuit.sequencer.cmdparams import default_params
 from testsuit.sequencer.library import without_comments
 from testsuit.sequencer.model import FlatStep, Step
 from testsuit.sequencer.monitor import Monitor, component_keys, selftest_component
@@ -95,6 +96,18 @@ def _event_line(kind: str, data: dict) -> str:
         text = value if isinstance(value, str) else json.dumps(value, default=str, separators=(",", ":"))
         fields.append(f"{key}={text if len(text) <= 160 else text[:157] + '...'}")
     return f"{kind}: " + " ".join(fields)
+
+
+def _manual_defaults(defaults: dict, keys: dict) -> dict:
+    """The default values of a command's parameters for a run by hand: rendered with the keys of the lab, or as
+    written when they read a key only a run defines."""
+    out = {}
+    for name, value in defaults.items():
+        try:
+            out[name] = render(value, keys, name)
+        except SequencerError:
+            out[name] = value
+    return out
 
 
 class Sequencer:
@@ -524,10 +537,14 @@ class Sequencer:
         return any((resources.get(key) or {}).get("maintenance")
                    for key in [("component", comp_id), *[("stage", s) for s in comp.stages]])
 
-    def _manual_keys(self, comp, stage, root: str, via=None, by_hand: dict | None = None) -> dict:
-        """The keys of a command run by hand: those of the lab, then the keys set by hand (dotted name -> value)."""
+    def _manual_keys(self, comp, stage, root: str, via=None, by_hand: dict | None = None,
+                     defaults: dict | None = None) -> dict:
+        """The keys of a command run by hand: those of the lab, the default values of the command's parameters
+        (``params``, rendered with the keys of the lab), then the keys set by hand (dotted name -> value)."""
         keys = component_keys(comp, root, via, self.lab)
         keys["component"].update(name=comp.id, type=comp.role)
+        if defaults:
+            keys["params"] = _manual_defaults(defaults, keys)
         if by_hand:
             keys = deep_merge(keys, self._by_hand(by_hand)[0])
         return keys
@@ -622,8 +639,10 @@ class Sequencer:
         for name, spec in sorted(resolved.commands.items()):
             spec = dict(spec or {})
             kind = ("run" if "run" in spec else "http" if "http" in spec else "signal" if "signal" in spec
-                    else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(spec), "?"))
-            entry = {"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS}
+                    else f"builtin {spec['builtin']}" if "builtin" in spec else next(iter(k for k in spec if k != "params"), "?"))
+            entry = {"name": name, "kind": kind, "spec": spec, "manual": kind in self.MANUAL_KINDS,
+                     "params": [{"name": p, "description": d, "default": default_params(spec, name).get(p)}
+                                for p, d in resolved.command_params.get(name, {}).items()]}
             if kind in ("run", "http"):
                 via = None
                 if spec.get("via"):
@@ -640,6 +659,9 @@ class Sequencer:
                     method = str(http.get("method") or "GET")
                     template = f"{method if '{{' in method else method.upper()} {http.get('url', '')}"
                 seen = lab_keys_for(via)
+                defaults = default_params(spec, name)
+                if defaults:                            # its parameters' default values, as params.*
+                    seen = {**seen, "params": _manual_defaults(defaults, seen)}
                 # the keys of the lab this command sees (those of its via included), before any set by hand
                 entry["set_by_hand"] = keys_set_by_hand(seen, flat)
                 entry["segments"] = self._segments(template, deep_merge(seen, nested) if nested else seen,
@@ -709,7 +731,7 @@ class Sequencer:
             via = None
             if spec.get("via"):
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
-            keys = self._manual_keys(comp, stage, root, via, by_hand)
+            keys = self._manual_keys(comp, stage, root, via, by_hand, default_params(spec, name))
             request = httpcall.normalize(render(spec["http"], keys, f"{comp_id}.{name}"), f"command '{name}'")
             if request.get("timeout") is not None:     # the request's own timeout wins over the command's
                 limit = httpcall.timeout_of(request)
@@ -740,7 +762,7 @@ class Sequencer:
                 via = self.lab.find_via(comp, stage, str(spec["via"]), f"command '{name}' of {comp_id}")
                 transport = self.transport_for(via.id)
                 manual_dir = f"{await transport.resolve_root()}/.tsq/manual/{comp_id}"
-            keys = self._manual_keys(comp, stage, root, via, by_hand)
+            keys = self._manual_keys(comp, stage, root, via, by_hand, default_params(spec, name))
             text = str(render(spec["run"], keys, f"{comp_id}.{name}"))
             env = {str(k): str(v) for k, v in (render(spec.get("env") or {}, keys, f"{comp_id}.{name}") or {}).items()}
             if timeout is None and spec.get("timeout") is not None:
@@ -1003,6 +1025,7 @@ class RunExecution:
                 return
             keys = self.ctx.keys("", None, bound)
             try:
+                keys["params"] = render(default_params(spec, "version"), keys)
                 result = await bound.transport.run(strict(str(render(spec["run"], keys))), timeout=30)
                 text = result.output.strip() if result.completed and result.exit_status == 0 else None
             except Exception:

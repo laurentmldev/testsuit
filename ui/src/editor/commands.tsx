@@ -28,7 +28,7 @@ export const WELL_KNOWN = ["start", "stop", "ready", "install", "version", "depl
 export function commandKind(spec: any): string {
   if (!spec || typeof spec !== "object") return "run";
   for (const k of ["builtin", "wait_for", "signal", "run", "python", "http"]) if (k in spec) return k;
-  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via", "comments"].includes(k)) || "run";
+  return Object.keys(spec).find((k) => !["timeout", "detach", "expect", "env", "via", "comments", "params"].includes(k)) || "run";
 }
 
 /** The editable comments of a command or a status probe. */
@@ -311,7 +311,43 @@ const KINDS: Choice[] = [
   { value: "builtin", label: "built-in", description: "deploy, collect or kill, as linux_system does them." },
 ];
 
-export function CommandEditor({ name, spec, onChange, noVia }: { name: string; spec: any; onChange: (v: any) => void; noVia?: boolean }) {
+/** The default values a command implementation gives the parameters its role declares (`params:`), each a
+ * template rendered at run time; empty: the one it inherits, or none (every step then gives it). */
+function ParamDefaults({ declared, value, inherited, onChange }: {
+  declared: Record<string, string>; value: any; inherited?: Record<string, any>; onChange: (v: any) => void;
+}) {
+  const own: Record<string, any> = value && typeof value === "object" ? value : {};
+  const names = [...new Set([...Object.keys(declared), ...Object.keys(own)])];
+  if (!names.length) return null;
+  const set = (n: string, x: string) => {
+    const next = { ...own, [n]: x };
+    if (x === "" || x === undefined) delete next[n];
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  return (
+    <Field label="Parameter defaults" wide
+      help={"The default value of each parameter the role declares for this command: a pipeline step sets them with `with:`, the command reads them as `{{ params.<name> }}`. Templates, rendered at run time with the step's keys. Empty: no default, every step that runs it gives the value."}>
+      <table className="grid compact">
+        <tbody>
+          {names.map((n) => (
+            <tr key={n}>
+              <td><code>params.{n}</code></td>
+              <td><Text keys mono value={own[n] === undefined ? "" : String(own[n])} onChange={(x) => set(n, x)}
+                placeholder={inherited?.[n] !== undefined ? `inherited: ${inherited[n]}` : "no default: each step gives it"} /></td>
+              <td className={classes("small", n in declared ? "muted" : "error-text")}>{n in declared ? declared[n] : "not declared by the role"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Field>
+  );
+}
+
+export function CommandEditor({ name, spec, onChange, noVia, params, inheritedDefaults }: {
+  name: string; spec: any; onChange: (v: any) => void; noVia?: boolean;
+  /** the parameters its role declares (name -> what it is for), and the defaults it inherits */
+  params?: Record<string, string>; inheritedDefaults?: Record<string, any>;
+}) {
   const help = useCommandHelp();
   const { ctx, schemas } = useSession();
   const kinds = [...KINDS, ...(ctx.step_types || []).map((s: string) => ({ value: s, label: s, description: "plugin step type" }))];
@@ -416,6 +452,7 @@ export function CommandEditor({ name, spec, onChange, noVia }: { name: string; s
           }
         }} /></Field>
       )}
+      <ParamDefaults declared={params || {}} value={s.params} inherited={inheritedDefaults} onChange={(x) => set("params", x)} />
       <CommentsField value={s.comments} onChange={(x) => set("comments", x)} help={help("comments")} />
     </div>
   );
@@ -487,7 +524,7 @@ function TransferDialog({ mode, name, transfer, onClose, onDone }: {
  * an own command can be copied or moved to another component (or copied to this one under another name). */
 export function CommandsEditor({ value, onChange, inherited, required, title, help, transfer, ownOnly, empty, focus }: {
   value: Record<string, any> | null | undefined; onChange: (v: Record<string, any>) => void;
-  inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string }>;
+  inherited?: Record<string, { spec: any; from: string }>; required?: Record<string, { description?: string; from?: string; params?: Record<string, string> }>;
   title?: string; help?: string; transfer?: CommandTransfer;
   /** only the own commands: the inherited ones are shown (and overridden) elsewhere */
   ownOnly?: boolean; empty?: ReactNode;
@@ -581,7 +618,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
               </tr>,
               openName === name && mine && (
                 <tr key={name + ":edit"} className="editing"><td colSpan={4}>
-                  <CommandEditor name={name} spec={own[name]} onChange={(s) => set(name, s)} />
+                  <CommandEditor name={name} spec={own[name]} onChange={(s) => set(name, s)} params={role?.params} inheritedDefaults={from?.spec?.params} />
                 </td></tr>
               ),
               openName === name && !mine && from && (

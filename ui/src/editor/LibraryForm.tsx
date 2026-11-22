@@ -248,8 +248,8 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
     if (v === undefined || v === "") delete next[k];
     onChange(next);
   };
-  const own: Record<string, string | null> = Array.isArray(r.commands) ? Object.fromEntries(r.commands.map((c: string) => [c, ""])) : r.commands || {};
-  const setCommands = (c: Record<string, string | null>) => set("commands", Object.keys(c).length ? c : undefined);
+  const own: Record<string, any> = Array.isArray(r.commands) ? Object.fromEntries(r.commands.map((c: string) => [c, ""])) : r.commands || {};
+  const setCommands = (c: Record<string, any>) => set("commands", Object.keys(c).length ? c : undefined);
   const parent = r.extends ? ctx.lab.roles?.[r.extends] : null;
   const inherited: Record<string, any> = parent?.commands || {};
   const [adding, setAdding] = useState("");
@@ -279,12 +279,15 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
         <table className="grid compact commands">
           <tbody>
             {Object.entries<any>(inherited).filter(([c]) => !(c in own)).map(([c, info]) => (
-              <tr key={c} className="inherited"><td><code>{c}</code></td><td className="small">{info.description}</td><td className="muted small">from {info.from}</td><td /></tr>
+              <tr key={c} className="inherited"><td><code>{c}</code></td><td className="small">{info.description}<ParamList params={info.params} /></td><td className="muted small">from {info.from}</td><td /></tr>
             ))}
-            {Object.entries(own).map(([c, text]) => (
+            {Object.entries(own).map(([c, value]) => (
               <tr key={c}>
                 <td><code>{c}</code></td>
-                <td><input value={text || ""} placeholder="what it does" onChange={(e) => setCommands({ ...own, [c]: e.target.value })} /></td>
+                <td>
+                  <input value={commandText(value)} placeholder="what it does" onChange={(e) => setCommands({ ...own, [c]: roleCommand(e.target.value, commandParams(value)) })} />
+                  <RoleParams value={commandParams(value)} inherited={inherited[c]?.params || {}} onChange={(p) => setCommands({ ...own, [c]: roleCommand(commandText(value), p) })} />
+                </td>
                 <td className="muted small">{c in inherited ? `also in ${inherited[c].from}` : "listed here"}</td>
                 <td><button className="icon" onClick={() => {
                   const next = { ...own };
@@ -299,12 +302,69 @@ function RoleForm({ name, value, onChange, onRename, onDelete }: { name: string;
           <Combo value={adding} onChange={setAdding} choices={WELL_KNOWN.filter((n) => !(n in own) && !(n in inherited)).map((n) => ({ value: n }))} placeholder="add a command: start, stop, ready…" onPick={add} />
           {adding && <button className="small" onClick={() => add(adding)}>Add</button>}
         </div>
-        <p className="muted small">A role lists commands only: the classes implement them, and every lab component with this role must implement them all.</p>
+        <p className="muted small">A role lists commands only: the classes implement them, and every lab component with this role must implement them all. A command can take parameters: a pipeline step sets them (<code>with:</code>), the classes give their default values, and the command reads them as <code>{"{{ params.<name> }}"}</code>.</p>
       </Section>
       <RoleInputs value={r.inputs} onChange={(v) => set("inputs", v.length ? v : undefined)} inherited={(parent?.inputs || []) as any[]} help={help(["inputs"])} />
       <RoleInputs outputs value={r.outputs} onChange={(v) => set("outputs", v.length ? v : undefined)} inherited={(parent?.outputs || []) as any[]} help={help(["outputs"])} />
       {described?.implemented_by?.length > 0 && <div className="hint-box small">Supported by the classes {described.implemented_by.map((c: string) => <code key={c}>{c}</code>)}</div>}
       {described?.used_by?.length > 0 && <div className="hint-box small">Role of <ItemLinks kind="host" names={described.used_by} /></div>}
+    </div>
+  );
+}
+
+/** What a role command does: its text, or the description of its mapping form ({description, params}). */
+function commandText(value: any): string {
+  return value && typeof value === "object" ? value.description || "" : value || "";
+}
+
+/** The parameters a role command declares (name -> what it is for). */
+function commandParams(value: any): Record<string, string> {
+  return value && typeof value === "object" && value.params && typeof value.params === "object" ? value.params : {};
+}
+
+/** A role command as written: its text alone, or {description, params} when it declares parameters. */
+function roleCommand(text: string, params: Record<string, string>): any {
+  if (!Object.keys(params).length) return text;
+  return text ? { description: text, params } : { params };
+}
+
+/** The parameters of an inherited command, read only. */
+function ParamList({ params }: { params?: Record<string, string> }) {
+  const names = Object.keys(params || {});
+  if (!names.length) return null;
+  return <div className="muted small">params: {names.map((n) => <code key={n} title={params?.[n] || ""}>{n}</code>)}</div>;
+}
+
+/** The parameters a role declares for a command, each with what it is for (no value: the classes give the defaults). */
+function RoleParams({ value, inherited, onChange }: { value: Record<string, string>; inherited: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+  const [adding, setAdding] = useState("");
+  const valid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(adding.trim());
+  const add = () => {
+    const n = adding.trim();
+    if (!valid || n in value || n in inherited) return;
+    onChange({ ...value, [n]: "" });
+    setAdding("");
+  };
+  return (
+    <div className="role-params small">
+      {Object.keys(inherited).filter((n) => !(n in value)).map((n) => (
+        <div key={n} className="inherited"><code>params.{n}</code> <span className="muted">{inherited[n] || ""} (inherited)</span></div>
+      ))}
+      {Object.entries(value).map(([n, text]) => (
+        <div key={n} className="param-row">
+          <code>params.{n}</code>
+          <input value={text || ""} placeholder="what it is for" onChange={(e) => onChange({ ...value, [n]: e.target.value })} />
+          <button className="icon" title="Remove this parameter" onClick={() => {
+            const next = { ...value };
+            delete next[n];
+            onChange(next);
+          }}>×</button>
+        </div>
+      ))}
+      <div className="param-row">
+        <input value={adding} placeholder="add a parameter (product, flags…)" onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+        {adding && <button className="small" disabled={!valid} title={valid ? "" : "letters, digits and _"} onClick={add}>Add</button>}
+      </div>
     </div>
   );
 }
@@ -378,8 +438,8 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, fo
   const nameInput = useNameEdit(name, Object.keys(ctx.lab.library || {}), onRename);
   // the roles it supports (its own list, else its parent's): their commands are required
   const roles: string[] = t.roles ?? parent?.roles ?? [];
-  const required: Record<string, { description?: string; from?: string }> = {};
-  for (const r of roles) for (const [c, i] of Object.entries<any>(ctx.lab.roles?.[r]?.commands || {})) required[c] = { description: i.description, from: r };
+  const required: Record<string, { description?: string; from?: string; params?: Record<string, string> }> = {};
+  for (const r of roles) for (const [c, i] of Object.entries<any>(ctx.lab.roles?.[r]?.commands || {})) required[c] = { description: i.description, from: r, params: { ...(required[c]?.params || {}), ...(i.params || {}) } };
   return (
     <div>
       <div className="form-title">

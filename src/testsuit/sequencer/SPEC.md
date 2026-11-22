@@ -153,7 +153,9 @@ roles:
   <role>:
     extends: <role>                 # inherits its commands, inputs and outputs
     description: <text>
-    commands: {<name>: <description>, ...}
+    commands:
+      <name>: <description>
+      <name>: {description: <text>, params: {<param>: <description>, ...}}   # parameters: no value here
     inputs:                         # expected in the input folder
       - {name: <path>[/], type: file|folder, optional: <bool>, description: <markdown>}
     outputs:                        # foreseen in the output folder, once collected
@@ -170,7 +172,7 @@ component_classes:
     extends: <class>                # inherits implementations, status, self-test, roles
     roles: [<role>, ...]            # roles it supports; inherited unless redefined; none for a base class
     transport: <name>
-    commands: {<name>: <implementation>, ...}
+    commands: {<name>: <implementation>, ...}   # an implementation MAY hold params: {<param>: <default template>}
     status: {probe: <implementation>, states: {<state>: <rule>, ...}, via: <ref>, interval: <duration>}
     selftest: [{id: <id>, run: <cmd>, timeout: <duration>}, ...]
 ```
@@ -181,6 +183,7 @@ Constraints (checked at load; a violation MUST fail the load unless marked *warn
 - A host MUST implement every command of its role. Implementing a command its role does not list is a *warning*.
 - A host's role is: the single role its class supports; else `tsq_role`, which MUST be one of the class's roles when the class lists any.
 - `extends` chains MUST be acyclic.
+- Command parameters: a role declares them by name per command; a sub-role MAY add parameters to an inherited command. A role MUST NOT give them values. An implementation of a command its roles list MUST read (`params.<name>`) and give defaults to only the parameters they declare.
 
 ### 4.3 Built-ins
 
@@ -197,6 +200,8 @@ The set of commands of a component is the command set of its role and all its an
 2. `tsq_commands` of the component's stage group;
 3. `tsq_commands` of the host;
 4. an inline action in a pipeline step (§6.3).
+
+The default parameter values (`params`) of an overriding implementation are merged over those of the one it overrides, its own winning.
 
 A datapack MUST NOT define commands. `commands` or `extends` in a slot class, and `commands` in a slot, MUST be refused.
 
@@ -270,7 +275,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 
 - `maintenance` (repair) and `hold` (personal use) take a stage or component out of scheduling, with an optional note, until `resume` / `release`.
 - A component in maintenance (or in a stage in maintenance) and not held by a run MAY have its `run`, `signal`, built-in `kill` and `http` commands executed by hand. `deploy`, `collect`, `wait_for` and `python` require a run and MUST NOT be offered.
-- Manual commands render with lab keys only (§7) plus keys set by hand. Detached processes go under `<remote_root>/.tsq/manual/<component>/`.
+- Manual commands render with lab keys only (§7), the defaults of their parameters as `params.*`, plus keys set by hand. Detached processes go under `<remote_root>/.tsq/manual/<component>/`.
 - Each manual command MUST be recorded as an auditable `manual_command` event, including the keys set by hand and the values they overrode.
 
 ### 4.9 Lab folder and reload
@@ -381,13 +386,19 @@ pipeline:
   detach: <bool>
   continue_on_error: <bool>
   env: {<name>: <template>}
-  with: {<param>: <value>}             # for uses
+  with: {<name>: <template>}           # for uses, do (§6.2.1) and exploit (§6.8); refused on other actions
 ```
 
 - A step targets the components bound to its slot(s), within its phase. `for_each` fans out in parallel. A step without a target runs on the sequencer host, in the run folder.
 - `do: <name>` runs the resolved implementation (§4.4) of that command of the slot's role.
 - `if` sees `succeeded('<step>')`, `failed(...)`, `errored(...)`, `skipped(...)`, `verdict`. A false `if` makes the step `skipped`.
 - Validation at submission (and by `tsq validate`) MUST reject: cycles in `needs` (steps and phases), unknown ids, and steps on slots not held by their phase.
+
+#### 6.2.1 Command parameters
+
+- `with` on a `do` step gives the command's parameters by plain name; a name the role (§4.2) does not declare for the command MUST be rejected at intake. A step MUST NOT override any other key for a command: names are never dotted.
+- At run time each parameter takes the step's value, else the default of the bound implementation, each rendered with the step's keys (run-time keys included). A parameter with neither MUST make the step `error`, naming it.
+- The command is rendered with `params` = its parameters only (an enclosing sub-pipeline's `params` are not visible). The values MUST be logged and recorded in the step record (`lab_command.params`).
 
 ### 6.3 Ordering
 
@@ -441,7 +452,9 @@ Binds criteria (mexploit scenarios) to the run contents they check.
 - The step has no `slot` nor `for_each`; it runs on the sequencer host. `criteria` and `data` MUST be non-empty. `criteria` MUST NOT be a template, so the binding is known without running: tools read it from the pipeline as written (phases, `finally`, sub-pipelines, included files).
 - Validation (§6.2) MUST reject a `data` entry naming an unknown phase or slot. The phase is informative: the entry reads `data/<slot>/<path>` of the run folder, once collected.
 - Generation MUST copy each named criteria entry into `definition/<path>` (`definition/criteria/<name>` for a path outside the test definition), and only those; a missing one MUST fail the generation. The Editor reports it as a problem of the test definition.
-- At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
+- `with` gives keys the criteria read: `params.<name>` keys (merged into `params`), or plain keys. A plain key the test's keys define MUST be rejected (at intake, by the Editor, and at run time); any plain key is a *warning*. Values are templates rendered with the step's keys.
+- A key the scenarios read that neither the step's keys nor `with` define MUST make the step `error` before exploit_runner runs, naming it; the Editor MUST report it before generation.
+- At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys with its `with`, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
 - Result: `succeeded` on exit 0 (every check met), `failed` on exit 1 (a check not met), `error` otherwise, or when no data entry matches a file (an entry matching nothing is noted in the log), or when a criteria entry is absent from the datapack. `timeout`, `retries`, `env` apply; `expect` and `detach` do not. Without `continue_on_error`, the steps that need an exploit step MUST run even when it does not succeed, and its result MUST still count in the verdict (§9.4); `continue_on_error: false` makes them skipped, `true` leaves it out of the verdict as for any step.
 - The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`.
 
@@ -464,7 +477,7 @@ All templates are Jinja2 (the `datapack` tool's environment, `StrictUndefined`).
 | `lab.components.<host>`, `lab.stages.<stage>`, `lab.hosts.<name>` | | ✓ | ✓ |
 | `via.{id,host,vars}` | | | under `via` |
 | `run.{id,dir,priority}`, `phase.id` | | ✓ | |
-| `params.<name>` | | in a sub-pipeline | |
+| `params.<name>` | | in a sub-pipeline; in a lab command, its parameters only (§6.2.1); in exploit criteria, plus the step's `with` | defaults of the command's parameters |
 | `succeeded()`, `failed()`, `errored()`, `skipped()`, `verdict` | | in `if` | |
 
 `input_dir` = `<remote_root>/<slot>/input`, `output_dir` = `<remote_root>/<slot>/output`, prefixed by `.tsq/<run>/` for `shared` and `none` lock modes.
@@ -513,7 +526,7 @@ A resource is free iff it is not `broken`, `offline`, in maintenance or on hold,
 
 ### 9.1 Intake
 
-On submission (`POST /runs` or `tsq submit`), the sequencer MUST verify the BagIt checksums, unpack into `runs/<run>/`, load the pipeline, resources and `context.yml` from the zip only, validate them against the current lab (stage types, roles, commands), check the expected baseline if any, and queue the run. Invalid datapacks are rejected; non-conform ones are flagged (§5.3).
+On submission (`POST /runs` or `tsq submit`), the sequencer MUST verify the BagIt checksums, unpack into `runs/<run>/`, load the pipeline, resources and `context.yml` from the zip only, validate them against the current lab (stage types, roles, commands, the `with` of `do` and `exploit` steps), check the expected baseline if any, and queue the run. Invalid datapacks are rejected; non-conform ones are flagged (§5.3).
 
 ### 9.2 Activation
 

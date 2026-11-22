@@ -554,7 +554,7 @@ function HostForm({ inv, name, update, onRenamed, onDeleted, focusCommand }: {
   const baseName = ext || "linux_system";
   const extendedBy = Object.keys(ctx.lab.components || {}).filter((h) => ctx.lab.components[h]?.extends === name);
   const inherited = Object.fromEntries(Object.entries<any>(base?.commands || {}).map(([k, v]) => [k, { spec: v.spec, from: v.from }]));
-  const required = Object.fromEntries(Object.entries<any>(ctx.lab.roles?.[role]?.commands || {}).map(([k, v]) => [k, { description: v.description, from: v.from }]));
+  const required = Object.fromEntries(Object.entries<any>(ctx.lab.roles?.[role]?.commands || {}).map(([k, v]) => [k, { description: v.description, from: v.from, params: v.params }]));
   return (
     <div>
       <div className="form-title">
