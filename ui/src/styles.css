@@ -1150,3 +1150,4 @@ input.manual-note { flex: 1; min-width: 200px; }
 .step-mode select { margin-left: 4px; }
 .step-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
 .interventions ul { margin: 4px 0; padding-left: 20px; }
+.manual-check-edit .nowrap { white-space: nowrap; display: inline-flex; gap: 4px; align-items: center; }

@@ -77,8 +77,11 @@ def test_manual_images_and_answers():
     assert record["checks"][0]["done"] and record["checks"][0]["comment"] == "cable a bit loose"
     ms.acknowledge(record, {"check": 1, "bypass": True, "comment": "LED broken, power measured"}, by="bob")
     assert record["checks"][1]["bypassed"] and not record["checks"][1]["done"]
-    assert ms.bypassed(record) == [record["checks"][1]]
+    assert ms.bypassed(record) == [record["checks"][1]] and record["checks"][1]["nonconform"] is False
+    ms.acknowledge(record, {"check": 1, "bypass": True, "nonconform": True}, by="bob")    # the operator's call
+    assert record["checks"][1]["nonconform"] is True
     ms.acknowledge(record, {"check": 1, "bypass": False})
+    assert "nonconform" not in record["checks"][1]
     with pytest.raises(SequencerError, match="1 left: Power LED green"):
         ms.acknowledge(record, {"outcome": "done"})
     ms.acknowledge(record, {"check": 1, "bypass": True})                # its comment is still its reason
@@ -139,7 +142,8 @@ def test_manual_step_waits_for_the_operator(tmp_path, monkeypatch):
             with pytest.raises(Exception, match="tick or bypass every check"):
                 await answer(run["id"], "test_run:plug", {"outcome": "done"})
             await answer(run["id"], "test_run:pl", {"check": 0, "by": "ann"})
-            await answer(run["id"], "test_run:plug", {"check": 1, "bypass": True, "comment": "LED broken", "by": "ann"})
+            await answer(run["id"], "test_run:plug", {"check": 1, "bypass": True, "comment": "LED broken", "by": "ann",
+                                                      "nonconform": True})
             done = await answer(run["id"], "test_run:plug", {"outcome": "done", "note": "on bench 1", "by": "ann"})
             assert done["manual"]["outcome"] == "done"
         [run] = await run_until_done(seq, [run["id"]], during=operator)
@@ -151,11 +155,15 @@ def test_manual_step_waits_for_the_operator(tmp_path, monkeypatch):
     assert plug["state"] == "succeeded" and [c["by"] for c in plug["manual"]["checks"]] == ["ann", "ann"]
     assert plug["reason"] == "1 check(s) bypassed: Power LED green (LED broken)"
     log = next((tmp_path / "storage" / "runs" / run["id"]).rglob("plug.log")).read_text()
-    assert "manual operation done by ann" in log and "[bypassed] Power LED green (ann): LED broken" in log
+    assert "manual operation done by ann" in log and "[bypassed, non-conform] Power LED green (ann): LED broken" in log
     assert "comment: on bench 1" in log
     from testsuit.sequencer.campaigns import run_summary
     assert run_summary(run)["bypassed_checks"] == [{"step": "test_run:plug", "check": "Power LED green",
-                                                   "comment": "LED broken", "by": "ann"}]
+                                                   "comment": "LED broken", "by": "ann", "nonconform": True}]
+    # the operator said the run cannot be conform without that check
+    assert not run["conform"] and ("check 'Power LED green' of manual step test_run:plug bypassed by ann: LED broken"
+                                   in run["nonconform"])
+    assert [(i["action"], i["check"]) for i in run["interventions"]] == [("bypass", "Power LED green")]
 
 
 def test_manual_step_failed_or_not_answered(tmp_path, monkeypatch):

@@ -319,7 +319,8 @@ def cmd_manual(args, client: Client) -> int:
         return 0
     for index, reason in args.bypass or []:
         record = client.post(f"/runs/{run['id']}/manual/{step}", json={"check": int(index) - 1, "bypass": True,
-                                                                     "comment": reason, "by": by})
+                                                                     "comment": reason, "by": by,
+                                                                     "nonconform": args.nonconform})
     if args.done or args.fail is not None:
         body = {"outcome": "done", **({"note": args.comment} if args.comment else {})} if args.done else \
             {"outcome": "failed", "note": args.fail}
@@ -636,6 +637,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--step", help="'<phase>:<step>' when the run waits for several")
     s.add_argument("--tick", type=int, action="append", metavar="N", help="tick check N (from 1), repeatable")
     s.add_argument("--bypass", nargs=2, action="append", metavar=("N", "REASON"), help="bypass check N, and why")
+    s.add_argument("--nonconform", action="store_true",
+                   help="the checks bypassed by this command make the run non-conform (once the operation is done)")
     s.add_argument("--comment", help="a global comment with --done or --redo-from")
     s.add_argument("--redo-from", metavar="STEP", help="run that earlier step (one its redo_from lists) and the next "
                                                        "ones again, then ask again")

@@ -1216,6 +1216,12 @@ class RunExecution:
             known = list(run["nonconform"] or [])
             if why not in known:
                 fields.update(conform=False, nonconform=[*known, why])
+        if entry.get("action") == "bypass":              # a manual check bypassed, said to make the run non-conform
+            why = (f"check '{entry.get('check')}' of manual step {entry['step']} bypassed"
+                   + (f" by {entry['by']}" if entry.get("by") else "") + f": {entry.get('reason')}")
+            known = list((fields.get("nonconform") or run["nonconform"]) or [])
+            if why not in known:
+                fields.update(conform=False, nonconform=[*known, why])
         self.store.update_run(self.run_id, **fields)
         log.warning(f"run {self.run_id}: operator {entry.get('action')} on {entry.get('step')}"
                     + (f" by {entry['by']}" if entry.get("by") else "") + (f": {entry['reason']}" if entry.get("reason") else ""))

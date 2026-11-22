@@ -129,7 +129,8 @@ def settled(check: Mapping) -> bool:
 def acknowledge(manual: dict, body: Mapping, by: str = "") -> str | None:
     """Apply an operator's answer to a manual operation still waiting. On one check (``check``: its index):
     ``done`` ticks it or not, ``bypass`` bypasses it or not (a bypass needs a ``comment``, its reason), ``comment``
-    sets its comment. On the operation: ``note`` sets the global comment, ``outcome`` ends it (``done`` once every
+    sets its comment, ``nonconform`` with a bypass makes the run non-conform once the operation is done. On the
+    operation: ``note`` sets the global comment, ``outcome`` ends it (``done`` once every
     check is ticked or bypassed, or ``failed``). Returns the outcome when it ends."""
     if manual.get("outcome"):
         raise SequencerError(f"this manual operation is already {manual['outcome']}")
@@ -145,13 +146,16 @@ def acknowledge(manual: dict, body: Mapping, by: str = "") -> str | None:
         if body.get("bypass"):
             if not check.get("comment"):
                 raise SequencerError(f"check '{check['text']}': give a comment saying why it is bypassed")
-            check.update(bypassed=True, done=False)
+            # the operator says whether going on without it makes the run non-conform
+            check.update(bypassed=True, done=False, nonconform=bool(body.get("nonconform")))
         elif "bypass" in body:
             check["bypassed"] = False
+            check.pop("nonconform", None)
         if "done" in body or not ({"comment", "bypass"} & set(body)):
             check["done"] = bool(body.get("done", True))
             if check["done"]:
                 check["bypassed"] = False
+                check.pop("nonconform", None)
         check.update({"by": by, "at": now()} if settled(check) or check.get("comment") else {"by": None, "at": None})
     if "note" in body:
         manual["note"] = str(body.get("note") or "").strip()

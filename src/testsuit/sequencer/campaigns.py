@@ -27,7 +27,7 @@ DONE = ("done", "cancelled")
 WAITING = ("queued", "waiting_resources")
 _RANK = {"succeeded": 0, "failed": 1, "error": 2}
 INTERVENTION = {"run_again": "run again:", "continue": "continued anyway:", "redo_from": "redone from an earlier step:",
-                "next": "next after"}
+                "next": "next after", "bypass": "manual check bypassed (non-conform):"}
 # what a campaign view keeps of an earlier attempt of a datapack (replaced by a re-run)
 ATTEMPT_FIELDS = ("run", "state", "verdict", "reason", "activated_at", "ended_at", "duration_s", "failed_step", "stages")
 
@@ -73,7 +73,7 @@ def run_summary(run: dict) -> dict:
         "paused": run.get("paused") or [],
         # checks of manual operations the operator bypassed: the run went on without them
         "bypassed_checks": [{"step": f"{s.get('phase')}:{s.get('id')}", "check": c.get("text"), "comment": c.get("comment"),
-                             "by": c.get("by")} for s in steps for c in (s.get("manual") or {}).get("checks") or []
+                             "by": c.get("by"), "nonconform": bool(c.get("nonconform"))} for s in steps for c in (s.get("manual") or {}).get("checks") or []
                             if c.get("bypassed")],
         # what operators did on its steps: next, run again, continue anyway, redo from
         "interventions": run.get("interventions") or [],
@@ -192,12 +192,12 @@ def report_html(view: dict, base: str = "") -> str:
             detail += f'<div class="muted">{e(r["reason"])}</div>'
         if r.get("nonconform"):
             detail += "".join(f'<div class="warn">non-conform: {e(n)}</div>' for n in r["nonconform"][:3])
-        detail += "".join(f'<div class="warn">bypassed: {e(str(b["check"]))} ({e(str(b.get("comment") or ""))})</div>'
+        detail += "".join(f'<div class="warn">bypassed{" (non-conform)" if b.get("nonconform") else ""}: {e(str(b["check"]))} ({e(str(b.get("comment") or ""))})</div>'
                           for b in r.get("bypassed_checks") or [])
-        detail += "".join(f'<div class="{"warn" if i.get("action") == "continue" else "muted"}">{e(INTERVENTION.get(i.get("action"), str(i.get("action"))))} '
+        detail += "".join(f'<div class="{"warn" if i.get("action") in ("continue", "bypass") else "muted"}">{e(INTERVENTION.get(i.get("action"), str(i.get("action"))))} '
                           f'<code>{e(str(i.get("step")))}</code>{e(" (" + i["by"] + ")" if i.get("by") else "")}'
                           f'{e(": " + i["reason"] if i.get("reason") else "")}</div>'
-                          for i in r.get("interventions") or [] if i.get("action") != "next")
+                          for i in r.get("interventions") or [] if i.get("action") not in ("next", "bypass"))
         if r.get("earlier"):                       # re-runs: the attempts it replaced, each linked
             detail += (f'<div class="muted">attempt {r.get("attempt")}; earlier: '
                        + ", ".join(f'<a href="{run_link(a["run"])}">{e(a["run"])}</a> {badge(a.get("verdict") or a.get("state"))}'

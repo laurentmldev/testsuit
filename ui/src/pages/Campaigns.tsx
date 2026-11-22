@@ -19,7 +19,7 @@ import { get, post, put, url, useResource } from "../api";
 import { Dialog, Field, IdText, Section, Text, Toggle } from "../fields";
 import { LiveLog, logWarnings } from "../editor/Generate";
 import { ago, attempt, Badge, classes, duration, Markdown, navigate, setQuery, Spinner, time, type Route } from "../util";
-import { PausedFlag } from "./Operator";
+import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 
 const CAMPAIGNS_INTRO = `A **campaign** is a list of test definitions generated and run together: one datapack each, all with the **same version of every dataset** they import (the campaign lists each one, no test definition chooses on its own), queued under one campaign run with their **priority** and the **tags** the lab resources must carry. Its runs are grouped under it in **All runs**, with a synthetic report.`;
@@ -414,7 +414,9 @@ export function CampaignRunPage({ id }: { id: string }) {
                     {" · "}<a href={url(`runs/${r.run}/logs/${step}`)} target="_blank" rel="noreferrer">log</a></div>}
                   {(r.checks?.not_met || []).slice(0, 3).map((c: any, i: number) => <div key={i} className="muted">✗ <code>{c.criteria}</code> {c.check || c.scenario}</div>)}
                   {!f && r.reason && <div className="muted">{r.reason}</div>}
-                  {(r.bypassed_checks || []).map((b: any, i: number) => <div key={"b" + i} className="warn-text" title={`step ${b.step}${b.by ? `, by ${b.by}` : ""}`}>bypassed: {b.check} <span className="muted">({b.comment})</span></div>)}
+                  {(r.bypassed_checks || []).map((b: any, i: number) => <div key={"b" + i} className="warn-text" title={`step ${b.step}${b.by ? `, by ${b.by}` : ""}`}>bypassed{b.nonconform ? " (non-conform)" : ""}: {b.check} <span className="muted">({b.comment})</span></div>)}
+                  {(r.interventions || []).filter((i: any) => !["next", "bypass"].includes(i.action)).map((i: any, n: number) => <div key={"i" + n} className={i.action === "continue" ? "warn-text" : "muted"} title={time(i.at)}>
+                    {ACTION_LABELS[i.action] || i.action} <code>{i.action === "redo_from" ? i.target : i.step}</code>{i.by ? ` (${i.by})` : ""}{i.reason ? `: ${i.reason}` : ""}</div>)}
                   {(r.nonconform || []).slice(0, 2).map((n: string, i: number) => <div key={i} className="warn-text">non-conform: {n}</div>)}
                   {r.results && <div><a href={url(`runs/${r.run}/files/results.zip?results=true`)}>results zip</a></div>}
                 </td>

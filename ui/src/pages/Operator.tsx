@@ -26,6 +26,7 @@ function operatorName(): string {
 
 export const ACTION_LABELS: Record<string, string> = {
   next: "Next after", run_again: "Run again", continue: "Continued anyway", redo_from: "Redone from an earlier step",
+  bypass: "Manual check bypassed, run non-conform:",
 };
 
 async function stepAction(runId: string, step: string, action: string, reason = "") {
@@ -123,12 +124,12 @@ export function StepActions({ run, record, part, onChanged }: { run: any; record
 export function Interventions({ items }: { items?: any[] }) {
   if (!items?.length) return null;
   return (
-    <details className="small interventions" open={items.some((i) => i.action === "continue")}>
+    <details className="small interventions" open={items.some((i) => i.action === "continue" || i.action === "bypass")}>
       <summary>Operator actions ({items.length})</summary>
       <ul>
         {items.map((i, n) => (
-          <li key={n} className={classes(i.action === "continue" && "warn-text")}>
-            <span title={time(i.at)}>{ago(i.at)}</span> · {ACTION_LABELS[i.action] || i.action} <code>{i.action === "redo_from" ? i.target : i.step}</code>
+          <li key={n} className={classes((i.action === "continue" || i.action === "bypass") && "warn-text")}>
+            <span title={time(i.at)}>{ago(i.at)}</span> · {ACTION_LABELS[i.action] || i.action} {i.action === "bypass" && <>"{i.check}" of </>}<code>{i.action === "redo_from" ? i.target : i.step}</code>
             {i.action === "redo_from" && <> for <code>{i.step}</code></>}
             {i.by && <> by <strong>{i.by}</strong></>}{i.reason && <>: {i.reason}</>}
             {i.steps?.length > 1 && <span className="muted"> (ran again: {i.steps.join(", ")})</span>}

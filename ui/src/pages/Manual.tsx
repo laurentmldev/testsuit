@@ -41,6 +41,7 @@ function CheckRow({ index, check, busy, send }: { index: number; check: any; bus
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState<string>(check.comment || "");
   const [bypassing, setBypassing] = useState(false);
+  const [nonconform, setNonconform] = useState(false);
   useEffect(() => { if (!editing) setComment(check.comment || ""); }, [check.comment]);
   const save = async (extra: any = {}) => {
     if (await send({ check: index, comment: comment.trim(), ...extra })) { setEditing(false); setBypassing(false); }
@@ -52,7 +53,7 @@ function CheckRow({ index, check, busy, send }: { index: number; check: any; bus
           <input type="checkbox" checked={!!check.done} disabled={busy} onChange={(e) => send({ check: index, done: e.target.checked })} />
           <span>{check.text}</span>
         </label>
-        {check.bypassed && <span className="badge warn" title="The operator went on without it">bypassed</span>}
+        {check.bypassed && <span className="badge warn" title={check.nonconform ? "The operator went on without it, and said the run is then not conform" : "The operator went on without it"}>{check.nonconform ? "bypassed · non-conform" : "bypassed"}</span>}
         {settled(check) && check.by && <span className="muted small">{check.by}, {ago(check.at)}</span>}
         <span className="spacer" />
         {!editing && <button className="small link" disabled={busy} onClick={() => setEditing(true)}>{check.comment ? "Edit comment" : "Comment"}</button>}
@@ -65,9 +66,13 @@ function CheckRow({ index, check, busy, send }: { index: number; check: any; bus
         <div className="manual-check-edit">
           <input value={comment} autoFocus onChange={(e) => setComment(e.target.value)}
             placeholder={bypassing ? "why it can be bypassed, e.g. LED broken, power checked with a meter" : "a comment on this check"}
-            onKeyDown={(e) => { if (e.key === "Enter" && comment.trim()) save(bypassing ? { bypass: true } : {}); if (e.key === "Escape") { setEditing(false); setBypassing(false); } }} />
+            onKeyDown={(e) => { if (e.key === "Enter" && comment.trim()) save(bypassing ? { bypass: true, nonconform } : {}); if (e.key === "Escape") { setEditing(false); setBypassing(false); } }} />
           {bypassing
-            ? <button className="small primary" disabled={busy || !comment.trim()} onClick={() => save({ bypass: true })}>Bypass</button>
+            ? <>
+                <label className="small nowrap" title="Going on without this check means the results cannot be trusted as they are: the run is marked non-conform, with this reason">
+                  <input type="checkbox" checked={nonconform} onChange={(e) => setNonconform(e.target.checked)} /> makes the run non-conform</label>
+                <button className="small primary" disabled={busy || !comment.trim()} onClick={() => save({ bypass: true, nonconform })}>Bypass</button>
+              </>
             : <button className="small primary" disabled={busy} onClick={() => save()}>Save</button>}
           <button className="small" onClick={() => { setEditing(false); setBypassing(false); setComment(check.comment || ""); }}>Cancel</button>
         </div>
