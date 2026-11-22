@@ -56,6 +56,7 @@ name: Max speed
 setup_file: ../../setup/toytrain_setup.yml
 setup_config: sim_bench
 dictionaries: [scenario.yml]           # its own keys, relative to this file
+reqs: [REQ-12, jama:SYS-4@3]           # OPTIONAL: the requirements it verifies (its checks can list their own)
 pipeline: ...                          # for the test sequencer: kept as written, not rendered
 ```
 
@@ -178,7 +179,8 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
   values.json         where each '{{ expression }}' output is in the rendered files, and the keys it
                       read (the UI shows them on hover); left out for a file that cannot be told
   baseline.yml        where the contents come from, and whether the datapack is conform
-  definition/         the test definition, setup and dictionaries, as written
+  definition/         the test definition, setup and dictionaries, as written; the criteria its exploit
+                      steps name; requirements.yml, the requirements it and its checks list, as fetched
   data/<slot>/input/         the generated files
   data/<slot>/output/        empty, for the results
 ```
@@ -190,9 +192,13 @@ The zip follows the BagIt layout (RFC 8493), so it can be checked with standard 
 - the tools that processed them, with their versions;
 - each generated file, with its checksum and what produced it.
 
-A datapack is **conform** when it was built without `--nocheck`, from clean git tags, with every dataset version confirmed, and with no defined key overridden by hand. `baseline.yml` also lists the keys set by hand (`keys_set_by_hand`), and `--check-baseline` names each overridden key.
+A datapack is **conform** when it was built without `--nocheck`, from clean git tags, with every dataset version confirmed, with no defined key overridden by hand, and linking no unknown, deleted or rejected requirement. `baseline.yml` also lists the keys set by hand (`keys_set_by_hand`), and `--check-baseline` names each overridden key.
 
 An **expected baseline** has the same structure and holds only what must match. A string is a shell pattern (`v1.4.*`), and a value starting with a comparison compares versions (`>=3.2`). A mismatch never stops anything: the datapack, or a run of it, is flagged non-conform. The sequencer adds a `run` part to the baseline of the results.
+
+### Requirements
+
+When the test definition or the checks of its criteria list requirements (`reqs`), the generation fetches them from the sources of the `requirements.yml` file at the root of the tests repository and writes them to `definition/requirements.yml`, with the links. An unknown, deleted or rejected requirement fails the generation; `--nocheck` forces it, and the datapack is non-conform. `baseline.yml` records the sources (`requirements`) and the sources file as a source of role `requirements`. See the [sequencer README, section 10.3](../../sequencer/README.md#103-requirements-coverage) for the sources file and the `reqs` command.
 
 ## Campaigns
 

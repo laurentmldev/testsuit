@@ -1,0 +1,174 @@
+# Copyright (C) 2026 Laurent Millet-Lacombe
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of testsuit.
+# testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+# General Public License as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+# Public License for more details.
+# You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+# see <https://www.gnu.org/licenses/>.
+
+"""The sources file: where the requirements of a tests repository come from.
+
+``requirements.yml``, at the root of the tests repository: the nearest one from the test definition's folder up to the
+git root (a repository holding several trees of tests, such as an example, can have one per tree)::
+
+    default: reqs                       # the source of the references without prefix (default: the first one)
+    sources:
+      reqs: {backend: yaml, options: {file: reqs/requirements.yml}}
+      jama:
+        backend: jama                   # a backend registered by a plugin
+        options: {url: https://jama.example/rest, project: 12}
+        credentials: {token: env:JAMA_TOKEN}      # from the environment only, never written here
+
+A sources file without ``sources`` but with ``requirements`` is itself the one source ``reqs`` of the built-in YAML
+backend (the simplest setup: one file).
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from testsuit.reqs.backend import ReqBackend, ReqError, create_req_backend, list_requirements
+from testsuit.reqs.model import Node, Ref, Requirement, ref_key, split_ref
+
+SOURCES_FILE = "requirements.yml"
+DEFAULT_SOURCE = "reqs"
+
+
+def repository_root(folder: Path) -> Path | None:
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True,
+                             timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(out.stdout.strip()).resolve() if out.returncode == 0 and out.stdout.strip() else None
+
+
+def find_sources_file(start: Path) -> Path | None:
+    """The sources file of the tests repository holding ``start`` (a file or a folder): the nearest one from its folder
+    up to the git root of the repository (outside git, up to the file system root)."""
+    folder = (start if start.is_dir() else start.parent).resolve()
+    root = repository_root(folder)
+    for parent in [folder, *folder.parents]:
+        if (parent / SOURCES_FILE).is_file():
+            return parent / SOURCES_FILE
+        if root is not None and parent == root:
+            break
+    return None
+
+
+def _credentials(name: str, spec: Any) -> dict[str, str] | None:
+    if spec is None:
+        return None
+    if not isinstance(spec, dict):
+        raise ReqError(f"source '{name}': 'credentials' is a mapping of names to 'env:<VARIABLE>'")
+    out = {}
+    for key, value in spec.items():
+        text = str(value)
+        if not text.startswith("env:"):
+            raise ReqError(f"source '{name}': credential '{key}' must come from the environment ('env:<VARIABLE>'), "
+                           "never be written in the sources file")
+        var = text[4:].strip()
+        if var not in os.environ:
+            raise ReqError(f"source '{name}': credential '{key}': environment variable '{var}' is not set")
+        out[str(key)] = os.environ[var]
+    return out
+
+
+class Sources:
+    """The requirements sources of a sources file, their backends created on first use."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file.resolve()
+        try:
+            data = yaml.safe_load(self.file.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as e:
+            raise ReqError(f"cannot read the requirements sources file '{self.file}': {e}") from e
+        if not isinstance(data, dict):
+            raise ReqError(f"'{self.file}': a mapping is expected")
+        specs = data.get("sources")
+        if specs is None:
+            if "requirements" not in data:
+                raise ReqError(f"'{self.file}': no 'sources', nor 'requirements'")
+            specs = {DEFAULT_SOURCE: {"backend": "yaml", "options": {"file": self.file.name}}}
+        if not isinstance(specs, dict) or not specs:
+            raise ReqError(f"'{self.file}': 'sources' is a mapping of sources by name")
+        self.specs: dict[str, dict] = {}
+        for name, spec in specs.items():
+            if not isinstance(spec, dict) or not spec.get("backend"):
+                raise ReqError(f"'{self.file}': source '{name}' names its 'backend'")
+            unknown = sorted(set(spec) - {"backend", "options", "credentials", "label"})
+            if unknown:
+                raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
+            self.specs[str(name)] = spec
+        self.default = str(data.get("default") or next(iter(self.specs)))
+        if self.default not in self.specs:
+            raise ReqError(f"'{self.file}': default source '{self.default}' is not one of its sources")
+        self._backends: dict[str, ReqBackend] = {}
+
+    @property
+    def names(self) -> list[str]:
+        return list(self.specs)
+
+    def backend(self, name: str) -> ReqBackend:
+        if name not in self.specs:
+            raise ReqError(f"unknown requirements source '{name}' (sources: {', '.join(self.specs)})")
+        if name not in self._backends:
+            spec = self.specs[name]
+            self._backends[name] = create_req_backend(spec["backend"], spec.get("options") or {},
+                                                      _credentials(name, spec.get("credentials")), self.file.parent)
+        return self._backends[name]
+
+    def ref(self, text: str) -> Ref:
+        return split_ref(text, self.names, self.default)
+
+    def key(self, ref: Ref) -> str:
+        return ref_key(ref, self.default)
+
+    def get(self, refs: Iterable[Ref]) -> dict[Ref, Requirement | None]:
+        """The requirement of each reference, by source in one call each."""
+        by_source: dict[str, list[Ref]] = {}
+        for r in refs:
+            by_source.setdefault(r.source, []).append(r)
+        out: dict[Ref, Requirement | None] = {}
+        for source, items in by_source.items():
+            found = self.backend(source).get(sorted({r.id for r in items}))
+            for r in items:
+                req = found.get(r.id)
+                if req is not None:
+                    req.source = source
+                out[r] = req
+        return out
+
+    def tree(self, source: str | None = None) -> list[Node]:
+        return self.backend(source or self.default).tree()
+
+    def list(self, path: str = "", children: bool = False, source: str | None = None) -> dict[str, Requirement]:
+        """The requirements under a path of a source, by key."""
+        name = source or self.default
+        out = {}
+        for req in list_requirements(self.backend(name), path, children):
+            req.source = name
+            out[self.key(Ref(name, req.id))] = req
+        return out
+
+    def record(self) -> list[dict]:
+        """What the baseline records of the sources used."""
+        out = []
+        for name, backend in self._backends.items():
+            try:
+                revision = backend.revision()
+            except Exception:
+                revision = None
+            out.append({"name": name, "backend": self.specs[name]["backend"],
+                        **({"revision": revision} if revision else {})})
+        return out

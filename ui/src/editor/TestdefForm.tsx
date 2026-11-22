@@ -93,6 +93,12 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         <Field label="Dictionaries" help={help("dictionaries")}><Tags value={data.dictionaries} onChange={(v) => set("dictionaries", v)} choices={dictChoices}
           onOpen={setDictionary} openTitle="View or edit this key file" /></Field>
       </Section>
+      <Section title="Requirements" collapsed={!(Array.isArray(data.reqs) ? data.reqs.length : data.reqs)}
+        help="Requirements the test verifies, `[<source>:]<id>[@<version>]`, from the sources of `requirements.yml` at the root of the tests repository. A check of the criteria can list its own (`reqs`); a requirement listed here is verified by the run verdict. Unknown, deleted or rejected ones are problems, and fail the generation unless forced.">
+        <Field label="Requirements" help={help("reqs")}>
+          <Tags value={Array.isArray(data.reqs) ? data.reqs : data.reqs ? [String(data.reqs)] : []} onChange={(v) => set("reqs", v)} placeholder="REQ-12" />
+        </Field>
+      </Section>
       <Section title="Keys given at each generation" collapsed={!Object.keys(data.user_keys || {}).length}
         help="Keys the user gives each time a datapack is generated (`datapack --set name=value`, or the Generate form, where each has its field): free text, or one of a list of choices. No dictionary defines them; the generation refuses to start without them.">
         <UserKeys value={data.user_keys || {}} onChange={(v) => set("user_keys", Object.keys(v).length ? v : undefined)} />

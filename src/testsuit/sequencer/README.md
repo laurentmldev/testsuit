@@ -1252,6 +1252,38 @@ A **campaign** runs a list of test definitions together: the datapack of each on
 
 The **report** gives, for each run: its test definition, verdict, duration, the stage or components it ran on, the checks of its exploit steps (met out of total, and those not met), its first failed step with its reason, and its non-conformities. Links lead further: the Run page, the log of the failed step, each exploit report, and the results zip. It also gives the campaign's git state, conformity, dataset versions and tags. The UI shows it as a page (`#/campaigns/<id>`), and `GET /campaigns/{id}/report` serves it as a self-contained HTML page (`?download=true`: as a file).
 
+### 10.3 Requirements coverage
+
+Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API, and the built-in backend reads a YAML file of the tests repository.
+
+```yaml
+# requirements.yml, at the root of the tests repository: the requirements themselves (one source, 'reqs')...
+nodes: {SYS: System, SYS/BRAKE: Braking}        # OPTIONAL labels of the tree
+requirements:
+  REQ-12:
+    path: SYS/BRAKE
+    title: Stopping distance
+    description: The train stops within 30 m from 10 m/s.
+    rationale: Safety margin of the track.
+    tags: [critical]
+    status: approved                             # deleted or rejected: linking it is a problem
+
+# ...or where they come from, when there are several sources or a plugin's backend
+default: reqs
+sources:
+  reqs: {backend: yaml, options: {file: reqs/requirements.yml, url: "https://wiki/reqs#{id}"}}
+  jama: {backend: jama, options: {url: https://jama.example/rest}, credentials: {token: env:JAMA_TOKEN}}
+```
+
+Links use the same key at both levels, `reqs`: on the test definition (`reqs: [REQ-12, jama:SYS-4@3]`), verified by the run verdict, and on any check of the criteria (`reqs: [REQ-12]` beside its `description`), verified by that check. `@3` pins the version the test was written against.
+
+1. **Generation** fetches every linked requirement once and keeps it in the datapack (`definition/requirements.yml`), so reports and coverage work offline on the text that was tested. An unknown, deleted or rejected requirement fails the generation; `--nocheck` forces it, and the datapack is then non-conform. A pinned version that changed since is a warning. The Editor shows the same problems on the test definition.
+2. **Coverage**: `reqs matrix <targets>` reads test definitions and campaign files (linked only), datapack zips, and results zips or folders of them (verified). Each requirement gets a status per test and overall: `passed`, `failed`, `error`, `partial` (some links passed, others skipped or not run), `skipped`, `not run`, or `uncovered`. The current version of each requirement is read from its source, and a test that verified an older one is marked *changed since* (`--offline`: snapshots only).
+3. **Matrices**: requirements × tests (rolled up per path node) and tests × requirements (each test, its test definition and each check, with the requirements they verify), as text, YAML, CSV (`--view reqs|tests`) or an HTML page (`--format html`) with links to the requirements and, with `--sequencer <url>`, to the runs and their exploit reports.
+4. **Uncovered**: `reqs uncovered <targets> --paths SYS/BRAKE -r` lists the requirements under those nodes (and their descendants with `-r`) that no target links; `reqs matrix ... --paths` adds them to the matrix.
+
+`reqs tree`, `reqs list <path> [-r]` and `reqs show <id>...` browse the sources.
+
 ## 11. Abort and kill
 
 - **`tsq cancel <run>`**: a queued run leaves the queue. On a running one, pending steps are cancelled and running steps get their `stop` command; after a grace period, the kill below follows.
@@ -1277,6 +1309,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
+| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml` |
 
 Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
 

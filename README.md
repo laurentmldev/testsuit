@@ -138,7 +138,7 @@ setup_config: sim_bench
 dictionaries: [scenario.yml]
 ```
 
-Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<slot>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. A **campaign** file (`<name>.campaign.yml`) lists test definitions to generate with the same version of every dataset and to run together: `datapack <name>.campaign.yml` builds all their datapacks, and the sequencer runs them as one campaign run with a synthetic report. `examples/toytrain/datapack` is a complete example. The [datapack README](src/testsuit/datatools/datapack/README.md) gives the usage, the file formats and the architecture.
+Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x" %}`, loops, filters) rendered with keys from YAML dictionaries: setup dictionaries first, then imported datasets, then test definition dictionaries, each overriding the previous ones. A key can reference other keys (`output_dir: "{{ testdef.path }}/../datapacks"`), and an undefined key is an error. The zip follows the BagIt layout: `data/<slot>/input/` holds the generated files, `datapack.yml` records what they were built from and which keys each file used, and `context.yml` holds every resolved key, so a datapack can be used without its dictionaries. `datapack --setup-config <name>` uses another configuration of the setup than the test definition's, for example to build the same test for another platform. `datapack --verify <zip>` checks its checksums. A **campaign** file (`<name>.campaign.yml`) lists test definitions to generate with the same version of every dataset and to run together: `datapack <name>.campaign.yml` builds all their datapacks, and the sequencer runs them as one campaign run with a synthetic report. Test definitions and checks can list the **requirements** they verify (`reqs`), from a YAML file of the tests repository or any requirements tool through a plugin: `reqs matrix` builds the coverage matrices of tests, results and campaigns, and `reqs uncovered` lists what no test covers ([sequencer README, section 10.3](src/testsuit/sequencer/README.md#103-requirements-coverage)). `examples/toytrain/datapack` is a complete example. The [datapack README](src/testsuit/datatools/datapack/README.md) gives the usage, the file formats and the architecture.
 
 ## Repository layout
 
@@ -148,6 +148,7 @@ src/testsuit/           the installable package
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
     DataFileMgrs/       one reader per file format (Csv, Tdms, Mdf, Dxd, Udbf, H5, InfluxDb, Clickhouse)
     datapack/           datapack generation: YAML dictionaries, Jinja2 templates, BagIt zip
+  reqs/                 requirements coverage: sources and their backends (plugins), links, snapshots, matrices
   exploit/              checks of recorded data, see its README
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
@@ -176,6 +177,7 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest`, `mxp webui`, `mxp vscode` help to write and test scenarios ([Writing criteria](#writing-criteria)) |
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
+| `reqs`                   | requirements coverage: browse the requirements sources, coverage matrices of tests, results and campaigns, uncovered requirements |
 | `tsq`                    | test sequencer client: submit datapacks, follow runs, manage the lab (`pip install "testsuit[sequencer]"`) |
 | `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API, web UI at `/ui` ([sequencer README](src/testsuit/sequencer/README.md)) |
 | `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |

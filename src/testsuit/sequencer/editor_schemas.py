@@ -802,6 +802,10 @@ TESTDEF = {
                                "description": h("What to give: shown beside its field.", type="string"),
                                "choices": h("The values it can take (a list to pick from); none: free text.",
                                             type="array")})),
+        "reqs": h("Requirements the test verifies, `[<source>:]<id>[@<version>]`, from the sources of `requirements.yml` "
+                  "at the root of the tests repository (its checks can list their own with `reqs`). Verified by the "
+                  "run verdict: list a requirement on the checks that verify it when there are some.",
+                  type="array", items={"type": "string"}),
         "pipeline": PIPELINE,
     },
 }
