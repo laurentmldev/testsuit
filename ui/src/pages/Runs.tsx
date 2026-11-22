@@ -16,6 +16,7 @@ import { Fragment, useState } from "react";
 import { useResource } from "../api";
 import { ago, Badge, classes, Elapsed, time } from "../util";
 import { CampaignBadge, CampaignProgress } from "./Campaigns";
+import { ManualFlag } from "./Manual";
 import { RunStateBadge } from "./Queue";
 
 const FILTERS: [string, string][] = [
@@ -47,12 +48,14 @@ function grouped(runs: any[], campaigns: any[]): Item[] {
   return items;
 }
 
-function RunRow({ r, nested }: { r: any; nested?: boolean }) {
+function RunRow({ r, nested, replaced }: { r: any; nested?: boolean; replaced?: string }) {
   return (
-    <tr className={classes(nested && "campaign-child")}>
+    <tr className={classes(nested && "campaign-child", replaced && "replaced")}>
       <td><a href={`#/runs/${r.id}`}>{r.id}</a></td>
-      <td title={r.name}>{r.testdef}</td>
-      <td><RunStateBadge run={r} /></td>
+      <td title={r.name}>{r.testdef}
+        {r.rerun_of && <span className="chip rerun-tag" title={`Runs the datapack of run ${r.rerun_of} again, unchanged`}>re-run</span>}
+        {replaced && <span className="chip muted" title={`An earlier attempt: run ${replaced} ran its datapack again, and counts for the campaign`}>earlier attempt</span>}</td>
+      <td><RunStateBadge run={r} /> <ManualFlag run={r} /></td>
       <td><Badge value={r.verdict} /></td>
       <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
       <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>
@@ -66,8 +69,10 @@ export function RunsPage() {
   const [state, setState] = useState("");
   const [text, setText] = useState("");
   const [folded, setFolded] = useState<Record<string, boolean>>({});
-  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase"]);
-  const campaigns = useResource<any[]>("campaigns?limit=200", ["run", "campaign"]);
+  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase", "manual_operation"]);
+  const campaigns = useResource<any[]>("campaigns?limit=200", ["run", "campaign", "manual_operation"]);
+  // the runs a re-run replaced in their campaign: their re-run, by id
+  const replacedBy = new Map<string, string>((runs.data || []).filter((r) => r.rerun_of).map((r) => [r.rerun_of, r.id]));
   const needle = text.toLowerCase();
   const matches = (r: any) => !text || `${r.id} ${r.name} ${r.testdef}`.toLowerCase().includes(needle);
   const items = grouped(runs.data || [], campaigns.data || [])
@@ -98,7 +103,7 @@ export function RunsPage() {
         </thead>
         <tbody>
           {items.map((item) => {
-            if ("run" in item) return <RunRow key={item.run.id} r={item.run} />;
+            if ("run" in item) return <RunRow key={item.run.id} r={item.run} replaced={replacedBy.get(item.run.id)} />;
             const c = item.campaign;
             const closed = isFolded(c);
             return (
@@ -111,14 +116,15 @@ export function RunsPage() {
                   </td>
                   <td><span className="badge campaign">campaign</span> <strong title={c.file}>{c.title || c.campaign}</strong>
                     {item.runs.length < c.counts.total && <span className="muted small"> · {item.runs.length} of {c.counts.total} shown</span>}</td>
-                  <td><CampaignProgress counts={c.counts} /></td>
+                  <td><CampaignProgress counts={c.counts} />{" "}
+                    {item.runs.some((r) => r.awaiting_manual?.length) && <ManualFlag run={{ id: item.runs.find((r) => r.awaiting_manual?.length).id, awaiting_manual: item.runs.flatMap((r) => r.awaiting_manual || []) }} />}</td>
                   <td><CampaignBadge view={c} /></td>
                   <td title={time(c.submitted_at)}>{ago(c.submitted_at)}</td>
                   <td>{c.started_at ? <Elapsed from={c.started_at} to={c.last_ended_at} /> : ""}</td>
                   <td><Badge value={c.conform ? "conform" : "non-conform"} /></td>
                   <td className="reason"><a href={`#/campaigns/${c.id}`}>report</a></td>
                 </tr>
-                {!closed && item.runs.map((r) => <RunRow key={r.id} r={r} nested />)}
+                {!closed && item.runs.map((r) => <RunRow key={r.id} r={r} nested replaced={replacedBy.get(r.id)} />)}
               </Fragment>
             );
           })}

@@ -31,6 +31,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from testsuit.sequencer.logbuffer import install as install_log_buffer
+from testsuit.sequencer.manualstep import awaiting
 from testsuit.sequencer.sequencer import Sequencer
 from testsuit.sequencer.util import SequencerError, now, parse_duration
 
@@ -145,6 +146,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         execution = seq.executions.get(run["id"])
         if execution is not None and execution.ctx is not None:
             run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
+            run["awaiting_manual"] = awaiting(run["steps"])
         run["wait"] = seq.wait_info(run)                 # why it, or its next phase, does not start yet
         return run
 
@@ -169,7 +171,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                     s = fs.step
                     steps.append({"id": fs.id, "part": part, "needs": fs.needs, "group": fs.group, "action": s.action,
                                   "do": s.do, "slot": s.slot, "for_each": s.for_each,
-                                  "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else s.action)})
+                                  "if": s.if_, "label": s.do or s.run or s.uses or (python_label(s.python) if s.python else None)
+                                  or (f"manual: {s.manual.get('title') or fs.id}" if s.manual else s.action)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": flat.phase.slots, "groups": flat.groups, "steps": steps,
                            "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
@@ -209,6 +212,20 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             return seq.retry_now(run_or_404(run_id)["id"])
         except SequencerError as e:
             raise HTTPException(409, str(e)) from e
+
+    @app.post("/runs/{run_id}/manual/{step:path}")
+    async def manual_answer(run_id: str, step: str, body: dict):
+        """The operator's answer to a manual operation the run waits for: {"check": i, "done": bool} ticks a
+        check, {"outcome": "done" | "failed", "note": "..."} ends it; "by" names who answered."""
+        try:
+            return seq.answer_manual(run_or_404(run_id)["id"], step, body, str(body.get("by") or ""))
+        except SequencerError as e:
+            raise HTTPException(409, str(e)) from e
+
+    @app.post("/runs/{run_id}/rerun")
+    async def rerun(run_id: str):
+        """Run a datapack of a campaign run again: a new run of the same zip, the earlier attempt kept."""
+        return await asyncio.to_thread(seq.rerun, run_or_404(run_id)["id"])
 
     @app.post("/runs/{run_id}/repost")
     async def repost(run_id: str):

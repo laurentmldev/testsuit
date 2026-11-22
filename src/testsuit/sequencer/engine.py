@@ -162,13 +162,15 @@ class StepRecord:
     progress: dict | None = None
     # an exploit step's results: {folder, report, status, checks: [{criteria, scenario, check, status}]}
     exploit: dict | None = None
+    # a manual operation: {title, text, checks: [{text, done, by, at}], base, since, outcome, note, by, at}
+    manual: dict | None = None
 
     @property
     def key(self) -> str:
         return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None or k not in ("progress", "exploit")}
+        return {k: v for k, v in self.__dict__.items() if v is not None or k not in ("progress", "exploit", "manual")}
 
 
 class Aborted(Exception):
@@ -199,6 +201,8 @@ class RunContext:
     lab: Any = None                               # lab.Lab: the keys of the other lab components (lab, stage)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _running: dict[str, asyncio.Task] = field(default_factory=dict)
+    # the manual operations waiting for the operator: step record key -> the future their answer sets
+    manual_waits: dict[str, asyncio.Future] = field(default_factory=dict)
 
     def lock_for(self, concrete: str) -> asyncio.Lock:
         return self._locks.setdefault(concrete, asyncio.Lock())
@@ -343,6 +347,8 @@ class StepRunner:
                 if self.step.with_:
                     keys = exploit_keys(f"step '{self.fs.id}'", self.step.with_, keys)
                 return await self.exploit(render(self.step.exploit, keys, self.fs.id), keys, timeout)
+            elif action == "manual":
+                return await self.manual(render(self.step.manual, keys, self.fs.id), timeout)
             elif action == "do":
                 spec = self.command(self.step.do)
                 keys = self.command_keys(spec, keys)
@@ -577,6 +583,38 @@ class StepRunner:
             return FAILED, f"{len(bad)} of {len(checks)} check(s) not met"
         self.note(f"exploit_runner ended with exit status {self.record.exit_status}{status}")
         return ERROR, f"exploit_runner exit status {self.record.exit_status}"
+
+    async def manual(self, spec: dict, timeout: float | None) -> tuple[str, str]:
+        """An operation a person does on the bench (SPEC section 6.9): wait for the operator's answer on the Run
+        page (POST /runs/<id>/manual/<step>): done (succeeded), failed, or no answer within the timeout (error)."""
+        from testsuit.sequencer import manualstep as ms
+        ms.check_manual(spec, f"step '{self.fs.id}'")
+        self.record.manual = ms.waiting_record(self.fs.id, spec)
+        checks = self.record.manual["checks"]
+        self.note(f"waiting for a manual operation: {self.record.manual['title']}"
+                  + "".join(f"\n[ ] {c['text']}" for c in checks))
+        answer: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.ctx.manual_waits[self.record.key] = answer
+        self.ctx.notify("step", {"run": self.ctx.run_id, **self.record.as_dict()})
+        self.ctx.notify("manual_operation", {"run": self.ctx.run_id, "step": self.record.key, "title": self.record.manual["title"],
+                                   "state": "waiting"})
+        try:
+            outcome = await asyncio.wait_for(answer, timeout)
+        except asyncio.TimeoutError:
+            self.record.manual.update(outcome="timeout", at=now())
+            self.note("no answer of the operator in time")
+            return ERROR, "manual operation: no answer in time"
+        finally:
+            self.ctx.manual_waits.pop(self.record.key, None)
+            self.ctx.notify("manual_operation", {"run": self.ctx.run_id, "step": self.record.key, "state": "answered"})
+        m = self.record.manual
+        who = f" by {m['by']}" if m.get("by") else ""
+        self.note(f"manual operation {outcome}{who}" + "".join(
+            f"\n[{'x' if c['done'] else ' '}] {c['text']}" + (f" ({c['by']})" if c.get("by") else "") for c in checks)
+            + (f"\nnote: {m['note']}" if m.get("note") else ""))
+        if outcome == ms.DONE:
+            return SUCCEEDED, ""
+        return FAILED, "manual operation failed" + (f": {m['note']}" if m.get("note") else "")
 
     def via_place(self, name: str) -> tuple:
         """The component a command's via names, its transport and remote root (bound with the component)."""

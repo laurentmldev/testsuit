@@ -30,7 +30,7 @@ from testsuit.datatools.datapack.model import FORMER_PHASE, FORMER_STEP, former_
 from testsuit.sequencer import registry
 from testsuit.sequencer.util import SequencerError, load_yaml
 
-BUILTIN_ACTIONS = ("do", "run", "python", "http", "exploit", "push", "pull", "delay", "wait_for", "uses")
+BUILTIN_ACTIONS = ("do", "run", "python", "http", "exploit", "manual", "push", "pull", "delay", "wait_for", "uses")
 PYTHON_KEYS = ("script", "code", "args", "interpreter")
 
 
@@ -74,6 +74,7 @@ class Step(BaseModel):
     python: dict | None = None
     http: dict | str | None = None
     exploit: dict | None = None                  # criteria checked on outputs of the run (exploitstep.py)
+    manual: dict | None = None                   # an operation a person does on the bench (manualstep.py)
     push: dict | None = None
     pull: dict | None = None
     delay: str | float | None = None
@@ -140,6 +141,12 @@ class Step(BaseModel):
             if self.slot or self.for_each is not None:
                 raise SequencerError(f"step '{self.id}': an 'exploit' step runs on the sequencer host, it has no "
                                      "'slot' nor 'for_each' (its 'data' names the slots' files)")
+        if action == "manual":
+            from testsuit.sequencer.manualstep import check_manual
+            check_manual(self.manual, f"step '{self.id}'")
+            if self.slot or self.for_each is not None:
+                raise SequencerError(f"step '{self.id}': a 'manual' step waits on the sequencer host for the "
+                                     "operator, it has no 'slot' nor 'for_each'")
         if action in ("do", "push", "pull") and not (self.slot or self.for_each):
             raise SequencerError(f"step '{self.id}': '{action}' needs a 'slot' or 'for_each'")
         if self.slot and self.for_each is not None:

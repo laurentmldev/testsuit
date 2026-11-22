@@ -28,7 +28,7 @@ import { ExpectEditor, HttpEditor, httpSummary, PythonEditor, pythonSummary, sum
 import { clone, hostLabel, useSession, useTestKeys, type Doc } from "./state";
 
 type Scope = { kind: "phase"; index: number } | { kind: "sub"; name: string } | { kind: "settings" } | { kind: "flat" };
-const ACTIONS = ["do", "run", "python", "http", "exploit", "push", "pull", "delay", "wait_for", "uses"];
+const ACTIONS = ["do", "run", "python", "http", "exploit", "manual", "push", "pull", "delay", "wait_for", "uses"];
 
 export function stepAction(step: any, plugins: string[] = []): string {
   const found = ACTIONS.find((a) => step?.[a] !== undefined && step?.[a] !== null);
@@ -103,6 +103,7 @@ function label(step: any, plugins: string[]): string {
   const target = step.slot || (Array.isArray(step.for_each) ? step.for_each.join(", ") : step.for_each) || "";
   const what = a === "do" ? step.do + withLabel(step.with) : a === "run" ? `run ${String(step.run).slice(0, 30)}` : a === "python" ? `python ${pythonSummary(step.python)}` : a === "http" ? httpSummary(step.http).slice(0, 40) : a === "delay" ? `delay ${step.delay}`
     : a === "wait_for" ? summary({ wait_for: step.wait_for }) : a === "uses" ? `uses ${step.uses}`
+    : a === "manual" ? `manual: ${step.manual?.title || step.id}`
     : a === "exploit" ? `criteria ${asList(step.exploit?.criteria).map((c: string) => c.replace(/\/$/, "").split("/").pop()).join(", ") || "?"}` : a || "no action";
   return `${what}${target ? ` · ${target}` : ""}${step.if ? " · if…" : ""}`;
 }
@@ -751,6 +752,8 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected, onCommen
           onMouseEnter={() => setHelp({ title: "http", text: "An HTTP request (a REST API call) from the sequencer host: URL, method, headers, body; it succeeds when the answer is the expected one." })}>REST API call</button>
         <button className="palette-item" onClick={() => onAdd({ id: "criteria", exploit: { criteria: [], data: [] } })}
           onMouseEnter={() => setHelp({ title: "exploit", text: "Check criteria (mexploit scenarios of the test definition) on outputs of the run, with exploit_runner on the sequencer host. The datapack holds only the criteria such steps name; the run page shows each check and the report." })}>check criteria</button>
+        <button className="palette-item" onClick={() => onAdd({ id: "plug_cable", manual: { title: "Plug cable A", text: "Plug **cable A** on pin F.", checks: ["Cable A plugged on pin F"] } })}
+          onMouseEnter={() => setHelp({ title: "manual", text: "An operation a person does on the bench (plug a cable, press a button): the run waits. The run page opens a dialog with its text (Markdown, pictures of the test definition's folder) and its checks; the operator ticks each, then answers Done or Failed." })}>manual operation</button>
         {(ctx.step_types || []).map((t: string) => <button key={t} className="palette-item" onClick={() => onAdd({ id: t, [t]: {} })}>{t}</button>)}
         <button className="palette-item comment-item" onClick={onComment}
           onMouseEnter={() => setHelp({ title: "comment", text: "A note on the graph, like a sticky note (Markdown): why the steps are this way, what to beware of. It is kept in the file with its place on the graph, never run, and shown under its phase on the run page." })}>comment</button>
@@ -990,6 +993,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
     if (a === "python") next.python = { code: "import sys\n\nsys.exit(0)\n" };
     if (a === "http") next.http = { url: "http://localhost:8080/api/status" };
     if (a === "exploit") { next.exploit = { criteria: [], data: [] }; delete next.slot; delete next.for_each; }
+    if (a === "manual") { next.manual = { title: "", text: "", checks: [] }; delete next.slot; delete next.for_each; }
     if (a === "delay") next.delay = "30s";
     if (a === "wait_for") next.wait_for = { state: "running", timeout: "30s" };
     if (a === "uses") next.uses = Object.keys(subs)[0] || "";
@@ -1005,7 +1009,7 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
   return (
     <div className="step-form">
       <Field label="Id" help={help("id")}><IdText value={step.id} taken={siblings.map((s) => s.id)} onChange={(v) => set("id", v)} /></Field>
-      {action !== "exploit" && <Field label="On" help={help("for_each")}>
+      {action !== "exploit" && action !== "manual" && <Field label="On" help={help("for_each")}>
         <Choices value={targetMode === "expr" ? null : targetMode} onChange={setTarget} allowNone="no slot" choices={[
           { value: "slot", label: "a slot" }, { value: "all", label: "every slot", description: "of the phase, in parallel" },
           { value: "list", label: "some slots", description: "in parallel" }, { value: "role", label: "a role" },
@@ -1018,7 +1022,8 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       <Field label="Does" help={help(action || "do")}>
         <Choices value={action} onChange={setAction} choices={[
           { value: "do", label: "a command" }, { value: "run", label: "shell" }, { value: "python", label: "Python" }, { value: "http", label: "REST API" },
-          { value: "exploit", label: "check criteria", description: "mexploit scenarios on outputs of the run" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
+          { value: "exploit", label: "check criteria", description: "mexploit scenarios on outputs of the run" },
+          { value: "manual", label: "manual operation", description: "a person on the bench: the run waits for Done" }, { value: "wait_for", label: "wait for" }, { value: "delay", label: "delay" },
           { value: "uses", label: "sub-pipeline" }, { value: "push", label: "push files" }, { value: "pull", label: "pull files" },
           ...plugins.map((p) => ({ value: p, label: p, description: "plugin step type" })),
         ]} />
@@ -1037,6 +1042,8 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
       {action === "exploit" && <ExploitEditor value={step.exploit} onChange={(v) => set("exploit", v)} testdef={testdef} phaseIds={phaseIds || []}
         phaseSlots={phaseSlots || {}} slotRoles={palette ? Object.fromEntries(Object.entries<any>(palette.slots).map(([id, c]) => [id, c.role])) : {}} help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "exploit", ...(f ? [f] : [])])} />}
       {action === "exploit" && <ExploitKeys testdef={testdef} criteria={asList(step.exploit?.criteria)} value={step.with} onChange={(v) => set("with", v)} help={help("with")} />}
+      {action === "manual" && <ManualEditor value={step.manual} onChange={(v) => set("manual", v)}
+        help={(f) => helpText(schemas.testdef, ["pipeline", "phases", 0, "steps", 0, "manual", ...(f ? [f] : [])])} />}
       {action === "delay" && <Field label="Duration" help={help("delay")}><Text keys value={step.delay} onChange={(v) => set("delay", v)} placeholder="30s, or {{ scenario.duration_s }}s" /></Field>}
       {action === "wait_for" && <WaitForEditor value={step.wait_for} onChange={(v) => set("wait_for", v)} withSlot={!step.slot} slots={comps} />}
       {(action === "push" || action === "pull") && (
@@ -1085,6 +1092,29 @@ function StepForm({ step, part, siblings, palette, held, subs, isSub, schemas, o
         <Field label="Environment" help={help("env")}><KeyValues keys value={step.env} onChange={(v) => set("env", Object.keys(v).length ? v : undefined)} /></Field>
       </Section>
       {part === "finally" && <p className="muted small">A finally step runs at the end of the phase in every case, cancel included.</p>}
+    </div>
+  );
+}
+
+/** A manual operation: its title, its text (Markdown, shown as the operator sees it, without the pictures) and its
+ *  checks, one per line. */
+function ManualEditor({ value, onChange, help }: { value: any; onChange: (v: any) => void; help: (field?: string) => string | undefined }) {
+  const v = value || {};
+  const set = (k: string, x: any) => onChange({ ...v, [k]: x });
+  // the checks as typed (an empty line kept while typing the next one), written as a list without empty ones
+  const [checks, setChecks] = useState<string>((v.checks || []).join("\n"));
+  useEffect(() => {
+    if (checks.split("\n").map((l) => l.trim()).filter(Boolean).join("\n") !== (v.checks || []).join("\n")) setChecks((v.checks || []).join("\n"));
+  }, [JSON.stringify(v.checks || [])]);
+  return (
+    <div className="sub-form">
+      <Field label="Title" help={help("title")}><Text keys value={v.title} onChange={(x) => set("title", x || undefined)} placeholder="the step id" /></Field>
+      <Field label="What to do" help={help("text")} wide><Text keys multiline value={v.text} onChange={(x) => set("text", x)}
+        placeholder={"Plug **cable A** on pin F.\n\n![Pin F](images/pin_f.jpg)"} /></Field>
+      {v.text && <div className="manual-preview small"><Markdown text={v.text} /></div>}
+      <Field label="Checks" help={help("checks")} hint="one per line: the operator ticks each before Done" wide>
+        <Text multiline value={checks} onChange={(x) => { setChecks(x); set("checks", x.split("\n").map((l) => l.trim()).filter(Boolean)); }}
+          placeholder={"Cable A plugged on pin F\nPower LED green"} /></Field>
     </div>
   );
 }

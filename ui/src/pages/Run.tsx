@@ -21,6 +21,7 @@ import { COMMENT_WIDTH, CommentNode } from "../comments";
 import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { Named } from "../kinds";
+import { ManualOperations, rerun } from "./Manual";
 import { abort, ACTIVE, PriorityInput, repost, RunStateBadge } from "./Queue";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
@@ -73,7 +74,9 @@ function StepNode({ data }: NodeProps) {
       title={d.title}>
       <Handle type="target" position={Position.Left} />
       <div className="step-id">{d.label}</div>
-      <div className="step-action">{d.action}</div>
+      {(d.items || []).some((i: any) => i.state === "running" && i.manual && !i.manual.outcome)
+        ? <div className="step-action step-manual" title="Waits for a manual operation: open it from the banner above">✋ waits for you</div>
+        : <div className="step-action">{d.action}</div>}
       {uploading && <UploadBar progress={uploading.progress} compact />}
       {vias.length > 0 && <div className="step-via">{vias.map((v) => <ViaTag key={v} via={v} title={`its command runs on ${v}, which reaches the component of its slot`} />)}</div>}
       {d.items?.length > 1 && (
@@ -451,7 +454,7 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
 }
 
 export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?: boolean }) {
-  const run = useResource<any>(`runs/${id}`, ["run", "phase", "step"], (d) => !d.run || String(d.run).startsWith(id));
+  const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
@@ -489,7 +492,9 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
         {live && <button onClick={() => abort(r, "cancel")}>Cancel</button>}
         {live && <button className="danger" onClick={() => abort(r, "kill")}>Kill</button>}
-        {["done", "cancelled"].includes(r.state) && <button title="Clean its outputs and put the datapack back in the queue" onClick={() => repost(r).then(() => { run.refresh(); pipeline.refresh(); })}>Re-post</button>}
+        {["done", "cancelled"].includes(r.state) && r.campaign_run && <button title="Run its datapack again in its campaign, unchanged: a new run, this one kept as an earlier attempt"
+          onClick={() => rerun(r).then((n: any) => { if (n?.id) window.location.hash = `#/runs/${n.id}`; })}>Run again</button>}
+        {["done", "cancelled"].includes(r.state) && !r.campaign_run && <button title="Clean its outputs and put the datapack back in the queue" onClick={() => repost(r).then(() => { run.refresh(); pipeline.refresh(); })}>Re-post</button>}
         {r.results && <a className="button" href={url(`runs/${r.id}/files/results.zip?results=true`)}>Results zip</a>}
       </div>
       <div className="run-facts">
@@ -502,6 +507,9 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
           {Object.entries(r.binding.slots || r.binding.components || {}).map(([l, c]) => <span key={l}><Named kind="slot" name={l} />=<Named kind="component" name={c as string}>{labelOf(c as string)}</Named></span>)}</span>}
         <Badge value={r.conform ? "conform" : "non-conform"} />
       </div>
+      {r.campaign_run && <div className="muted small">part of campaign run <a href={`#/campaigns/${r.campaign_run}`}>{r.campaign_run}</a>
+        {r.rerun_of && <> · runs again the datapack of run <a href={`#/runs/${r.rerun_of}`}>{r.rerun_of}</a></>}</div>}
+      <ManualOperations runId={r.id} records={records} onAnswered={run.refresh} />
       {r.reason && <div className="banner warn">{r.reason}</div>}
       {r.wait ? <WaitBanner run={r} onRetry={run.refresh} /> : r.waiting_for && <div className="banner info">Waiting for: {r.waiting_for}</div>}
       {(r.nonconform || []).length > 0 && <details className="small"><summary>Why it is non-conform</summary><ul>{r.nonconform.map((n: string) => <li key={n}>{n}</li>)}</ul></details>}

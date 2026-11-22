@@ -289,7 +289,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 
 ## 5. Datapack model
 
-A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup, included sub-pipeline files and the criteria its exploit steps name (§6.8), `datapack.yml`, `baseline.yml`).
+A datapack is the BagIt zip built by the `datapack` tool from a test definition. It MUST be self-sufficient: a run uses its contents only (inputs, `context.yml` with every resolved key, `definition/` with the test definition, setup, included sub-pipeline files and the criteria its exploit steps name (§6.8) and the pictures its manual steps show (§6.9), `datapack.yml`, `baseline.yml`).
 
 ### 5.1 Setup
 
@@ -398,7 +398,7 @@ pipeline:
   slot: <slot>
   for_each: [<slot>...] | slots | <role> | "{{ params.x }}"
   # action (exactly one)
-  do: <command> | run: <script> | python: {...} | http: {...} | exploit: {...}
+  do: <command> | run: <script> | python: {...} | http: {...} | exploit: {...} | manual: {...}
   | push: ... | pull: ... | delay: <duration> | wait_for: {...} | uses: <sub-pipeline> | <plugin type>: ...
   # options
   needs: [<step>...]
@@ -480,6 +480,26 @@ Binds criteria (mexploit scenarios) to the run contents they check.
 - At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys with its `with`, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
 - Result: `succeeded` on exit 0 (every check met), `failed` on exit 1 (a check not met), `error` otherwise, or when no data entry matches a file (an entry matching nothing is noted in the log), or when a criteria entry is absent from the datapack. `timeout`, `retries`, `env` apply; `expect` and `detach` do not. Without `continue_on_error`, the steps that need an exploit step MUST run even when it does not succeed, and its result MUST still count in the verdict (§9.4); `continue_on_error: false` makes them skipped, `true` leaves it out of the verdict as for any step.
 - The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`.
+
+### 6.9 `manual` action
+
+An operation a person does on the bench (plug a cable, press a button) that the run waits for.
+
+```yaml
+- id: plug_cable
+  needs: [...]
+  manual:
+    title: <text>                      # OPTIONAL, the step id by default
+    text: <Markdown>                   # what to do; templates allowed
+    checks: [<text>...]                # OPTIONAL: acknowledged one by one before done
+  timeout: <duration>                  # OPTIONAL: no answer by then is an error
+```
+
+- The step has no `slot` nor `for_each`; it waits on the sequencer host. `text` or `checks` MUST be given; `title`, `text` and `checks` are rendered with the step's keys.
+- A picture of `text` (`![alt](<path>)`) that is not a web address is a path relative to the test definition, inside its folder (an absolute path or `..` MUST be rejected). Generation MUST copy each into `definition/<path>`; a missing one MUST fail the generation. Pictures of steps in included sub-pipeline files are relative to the test definition too.
+- At run time the step record (§9.3) carries `manual: {title, text, checks: [{text, done, by, at}], base, since, outcome, note, by, at}` (`base`: the folder of the run its pictures are in, `definition/`) while the step is `running`, and the run is listed with `awaiting_manual: [{step, title, since}]` (`GET /runs`, `GET /runs/{id}`).
+- The operator answers with `POST /runs/{id}/manual/{step}` (`tsq manual`): `{check: <index>, done: <bool>}` ticks a check or not; `{outcome: done}` ends it `succeeded` and MUST be refused while a check is not ticked; `{outcome: failed, note}` ends it `failed`, the note as reason. `by` names who answered. Each answer is an event (`step`), so every viewer sees the ticks. No answer within `timeout`: `error`. Cancel and kill end the wait like any step.
+- `retries` asks again after a failed answer; `expect`, `detach` and `with` do not apply. A run executed by another process (`tsq run --local`) cannot be answered through tsqd.
 
 ---
 
@@ -597,6 +617,7 @@ The reason of a step `error` (crash, timeout, killed, transport) MUST be kept.
 - `POST /campaigns` (`tsq submit-campaign`) takes a generated campaign (§5.4). Each datapack MUST pass intake (§9.1) with the campaign's routing tags and expected baseline; if one fails, none is queued. Runs get the entry's priority, else the campaign's (a priority given at submission overrides both), and record `campaign_run` and `routing`.
 - The campaign run is `queued` while every run is queued, `running` while one has not ended, `done` once all ended. Its verdict is the worst of its runs' (`error` > `failed` > `succeeded`, a cancelled run counting as `error`). It is conform iff the manifest and every run are.
 - When it becomes `done`, its report MUST be written to `storage.results/campaigns/<id>/report.html`. A repost of one of its runs reopens it.
+- `POST /runs/{id}/rerun` (`tsq rerun`) runs a datapack of a campaign run again, when the bench was not set up right for example: a new run of the same zip, unchanged (intake again, same routing, priority and expected baseline), recording `rerun_of`. It takes the place of the ended run in its entry, which keeps the earlier ones in `attempts`; only the last attempt of an entry can be run again, and only once it ended. The campaign run reopens; its state, verdict and counts are those of each entry's last attempt, and the view and the report list the earlier attempts with their verdicts. Changing the datapack of a re-run is not supported.
 - `POST /campaigns/{id}/cancel|kill` aborts each of its runs that has not ended (§10.1).
 - The report gives, per run: test definition, verdict, duration, stages or components bound, exploit checks met and not met, first `failed` or `error` step with its reason, non-conformities, and links to the run, that step's log, the exploit reports and the results zip; and the campaign's git state, conformity, pinned versions and routing tags.
 
@@ -657,7 +678,8 @@ tsq priority <run> <N>
 tsq validate <zip | testdef.yml> [--lab F] [--setup-config C]
 tsq run <zip> --local [--follow]
 tsq queue | runs [--state S] | show <run> | logs <run> [--step S] [-f]
-tsq cancel | kill | repost <run>
+tsq cancel | kill | repost | rerun <run>
+tsq manual <run> [--step S] [--tick N]... [--done | --fail NOTE]
 tsq stages | components
 tsq hold | release | maintenance [--note T] | resume <stage | component>
 tsq selftest [<stage | component>]
@@ -676,6 +698,7 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 |---|---|
 | `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` | submit, list, inspect, change priority |
 | `POST /runs/{id}/cancel \| kill \| repost \| retry` | §10, §8.4 |
+| `POST /runs/{id}/rerun`, `POST /runs/{id}/manual/{step}` | run a campaign's datapack again (§9.6), answer a manual operation (§6.9) |
 | `POST /campaigns` (multipart manifest, datapacks, priority), `GET /campaigns`, `GET /campaigns/{id}`, `GET /campaigns/{id}/report`, `POST /campaigns/{id}/cancel \| kill` | campaign runs (§9.6) |
 | `GET /runs/{id}/pipeline`, `GET /runs/{id}/logs/{step}`, `GET /runs/{id}/files/{path}` | expanded pipeline, logs, files (HTTP range) |
 | `GET /stages`, `GET /components`, `POST /{stages\|components}/{id}/{hold\|release\|maintenance\|resume}` | resources |
@@ -697,7 +720,8 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Push**: commit in the user's name, optional tag, push with credentials supplied in the request; credentials MUST NOT be stored or logged, and tsqd MUST NOT push with its own credentials (agent, credential helper, `insteadOf` rewrites). A rejected push applies nothing.
 - **Lab changes** apply only on reload (§4.9).
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
-- **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it; its page shows the report.
+- **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it, an earlier attempt greyed under its re-run; its page shows the report and runs an ended datapack again.
+- **Manual operations**: the step palette and form edit a `manual` step (§6.9). The Run page opens the dialog of the operation the run waits for (its Markdown text and pictures, its checks, Done and Failed); All runs and the campaign page flag the runs that expect one.
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---

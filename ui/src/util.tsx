@@ -127,15 +127,29 @@ export function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 12) : id;
 }
 
-// ── light Markdown: `code`, **bold**, [links](https://…), lists, code blocks, paragraphs ──
+// ── light Markdown: `code`, **bold**, *italic*, [links](https://…), ![pictures](path), headings, lists, code blocks ──
 
-function inline(text: string, key: number): ReactNode {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"])/g);
+/** Where a picture of a Markdown text is: a web address as is, a relative path from `base` (a datapack's folder). */
+function pictureSrc(src: string, base?: string): string | null {
+  if (/^(https?:|data:image\/)/i.test(src)) return src;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("//")) return null;    // never javascript: or the like
+  return base ? base + src.replace(/^\.\//, "") : null;
+}
+
+function inline(text: string, key: number, base?: string): ReactNode {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|!\[[^\]]*\]\(<?[^)\s>]+>?(?:\s+"[^"]*")?\)|\[[^\]]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"])/g);
   return (
     <Fragment key={key}>
       {parts.map((p, i) => {
         if (p.startsWith("`") && p.endsWith("`") && p.length > 1) return <code key={i}>{p.slice(1, -1)}</code>;
         if (p.startsWith("**") && p.endsWith("**") && p.length > 4) return <strong key={i}>{p.slice(2, -2)}</strong>;
+        if (p.startsWith("*") && p.endsWith("*") && p.length > 2) return <em key={i}>{p.slice(1, -1)}</em>;
+        const pic = /^!\[([^\]]*)\]\(<?([^)\s>]+)>?(?:\s+"([^"]*)")?\)$/.exec(p);
+        if (pic) {
+          const src = pictureSrc(pic[2], base);
+          return src ? <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="md-picture" onClick={(e) => e.stopPropagation()}>
+            <img src={src} alt={pic[1]} title={pic[3] || pic[1]} loading="lazy" /></a> : <span key={i} className="muted">[{pic[1] || pic[2]}]</span>;
+        }
         const md = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(p);
         const href = md ? md[2] : /^https?:\/\//.test(p) ? p : null;
         if (href && /^(https?:|mailto:)/i.test(href))   // only web and mail links: never javascript: or the like
@@ -166,12 +180,17 @@ export function CommentsNote({ text, compact }: { text?: string | null; compact?
   );
 }
 
-export function Markdown({ text, className }: { text?: string | null; className?: string }) {
+/** Light Markdown. base: where the relative paths of its pictures are (a datapack's folder, as an API URL). */
+export function Markdown({ text, className, base }: { text?: string | null; className?: string; base?: string }) {
   if (!text) return null;
   const blocks: ReactNode[] = [];
   let list: string[] = [];
+  let ordered = false;
   const flush = () => {
-    if (list.length) blocks.push(<ul key={blocks.length}>{list.map((l, i) => <li key={i}>{inline(l, i)}</li>)}</ul>);
+    if (list.length) {
+      const items = list.map((l, i) => <li key={i}>{inline(l, i, base)}</li>);
+      blocks.push(ordered ? <ol key={blocks.length}>{items}</ol> : <ul key={blocks.length}>{items}</ul>);
+    }
     list = [];
   };
   for (const para of text.split(/\n\n+/)) {
@@ -181,10 +200,16 @@ export function Markdown({ text, className }: { text?: string | null; className?
       continue;
     }
     for (const line of para.split("\n")) {
-      if (/^\s*- /.test(line)) list.push(line.replace(/^\s*- /, ""));
-      else {
+      const item = /^\s*(?:([-*])|(\d+)[.)])\s+(.*)$/.exec(line);
+      const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+      if (item) {
+        if (list.length && ordered !== !item[1]) flush();
+        ordered = !item[1];
+        list.push(item[3]);
+      } else {
         flush();
-        if (line.trim()) blocks.push(<p key={blocks.length}>{inline(line, 0)}</p>);
+        if (heading) blocks.push(<div key={blocks.length} className={`md-h md-h${heading[1].length}`}>{inline(heading[2], 0, base)}</div>);
+        else if (line.trim()) blocks.push(<p key={blocks.length}>{inline(line, 0, base)}</p>);
       }
     }
     flush();

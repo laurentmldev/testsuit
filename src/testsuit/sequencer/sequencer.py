@@ -317,6 +317,35 @@ class Sequencer:
             self._queue_run(fields)
         return self.campaign_view(campaign_id)
 
+    def rerun(self, run_id: str) -> dict:
+        """Run a datapack of a campaign run again (SPEC section 9.6): a new run of the same datapack zip, unchanged
+        (same routing, priority and expected baseline), that takes the place of the ended one in its campaign run.
+        The earlier attempt is kept, listed with it; the campaign's verdict is that of each entry's last attempt."""
+        run = self.require_run(run_id)
+        if not run.get("campaign_run"):
+            raise SequencerError(f"run {run['id']} is not part of a campaign run: post it again instead (repost)")
+        if run["state"] not in DONE_STATES or run["id"] in self.executions:
+            raise SequencerError(f"run {run['id']} is {run['state']}: only an ended run can be run again")
+        campaign = self.require_campaign_run(run["campaign_run"])
+        entries = campaign.get("entries") or []
+        entry = next((e for e in entries if e.get("run") == run["id"]), None)
+        if entry is None:
+            later = next((e["run"] for e in entries if run["id"] in (e.get("attempts") or [])), None)
+            raise SequencerError(f"run {run['id']} is an earlier attempt" + (f": run {later} took its place, run that "
+                                 "one again" if later else " of its campaign run"))
+        if not Path(run["zip"] or "").is_file():
+            raise SequencerError(f"run {run['id']}: its datapack zip is gone, it cannot run again")
+        fields = self._intake(Path(run["zip"]), run["priority"], run.get("expected_baseline"), run.get("routing"),
+                              campaign["id"])
+        fields["rerun_of"] = run["id"]
+        entry["attempts"] = [*(entry.get("attempts") or []), run["id"]]
+        entry["run"] = fields["id"]
+        self.store.update_campaign_run(campaign["id"], entries=entries, ended_at=None, verdict=None)
+        new = self._queue_run(fields)
+        self.notify("campaign", {"campaign_run": campaign["id"], "campaign": campaign.get("campaign"), "state": "running",
+                                 "rerun": {"run": new["id"], "of": run["id"]}})
+        return new
+
     def require_campaign_run(self, campaign_id: str) -> dict:
         campaign = self.store.get_campaign_run(campaign_id)
         if campaign is None:
@@ -500,6 +529,28 @@ class Sequencer:
                             "conform": bool(run["conform"]), "reposted": True})
         self.wake()
         return self.store.get_run(run["id"])
+
+    def answer_manual(self, run_id: str, step: str, body: dict, by: str = "") -> dict:
+        """The operator's answer to a manual operation a run waits for (SPEC section 6.9): a check ticked or not,
+        or the operation done or failed. step: its record key ('<phase>:<step>'), or a unique prefix of it."""
+        from testsuit.sequencer.manualstep import acknowledge
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        ctx = execution.ctx if execution is not None else None
+        if ctx is None:
+            raise SequencerError(f"run {run['id']} is {run['state']}" + (" (run by another process: tsq run --local)"
+                                 if run.get("local") and run["state"] not in DONE_STATES else "")
+                                 + ": it waits for no manual operation here")
+        keys = [k for k in ctx.manual_waits if k == step] or [k for k in ctx.manual_waits if k.startswith(step)]
+        if len(keys) != 1:
+            waiting = ", ".join(ctx.manual_waits) or "none"
+            raise SequencerError(f"run {run['id']}: no single manual operation '{step}' waiting (waiting: {waiting})")
+        record, answer = ctx.records[keys[0]], ctx.manual_waits[keys[0]]
+        outcome = acknowledge(record.manual, body, by)
+        ctx.notify("step", {"run": run["id"], **record.as_dict()})
+        if outcome and not answer.done():
+            answer.set_result(outcome)
+        return record.as_dict()
 
     def require_run(self, run_id: str) -> dict:
         run = self.store.get_run(run_id)

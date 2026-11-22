@@ -1110,3 +1110,28 @@ dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .campaign-runs .chip { margin: 0 4px 2px 0; }
 .campaign-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
 .campaign-page { overflow-x: auto; }
+
+/* ── manual operations and campaign re-runs ──────────────────────────── */
+.banner.manual-banner { background: var(--wait-soft); border: 1px solid var(--wait); }
+.manual-icon { font-size: 18px; }
+.badge.manual-flag { background: var(--wait-soft); color: var(--wait); white-space: nowrap; animation: manual-pulse 1.6s ease-in-out infinite; }
+@keyframes manual-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .badge.manual-flag { animation: none; } }
+.manual-op .manual-text { margin: 10px 0; }
+.manual-op .manual-text img { max-width: 100%; max-height: 360px; border-radius: 6px; border: 1px solid var(--border); display: block; margin: 6px 0; }
+.manual-checks { margin: 10px 0; padding-left: 22px; }
+.manual-checks li { margin: 6px 0; }
+.manual-checks li label { display: inline-flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.manual-checks li.done span { text-decoration: line-through; color: var(--muted); }
+.manual-by input { width: 140px; }
+input.manual-note { flex: 1; min-width: 200px; }
+.md .md-h { font-weight: 600; margin: 10px 0 4px; } .md .md-h1 { font-size: 17px; } .md .md-h2 { font-size: 15px; }
+.md ol { margin: 4px 0; padding-left: 22px; }
+.md a.md-picture { display: inline-block; }
+.md a.md-picture img { max-width: 100%; }
+.runs-tree td .chip { margin-left: 6px; }
+.chip.rerun-tag { background: var(--wait-soft); color: var(--wait); }
+.runs-tree tr.replaced td { opacity: 0.6; }
+.earlier-attempt { margin-top: 2px; }
+.step-node .step-manual { font-size: 11px; color: var(--wait); font-weight: 600; }
+.manual-preview { border-left: 3px solid var(--wait); padding: 2px 10px; margin: 4px 0 8px; }
