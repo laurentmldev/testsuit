@@ -12,6 +12,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 """Test campaigns: the campaign file, its datapacks generated with the dataset versions it pins, routing tags."""
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -261,31 +262,51 @@ def test_campaign_routing_refused(tmp_path, monkeypatch):
 
 
 def test_campaign_api_and_cli(tmp_path, monkeypatch, capsys):
-    from fastapi.testclient import TestClient
+    import io
+
+    from starlette.datastructures import UploadFile
 
     from testsuit.cli import tsq
     from testsuit.sequencer.api import create_app
     bench, folder = _bench_campaign(tmp_path, monkeypatch)
     seq = bench.sequencer()
-    client = TestClient(create_app(seq))
+    routes = {(r.path, m): r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint") for m in r.methods}
 
-    class Http:                                       # tsq's client, on the test client
-        def get(self, path, **kw):
-            return client.get(path, **kw).raise_for_status().json()
+    async def main():
+        loop = asyncio.get_running_loop()
 
-        def post(self, path, **kw):
-            kw.pop("timeout", None)
-            return client.post(path, **kw).raise_for_status().json()
-    assert tsq.cmd_submit_campaign(SimpleNamespace(campaign=str(folder), priority=20, wait=False), Http()) == 0
-    out = capsys.readouterr().out
-    assert "2 run(s) queued" in out
-    [view] = client.get("/campaigns").json()
-    assert view["state"] == "queued" and [r["priority"] for r in view["runs"]] == [20, 20]
-    assert client.get(f"/campaigns/{view['id'][:8]}").json()["id"] == view["id"]
-    page = client.get(f"/campaigns/{view['id']}/report")
-    assert page.status_code == 200 and "<title>Nightly · campaign report</title>" in page.text
-    assert {r["campaign_run"] for r in client.get("/runs").json()} == {view["id"]}
-    cancelled = client.post(f"/campaigns/{view['id']}/cancel").json()
-    assert cancelled["state"] == "done" and cancelled["verdict"] == "error"
-    assert tsq.cmd_campaign(SimpleNamespace(id=view["id"], cancel=False, kill=False), Http()) == 0
-    assert "[error]" in capsys.readouterr().out
+        def call(coro):                               # tsq runs in a thread, the endpoints on this loop
+            return asyncio.run_coroutine_threadsafe(coro, loop).result()
+
+        class Http:                                   # tsq's client, straight onto the API endpoints
+            def get(self, path, **kw):
+                return call(routes[("/campaigns/{campaign_id}", "GET")](path.rsplit("/", 1)[1]))
+
+            def post(self, path, files=(), data=None, **kw):
+                if path == "/campaigns":
+                    ups = {}
+                    for field, (name, f, _) in files:
+                        ups.setdefault(field, []).append(UploadFile(io.BytesIO(f.read()), filename=name))
+                        f.close()
+                    priority = int(data["priority"]) if data and "priority" in data else None
+                    return call(routes[("/campaigns", "POST")](ups["manifest"][0], ups["datapacks"], priority))
+                cid, command = path.split("/")[2:4]
+                return call(routes[("/campaigns/{campaign_id}/{command}", "POST")](cid, command))
+
+        args = SimpleNamespace(campaign=str(folder), priority=20, wait=False)
+        assert await asyncio.to_thread(tsq.cmd_submit_campaign, args, Http()) == 0
+        out = capsys.readouterr().out
+        assert "2 run(s) queued" in out
+        [view] = await routes[("/campaigns", "GET")]()
+        assert view["state"] == "queued" and [r["priority"] for r in view["runs"]] == [20, 20]
+        assert (await routes[("/campaigns/{campaign_id}", "GET")](view["id"][:8]))["id"] == view["id"]
+        page = await routes[("/campaigns/{campaign_id}/report", "GET")](view["id"])
+        assert page.status_code == 200 and "<title>Nightly · campaign report</title>" in page.body.decode()
+        assert {r["campaign_run"] for r in await routes[("/runs", "GET")]()} == {view["id"]}
+        cancelled = await routes[("/campaigns/{campaign_id}/{command}", "POST")](view["id"], "cancel")
+        assert cancelled["state"] == "done" and cancelled["verdict"] == "error"
+        args = SimpleNamespace(id=view["id"], cancel=False, kill=False)
+        assert await asyncio.to_thread(tsq.cmd_campaign, args, Http()) == 0
+        assert "[error]" in capsys.readouterr().out
+        await seq.close()
+    asyncio.run(main())
