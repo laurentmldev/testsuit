@@ -30,7 +30,7 @@ import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from testsuit.datatools.datapack.baseline import NOT_CONFORM_IN_ITSELF, check_baseline, nonconform_reasons, tool_versions
 from testsuit.datatools.datapack.templating import TemplateError, expand_dotted_keys, keys_set_by_hand, parse_value, undefined_keys
@@ -48,6 +48,8 @@ from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport, strict, traced
 from testsuit.sequencer.results import pack_results
 from testsuit.sequencer.runlog import RunLog
+if TYPE_CHECKING:
+    from testsuit.reqs.coverage import Coverage
 from testsuit.sequencer.util import SequencerError, deep_merge, dump_yaml, now, parse_duration, render, wait_event
 
 log = logging.getLogger("testsuit.sequencer")
@@ -329,6 +331,21 @@ class Sequencer:
         campaign = campaign or self.require_campaign_run(campaign_id)
         return summarize(campaign, self.store.campaign_runs_of(campaign["id"]))
 
+    def run_requirements(self, run_id: str) -> Coverage:
+        """Requirements coverage of a run (SPEC §5.5), from its snapshot; its steps as they are now while it runs."""
+        from testsuit.reqs.coverage import coverage_of_runs
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        if execution is not None and execution.ctx is not None:
+            run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
+        return coverage_of_runs([run])
+
+    def campaign_requirements(self, campaign_id: str) -> Coverage:
+        """Requirements coverage of the runs of a campaign run."""
+        from testsuit.reqs.coverage import coverage_of_runs
+        campaign = self.require_campaign_run(campaign_id)
+        return coverage_of_runs(self.store.campaign_runs_of(campaign["id"]))
+
     def campaign_views(self, limit: int = 200) -> list[dict]:
         return [self.campaign_view(c["id"], c) for c in self.store.campaign_runs(limit)]
 
@@ -344,7 +361,8 @@ class Sequencer:
         folder = self.config.storage_path("results") / "campaigns" / view["id"]
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / "report.html").write_text(report_html(view, base="../"), encoding="utf-8")
+            (folder / "report.html").write_text(report_html(view, base="../", requirements=self.campaign_requirements(view["id"])),
+                                                encoding="utf-8")
             report = str(folder / "report.html")
         except OSError as e:
             log.warning(f"campaign run {view['id']}: writing its report: {e}")

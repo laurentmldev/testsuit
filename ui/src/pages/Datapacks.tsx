@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { CampaignsTab } from "./Campaigns";
+import { RequirementsTab } from "./Requirements";
 import { KeysExplorer } from "../editor/KeysExplorer";
 import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
 import { DiffView } from "../monaco";
@@ -70,7 +71,7 @@ export function DatapacksPage({ route }: { route: Route }) {
   const selected = route.query.get("def") || testdefs[0]?.path || null;
   const [config, setConfig] = useState<string | null>(null);
   useEffect(() => setConfig(null), [selected]);
-  const view = route.query.get("view") === "campaigns" ? "campaigns" : "testdefs";
+  const view = ["campaigns", "requirements"].includes(route.query.get("view") || "") ? route.query.get("view") as string : "testdefs";
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
 
   if (home.error) return <div className="page"><div className="error-box">{home.error}</div></div>;
@@ -98,6 +99,8 @@ export function DatapacksPage({ route }: { route: Route }) {
             title="One test definition at a time: what it is made of, its baseline, generating and posting its datapack">Test definitions{ctx ? ` (${testdefs.length})` : ""}</button>
           <button className={classes(view === "campaigns" && "selected")} onClick={() => setQuery("view", "campaigns")}
             title="Lists of test definitions generated with the same dataset versions and run together">Campaigns{ctx ? ` (${campaigns.length})` : ""}</button>
+          <button className={classes(view === "requirements" && "selected")} onClick={() => setQuery("view", "requirements")}
+            title="The requirements of this repository (requirements.yml) and how its test definitions cover them">Requirements</button>
         </div>
       )}
       {view === "testdefs" && <Markdown text={INTRO} className="intro" />}
@@ -109,6 +112,7 @@ export function DatapacksPage({ route }: { route: Route }) {
       {error && <div className="error-box">{error}</div>}
       {repo && !ctx && !error && <Spinner className="block" text="Reading the test definitions…" />}
       {ctx && sid && view === "campaigns" && <CampaignsTab sid={sid} ctx={ctx} route={route} reread={reread} />}
+      {ctx && sid && view === "requirements" && <RequirementsTab sid={sid} ctx={ctx} />}
       {ctx && view === "testdefs" && (
         <div className="datapacks">
           <nav className="testdef-list">

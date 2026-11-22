@@ -203,6 +203,24 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     async def context(sid: str):
         return await run(editor.context, session(sid))
 
+    @app.get("/edit/sessions/{sid}/requirements")
+    async def requirements(sid: str, source: str | None = None, campaign: str | None = None):
+        """The requirements of a tests repository and their coverage by its test definitions (SPEC §5.5)."""
+        return await run(editor.requirements, session(sid), source, campaign)
+
+    @app.get("/edit/sessions/{sid}/requirements/report")
+    async def requirements_report(sid: str, source: str | None = None, campaign: str | None = None,
+                                  download: bool = False):
+        """The same as a self-contained HTML page, with both matrices."""
+        from fastapi.responses import HTMLResponse
+        from testsuit.reqs.coverage import Coverage
+        from testsuit.reqs.render import as_html
+        _, cov = await run(editor.requirements_coverage, session(sid), source, campaign)
+        cov = cov or Coverage()
+        title = f"{Path(campaign).name if campaign else session(sid).repo}: requirements coverage"
+        headers = {"Content-Disposition": 'attachment; filename="requirements_coverage.html"'} if download else {}
+        return HTMLResponse(as_html(cov, title, "../../../../"), headers=headers)
+
     @app.get("/edit/sessions/{sid}/schemas")
     async def session_schemas(sid: str):
         return schemas(await run(editor.context, session(sid)))
