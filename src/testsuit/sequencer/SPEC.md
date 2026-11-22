@@ -58,6 +58,7 @@ The datapack side and the lab side use disjoint vocabularies; a term of one neve
 Other terms:
 
 - **Run**: one activation of one datapack. Identified by a run id.
+- **Campaign**: a list of test definitions generated with the same dataset versions and run together (§5.4). Its runs, submitted together, form a **campaign run** (§9.6).
 - **Binding**: the mapping slot → component and stage slot → stage of a run.
 - **Phase / step**: units of the pipeline (§6).
 - **Verdict**: `succeeded | failed | error` (§9.4).
@@ -329,13 +330,35 @@ pipeline: {...}                                   # §6
 - `tools`: name and version of testsuit, plugins and processing libraries;
 - `files`: each generated file with its sources, method, generator and sha256;
 - `keys_set_by_hand`, `versions_set_by_hand`;
-- for results only, `run`: sequencer and plugin versions, lab inventory and library git state, the binding, and each component's `version` command output (read before the first phase).
+- for results only, `run`: sequencer and plugin versions, lab inventory and library git state, the binding, each component's `version` command output (read before the first phase), and for a run of a campaign its `campaign_run` and `routing`.
 
 A datapack is **conform** iff every source is a clean tagged git state, every dataset version is confirmed, no defined key is overridden by hand, and every dataset version set by hand is a tag of its source. `--nocheck` produces `conform: false`.
 
 An **expected baseline** is a partial baseline (values MAY be glob patterns) checked by `datapack --check-baseline`, at build (`--baseline`), at submission (`tsq submit --baseline` or `pipeline.baseline`), and before the first phase for the `run` part.
 
 A non-conform datapack or run MUST be accepted, never rejected. It MUST be flagged in every interface, its mismatches recorded in the run record and in the results baseline (`run.conform: false`), and its results zip suffixed `_NONCONFORM`. The verdict is unaffected.
+
+### 5.4 Campaign
+
+A campaign file (`<name>.campaign.yml`, not templated):
+
+```yaml
+id: <id>
+name: <text>
+description: <markdown>
+priority: <0..100>                   # OPTIONAL, of its runs
+testdefs:                            # relative to the file; at least one; (testdef, setup_config) unique
+  - <testdef file> | {testdef: <file>, setup_config: <name>, priority: <0..100>}
+routing:                             # OPTIONAL (§8.1)
+  stage_tags: [<tag>...] | {<stage type>: [<tag>...]}
+  component_tags: {<role>: [<tag>...]}
+datasets: {<dataset id>: <version>}  # every dataset its test definitions import
+baseline: <expected baseline file>   # OPTIONAL, replaces the test definitions' own
+```
+
+- `datapack <file>.campaign.yml` MUST generate the datapack of every entry into one folder with a `campaign.yml` manifest (`id`, `git`, `conform`, `priority`, `routing`, `datasets`, `expected_baseline`, `datapacks: [{testdef, setup_config, priority, zip, conform}]`), or none: a failure MUST leave no folder.
+- Every dataset a setup imports MUST be in `datasets`, else the generation MUST fail naming it. Its version replaces the written one. Versions set by hand MUST be refused. A dataset pinned and imported by no entry is a warning.
+- Each datapack records `versions_pinned_by_campaign` (`{dataset, version, overrides, was, tag}`), `pinned_by: campaign` on its dataset sources, `campaign: {id, name, file}`, and the campaign file as a source of role `campaign` (§5.3). It is conform iff the §5.3 conditions hold, the campaign source included, and each pinned version that overrides the written one is a tag of its source. Keys `campaign.{id, name, file}` are available at generation.
 
 ---
 
@@ -481,6 +504,8 @@ For the phase being activated:
 - each slot of a stage slot binds to a distinct component of that stage whose role equals or extends the slot's role and that carries all its `tags`;
 - each ad hoc slot binds to a free ad hoc component under the same rule.
 
+A run of a campaign (§9.6) carries **routing tags**: `stage_tags` are added to the tags of every stage slot (a mapping: of the stage slots of that stage type), `component_tags.<role>` to those of every slot of that role. They apply to intake checks, binding and the resource overview, and MUST NOT change the datapack.
+
 Within a stage, slots with the fewest candidates are assigned first; each slot prefers, in inventory order, an exact-role component over one of a derived role; the assignment backtracks when a choice starves a later slot. A stage binds only if every slot gets a distinct component.
 
 Components of a candidate stage that are in maintenance, on hold, `broken` or `offline` are **left out** (recorded as `left_out`): not locked, not self-tested, not bound. The stage remains a candidate while its other components can take every slot.
@@ -554,6 +579,14 @@ step:  pending ─► ready ─► running ─► succeeded | failed | error | s
 
 The reason of a step `error` (crash, timeout, killed, transport) MUST be kept.
 
+### 9.6 Campaign runs
+
+- `POST /campaigns` (`tsq submit-campaign`) takes a generated campaign (§5.4). Each datapack MUST pass intake (§9.1) with the campaign's routing tags and expected baseline; if one fails, none is queued. Runs get the entry's priority, else the campaign's (a priority given at submission overrides both), and record `campaign_run` and `routing`.
+- The campaign run is `queued` while every run is queued, `running` while one has not ended, `done` once all ended. Its verdict is the worst of its runs' (`error` > `failed` > `succeeded`, a cancelled run counting as `error`). It is conform iff the manifest and every run are.
+- When it becomes `done`, its report MUST be written to `storage.results/campaigns/<id>/report.html`. A repost of one of its runs reopens it.
+- `POST /campaigns/{id}/cancel|kill` aborts each of its runs that has not ended (§10.1).
+- The report gives, per run: test definition, verdict, duration, stages or components bound, exploit checks met and not met, first `failed` or `error` step with its reason, non-conformities, and links to the run, that step's log, the exploit reports and the results zip; and the campaign's git state, conformity, pinned versions and routing tags.
+
 ---
 
 ## 10. Abort and recovery
@@ -586,7 +619,7 @@ data/<slot>/output/     everything collected
 data/<slot>/http/       saved HTTP answers
 data/_sequencer/exploit/<step>/   an exploit step's configuration, keys and exploit_runner results (§6.8)
 logs/                   step logs, sequencer.log
-run.yml                 states, binding, verdict, step results, lab_command, non-conformities
+run.yml                 states, binding, verdict, step results, lab_command, non-conformities, campaign_run, routing
 selftest.yml            self-test results, bypasses
 baseline.yml            completed with the run part (§5.3)
 ```
@@ -605,6 +638,8 @@ baseline.yml            completed with the run part (§5.3)
 
 ```
 tsq submit <zip> [--priority N] [--baseline F] [--wait] [--follow]
+tsq submit-campaign <folder> [--priority N] [--wait]
+tsq campaigns | campaign <id> [--cancel | --kill]
 tsq priority <run> <N>
 tsq validate <zip | testdef.yml> [--lab F] [--setup-config C]
 tsq run <zip> --local [--follow]
@@ -628,6 +663,7 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 |---|---|
 | `POST /runs` (multipart zip, priority), `GET /runs`, `GET /runs/{id}`, `PATCH /runs/{id}` | submit, list, inspect, change priority |
 | `POST /runs/{id}/cancel \| kill \| repost \| retry` | §10, §8.4 |
+| `POST /campaigns` (multipart manifest, datapacks, priority), `GET /campaigns`, `GET /campaigns/{id}`, `GET /campaigns/{id}/report`, `POST /campaigns/{id}/cancel \| kill` | campaign runs (§9.6) |
 | `GET /runs/{id}/pipeline`, `GET /runs/{id}/logs/{step}`, `GET /runs/{id}/files/{path}` | expanded pipeline, logs, files (HTTP range) |
 | `GET /stages`, `GET /components`, `POST /{stages\|components}/{id}/{hold\|release\|maintenance\|resume}` | resources |
 | `GET\|POST /components/{id}/probe`, `POST /components/{id}/bypass`, `GET\|POST /components/{id}/commands[/{cmd}]` | probe report, bypass, manual commands |
@@ -648,6 +684,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Push**: commit in the user's name, optional tag, push with credentials supplied in the request; credentials MUST NOT be stored or logged, and tsqd MUST NOT push with its own credentials (agent, credential helper, `insteadOf` rewrites). A rejected push applies nothing.
 - **Lab changes** apply only on reload (§4.9).
 - **Generate** runs the `datapack` tool with optional keys set by hand and dataset versions set by hand (§5.3).
+- **Campaigns**: the Datapacks page lists the campaign files of a repository; for each, its entries, the datasets they import against the versions it pins (one not pinned is a problem that blocks generation), and its routing tags checked against the lab. It generates a campaign and submits it (§9.6). The All runs list groups the runs of a campaign run under it; its page shows the report.
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---

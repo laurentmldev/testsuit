@@ -11,10 +11,11 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// History of runs, filtered by state.
-import { useState } from "react";
+// History of runs, filtered by state; the runs of a campaign grouped under it.
+import { Fragment, useState } from "react";
 import { useResource } from "../api";
-import { ago, Badge, Elapsed, time } from "../util";
+import { ago, Badge, classes, Elapsed, time } from "../util";
+import { CampaignBadge, CampaignProgress } from "./Campaigns";
 import { RunStateBadge } from "./Queue";
 
 const FILTERS: [string, string][] = [
@@ -22,11 +23,64 @@ const FILTERS: [string, string][] = [
   ["done", "done"], ["cancelled", "cancelled"],
 ];
 
+type Item = { run: any } | { campaign: any; runs: any[] };
+
+/** The runs, newest first; those of a campaign run under it, where its newest run is. */
+function grouped(runs: any[], campaigns: any[]): Item[] {
+  const views = new Map(campaigns.map((c) => [c.id, c]));
+  const groups = new Map<string, { campaign: any; runs: any[] }>();
+  const items: Item[] = [];
+  for (const r of runs) {
+    const view = r.campaign_run ? views.get(r.campaign_run) : undefined;
+    if (!view) {
+      items.push({ run: r });
+      continue;
+    }
+    let group = groups.get(view.id);
+    if (!group) {
+      group = { campaign: view, runs: [] };
+      groups.set(view.id, group);
+      items.push(group);
+    }
+    group.runs.push(r);
+  }
+  return items;
+}
+
+function RunRow({ r, nested }: { r: any; nested?: boolean }) {
+  return (
+    <tr className={classes(nested && "campaign-child")}>
+      <td><a href={`#/runs/${r.id}`}>{r.id}</a></td>
+      <td title={r.name}>{r.testdef}</td>
+      <td><RunStateBadge run={r} /></td>
+      <td><Badge value={r.verdict} /></td>
+      <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
+      <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>
+      <td><Badge value={r.conform ? "conform" : "non-conform"} title={(r.nonconform || []).join("\n")} /></td>
+      <td className="reason">{r.reason}</td>
+    </tr>
+  );
+}
+
 export function RunsPage() {
   const [state, setState] = useState("");
   const [text, setText] = useState("");
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
   const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase"]);
-  const list = (runs.data || []).filter((r) => !text || `${r.id} ${r.name} ${r.testdef}`.toLowerCase().includes(text.toLowerCase()));
+  const campaigns = useResource<any[]>("campaigns?limit=200", ["run", "campaign"]);
+  const needle = text.toLowerCase();
+  const matches = (r: any) => !text || `${r.id} ${r.name} ${r.testdef}`.toLowerCase().includes(needle);
+  const items = grouped(runs.data || [], campaigns.data || [])
+    .map((item): Item | null => {
+      if ("run" in item) return matches(item.run) ? item : null;
+      const c = item.campaign;
+      const own = !text || `${c.id} ${c.campaign} ${c.title}`.toLowerCase().includes(needle);
+      const children = own ? item.runs : item.runs.filter(matches);
+      return children.length ? { ...item, runs: children } : null;
+    })
+    .filter((x): x is Item => x !== null);
+  // a campaign run is open while it runs, folded once done; a click changes that
+  const isFolded = (c: any) => folded[c.id] ?? c.state === "done";
   return (
     <div className="page">
       <div className="page-head">
@@ -35,29 +89,42 @@ export function RunsPage() {
             <button key={label} className={state === value ? "selected" : ""} onClick={() => setState(value)}>{label}</button>
           ))}
         </div>
-        <input className="search" placeholder="filter by test or id…" value={text} onChange={(e) => setText(e.target.value)} />
+        <input className="search" placeholder="filter by test, campaign or id…" value={text} onChange={(e) => setText(e.target.value)} />
       </div>
       {runs.error && <div className="error-box">{runs.error}</div>}
-      <table className="grid">
+      <table className="grid runs-tree">
         <thead>
           <tr><th>Run</th><th>Test</th><th>State</th><th>Verdict</th><th>Submitted</th><th>Duration</th><th>Conform</th><th>Reason</th></tr>
         </thead>
         <tbody>
-          {list.map((r) => (
-            <tr key={r.id}>
-              <td><a href={`#/runs/${r.id}`}>{r.id}</a></td>
-              <td title={r.name}>{r.testdef}</td>
-              <td><RunStateBadge run={r} /></td>
-              <td><Badge value={r.verdict} /></td>
-              <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
-              <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>
-              <td><Badge value={r.conform ? "conform" : "non-conform"} title={(r.nonconform || []).join("\n")} /></td>
-              <td className="reason">{r.reason}</td>
-            </tr>
-          ))}
+          {items.map((item) => {
+            if ("run" in item) return <RunRow key={item.run.id} r={item.run} />;
+            const c = item.campaign;
+            const closed = isFolded(c);
+            return (
+              <Fragment key={c.id}>
+                <tr className="campaign-row">
+                  <td>
+                    <button className="fold" onClick={() => setFolded({ ...folded, [c.id]: !closed })}
+                      title={closed ? "Show its runs" : "Hide its runs"}>{closed ? "▸" : "▾"}</button>{" "}
+                    <a href={`#/campaigns/${c.id}`} title="The campaign run: its runs at a glance, and its report">{c.id}</a>
+                  </td>
+                  <td><span className="badge campaign">campaign</span> <strong title={c.file}>{c.title || c.campaign}</strong>
+                    {item.runs.length < c.counts.total && <span className="muted small"> · {item.runs.length} of {c.counts.total} shown</span>}</td>
+                  <td><CampaignProgress counts={c.counts} /></td>
+                  <td><CampaignBadge view={c} /></td>
+                  <td title={time(c.submitted_at)}>{ago(c.submitted_at)}</td>
+                  <td>{c.started_at ? <Elapsed from={c.started_at} to={c.last_ended_at} /> : ""}</td>
+                  <td><Badge value={c.conform ? "conform" : "non-conform"} /></td>
+                  <td className="reason"><a href={`#/campaigns/${c.id}`}>report</a></td>
+                </tr>
+                {!closed && item.runs.map((r) => <RunRow key={r.id} r={r} nested />)}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
-      {list.length === 0 && !runs.loading && <p className="muted">No run.</p>}
+      {items.length === 0 && !runs.loading && <p className="muted">No run.</p>}
     </div>
   );
 }

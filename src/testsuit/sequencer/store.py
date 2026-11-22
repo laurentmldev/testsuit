@@ -33,7 +33,12 @@ CREATE TABLE IF NOT EXISTS runs (
     submitted_at TEXT, activated_at TEXT, ended_at TEXT,
     conform INTEGER, nonconform TEXT, waiting_for TEXT, attempts INTEGER DEFAULT 0,
     binding TEXT, phase TEXT, results TEXT, expected_baseline TEXT, warnings TEXT,
-    steps TEXT, local INTEGER DEFAULT 0, abort TEXT, owner TEXT
+    steps TEXT, local INTEGER DEFAULT 0, abort TEXT, owner TEXT, campaign_run TEXT, routing TEXT
+);
+CREATE TABLE IF NOT EXISTS campaign_runs (
+    id TEXT PRIMARY KEY, campaign TEXT, name TEXT, title TEXT, description TEXT, file TEXT, git TEXT,
+    conform INTEGER, priority INTEGER, routing TEXT, datasets TEXT, entries TEXT, expected_baseline TEXT,
+    submitted_at TEXT, ended_at TEXT, verdict TEXT, owner TEXT, report TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (
     run_id TEXT, kind TEXT, resource TEXT, mode TEXT, since TEXT,
@@ -55,7 +60,8 @@ CREATE TABLE IF NOT EXISTS events (
 
 ACTIVE_STATES = ("waiting_resources", "reserved", "selftest", "running", "cleaning")
 QUEUED_STATES = ("queued", "waiting_resources")
-JSON_FIELDS = ("nonconform", "binding", "expected_baseline", "warnings", "steps")
+JSON_FIELDS = ("nonconform", "binding", "expected_baseline", "warnings", "steps", "routing")
+CAMPAIGN_JSON_FIELDS = ("git", "routing", "datasets", "entries", "expected_baseline")
 
 
 class Store:
@@ -74,6 +80,10 @@ class Store:
                 self._db.execute("ALTER TABLE resources ADD COLUMN selftest_failed TEXT")
             if "bypass" not in columns:
                 self._db.execute("ALTER TABLE resources ADD COLUMN bypass TEXT")
+            columns = {r["name"] for r in self._db.execute("PRAGMA table_info(runs)")}
+            for column in ("campaign_run", "routing"):           # before campaigns
+                if column not in columns:
+                    self._db.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT")
 
     def close(self) -> None:
         self._db.close()
@@ -127,6 +137,51 @@ class Store:
         else:
             rows = self._exec("SELECT * FROM runs ORDER BY submitted_at DESC LIMIT ?", [limit]).fetchall()
         return [self._run(r) for r in rows]
+
+    def campaign_runs_of(self, campaign_run: str) -> list[dict]:
+        """The runs of a campaign run, in the order they were submitted (the campaign's order)."""
+        rows = self._exec("SELECT * FROM runs WHERE campaign_run = ? ORDER BY submitted_at ASC, rowid ASC",
+                          [campaign_run]).fetchall()
+        return [self._run(r) for r in rows]
+
+    # ── campaign runs ─────────────────────────────────────────────────────
+    @staticmethod
+    def _campaign(row: sqlite3.Row | None) -> dict | None:
+        if row is None:
+            return None
+        campaign = dict(row)
+        for name in CAMPAIGN_JSON_FIELDS:
+            campaign[name] = json.loads(campaign[name]) if campaign.get(name) else None
+        campaign["conform"] = None if campaign["conform"] is None else bool(campaign["conform"])
+        return campaign
+
+    def add_campaign_run(self, **fields: Any) -> None:
+        fields.setdefault("submitted_at", now())
+        for name in CAMPAIGN_JSON_FIELDS:
+            if name in fields and fields[name] is not None:
+                fields[name] = json.dumps(fields[name])
+        if "conform" in fields and fields["conform"] is not None:
+            fields["conform"] = int(bool(fields["conform"]))
+        self._exec(f"INSERT INTO campaign_runs ({', '.join(fields)}) VALUES ({', '.join('?' * len(fields))})",
+                   fields.values())
+
+    def update_campaign_run(self, campaign_id: str, **fields: Any) -> None:
+        for name in CAMPAIGN_JSON_FIELDS:
+            if name in fields and fields[name] is not None:
+                fields[name] = json.dumps(fields[name])
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self._exec(f"UPDATE campaign_runs SET {sets} WHERE id = ?", [*fields.values(), campaign_id])
+
+    def get_campaign_run(self, campaign_id: str) -> dict | None:
+        row = self._exec("SELECT * FROM campaign_runs WHERE id = ?", [campaign_id]).fetchone()
+        if row is None:              # unique prefix
+            rows = self._exec("SELECT * FROM campaign_runs WHERE id LIKE ?", [campaign_id + "%"]).fetchall()
+            row = rows[0] if len(rows) == 1 else None
+        return self._campaign(row)
+
+    def campaign_runs(self, limit: int = 200) -> list[dict]:
+        rows = self._exec("SELECT * FROM campaign_runs ORDER BY submitted_at DESC LIMIT ?", [limit]).fetchall()
+        return [self._campaign(r) for r in rows]
 
     def queue(self) -> list[dict]:
         rows = self._exec(f"SELECT * FROM runs WHERE state IN ({', '.join('?' * len(QUEUED_STATES))}) "

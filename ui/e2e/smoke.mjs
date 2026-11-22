@@ -40,11 +40,14 @@ for (const p of ["queue", "runs", "lab", "config"]) await visit(p);
 const runs = await api("runs");
 const list = Array.isArray(runs) ? runs : runs.runs || [];
 if (list.length) for (const tab of ["pipeline", "steps", "files"]) await visit(`runs/${list[0].id}?tab=${tab}`, 1500);
+const campaigns = await api("campaigns").catch(() => []);
+if (Array.isArray(campaigns) && campaigns.length) await visit(`campaigns/${campaigns[0].id}`, 1500);
 
 const edit = await api("edit").catch(() => null);
 if (edit?.enabled) {
   await visit("edit");
   await visit("datapacks", 4000);
+  await visit("datapacks?view=campaigns", 3000);
   await visit("exploit", 3000);
   await visit("exploit/plot", 2500);
   let sessions = edit.sessions || [];

@@ -1175,8 +1175,9 @@ class Editor:
 
     def scan_workspace(self, folder: Path, rel_to: Path) -> dict:
         """Test definitions, setups, sub-pipelines, dictionaries and templates of a folder."""
+        from testsuit.datatools.datapack.campaign import is_campaign_file, looks_like_campaign
         result = {"testdefs": [], "setups": [], "subpipelines": {}, "subpipeline_files": [], "shared_subpipelines": {},
-                  "dictionaries": [], "templates": []}
+                  "dictionaries": [], "templates": [], "campaigns": []}
         if not folder.is_dir():
             return result
         for dirpath, dirnames, filenames in os.walk(folder):
@@ -1194,6 +1195,10 @@ class Editor:
                 except (yaml.YAMLError, UnicodeDecodeError):
                     continue
                 if not isinstance(data, dict):
+                    continue
+                if is_campaign_file(rel) or looks_like_campaign(data):
+                    result["campaigns"].append({"path": rel, "id": data.get("id"), "name": data.get("name"),
+                                                "testdefs": len(data.get("testdefs") or [])})
                     continue
                 if "setup_file" in data or "pipeline" in data:
                     setup = (path.parent / str(data.get("setup_file", ""))).resolve()
@@ -1252,7 +1257,7 @@ class Editor:
         if session.kind == "workspace":
             workspace = self.scan_workspace(session.folder, session.folder)
         else:                                          # what the datapacks of the workspaces ask of the lab
-            workspace = {"testdefs": [], "setups": [], "subpipelines": {}}
+            workspace = {"testdefs": [], "setups": [], "subpipelines": {}, "campaigns": []}
             for folder in self.workspace_folders():
                 found = self.scan_workspace(folder, folder)
                 workspace["setups"] += found["setups"]
@@ -2279,7 +2284,7 @@ class Editor:
 
     def start_generate(self, session: EditSession, testdef_rel: str, setup_config: str | None = None,
                        nocheck: bool = True, lenient: bool = False, manual_keys: dict | None = None,
-                       dataset_versions: dict | None = None) -> dict:
+                       dataset_versions: dict | None = None, campaign: bool = False) -> dict:
         """The same as generate, in the background: its log can be read while it runs (generation_job).
 
         The datapack tool runs in a process of its own: a stopped generation ends for sure (the process and
@@ -2305,7 +2310,7 @@ class Editor:
             logger.info(f"editor: datapack generation of {testdef_rel} ({session.repo}) started")
             try:
                 job["result"] = self._generate(session, testdef_rel, setup_config, nocheck, lenient, job, manual_keys,
-                                               dataset_versions)
+                                               dataset_versions, campaign)
             except BaseException as e:                   # never a silent end
                 job["result"] = {"ok": False, "error": _describe(e), "log": self._clean(session, log.text())}
             finally:
@@ -2317,7 +2322,7 @@ class Editor:
                     logger.warning(f"editor: datapack generation of {testdef_rel} ({session.repo}) failed: "
                                    f"{job['result']['error']}")
                 else:
-                    logger.info(f"editor: datapack {job['result']['zip']} generated")
+                    logger.info(f"editor: {'campaign ' + job['result']['name'] if campaign else 'datapack ' + job['result']['zip']} generated")
                 job["done"] = True
 
         job["thread"] = threading.Thread(target=work, name=f"generate-{job_id}", daemon=True)
@@ -2364,7 +2369,7 @@ class Editor:
 
     def _generate(self, session: EditSession, testdef_rel: str, setup_config: str | None, nocheck: bool,
                   lenient: bool, job: dict, manual_keys: dict | None = None,
-                  dataset_versions: dict | None = None) -> dict:
+                  dataset_versions: dict | None = None, campaign: bool = False) -> dict:
         from testsuit.datatools.datapack.datapack_tools import read_baseline
         log: _LiveLog = job["log"]
         out_dir = Path(session.dir) / "generated"
@@ -2407,9 +2412,10 @@ class Editor:
         text = self._clean(session, log.text())
         if job["stop"].is_set():
             return {"ok": False, "error": "Generation stopped.", "log": text}
-        zip_path = next((Path(line.split("Generated Datapack:", 1)[1].strip()) for line in reversed(output)
-                         if "Generated Datapack:" in line), None)
-        if returncode != 0 or zip_path is None or not zip_path.is_file():
+        marker = "Generated campaign:" if campaign else "Generated Datapack:"
+        zip_path = next((Path(line.split(marker, 1)[1].strip()) for line in reversed(output)
+                         if marker in line), None)
+        if returncode != 0 or zip_path is None or not zip_path.exists():
             # the tool's last error, with the lines it spans (a list of keys that cannot be resolved), or the
             # last line it wrote (the exception of a traceback)
             start = next((i for i in range(len(output) - 1, -1, -1) if output[i].startswith("ERROR: ")), None)
@@ -2420,6 +2426,12 @@ class Editor:
                 error = f"the datapack tool failed (exit status {returncode}): {last}"
             _, message = self._message_file(session, error, testdef_rel)
             return {"ok": False, "error": self._clean(session, message), "log": text}
+        if campaign:                                     # a folder: its manifest and datapacks
+            from testsuit.datatools.datapack.campaign import read_manifest
+            manifest = read_manifest(zip_path)
+            for entry in manifest["datapacks"]:
+                entry["baseline"] = read_baseline(zip_path / entry["zip"])
+            return {"ok": True, "campaign": True, "name": zip_path.name, "log": text, "manifest": manifest}
         import zipfile
         with zipfile.ZipFile(zip_path) as z:
             files = [{"path": n.split("/", 1)[1], "size": z.getinfo(n).file_size} for n in z.namelist()
@@ -2428,6 +2440,104 @@ class Editor:
             manifest = yaml.safe_load(z.read(f"{root}/datapack.yml"))
         return {"ok": True, "name": zip_path.stem, "zip": zip_path.name, "log": text, "files": files,
                 "baseline": read_baseline(zip_path), "datapack": manifest}
+
+    def generated_campaign(self, session: EditSession, name: str) -> Path:
+        path = Path(session.dir) / "generated" / Path(name).name
+        if not (path / "campaign.yml").is_file():
+            raise SequencerError(f"no generated campaign '{name}' in this session")
+        return path
+
+    # ── campaigns ────────────────────────────────────────────────────────
+
+    def campaign_synthesis(self, session: EditSession, campaign_rel: str) -> dict:
+        """A campaign at a glance (the Campaigns subtab of the Datapacks page): its test definitions, each with
+        its setup configuration and priority; the datasets they import, the version each test definition writes and
+        the one the campaign pins (every one must be pinned); its routing tags, against the lab; and its problems."""
+        from pydantic import ValidationError
+
+        from testsuit.datatools.datapack.campaign import Campaign
+        path = self.path(session, campaign_rel)
+        problems: list[str] = []
+        warnings: list[str] = []
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as e:
+            raise SequencerError(f"campaign '{campaign_rel}': {e}") from e
+        if not isinstance(raw, dict):
+            raise SequencerError(f"campaign '{campaign_rel}': not a YAML mapping")
+        campaign = None
+        try:
+            campaign = Campaign.model_validate(raw)
+        except ValidationError as e:
+            problems += [f"{'.'.join(str(x) for x in err['loc']) or 'campaign'}: {err['msg']}" for err in e.errors()]
+        entries = campaign.testdefs if campaign else []
+        pinned = dict(campaign.datasets) if campaign else {}
+        routing = campaign.routing.model_dump() if campaign else {}
+        base = path.parent
+        testdefs, datasets = [], {}
+        lab = self.seq.lab
+        for entry in entries:
+            file = (base / entry.testdef).resolve()
+            rel = self.rel(session, file) if file.is_relative_to(session.folder.resolve()) else entry.testdef
+            item: dict[str, Any] = {"testdef": entry.testdef, "path": rel, "setup_config": entry.setup_config,
+                                    "priority": entry.priority if entry.priority is not None else campaign.priority,
+                                    "id": None, "name": None, "problems": []}
+            testdefs.append(item)
+            if not file.is_file():
+                problems.append(f"test definition '{entry.testdef}' not found (paths are relative to the campaign file)")
+                item["problems"].append("not found")
+                continue
+            try:
+                found = self.synthesis(session, rel, entry.setup_config, versions=False, run_checks=False)
+            except SequencerError as e:
+                problems.append(f"{entry.testdef}: {e}")
+                item["problems"].append(str(e))
+                continue
+            item.update({"id": found["testdef"]["id"], "name": found["testdef"]["name"],
+                         "description": found["testdef"]["description"],
+                         "configuration": found["testdef"]["setup_config"], "setup_file": found["testdef"]["setup_file"]})
+            item["problems"] += found["problems"]
+            for d in found["baseline"]:
+                row = datasets.setdefault(d["id"], {"id": d["id"], "name": d.get("name"), "importer": d.get("importer"),
+                                                    "source": d.get("source"), "pinned": pinned.get(d["id"]), "used_by": []})
+                row["used_by"].append({"testdef": entry.testdef, "written": d.get("version") or d.get("written"),
+                                       "defined_in": d.get("defined_in")})
+            item["routing_problems"] = self._routing_problems(lab, found, routing)
+            problems += [f"{entry.testdef}: {p}" for p in item["routing_problems"]]
+        for row in datasets.values():
+            if row["pinned"] is None:
+                problems.append(f"dataset '{row['id']}' is imported by "
+                                f"{', '.join(u['testdef'] for u in row['used_by'])}: the campaign must give its version "
+                                "(datasets:)")
+            written = {u["written"] for u in row["used_by"]}
+            row["differs"] = len(written) > 1
+        for name, version in pinned.items():
+            if name not in datasets:
+                warnings.append(f"dataset '{name}' is pinned to {version} but no test definition of the campaign imports it")
+                datasets[name] = {"id": name, "pinned": version, "used_by": [], "unused": True}
+        return {"path": campaign_rel, "raw": raw,
+                "campaign": {"id": raw.get("id"), "name": raw.get("name"), "description": raw.get("description") or "",
+                             "priority": raw.get("priority"), "baseline": raw.get("baseline")},
+                "testdefs": testdefs, "datasets": list(datasets.values()), "routing": routing,
+                "problems": problems, "warnings": warnings, "git": git_state(path.parent)}
+
+    @staticmethod
+    def _routing_problems(lab, found: dict, routing: dict) -> list[str]:
+        """What the lab lacks for a test definition with the campaign's routing tags (checked again at submission)."""
+        if lab is None or not routing or (not routing.get("stage_tags") and not routing.get("component_tags")):
+            return []
+        inv = lab.inventory
+        problems = []
+        stage_tags = routing.get("stage_tags") or []
+        for stage_slot, stage_type in (found.get("stage_slots") or {}).items():
+            extra = stage_tags if isinstance(stage_tags, list) else (stage_tags.get(stage_type) or [])
+            if extra and not [s for s in inv.stages_of_type(stage_type) if set(extra) <= set(s.tags)]:
+                problems.append(f"stage slot '{stage_slot}': no '{stage_type}' stage of the lab tagged {', '.join(extra)}")
+        for slot in found.get("slots") or []:
+            extra = (routing.get("component_tags") or {}).get(slot.get("role")) or []
+            if extra and not any(lab.fits(c, slot["role"], extra) for c in inv.components.values()):
+                problems.append(f"slot '{slot['id']}': no component with role '{slot['role']}' tagged {', '.join(extra)}")
+        return problems
 
     def generated(self, session: EditSession, name: str) -> Path:
         path = (Path(session.dir) / "generated" / Path(name).name).with_suffix(".zip")

@@ -1049,3 +1049,68 @@ def test_setup_type_role_inputs(repos):
     assert any(m.startswith("slot 'analysis': role 'sequencer', but its class 'dut_app' is for role 'dut'") for m in messages), messages
     described = editor.context(session)["lab"]["roles"]["dut"]["inputs"]
     assert [i["name"] for i in described] == ["app.sh", "extra/", "notes.txt"] and described[1]["from"] == "dut"
+
+
+def test_campaign_synthesis_generation_and_submission(repos, tmp_path):
+    """a campaign in the Datapacks page: its test definitions, the datasets they import against the versions it pins
+    (every one must be), its routing against the lab; generated whole, then queued as one campaign run"""
+    editor = repos.editor
+    session = editor.open("workspace0", local=True)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "a.txt").write_text("a\n")
+    git(data, "init", "-q", "-b", "main")
+    git(data, "add", "-A")
+    git(data, "commit", "-qm", "data")
+    for tag in ("v1.9.0", "v1.10.0"):
+        git(data, "tag", tag)
+    setup = yaml.safe_load(editor.read(session, "setup/bench_setup.yml")["content"])
+    setup["datarepositories"] = [{"id": "repo", "path": str(tmp_path / "datarepo"), "datasources": [
+        {"id": "src", "importer": "git", "source": str(data), "datasets": [{"id": "ds", "version": "v1.9.0"}]}]}]
+    editor.write(session, "setup/bench_setup.yml", data=setup)
+    pipeline = {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [
+        {"id": "deploy", "slot": "dut", "do": "deploy"}, {"id": "start", "slot": "dut", "do": "start", "needs": ["deploy"]}]}]}
+    for name in ("count", "again"):
+        editor.write(session, f"testdef/{name}/testdef.yml", data={
+            "id": name, "name": name.title(), "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+            "pipeline": pipeline})
+    campaign = {"id": "nightly", "name": "Nightly", "priority": 30,
+                "testdefs": ["../testdef/count/testdef.yml", {"testdef": "../testdef/again/testdef.yml", "priority": 60}]}
+    editor.write(session, "campaigns/nightly.campaign.yml", content=yaml.safe_dump(campaign, sort_keys=False))
+    scanned = editor.scan_workspace(session.folder, session.folder)
+    assert scanned["campaigns"] == [{"path": "campaigns/nightly.campaign.yml", "id": "nightly", "name": "Nightly", "testdefs": 2}]
+    assert "campaigns/nightly.campaign.yml" not in scanned["dictionaries"]
+
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    assert [(t["path"], t["id"], t["priority"]) for t in found["testdefs"]] == [
+        ("testdef/count/testdef.yml", "count", 30), ("testdef/again/testdef.yml", "again", 60)]
+    (ds,) = found["datasets"]
+    assert ds["id"] == "ds" and ds["pinned"] is None and [u["written"] for u in ds["used_by"]] == ["v1.9.0", "v1.9.0"]
+    assert found["problems"] == ["dataset 'ds' is imported by ../testdef/count/testdef.yml, ../testdef/again/testdef.yml: "
+                                 "the campaign must give its version (datasets:)"]
+
+    campaign.update(datasets={"ds": "v1.10.0", "extra": "v1"}, routing={"stage_tags": ["nope"]})
+    editor.write(session, "campaigns/nightly.campaign.yml", content=yaml.safe_dump(campaign, sort_keys=False))
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    assert found["warnings"] == ["dataset 'extra' is pinned to v1 but no test definition of the campaign imports it"]
+    assert found["problems"] == [f"../testdef/{n}/testdef.yml: stage slot 'bench': no 'counter_bench' stage of the lab "
+                                 "tagged nope" for n in ("count", "again")]
+    campaign.update(datasets={"ds": "v1.10.0"}, routing={"stage_tags": ["bench_2"]})
+    editor.write(session, "campaigns/nightly.campaign.yml", content=yaml.safe_dump(campaign, sort_keys=False))
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    assert found["problems"] == [] and found["warnings"] == [] and found["datasets"][0]["pinned"] == "v1.10.0"
+
+    job = editor.start_generate(session, "campaigns/nightly.campaign.yml", campaign=True)["job"]
+    state, lines = _follow(editor, session, job)
+    result = state["result"]
+    assert result["ok"] and result["campaign"], result.get("error")
+    manifest = result["manifest"]
+    assert [d["priority"] for d in manifest["datapacks"]] == [30, 60]
+    for entry in manifest["datapacks"]:
+        assert [s["version"] for s in entry["baseline"]["sources"] if s["role"] == "dataset"] == ["v1.10.0"]
+    view = repos.editor.seq.submit_campaign(editor.generated_campaign(session, result["name"]))
+    assert view["campaign"] == "nightly" and [r["priority"] for r in view["runs"]] == [30, 60]
+    assert all(repos.editor.seq.store.get_run(r["run"])["routing"] == {"stage_tags": ["bench_2"], "component_tags": {}}
+               for r in view["runs"])
+    with pytest.raises(SequencerError, match="no generated campaign"):
+        editor.generated_campaign(session, "nope")

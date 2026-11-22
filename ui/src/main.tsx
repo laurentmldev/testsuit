@@ -23,6 +23,7 @@ import { setAppName, useTabTitle } from "./title";
 import { ACTIVE, QueuePage } from "./pages/Queue";
 import { RunsPage } from "./pages/Runs";
 import { RunPage } from "./pages/Run";
+import { CampaignRunPage } from "./pages/Campaigns";
 import { LabPage } from "./pages/Lab";
 import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
@@ -129,13 +130,14 @@ function App() {
   ];
   // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
   // are kept as they were, so existing links still work
-  const tabOf = (key: string) => (key === "queue" || key === "" ? "runs" : key);
+  const tabOf = (key: string) => (key === "queue" || key === "" || key === "campaigns" ? "runs" : key);
   // the browser tab follows the selected top-level tab: "Lab · Test sequencer"
   const tabLabel = page === "edit" ? "Editor" : nav.find(([key]) => key === tabOf(page))?.[1] ?? "Runs";
   useTabTitle(editing ? undefined : tabLabel);
   let content;
   if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor} />;
   else if (page === "runs") content = <RunsPage />;
+  else if (page === "campaigns" && route.parts[1]) content = <CampaignRunPage id={route.parts[1]} />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
   else if (plotting) content = <PlotPage />;

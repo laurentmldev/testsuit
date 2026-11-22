@@ -77,8 +77,9 @@ def unpack(zip_path: Path, target: Path) -> Path:
     return target / root
 
 
-def load_datapack(bag: Path) -> Datapack:
-    """Read an unpacked datapack and validate its pipeline against its own resources."""
+def load_datapack(bag: Path, routing: dict | None = None) -> Datapack:
+    """Read an unpacked datapack and validate its pipeline against its own resources. routing: the tags a
+    campaign adds to those of its slots and stage slots (``{stage_tags, component_tags}``, SPEC section 8.1)."""
     def read(name: str, required: bool = True):
         path = bag / name
         if not path.is_file():
@@ -94,6 +95,9 @@ def load_datapack(bag: Path) -> Datapack:
     configuration = str((manifest.get("setup") or {}).get("configuration") or testdef.get("setup_config") or "")
     pipeline = load_pipeline(testdef.get("pipeline"), bag / "definition")
     needs = needs_from_setup(setup, configuration)
+    if routing:
+        from testsuit.datatools.datapack.campaign import apply_routing
+        apply_routing(needs.stage_slots, needs.stage_slot_tags, needs.slots, routing)
     phases = validate_pipeline(pipeline, needs)
     expected = None
     if pipeline.baseline:

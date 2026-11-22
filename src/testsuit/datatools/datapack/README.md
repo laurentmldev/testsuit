@@ -194,6 +194,37 @@ A datapack is **conform** when it was built without `--nocheck`, from clean git 
 
 An **expected baseline** has the same structure and holds only what must match. A string is a shell pattern (`v1.4.*`), and a value starting with a comparison compares versions (`>=3.2`). A mismatch never stops anything: the datapack, or a run of it, is flagged non-conform. The sequencer adds a `run` part to the baseline of the results.
 
+## Campaigns
+
+A **campaign** is a list of test definitions generated and run together. It is a file named `<name>.campaign.yml`, kept in the tests repository with the test definitions:
+
+```yaml
+id: toytrain_regression
+name: Toy train regression
+description: Markdown text
+priority: 50                           # of its runs (default: the sequencer's queue.default_priority)
+testdefs:                              # relative to this file
+  - ../testdef/max_speed/testdef.yml
+  - {testdef: ../testdef/front_contact/testdef.yml, setup_config: emulated, priority: 60}
+routing:                               # tags the lab resources of its runs must carry, over those of their slots
+  stage_tags: [train_1]                # every stage slot; or {<stage type>: [tags]}
+  component_tags: {pilot: [rev_b]}    # the slots of that role
+datasets:                              # the version of EVERY dataset its test definitions import
+  toytrain_sw: v0.3.0
+  toytrain_sim: v1.1.0
+baseline: ../baseline_expected.yml     # optional: checked on every run, instead of the test definitions' own
+```
+
+`datapack <file>.campaign.yml` generates the datapack of each test definition, in the order given, into one folder `<output dir>/<campaign id>_<user>_<date>_<time>[_DRAFT]/`, with a `campaign.yml` manifest: the campaign, its git state, and each datapack with its priority and conformity. It is all or nothing: when one datapack cannot be generated, the folder is removed. `--nocheck`, `--lenient`, `--set` and `--output-dir` apply to every datapack; `--setup-config`, `--dataset-version` and `--baseline` are refused, since the campaign file gives them. `tsq submit-campaign <folder>` posts the folder to the sequencer as one campaign run ([sequencer README](../../sequencer/README.md), section 10.2).
+
+**Dataset versions.** A dataset has one version in the whole campaign, and the campaign gives it: every dataset a test definition of the campaign imports must be listed under `datasets`, and the generation stops on one that is missing. No test definition chooses a version on its own in a campaign. The campaign's version replaces the one the setup writes (as a version set by hand would, but written in a file under git):
+- `baseline.yml` and `datapack.yml` record it under `versions_pinned_by_campaign` (`{dataset, version, overrides, was, tag}`), and each dataset source carries `pinned_by: campaign`. Versions cannot also be set by hand.
+- The campaign file is a source of role `campaign`, with its git state, and `baseline.yml` names the campaign (`campaign: {id, name, file}`). The keys `campaign.{id, name, file}` are available to the templates.
+- The datapack stays **conform** when the campaign file is a clean git tag (like the test definition and the setup) and each pinned version that differs from the written one is a tag of its source. A pinned version that is not a tag (a branch, a commit) makes it non-conform, with the reason.
+- A dataset the campaign pins but none of its test definitions imports is a warning.
+
+The per-test-definition baseline (the versions written in the dictionaries, shown on the Datapacks page) is unchanged: it applies when a test definition is generated on its own.
+
 ## Architecture
 
 ```mermaid
@@ -225,6 +256,7 @@ A build runs in four steps, in `_Builder.build`:
 | [importers.py](importers.py), [ADataImporter.py](ADataImporter.py), [GitImporter.py](GitImporter.py) | The importer registry, the importer interface (`retrieve`, `checkVersion`, `getTag`, `getChanges`, optional `listVersions`), and the built-in `git` importer. |
 | [processors.py](processors.py) | Processors run on an imported dataset or a generated input: built-in `finalize` and `replace`, registered ones, or scripts. |
 | [generators.py](generators.py) | Generators for `method: generate`: registered functions, or scripts given the keys as JSON. |
+| [campaign.py](campaign.py) | Campaign files (`Campaign`, `load_campaign()`), their generation (`build_campaign()`, the `campaign.yml` manifest, `read_manifest()`), and the routing tags added to a datapack's needs (`apply_routing()`). |
 | [baseline.py](baseline.py) | Tool versions and the comparison with an expected baseline. |
 | [procs.py](procs.py) | Runs scripts with their output in the tool's log (the terminal, or the sequencer's live log). |
 

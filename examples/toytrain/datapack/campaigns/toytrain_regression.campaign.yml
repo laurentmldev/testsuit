@@ -1,0 +1,17 @@
+# Regression campaign of the toy train (sequencer README, Campaigns): every test definition, generated with the
+# same release of the software and of the simulation, run together and reported as one campaign run.
+#   datapack campaigns/toytrain_regression.campaign.yml        -> one folder: a datapack per test definition
+#   tsq submit-campaign <that folder> --wait                    -> one campaign run, its verdict the worst of its runs
+id: toytrain_regression
+name: Toy train regression
+description: Max speed and front contact detection on the lab train, with release v0.3.0 of the software.
+priority: 50                           # of its runs (a test definition may give its own)
+testdefs:                              # relative to this file
+  - ../testdef/max_speed/testdef.yml
+  - {testdef: ../testdef/front_contact/testdef.yml, priority: 60}   # the safety test first
+routing:                               # tags its lab resources must carry, over those of the slots
+  stage_tags: [train_1]                # a stage's id is one of its tags: the first lab train only
+  component_tags: {}                   # role: [tags], e.g. {pilot: [mcu_rev_b]}
+datasets:                              # every dataset its test definitions import: one version for all of them
+  toytrain_sw: v0.3.0
+  toytrain_sim: v1.1.0
