@@ -34,7 +34,8 @@ Steps, from a test definition file (see model for the file formats, templating f
                                      the keys it read (for viewers: hover a value to see where it comes from)
          baseline.yml                where the contents come from: sources (git), datasets, tools,
                                      and each generated file with its checksum (conform or not)
-         definition/                 test definition, setup and dictionaries, as written
+         definition/                 test definition, setup and dictionaries, as written; the criteria its
+                                     exploit steps name; requirements.yml, the requirements linked (testsuit.reqs)
          data/<slot>/input/          generated files
          data/<slot>/output/         empty, for the test results
 
@@ -487,6 +488,7 @@ class _Builder:
         self.now = datetime.now()
         self.work = self.testdef_dir / WORK_FOLDER
         self.manifest: dict[str, Any] = {}
+        self.requirements: dict | None = None          # snapshot of the linked requirements (write_requirements)
         self.dictionaries: list[tuple[str, Path]] = []   # (layer, file)
         self.datasets: list[dict] = []
         self.dataset_keys: list[tuple[dict, str]] = []   # (keys, origin)
@@ -846,6 +848,36 @@ class _Builder:
             shutil.copy2(path, target)
             target.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH)
 
+    def write_requirements(self, testdef: Testdef, context: dict) -> None:
+        """The requirements the test and its checks list, fetched once: definition/requirements.yml (sequencer
+        SPEC section 5.4). An unknown, deleted or rejected one fails the generation, unless nocheck (non-conform)."""
+        from testsuit.reqs.snapshot import SNAPSHOT, snapshot_of_testdef
+        raw = load_yaml_mapping(self.testdef_file)
+        self.requirements = snapshot_of_testdef(self.testdef_file, {"reqs": testdef.reqs, "pipeline": raw.get("pipeline")},
+                                                context)
+        if self.requirements is None:
+            return
+        problems = self.requirements.get("problems") or []
+        if problems and not self.nocheck:
+            raise DatapackError("requirements: " + "; ".join(problems) + ". Try again with option '--nocheck' to force "
+                                "(the datapack is then non-conform).")
+        for problem in problems:
+            _warn(f"requirements: {problem}, ignored (nocheck): the datapack is non-conform")
+        for warning in self.requirements.get("warnings") or []:
+            _warn(f"requirements: {warning}")
+        _dump_yaml(self.work / "definition" / SNAPSHOT, self.requirements,
+                   "# the requirements this test verifies, as fetched at generation (sequencer SPEC, section 5.4)\n")
+        n = len(self.requirements.get("requirements") or {})
+        _info(Fore.LIGHTBLACK_EX + f"[{n} requirement(s) linked, snapshot in definition/{SNAPSHOT}]")
+
+    def _requirements_record(self) -> dict:
+        from testsuit.reqs.sources import find_sources_file
+        snap = self.requirements or {}
+        file = find_sources_file(self.testdef_file)
+        return {"sources_file": self._relative(str(file)) if file else None, "sources": snap.get("sources") or [],
+                "linked": len(snap.get("requirements") or {}),
+                **({"problems": snap["problems"]} if snap.get("problems") else {})}
+
     def _source(self, role: str, path: Path, state: dict | None) -> dict:
         entry = {"role": role, "path": path.as_posix()}
         if state is not None:
@@ -874,6 +906,11 @@ class _Builder:
                 sources.append(self._source("dictionary", path, git_state(path.parent)))
         if self.campaign is not None:
             sources.append(self._source("campaign", Path(self.campaign["file"]), self.campaign.get("git")))
+        if self.requirements is not None:
+            from testsuit.reqs.sources import find_sources_file
+            file = find_sources_file(self.testdef_file)
+            if file is not None:
+                sources.append(self._source("requirements", file, git_state(file.parent)))
         for ds in self.datasets:
             sources.append({"role": "dataset", "id": ds["id"], "importer": ds["importer"], "source": ds["source"],
                             "version": ds["version"], "confirmed": ds.get("confirmed", True),
@@ -893,13 +930,15 @@ class _Builder:
                    and all(s.get("clean") and s.get("tag") for s in sources if s["role"] != "dataset")
                    and all(s.get("confirmed", True) for s in sources if s["role"] == "dataset")
                    and not any(k["overrides"] for k in self.set_by_hand)
-                   and not any(v["overrides"] and not v.get("tag") for v in self.versions_by_hand + self.versions_pinned))
+                   and not any(v["overrides"] and not v.get("tag") for v in self.versions_by_hand + self.versions_pinned)
+                   and not (self.requirements or {}).get("problems"))
         return {"datapack": {"name": name, "format": FORMAT_VERSION, "conform": conform},
                 **({"campaign": self._campaign_record()} if self.campaign is not None else {}),
                 "sources": sources,
                 **({"keys_set_by_hand": self._set_by_hand_record()} if self.set_by_hand else {}),
                 **({"versions_set_by_hand": self.versions_by_hand} if self.versions_by_hand else {}),
                 **({"versions_pinned_by_campaign": self.versions_pinned} if self.versions_pinned else {}),
+                **({"requirements": self._requirements_record()} if self.requirements is not None else {}),
                 "tools": tool_versions(), "files": files}
 
     def _campaign_record(self) -> dict:
@@ -941,6 +980,7 @@ class _Builder:
 
         from testsuit import __version__
         self.write_definition()
+        self.write_requirements(testdef, context)
         _dump_yaml(self.work / "context.yml", context, "# every key of the datapack, resolved\n")
         _dump_yaml(self.work / "datapack.yml", {
             "format": FORMAT_VERSION,

@@ -1458,7 +1458,36 @@ class Editor:
         for name, problem in self._criteria_problems(session, rel):
             line, column = _find_line(text, name)
             problems.append({"file": rel, "line": line, "column": column, "severity": "error", "message": problem})
+        for severity, problem in self._reqs_problems(session, rel, raw):
+            line, column = _find_line(text, problem)
+            problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": problem})
         return problems
+
+    def _reqs_problems(self, session: EditSession, testdef_rel: str, raw: dict) -> list[tuple[str, str]]:
+        """(severity, problem) of the requirements the test definition and its checks list (SPEC section 5.4):
+        unknown, deleted or rejected ones are errors (the generation fails without --nocheck), pinned versions that
+        changed since are warnings."""
+        from testsuit.reqs.snapshot import snapshot_of_testdef
+        path = self.path(session, testdef_rel)
+        try:
+            snap = snapshot_of_testdef(path, raw)
+        except Exception as e:                     # a backend that fails: say so, the rest of the checks go on
+            return [("warning", f"requirements not checked: {e}")]
+        if snap is None:
+            return []
+        where: dict[str, str] = {}
+        for c in snap.get("checks") or []:
+            for r in c["reqs"]:
+                where.setdefault(r, f"check '{c['check']}' of {c['criteria']}/{c['scenario']}/{c['file']}")
+        own = set(snap.get("testdef") or [])
+
+        def located(problem: str) -> str:
+            m = re.search(r"requirement '([^']+)'", problem)
+            if m and m[1] not in own and m[1] in where:
+                return f"{problem} (listed by {where[m[1]]})"
+            return problem
+        return ([("error", "requirements: " + located(p)) for p in snap.get("problems") or []]
+                + [("warning", "requirements: " + located(w)) for w in snap.get("warnings") or []])
 
     def _criteria_problems(self, session: EditSession, testdef_rel: str) -> list[tuple[str, str]]:
         """(criteria, problem) for each criteria an exploit step names that is not there: the datapack could

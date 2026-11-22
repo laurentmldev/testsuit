@@ -132,6 +132,8 @@ def nonconform_reasons(baseline: dict | None) -> list[str]:
         if entry.get("overrides") and not entry.get("tag"):
             reasons.append(f"dataset '{entry.get('dataset')}' pinned by the campaign to version {entry.get('version')!r} "
                            f"instead of {entry.get('was')!r}, not a tag of its source")
+    for problem in (baseline.get("requirements") or {}).get("problems") or []:
+        reasons.append(f"requirements: {problem}")
     sources = baseline.get("sources") or []
     sources_ok = (all(s.get("clean") and s.get("tag") for s in sources if s.get("role") != "dataset")
                   and all(s.get("confirmed", True) for s in sources if s.get("role") == "dataset"))
