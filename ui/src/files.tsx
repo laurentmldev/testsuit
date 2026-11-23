@@ -204,39 +204,53 @@ function InlinePlot({ file, onSkip }: { file: Readable; onSkip: (why: string) =>
   return <div className={classes("file-plot", !shown && "hidden")}><div ref={box} className="file-plot-canvas" /></div>;
 }
 
-// what the viewer shows of a file: its first bytes only, the rest is not downloaded (a data file can be GBs)
+// what the viewer shows of a file at first, and adds on each "Load more": a part only, the rest is not downloaded
+// (a data file can be GBs)
 const VIEW_BYTES = 5 << 20;
+// what it shows at most (Load whole file included): past this, the editor and the table freeze; Download, or Plot
+const VIEW_MAX = 50 << 20;
 
-/** The first max bytes of a response's body, and whether it has more: the download stops there. */
-async function head(r: Response, max: number): Promise<{ bytes: Uint8Array; more: boolean }> {
+/** A part of a file: its bytes from start (max at most), whether the file has more after them, its size when
+ *  the server tells it. */
+interface Part { bytes: Uint8Array; more: boolean; total: number | null }
+
+/** The bytes [skip, skip + want) of a response's body, at most: the download stops there. */
+async function readBody(r: Response, skip: number, want: number): Promise<Uint8Array> {
+  const out = new Uint8Array(want);
+  let at = 0;
   if (!r.body) {
-    const all = new Uint8Array(await r.arrayBuffer());
-    return { bytes: all.subarray(0, max), more: all.length > max };
+    const all = new Uint8Array(await r.arrayBuffer()).subarray(skip, skip + want);
+    out.set(all);
+    return out.subarray(0, all.length);
   }
   const reader = r.body.getReader();
-  const parts: Uint8Array[] = [];
-  let n = 0;
-  let more = false;
-  for (;;) {
+  let seen = 0;     // bytes of the body read, the skipped ones included
+  while (at < want) {
     const { done, value } = await reader.read();
     if (done) break;
-    parts.push(value);
-    n += value.length;
-    if (n > max) {
-      more = true;
-      break;
-    }
-  }
-  if (more) reader.cancel().catch(() => { /* the connection is closed anyway */ });
-  const bytes = new Uint8Array(Math.min(n, max));
-  let at = 0;
-  for (const p of parts) {
-    if (at >= bytes.length) break;
-    const take = p.subarray(0, bytes.length - at);
-    bytes.set(take, at);
+    const from = Math.max(0, skip - seen);
+    seen += value.length;
+    if (from >= value.length) continue;
+    const take = value.subarray(from, from + want - at);
+    out.set(take, at);
     at += take.length;
   }
-  return { bytes, more };
+  if (at >= want) reader.cancel().catch(() => { /* the connection is closed anyway */ });
+  return out.subarray(0, at);
+}
+
+/** The bytes of the file at href from start, max at most: asked as an HTTP range (206), or, from a server that
+ *  answers with the whole file (200), read through the body up to them. One byte more is read to know whether
+ *  the file goes on. */
+async function readPart(href: string, start: number, max: number, signal: AbortSignal): Promise<Part> {
+  const r = await fetch(href, { signal, headers: { Range: `bytes=${start}-${start + max}` } });
+  if (r.status === 416) return { bytes: new Uint8Array(0), more: false, total: start };
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  const ranged = r.status === 206;
+  const totalHeader = ranged ? r.headers.get("Content-Range")?.split("/")[1] : r.headers.get("Content-Length");
+  const total = totalHeader && /^\d+$/.test(totalHeader) ? Number(totalHeader) : null;
+  const bytes = await readBody(r, ranged ? 0 : start, max + 1);
+  return { bytes: bytes.subarray(0, max), more: bytes.length > max, total };
 }
 
 /** Where to cut UTF-8 bytes so that no character is split: before the last one when it is incomplete. */
@@ -253,6 +267,10 @@ function utf8Cut(bytes: Uint8Array): number {
 
 export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
   const [text, setText] = useState<string | null>(null);
+  // how far the text shown goes in the file (bytes), whether the file has more, its size (when known)
+  const [shown, setShown] = useState<{ next: number; more: boolean; total: number | null }>({ next: 0, more: false, total: null });
+  const [loading, setLoading] = useState(false);
+  const loads = useRef<AbortController | null>(null);
   const [readable, setReadable] = useState<Readable | null>(null);
   const [skipped, setSkipped] = useState<string | null>(null);    // why the quick plot was not drawn, found when trying it
   useEffect(() => {
@@ -267,23 +285,37 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
   const [mode, setMode] = useState<"auto" | "raw">("auto");
   // a file rendered from a template is text, whatever its extension
   const isText = TEXT.test(path) || !!rendered;
+  /** Shows the bytes of the file from start, max at most, after the text shown (from 0: instead of it). */
+  const load = (start: number, max: number) => {
+    loads.current?.abort();
+    const aborted = (loads.current = new AbortController());
+    setLoading(true);
+    readPart(href, start, max, aborted.signal)
+      .then(({ bytes, more, total }) => {
+        if (aborted.signal.aborted) return;
+        // cut at a byte: a character split there is left for the next part
+        const end = more ? utf8Cut(bytes) : bytes.length;
+        const part = new TextDecoder().decode(bytes.subarray(0, end));
+        setText((t) => (start && t !== null ? t + part : part));
+        setShown({ next: start + end, more, total: total ?? (more ? null : start + end) });
+      })
+      .catch((e) => !aborted.signal.aborted && setError(e.message))
+      .finally(() => !aborted.signal.aborted && setLoading(false));
+  };
   useEffect(() => {
     setText(null);
     setError(null);
+    setShown({ next: 0, more: false, total: null });
     if (IMAGE.test(path) || !isText) return;
-    const aborted = new AbortController();
-    fetch(href, { signal: aborted.signal })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-        const { bytes, more } = await head(r, VIEW_BYTES);
-        // a file cut at a byte: a character split there is left out
-        const text = new TextDecoder().decode(bytes.subarray(0, more ? utf8Cut(bytes) : bytes.length));
-        setText(more ? text + "\n… (truncated: download the whole file)" : text);
-      })
-      .catch((e) => !aborted.signal.aborted && setError(e.message));
+    load(0, VIEW_BYTES);
     // another file picked meanwhile: the rest of this one is not downloaded
-    return () => aborted.abort();
+    return () => loads.current?.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [href, path, isText]);
+  const room = VIEW_MAX - shown.next;         // what may still be shown
+  const loadMore = () => load(shown.next, Math.min(VIEW_BYTES, room));
+  const wholeFits = shown.total !== null && shown.total <= VIEW_MAX;
+  const loadWhole = () => shown.total !== null && load(shown.next, shown.total - shown.next);
   const keys = Object.entries(rendered?.keys || {});
   const openPlot = () => readable && openInNewTab({ path: "exploit/plot", query: { source: readable.path } });
   const noQuickPlot = readable && (skipped || quickPlotRefused(readable));
@@ -317,9 +349,21 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
         ? <div className="file-plot-note muted small">No quick plot: {noQuickPlot}.{" "}
             <button className="link" onClick={openPlot}>Open it in the Plot tab</button> (a new browser tab).</div>
         : <InlinePlot key={readable.path} file={readable} onSkip={setSkipped} />)}
+      {text !== null && shown.more && (
+        <div className="file-more muted small">
+          Showing the first {size(shown.next)}{shown.total !== null ? ` of ${size(shown.total)}` : ""}, the rest not downloaded.{" "}
+          {room > 0 ? <>
+            <button className="small" disabled={loading} onClick={loadMore}>Load {size(Math.min(VIEW_BYTES, room))} more</button>{" "}
+            {wholeFits && <button className="small" disabled={loading} onClick={loadWhole}>Load whole file</button>}
+            {!wholeFits && <> More than {size(VIEW_MAX)} is not shown here: Download it{readable ? ", or plot it" : ""}.</>}
+          </> : <>The viewer shows {size(VIEW_MAX)} at most: Download it{readable ? ", or plot it" : ""} for the rest.</>}
+          {loading && <span> Loading…</span>}
+        </div>
+      )}
       {IMAGE.test(path) && <img className="file-image" src={href} alt={path} />}
       {!IMAGE.test(path) && !isText && <p className="muted">Binary file: download it to open it.</p>}
-      {text !== null && /\.(csv|tsv)$/i.test(path) && mode === "auto" && <CsvTable text={text} tab={/\.tsv$/i.test(path)} />}
+      {text !== null && /\.(csv|tsv)$/i.test(path) && mode === "auto" && <CsvTable key={href} text={text} tab={/\.tsv$/i.test(path)} partial={shown.more}
+        onMore={shown.more && room > 0 && !loading ? loadMore : undefined} />}
       {text !== null && !(/\.(csv|tsv)$/i.test(path) && mode === "auto") && (
         /\.(log|txt)$/i.test(path) && !rendered?.values?.length ? <pre className="log">{text}</pre>
           : <CodeEditor uri={`file:///view/${encodeURIComponent(href)}`} value={text} readOnly language={languageOf(path)} height="calc(100vh - 260px)"
@@ -329,19 +373,37 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
   );
 }
 
-function CsvTable({ text, tab }: { text: string; tab?: boolean }) {
-  const rows = useMemo(() => {
-    const sep = tab ? "\t" : text.split("\n")[0].includes(";") && !text.split("\n")[0].includes(",") ? ";" : ",";
-    return text.split(/\r?\n/).filter(Boolean).slice(0, 1001).map((line) => line.split(sep));
-  }, [text, tab]);
-  if (!rows.length) return <p className="muted">Empty file.</p>;
+const CSV_ROWS = 1000;
+
+/** A CSV text as a table, CSV_ROWS rows at first, more on demand; partial: the text is the start of the file
+ *  (its last line may be cut: left out), onMore loads more of it. */
+function CsvTable({ text, tab, partial, onMore }: { text: string; tab?: boolean; partial?: boolean; onMore?: () => void }) {
+  const [limit, setLimit] = useState(CSV_ROWS);
+  const lines = useMemo(() => {
+    const all = text.split(/\r?\n/);
+    if (partial) all.pop();
+    return all.filter(Boolean);
+  }, [text, partial]);
+  const sep = useMemo(() => {
+    const first = lines[0] || "";
+    return tab ? "\t" : first.includes(";") && !first.includes(",") ? ";" : ",";
+  }, [lines, tab]);
+  const rows = useMemo(() => lines.slice(0, limit + 1).map((line) => line.split(sep)), [lines, limit, sep]);
+  if (!rows.length) return <p className="muted">{partial ? "No complete line yet: load more of the file." : "Empty file."}</p>;
+  const hidden = lines.length - rows.length;
   return (
     <div className="csv">
       <table className="grid compact">
         <thead><tr>{rows[0].map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
         <tbody>{rows.slice(1).map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
       </table>
-      {rows.length > 1000 && <p className="muted">First 1000 rows: download the file for the rest.</p>}
+      <p className="muted small">
+        {(rows.length - 1).toLocaleString("en-US")} rows shown{hidden > 0 ? `, ${hidden.toLocaleString("en-US")} more loaded` : ""}
+        {partial ? ", the file goes on" : ""}.{" "}
+        {hidden > 0 && <button className="small" onClick={() => setLimit(limit + CSV_ROWS)}>Show {Math.min(CSV_ROWS, hidden).toLocaleString("en-US")} more rows</button>}
+        {hidden === 0 && onMore && <button className="small" onClick={onMore}>Load more of the file</button>}
+        {hidden === 0 && partial && !onMore && " Download the file for the rest."}
+      </p>
     </div>
   );
 }

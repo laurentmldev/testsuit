@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
@@ -352,8 +352,9 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return FileResponse(path, media_type="application/zip", filename=path.name)
 
     @app.get("/edit/sessions/{sid}/datapack/{name}/files/{path:path}")
-    async def datapack_file(sid: str, name: str, path: str):
-        return zip_entry(editor.generated(session(sid), name), path)
+    async def datapack_file(sid: str, name: str, path: str,
+                            range_header: Annotated[str | None, Header(alias="range")] = None):
+        return zip_entry(editor.generated(session(sid), name), path, range_header)
 
     @app.post("/edit/sessions/{sid}/datapack/{name}/submit", status_code=201)
     async def submit(sid: str, name: str, body: dict | None = None):

@@ -21,13 +21,14 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import re
 import tempfile
 import zipfile
 from pathlib import Path
 from typing import Annotated
 
 import yaml
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from testsuit.sequencer.logbuffer import install as install_log_buffer
@@ -38,20 +39,52 @@ from testsuit.sequencer.util import SequencerError, now, parse_duration
 STEP_FILES = ("datapack.yml", "context.yml", "baseline.yml", "run.yml", "selftest.yml")
 
 
-def zip_entry(zip_path: Path, path: str):
+def byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """The bytes [start, end] (end included) of a file of size bytes an HTTP Range header asks for ("bytes=a-b",
+    "bytes=a-", "bytes=-n"; one range only); None: no range asked, or one this server does not read (several):
+    the whole file. HTTPException 416 when it is outside the file."""
+    m = re.fullmatch(r"\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*", header or "")
+    if not m or not (m[1] or m[2]):
+        return None
+    if m[1]:
+        start, end = int(m[1]), min(int(m[2]) if m[2] else size - 1, size - 1)
+    else:
+        start, end = max(0, size - int(m[2])), size - 1
+    if start >= size or start > end:
+        raise HTTPException(416, f"bytes {header} outside the {size} of the file", headers={"Content-Range": f"bytes */{size}"})
+    return start, end
+
+
+def zip_entry(zip_path: Path, path: str, range_header: str | None = None):
+    """A file of a zip (its top folder left out of path), streamed; with range_header (an HTTP Range header), the
+    bytes it asks for only (206): the viewers read a big file part by part. A folder: its entries, listed."""
     archive = zipfile.ZipFile(zip_path)
     root = archive.namelist()[0].split("/")[0]
     prefix = f"{root}/{path}".rstrip("/")
     names = archive.namelist()
     if prefix in names and not prefix.endswith("/"):
         info = archive.getinfo(prefix)
+        media = mimetypes.guess_type(prefix)[0] or "application/octet-stream"
+        try:
+            asked = byte_range(range_header, info.file_size)
+        except HTTPException:
+            archive.close()
+            raise
+        start, end = asked or (0, info.file_size - 1)
 
         def stream():
             with archive, archive.open(info) as f:
-                while chunk := f.read(1 << 20):
+                # a compressed entry is read up to start (not sent): only the bytes asked leave the server
+                f.seek(start)
+                left = end - start + 1
+                while left > 0 and (chunk := f.read(min(1 << 20, left))):
+                    left -= len(chunk)
                     yield chunk
-        return StreamingResponse(stream(), media_type=mimetypes.guess_type(prefix)[0] or "application/octet-stream",
-                                 headers={"Content-Length": str(info.file_size)})
+        headers = {"Content-Length": str(max(0, end - start + 1)), "Accept-Ranges": "bytes"}
+        if asked is None:
+            return StreamingResponse(stream(), media_type=media, headers=headers)
+        return StreamingResponse(stream(), status_code=206, media_type=media,
+                                 headers={**headers, "Content-Range": f"bytes {start}-{end}/{info.file_size}"})
     children = {}
     for name in names:
         if name.startswith(prefix + "/") and name != prefix + "/":
@@ -332,7 +365,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
 
     @app.get("/runs/{run_id}/files")
     @app.get("/runs/{run_id}/files/{path:path}")
-    async def files(run_id: str, path: str = "", results: bool = False, list: bool = False):  # noqa: A002
+    async def files(run_id: str, path: str = "", results: bool = False, list: bool = False,  # noqa: A002
+                    range_header: Annotated[str | None, Header(alias="range")] = None):
         """List a folder or download a file of the run: run folder, or results zip (results=true, or once
         the run folder is gone). With results=true, the bare path downloads the zip, unless list=true."""
         run = run_or_404(run_id)
@@ -349,7 +383,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             raise HTTPException(404, f"run {run['id']} has no files")
         if results and (path == "results.zip" or (path == "" and not list)):
             return FileResponse(run["results"], media_type="application/zip", filename=Path(run["results"]).name)
-        return zip_entry(Path(run["results"]), path)
+        return zip_entry(Path(run["results"]), path, range_header)
 
     # ── lab resources ────────────────────────────────────────────────────
     def resources(kind: str) -> list[dict]:

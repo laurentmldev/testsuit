@@ -1926,6 +1926,40 @@ def test_local_process_closed_when_the_loop_stops(tmp_path, monkeypatch):
     assert started and started[0]._transport.is_closing()
 
 
+def test_zip_entry_ranges(tmp_path):
+    """A file of a zip, whole or a byte range of it (HTTP Range: the file viewer reads a big file in parts)."""
+    import zipfile
+
+    from fastapi import FastAPI, Header
+    from fastapi.testclient import TestClient
+
+    from testsuit.sequencer.api import zip_entry
+    data = bytes(range(256)) * 4000
+    archive = tmp_path / "pack.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("pack/data/big.csv", data)
+    app = FastAPI()
+
+    @app.get("/f/{path:path}")
+    def get(path: str, range_header: str | None = Header(None, alias="range")):
+        return zip_entry(archive, path, range_header)
+
+    client = TestClient(app)
+    whole = client.get("/f/data/big.csv")
+    assert whole.status_code == 200 and whole.content == data and whole.headers["Accept-Ranges"] == "bytes"
+    for asked, start, end in (("bytes=1000-1999", 1000, 1999), ("bytes=900000-", 900000, len(data) - 1),
+                              ("bytes=-10", len(data) - 10, len(data) - 1), ("bytes=5-99999999", 5, len(data) - 1)):
+        r = client.get("/f/data/big.csv", headers={"Range": asked})
+        assert r.status_code == 206 and r.content == data[start:end + 1], asked
+        assert r.headers["Content-Range"] == f"bytes {start}-{end}/{len(data)}"
+        assert r.headers["Content-Length"] == str(end - start + 1)
+    outside = client.get("/f/data/big.csv", headers={"Range": f"bytes={len(data)}-"})
+    assert outside.status_code == 416 and outside.headers["Content-Range"] == f"bytes */{len(data)}"
+    # several ranges, or not bytes: the whole file
+    assert client.get("/f/data/big.csv", headers={"Range": "bytes=0-1,5-6"}).content == data
+    assert [e["name"] for e in client.get("/f/data", headers={"Range": "bytes=0-1"}).json()] == ["big.csv"]
+
+
 def test_daemon_api_and_cli(daemon, capsys):
     import requests
 
@@ -1948,6 +1982,10 @@ def test_daemon_api_and_cli(daemon, capsys):
     listed = requests.get(f"{url}/runs/{run['id']}/files/", params={"results": "true", "list": "true"}).json()
     assert "run.yml" in {f["name"] for f in listed}
     assert yaml.safe_load(in_zip.text)["verdict"] == "succeeded"
+    # a range of a file of the results zip: those bytes only (the file viewer reads a big file part by part)
+    part = requests.get(f"{url}/runs/{run['id']}/files/run.yml", params={"results": "true"}, headers={"Range": "bytes=2-9"})
+    assert part.status_code == 206 and part.content == in_zip.content[2:10]
+    assert part.headers["Content-Range"] == f"bytes 2-9/{len(in_zip.content)}"
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
 
     resources = requests.get(f"{url}/runs/{run['id']}/resources").json()
