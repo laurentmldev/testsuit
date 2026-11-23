@@ -36,6 +36,8 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* the top banner stays at the top of the window: scrolled-to elements land below it */
+html { scroll-padding-top: calc(var(--topbar-h) + 8px); }
 body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -122,9 +124,11 @@ input.priority { width: 80px; }
 .dot.off { background: var(--bad); }
 
 /* app frame */
-.app { min-height: 100%; display: flex; flex-direction: column; --topbar-h: 58px; }
+:root { --topbar-h: 58px; }
+.app { min-height: 100%; display: flex; flex-direction: column; }
 .app.full { height: 100%; }
-.topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: var(--topbar-h); background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: var(--topbar-h); background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  position: sticky; top: 0; z-index: 70; }
 .topbar .brand { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .topbar .brand img { height: 46px; max-width: 220px; object-fit: contain; }
 .topbar nav, .topbar > div:not(.topbar-right) { display: flex; gap: 4px; }
@@ -488,7 +492,7 @@ button .spinner { width: 11px; height: 11px; vertical-align: -1px; margin-right:
 
 /* Datapacks page */
 .datapacks { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
-.testdef-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 8px; }
+.testdef-list { display: flex; flex-direction: column; gap: 4px; position: sticky; top: calc(var(--topbar-h) + 8px); }
 .testdef-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .testdef-item.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .testdef-item .mono { word-break: break-all; }
@@ -1225,7 +1229,7 @@ input.manual-note { flex: 1; min-width: 200px; }
 .cov-actions { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
 .cov-actions .spacer { flex: 1; }
 .requirements-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
-.req-tree { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.req-tree { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--topbar-h) + 8px); }
 .req-tree select { margin-bottom: 6px; }
 .req-tree-item { display: flex; align-items: center; gap: 6px; text-align: left; border: none; background: none; padding: 4px 8px; border-radius: 6px; }
 .req-tree-item span:first-child { flex: 1; }
