@@ -183,6 +183,8 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |
 | `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
 
+**Secrets.** Wherever a password or a token is given (the `token` of an InfluxDB config file, the `password` of a ClickHouse one, `data2db --token`, the credentials of a requirements source), it can be a reference rather than the secret itself: `env:<VARIABLE>` reads an environment variable, and `file:<path>` the content of a file, such as a Docker or Kubernetes secret (`token: file:/run/secrets/influx_token`; trailing white space dropped; a relative path is relative to the config file, or to the current folder on the command line). The sources file of the requirements accepts references only.
+
 ## Using the library
 
 ```python

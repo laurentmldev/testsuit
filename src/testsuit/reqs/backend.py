@@ -17,7 +17,7 @@ A backend gives access to the requirements of one tool. It is created by a facto
 ``factory(options, credentials, base_dir) -> ReqBackend``:
 
 - ``options``: the ``options`` of its entry in the sources file (a URL, a project...);
-- ``credentials``: ``{name: value}`` read from the environment (``token: env:JAMA_TOKEN``), or None;
+- ``credentials``: ``{name: value}`` read from the environment or a file (``token: env:JAMA_TOKEN``, ``token: file:/run/secrets/jama``), or None;
 - ``base_dir``: the folder of the sources file, for relative paths.
 
 Example, from an external library::
@@ -68,7 +68,7 @@ class ReqBackend:
     description: str = ""
     # the options of its entry in the sources file, by name, with their help: proposed by the Editor's form
     options_help: dict[str, str] = {}
-    # the credentials it reads, by name, with their help (their values: 'env:<VARIABLE>')
+    # the credentials it reads, by name, with their help (their values: 'env:<VARIABLE>' or 'file:<path>')
     credentials_help: dict[str, str] = {}
 
     def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path) -> None:

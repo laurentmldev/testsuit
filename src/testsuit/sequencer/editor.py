@@ -51,6 +51,7 @@ from pydantic import ValidationError
 from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
                                              is_scenario, is_utests)
 from testsuit.reqs.backend import describe_req_backends
+from testsuit.reqs.backend import walk as req_paths
 from testsuit.reqs.sources import is_requirements_file
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
@@ -1353,7 +1354,7 @@ class Editor:
 
     def check_requirements(self, session: EditSession, rel: str, text: str) -> list[dict]:
         """A sources file reads, and so does each of its sources (a backend no plugin registers, a file that is not
-        there; a credential whose variable is not set here is a warning: it may be set where datapacks are generated);
+        there; a credential whose variable is not set, or file not readable, here is a warning: it may be set where datapacks are generated);
         a requirements file of the YAML backend reads."""
         from testsuit.reqs.backend import ReqError, YamlBackend
         from testsuit.reqs.sources import SOURCES_FILE, Sources
@@ -1377,7 +1378,7 @@ class Editor:
             try:
                 sources.backend(name)
             except ReqError as e:
-                add(str(e), "warning" if "is not set" in str(e) else "error", f"'{name}'")
+                add(str(e), "warning" if ("is not set" in str(e) or "is not readable" in str(e)) else "error", f"'{name}'")
         return problems
 
     def _message_file(self, session: EditSession, message: str, default: str) -> tuple[str, str]:
@@ -1505,6 +1506,30 @@ class Editor:
     def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None) -> dict:
         out, cov = self.requirements_coverage(session, source, campaign)
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
+
+    def requirements_test(self, session: EditSession, path: str, source: str) -> dict:
+        """Read one source of a sources file of the session as it is saved, as datapack generation would: how many
+        requirements, how long it took, the tree and the first requirements, or what went wrong (Editor form)."""
+        import time
+
+        from testsuit.reqs.backend import ReqError, list_requirements
+        from testsuit.reqs.sources import Sources
+        start = time.monotonic()
+        out: dict[str, Any] = {"source": source, "ok": False}
+        try:
+            sources = Sources(self.path(session, path))
+            backend = sources.backend(source)
+            reqs = list_requirements(backend, "", True)
+            tree = backend.tree()
+        except ReqError as e:
+            out["error"] = str(e).replace(str(session.folder) + os.sep, "")
+        except Exception as e:                 # a plugin's bug: shown, not raised
+            out["error"] = f"{type(e).__name__}: {e}"
+        else:
+            out.update({"ok": True, "count": len(reqs), "nodes": sum(1 for _ in req_paths(tree)),
+                        "sample": [r.as_dict() for r in reqs[:5]]})
+        out["seconds"] = round(time.monotonic() - start, 2)
+        return out
 
     def requirements_coverage(self, session: EditSession, source: str | None = None, campaign: str | None = None):
         """(description, Coverage or None): the requirements of a tests repository and how its test definitions cover them (Datapacks, Requirements; SPEC

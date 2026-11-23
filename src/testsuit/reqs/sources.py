@@ -22,7 +22,7 @@ git root (a repository holding several trees of tests, such as an example, can h
       jama:
         backend: jama                   # a backend registered by a plugin
         options: {url: https://jama.example/rest, project: 12}
-        credentials: {token: env:JAMA_TOKEN}      # from the environment only, never written here
+        credentials: {token: env:JAMA_TOKEN}      # env:<VARIABLE> or file:<path> (a Docker secret), never written here
 
 A sources file without ``sources`` but with ``requirements`` is itself the one source ``reqs`` of the built-in YAML
 backend (the simplest setup: one file).
@@ -37,6 +37,7 @@ from typing import Any
 
 import yaml
 
+from testsuit.credentials import CredentialError, is_reference, resolve_secret
 from testsuit.reqs.backend import ReqBackend, ReqError, create_req_backend, list_requirements
 from testsuit.reqs.model import Node, Ref, Requirement, ref_key, split_ref
 
@@ -79,21 +80,24 @@ def find_sources_file(start: Path) -> Path | None:
     return None
 
 
-def _credentials(name: str, spec: Any) -> dict[str, str] | None:
+def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str, str] | None:
+    """The credentials of a source, each read where its value says: ``env:<VARIABLE>`` (an environment variable) or
+    ``file:<path>`` (the content of a file, such as a Docker or Kubernetes secret ``/run/secrets/<name>``; a relative
+    path is relative to the sources file; trailing white space dropped). A value written in the file is refused."""
     if spec is None:
         return None
     if not isinstance(spec, dict):
-        raise ReqError(f"source '{name}': 'credentials' is a mapping of names to 'env:<VARIABLE>'")
+        raise ReqError(f"source '{name}': 'credentials' is a mapping of names to 'env:<VARIABLE>' or 'file:<path>'")
     out = {}
     for key, value in spec.items():
         text = str(value)
-        if not text.startswith("env:"):
-            raise ReqError(f"source '{name}': credential '{key}' must come from the environment ('env:<VARIABLE>'), "
-                           "never be written in the sources file")
-        var = text[4:].strip()
-        if var not in os.environ:
-            raise ReqError(f"source '{name}': credential '{key}': environment variable '{var}' is not set")
-        out[str(key)] = os.environ[var]
+        if not is_reference(text):
+            raise ReqError(f"source '{name}': credential '{key}' must come from the environment ('env:<VARIABLE>') "
+                           "or a file ('file:<path>', such as a Docker secret), never be written in the sources file")
+        try:
+            out[str(key)] = resolve_secret(text, base_dir, f"source '{name}': credential '{key}'")
+        except CredentialError as e:
+            raise ReqError(str(e)) from e
     return out
 
 
@@ -138,7 +142,8 @@ class Sources:
         if name not in self._backends:
             spec = self.specs[name]
             self._backends[name] = create_req_backend(spec["backend"], spec.get("options") or {},
-                                                      _credentials(name, spec.get("credentials")), self.file.parent)
+                                                      _credentials(name, spec.get("credentials"), self.file.parent),
+                                                      self.file.parent)
         return self._backends[name]
 
     def ref(self, text: str) -> Ref:

@@ -20,6 +20,7 @@ from testsuit.plugins import load_plugins
 from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
 from testsuit.misc.MonitorProgress import MonitorProgress,consoleRichProgressCb
 from testsuit.datatools.data2db import create_data2db
+from testsuit.credentials import resolve_secret
 from testsuit.misc.logger import create_logger,get_logger
 
 
@@ -67,7 +68,8 @@ def main():
     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('sourceFolderOrFile', metavar="FolderOrFile", help="source folder or file  where to scan data files",type=isInputReadable)
     parser.add_argument('confJson', help="Conf for DB parameters. See up there of details about expected contents",type=isInputReadable)
-    parser.add_argument('-t','--token',help="DB password or token")
+    parser.add_argument('-t','--token',help="DB password or token: env:<VARIABLE> or file:<path> (such as a Docker secret) "
+                        "to read it from there rather than give it on the command line")
     parser.add_argument("--test",action='store_true', default=False, help="Dry-run: does not actually inject data")
     parser.add_argument('-d',"--debug",action='store_true', default=False, help="Show debug messages")
     parser.add_argument('--extensions',type=lambda s: s.split(","),metavar='ext1,ext2,...',
@@ -83,7 +85,7 @@ def main():
         
     monitorProgress=MonitorProgress(progressCb=consoleRichProgressCb,name="data2db")
     dbHandler = create_data2db(conf["db"]["dbtype"])
-    rst = dbHandler.data2db(args.sourceFolderOrFile,conf,args.extensions,token=args.token,dryRun=args.test,monitorProgress=monitorProgress,silent=True)
+    rst = dbHandler.data2db(args.sourceFolderOrFile,conf,args.extensions,token=resolve_secret(args.token,what='--token'),dryRun=args.test,monitorProgress=monitorProgress,silent=True)
 
     if rst == True:
         sys.exit(0)
