@@ -21,6 +21,7 @@ import { handKeys, KeysByHand, rememberedKeys, rememberKeys, type HandKey } from
 import { Address, ago, attempt, Badge, classes, CommentsNote, ConsoleText, LiveConsole, MenuButton, openInNewTab, setQuery, time, useRoute, ViaRoute, ViaTag } from "../util";
 import { ComponentDialog, LabGraph, LinksDialog, offNote, Rendered, StageDialog, type LabLink, type LabView } from "./LabGraph";
 import { LogsDialog } from "./Logs";
+import { Named } from "../kinds";
 
 const ACTION_HELP: Record<string, string> = {
   hold: "Keep it out of new runs (a run holding it goes on). Resume to give it back.",
@@ -548,7 +549,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   const row = (c: any) => (
     <tr key={c.id} id={`lab-row-${c.id}`} className={classes((c.hold || c.maintenance) && "off", focus === c.id && "focused")}>
       <td><strong title={c.id}>{c.label || c.id}</strong><div className="muted small">{c.label && c.label !== c.id ? c.id : ""}</div>{c.description && <div className="small description">{c.description}</div>}</td>
-      <td>{c.role}</td>
+      <td>{c.role && <Named kind="role" name={c.role} />}</td>
       <td><code>{c.extends}</code></td>
       <td><Address host={c.host} alias={c.host_alias} /></td>
       <td><button className="link state-button" onClick={() => setDetails(c.id)} title={`${c.detail ? c.detail + "\n\n" : ""}What was tested, the answer, and why this state`}><Badge value={c.state} /></button>{c.expected && c.expected !== c.state && <span className="muted small"> expected {c.expected}</span>}
