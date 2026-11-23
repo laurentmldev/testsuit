@@ -18,7 +18,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { get, getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
-import { COMMENT_WIDTH, CommentNode } from "../comments";
+import { COMMENT_WIDTH, CommentNode, PinEdge, pinEdge } from "../comments";
 import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { Named } from "../kinds";
@@ -128,6 +128,15 @@ function FrameNode({ data }: NodeProps) {
 }
 
 const nodeTypes = { step: StepNode, frame: FrameNode, comment: CommentNode };
+const edgeTypes = { pin: PinEdge };
+
+/** About how tall a comment card of the run graph is (its Markdown at 12px, COMMENT_WIDTH wide): the room its
+ *  sub-pipeline frame keeps for it, laid out before the card is drawn. */
+function commentHeight(text: string): number {
+  const perLine = Math.floor((COMMENT_WIDTH - 20) / 6.6);
+  const lines = text.trim().split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / perLine)), 0);
+  return 14 + lines * 17;
+}
 
 export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   pipeline: any; records: any[]; selected: string | null; onSelect: (key: string, step: any, phase: string) => void;
@@ -191,6 +200,20 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
         for (const l of lasts) edgeList.push({ id: `${phase.id}:${l.id}~>finally`, source: `${pid}/${l.id}`, target: lane, className: "finally-edge" });
       }
     }
+    // the comment cards of each sub-pipeline, at the bottom of its frame (one frame per 'uses' step): room for them
+    // there, below its steps, and a frame wide enough for them side by side
+    const groupCards: Record<string, { card: any; height: number }[]> = {};
+    for (const phase of pipeline.phases) {
+      for (const c of phase.comments || []) {
+        const frame = c.group ? `phase:${phase.id}/${c.group}/${c.part || "steps"}` : "";
+        if (frame && lay.some((n) => n.id === frame)) (groupCards[frame] ||= []).push({ card: c, height: commentHeight(c.text) });
+      }
+    }
+    for (const [frame, cards] of Object.entries(groupCards)) {
+      const n = lay.find((l) => l.id === frame);
+      n.padding = `[top=36,left=16,bottom=${16 + Math.max(...cards.map((c) => c.height)) + 14},right=16]`;
+      n.minWidth = 32 + cards.length * COMMENT_WIDTH + (cards.length - 1) * 12;
+    }
     // one arrow from a sub-pipeline rather than one from each of its last steps (to the finally lane, or to the
     // steps after it), and one into it rather than one to each of its first steps
     edgeList = mergeGroupEdges(edgeList, members);
@@ -216,21 +239,45 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
           list.push({ ...base, type: "step", data: { step, phase: phaseId }, style: { width: p.width } });
         }
       }
-      // the comment cards of each phase (notes, never run), side by side under its frame
+      // the comment cards of each phase (notes, never run), side by side under its frame, and those of its
+      // sub-pipelines at the bottom of theirs (or under the phase when their frame is not drawn)
+      // (a card pinned to a step says which: the run graph is laid out otherwise than the Editor's)
+      const cardData = (c: any) => (typeof c === "string" ? { text: c } : { text: c.text, pin: c.step || undefined, color: c.color || undefined });
       for (const phase of pipeline.phases) {
         const p = placed[`phase:${phase.id}`];
         if (!p) continue;
-        // (a card pinned to a step says which: the run graph is laid out otherwise than the Editor's)
-        (phase.comments || []).forEach((c: any, i: number) => list.push({
-          id: `comment:${phase.id}:${i}`, type: "comment", position: { x: p.x + i * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
-          data: typeof c === "string" ? { text: c } : { text: c.text, pin: c.step || undefined }, style: { width: COMMENT_WIDTH }, draggable: false, selectable: false,
-        }));
+        let free = 0;
+        (phase.comments || []).forEach((c: any, i: number) => {
+          const frame = c.group ? `phase:${phase.id}/${c.group}/${c.part || "steps"}` : "";
+          const id = `comment:${phase.id}:${i}`;
+          const style = { width: COMMENT_WIDTH };
+          const g = groupCards[frame] && placed[frame];
+          if (g) {
+            const at = groupCards[frame].findIndex((x) => x.card === c);
+            const room = Math.max(...groupCards[frame].map((x) => x.height));
+            list.push({ id, type: "comment", parentId: frame, extent: "parent", position: { x: 16 + at * (COMMENT_WIDTH + 12), y: g.height - room - 16 },
+              data: cardData(c), style, draggable: false, selectable: false });
+          } else {
+            list.push({ id, type: "comment", position: { x: p.x + (free++) * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
+              data: cardData(c), style, draggable: false, selectable: false });
+          }
+        });
+      }
+      // a pinned card: a line to its step (an id of its phase, or of its sub-pipeline under its 'uses' step)
+      const pins: Edge[] = [];
+      for (const phase of pipeline.phases) {
+        (phase.comments || []).forEach((c: any, i: number) => {
+          // (pinned to a 'uses' step: to the frame of its sub-pipeline)
+          const step = typeof c === "object" && c.step ? `phase:${phase.id}/${c.group ? `${c.group}.` : ""}${c.step}` : "";
+          const node = step && [step, `${step}/steps`, `${step}/finally`].find((id) => list.some((n) => n.id === id));
+          if (node) pins.push(pinEdge(`comment:${phase.id}:${i}`, node));
+        });
       }
       setNodes(list);
-      setEdges(edgeList.map((e) => ({
+      setEdges(pins.concat(edgeList.map((e) => ({
         ...e, markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
         style: e.className === "finally-edge" ? { strokeDasharray: "4 3", opacity: 0.5 } : e.className === "phase-edge" ? { strokeWidth: 2 } : undefined,
-      })));
+      }))));
     });
     return () => {
       cancelled = true;
@@ -285,7 +332,7 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
 
   return (
     <div className="graph-box">
-      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }}
+      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }}
         // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
         // measured again, which does not happen when its size did not change (the graph went blank on an update)
         onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))} nodesConnectable={false} proOptions={{ hideAttribution: true }}
@@ -460,20 +507,29 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
-  // the step running now is followed (selected, its log shown, brought into view) until a step is picked by hand
+  // the step running now is followed (selected, its log shown, brought into view) until another step is picked by
+  // hand; picking a step that is running (or the button) follows again, to the next step when it starts
   const [pinned, setPinned] = useState(false);
-  const pick = (key: string | null) => {
-    setSelected(key);
-    setPinned(true);
-  };
   const r = run.data;
   const records: any[] = r?.steps || [];
   const live = r && (ACTIVE.includes(r.state) || ["queued", "waiting_resources"].includes(r.state));
   const running = records.filter((s) => s.state === "running").sort((a, b) => String(b.started || "").localeCompare(String(a.started || "")))[0];
   const runningKey = running ? stepKey(running.phase, running.id, slotOf(running)) : null;
+  // whether a key ('phase:id' for the whole step, or 'phase:id[slot]') is of a step running now
+  const isRunningKey = (key: string | null) => !!key && records.some((s) => s.state === "running"
+    && (stepKey(s.phase, s.id, slotOf(s)) === key || key === `${s.phase}:${s.id}`));
+  const pick = (key: string | null) => {
+    setSelected(key);
+    setPinned(!(live && isRunningKey(key)));
+  };
+  const followRunning = () => {
+    if (runningKey) setSelected(runningKey);
+    setPinned(false);
+  };
+  // a step that starts is selected when following (not on a resume: the running step picked stays selected)
   useEffect(() => {
     if (!pinned && runningKey && runningKey !== selected) setSelected(runningKey);
-  }, [runningKey, pinned]);
+  }, [runningKey]);
   // the finally steps of each phase ('phase:step'), marked as such in the list of steps
   const finals = useMemo(() => new Set<string>((pipeline.data?.phases || []).flatMap((ph: any) => ph.steps.filter((s: any) => s.part === "finally").map((s: any) => `${ph.id}:${s.id}`))), [pipeline.data]);
   const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, slotOf(s)) === key);
@@ -533,8 +589,8 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
           <div className="split-side">
             {selected ? (
               <>
-                {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
-                {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
+                {live && pinned && <button className="small" onClick={followRunning} title="Select the step running now, and keep following the steps as they run (clicking a running step does it too)">Follow the running step</button>}
+                {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop, a running one to follow again.</p>}
                 <StepActions run={r} record={logRecord} part={finals.has(`${logRecord?.phase}:${logRecord?.id}`) ? "finally" : undefined} onChanged={run.refresh} />
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {editor && logRecord && <EditLabCommand record={logRecord} />}

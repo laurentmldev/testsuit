@@ -382,7 +382,7 @@ function HostCard({ name, own, onOverride }: {
   return (
     <div className="type-card">
       <div><span className="muted small">{h.chain.join(" → ")}</span></div>
-      {h.missing?.length > 0 && <div className="error-text">Does not implement {h.missing.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {h.role}: the lab does not load.
+      {h.missing?.length > 0 && <div className="error-text">Does not implement {h.missing.map((c: string) => <code key={c}>{c}</code>)}, listed by its role <Named kind="role" name={h.role} />: the lab does not load.
         {onOverride && h.missing.filter((c: string) => !(own && c in own)).map((c: string) =>
           <button key={c} className="small" onClick={() => onOverride(c, undefined)}>Implement {c}</button>)}</div>}
       {h.extra?.length > 0 && <div className="warning-text">Implements {h.extra.map((c: string) => <code key={c}>{c}</code>)}, which its role does not list: datapacks cannot use them.</div>}

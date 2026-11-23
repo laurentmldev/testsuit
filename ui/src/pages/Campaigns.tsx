@@ -22,6 +22,7 @@ import { LiveLog, logWarnings } from "../editor/Generate";
 import { ago, attempt, Badge, classes, duration, Markdown, navigate, setQuery, Spinner, time, type Route } from "../util";
 import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
+import { Named } from "../kinds";
 
 const CAMPAIGNS_INTRO = `A **campaign** is a list of test definitions generated and run together: one datapack each, all with the **same version of every dataset** they import (the campaign lists each one, no test definition chooses on its own), queued under one campaign run with their **priority** and the **tags** the lab resources must carry. Its runs are grouped under it in **All runs**, with a synthetic report.`;
 
@@ -221,7 +222,7 @@ function CampaignSynthesis({ sid, campaign }: { sid: string; campaign: string })
                 : Object.entries(stageTags).map(([type, tags]: any) => <div key={type}><code>{type}</code>: {tags.map((t: string) => <span key={t} className="chip">{t}</span>)}</div>)}</dd>
               <dt>Components</dt>
               <dd>{Object.keys(routing.component_tags || {}).length === 0 ? <span className="muted">any (no tag)</span>
-                : Object.entries(routing.component_tags).map(([role, tags]: any) => <div key={role}>role <code>{role}</code>: {tags.map((t: string) => <span key={t} className="chip">{t}</span>)}</div>)}</dd>
+                : Object.entries(routing.component_tags).map(([role, tags]: any) => <div key={role}>role <code><Named kind="role" name={role} /></code>: {tags.map((t: string) => <span key={t} className="chip">{t}</span>)}</div>)}</dd>
             </dl>
             <p className="muted small">Added to the tags of the slots and stage slots of every run (a stage's or component's id is one of its tags: <code>stage_tags: [bench_2]</code> runs everything on that stage). The sequencer refuses the campaign when the lab has nothing that fits.</p>
           </Section>

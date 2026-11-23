@@ -1993,7 +1993,7 @@ class Editor:
         steps give (``with:``) and those their criteria read that nothing defines."""
         from testsuit.sequencer.cmdparams import PARAMS, default_params, exploit_keys, exploit_with_problems, \
             step_param_problems, without_params
-        from testsuit.sequencer.model import phase_slots
+        from testsuit.sequencer.model import comment_cards, phase_slots
         from testsuit.sequencer.scheduler import Availability, find_binding
         problems: list[str] = []
         key_problems: list[str] = []
@@ -2117,7 +2117,7 @@ class Editor:
                                  "step": step.model_dump(by_alias=True, exclude_defaults=True)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": held, "groups": flat.groups, "steps": rows,
-                           "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
+                           "comments": comment_cards(flat.phase, pipeline)})
         return {"binding": binding.as_dict() if binding is not None else None, "phases": phases, "problems": problems,
                 "key_problems": key_problems, "exploit_problems": exploit_problems, "warnings": warnings, "missing_keys": missing_keys, "deployed": sorted(deployed), "used": sorted(used)}
 

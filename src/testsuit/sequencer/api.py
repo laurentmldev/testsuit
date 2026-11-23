@@ -33,6 +33,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 
 from testsuit.sequencer.logbuffer import install as install_log_buffer
 from testsuit.sequencer.manualstep import awaiting
+from testsuit.sequencer.model import comment_cards
 from testsuit.sequencer.sequencer import Sequencer
 from testsuit.sequencer.util import SequencerError, now, parse_duration
 
@@ -247,7 +248,7 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
                                   or (f"manual: {s.manual.get('title') or fs.id}" if s.manual else s.action)})
             phases.append({"id": flat.phase.id, "needs": flat.phase.needs, "stage_slots": flat.phase.stage_slots,
                            "slots": flat.phase.slots, "groups": flat.groups, "steps": steps,
-                           "comments": [{"text": c.text, "step": c.step} for c in flat.phase.comments if c.text.strip()]})
+                           "comments": comment_cards(flat.phase, dp.pipeline)})
         return {"phases": phases, "stage_slots": dp.needs.stage_slots,
                 "slots": {c.id: {"slot_class": c.slot_class, "role": c.role, "stage_slot": c.stage_slot, "name": c.name}
                           for c in dp.needs.slots.values()}}

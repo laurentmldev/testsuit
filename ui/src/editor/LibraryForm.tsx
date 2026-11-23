@@ -457,7 +457,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, fo
         <Tags kind="role" value={t.roles} onChange={(v) => set("roles", v.length ? v : undefined)} choices={labRoleChoices(ctx)} placeholder="add a role it supports" />
       </Field>
       {Object.entries<any>(described?.role_missing || {}).filter(([, m]) => m.length).map(([r, m]) => (
-        <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role {r}: the lab does not load.</div>
+        <div key={r} className="error-text">Does not implement {m.map((c: string) => <code key={c}>{c}</code>)}, listed by its role <Named kind="role" name={r} />: the lab does not load.</div>
       ))}
       <RelatedItems groups={[
         ["extended by the classes", "component", Object.keys(ctx.lab.library || {}).filter((n) => ctx.lab.library[n]?.extends === name)],

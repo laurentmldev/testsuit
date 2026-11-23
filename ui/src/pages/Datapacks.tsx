@@ -19,6 +19,7 @@ import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { CampaignsTab } from "./Campaigns";
 import { RequirementsTab } from "./Requirements";
+import { NavIcon } from "../navicons";
 import { KeysExplorer } from "../editor/KeysExplorer";
 import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
 import { DiffView } from "../monaco";
@@ -96,11 +97,14 @@ export function DatapacksPage({ route }: { route: Route }) {
       {current && (
         <div className="tabs subtabs datapacks-subtabs">
           <button className={classes(view === "testdefs" && "selected")} onClick={() => setQuery("view", null)}
-            title="One test definition at a time: what it is made of, its baseline, generating and posting its datapack">Test definitions{ctx ? ` (${testdefs.length})` : ""}</button>
+            title="One test definition at a time: what it is made of, its baseline, generating and posting its datapack">
+            <NavIcon name="testdefs" size={18} />Test definitions{ctx && <span className="count">{testdefs.length}</span>}</button>
           <button className={classes(view === "campaigns" && "selected")} onClick={() => setQuery("view", "campaigns")}
-            title="Lists of test definitions generated with the same dataset versions and run together">Campaigns{ctx ? ` (${campaigns.length})` : ""}</button>
+            title="Lists of test definitions generated with the same dataset versions and run together">
+            <NavIcon name="campaigns" size={18} />Campaigns{ctx && <span className="count">{campaigns.length}</span>}</button>
           <button className={classes(view === "requirements" && "selected")} onClick={() => setQuery("view", "requirements")}
-            title="The requirements of this repository (requirements.yml) and how its test definitions cover them">Requirements</button>
+            title="The requirements of this repository (requirements.yml) and how its test definitions cover them">
+            <NavIcon name="requirements" size={18} />Requirements</button>
         </div>
       )}
       {view === "testdefs" && <Markdown text={INTRO} className="intro" />}
@@ -349,7 +353,7 @@ function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: strin
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>
-              <td>{c.role || <span className="muted">none</span>}</td>
+              <td>{c.role ? <Named kind="role" name={c.role} /> : <span className="muted">none</span>}</td>
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
               <td><code>{c.slot_class}</code></td>
               <td>{c.configuration}</td>
