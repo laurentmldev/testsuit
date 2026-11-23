@@ -12,6 +12,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 import yaml
+import os
 import re
 import threading
 from typing import Any
@@ -24,6 +25,7 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.credentials import resolve_secret
 
 
 class ClickhouseFileMgr(AFileMgr):
@@ -41,7 +43,7 @@ class ClickhouseFileMgr(AFileMgr):
         host: clickhouse           # or url: http://clickhouse:9000 (same as data2db conf)
         port: 9000                 # OPTIONAL
         user: default              # OPTIONAL
-        password: ...              # OPTIONAL
+        password: ...              # OPTIONAL: env:<VARIABLE> or file:<path> (a Docker secret) rather than written here
         database: testDb
         table: testTable           # regex, might match several tables of the database
         timestampColumn: ts        # OPTIONAL
@@ -78,7 +80,8 @@ class ClickhouseFileMgr(AFileMgr):
                 if m.group(2): self._port = int(m.group(2))
             self._port = int(config.get('port', self._port))
             self._user = config.get('user', self._user)
-            self._password = config.get('password')
+            self._password = resolve_secret(config.get('password'), os.path.dirname(os.path.abspath(self.getFileName())),
+                                            f"'{self.getFileName()}': password")
             self._database = config.get('database')
             self._table = config.get('table')
             self._tsCol = config.get('timestampColumn', self._tsCol)

@@ -37,6 +37,7 @@ from typing import Any
 
 import yaml
 
+from testsuit.credentials import CredentialError, is_reference, resolve_secret
 from testsuit.reqs.backend import ReqBackend, ReqError, create_req_backend, list_requirements
 from testsuit.reqs.model import Node, Ref, Requirement, ref_key, split_ref
 
@@ -90,23 +91,13 @@ def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str
     out = {}
     for key, value in spec.items():
         text = str(value)
-        if text.startswith("env:"):
-            var = text[4:].strip()
-            if var not in os.environ:
-                raise ReqError(f"source '{name}': credential '{key}': environment variable '{var}' is not set")
-            out[str(key)] = os.environ[var]
-        elif text.startswith("file:"):
-            path = Path(os.path.expanduser(text[5:].strip()))
-            if not path.is_absolute():
-                path = (base_dir or Path.cwd()) / path
-            try:
-                out[str(key)] = path.read_text(encoding="utf-8").rstrip()
-            except (OSError, UnicodeDecodeError) as e:
-                raise ReqError(f"source '{name}': credential '{key}': file '{path}' is not readable "
-                               f"({getattr(e, 'strerror', None) or e})") from e
-        else:
+        if not is_reference(text):
             raise ReqError(f"source '{name}': credential '{key}' must come from the environment ('env:<VARIABLE>') "
                            "or a file ('file:<path>', such as a Docker secret), never be written in the sources file")
+        try:
+            out[str(key)] = resolve_secret(text, base_dir, f"source '{name}': credential '{key}'")
+        except CredentialError as e:
+            raise ReqError(str(e)) from e
     return out
 
 

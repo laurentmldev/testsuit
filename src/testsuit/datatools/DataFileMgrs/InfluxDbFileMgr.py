@@ -22,7 +22,10 @@ from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 
+import os
 import re
+
+from testsuit.credentials import resolve_secret
 
 class InfluxDbV3FileMgr(AFileMgr):
     """Uses a YML description as a pseudo data file to access DB contents."""
@@ -44,7 +47,7 @@ class InfluxDbV3FileMgr(AFileMgr):
             with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                self._token = config.get('token')
+                self._token = resolve_secret(config.get('token'), os.path.dirname(os.path.abspath(self.getFileName())), f"'{self.getFileName()}': token")
                 self._org = config.get('org')
                 self._database = config.get('database')  # Changed from 'bucket'
                 self._table = config.get('table')
@@ -558,7 +561,7 @@ class InfluxDbV2FileMgr(AFileMgr):
             with open(self.getFileName()) as f:
                 config = yaml.safe_load(f)
                 self._host = config.get('host')
-                self._token = config.get('token')
+                self._token = resolve_secret(config.get('token'), os.path.dirname(os.path.abspath(self.getFileName())), f"'{self.getFileName()}': token")
                 self._org = config.get('org')
                 self._bucket = config.get('bucket')
                 self._measurement = config.get('measurement')
