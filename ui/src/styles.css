@@ -992,6 +992,30 @@ tr.bypassed td { background: var(--warn-soft); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --note: #3a3520; --note-border: #6b6030; --note-text: #efe6bf; } }
 :root[data-theme="dark"] { --note: #3a3520; --note-border: #6b6030; --note-text: #efe6bf; }
 .comment-node { background: var(--note); color: var(--note-text); border: 1px solid var(--note-border); border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.4; box-shadow: 0 2px 6px rgba(20, 30, 50, 0.12); overflow-wrap: anywhere; }
+/* the other colors of a comment card ('color'; yellow by default), light and dark */
+.note-orange { --note: #ffe3c4; --note-border: #e8a868; --note-text: #5a3510; }
+.note-red { --note: #ffd6d3; --note-border: #e0918b; --note-text: #5c1d18; }
+.note-pink { --note: #fbd9ec; --note-border: #dd94bd; --note-text: #57203f; }
+.note-purple { --note: #e7dcfb; --note-border: #a990dc; --note-text: #33215a; }
+.note-blue { --note: #d6e8fd; --note-border: #89b2e0; --note-text: #173459; }
+.note-green { --note: #d8f2d4; --note-border: #8cc486; --note-text: #1d4519; }
+.note-grey { --note: #e8e9ec; --note-border: #b4b8c0; --note-text: #2f333a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .note-orange { --note: #45301c; --note-border: #7a5430; --note-text: #f3dcc3; }
+  :root:not([data-theme="light"]) .note-red { --note: #4a2422; --note-border: #7f413c; --note-text: #f5d4d1; }
+  :root:not([data-theme="light"]) .note-pink { --note: #47243a; --note-border: #7d4466; --note-text: #f4d4e7; }
+  :root:not([data-theme="light"]) .note-purple { --note: #33284a; --note-border: #5d4b85; --note-text: #e2d9f7; }
+  :root:not([data-theme="light"]) .note-blue { --note: #1f3047; --note-border: #3e5d85; --note-text: #d3e3f7; }
+  :root:not([data-theme="light"]) .note-green { --note: #223a22; --note-border: #44703f; --note-text: #d5eed1; }
+  :root:not([data-theme="light"]) .note-grey { --note: #2e3137; --note-border: #565b65; --note-text: #e2e4e8; }
+}
+:root[data-theme="dark"] .note-orange { --note: #45301c; --note-border: #7a5430; --note-text: #f3dcc3; }
+:root[data-theme="dark"] .note-red { --note: #4a2422; --note-border: #7f413c; --note-text: #f5d4d1; }
+:root[data-theme="dark"] .note-pink { --note: #47243a; --note-border: #7d4466; --note-text: #f4d4e7; }
+:root[data-theme="dark"] .note-purple { --note: #33284a; --note-border: #5d4b85; --note-text: #e2d9f7; }
+:root[data-theme="dark"] .note-blue { --note: #1f3047; --note-border: #3e5d85; --note-text: #d3e3f7; }
+:root[data-theme="dark"] .note-green { --note: #223a22; --note-border: #44703f; --note-text: #d5eed1; }
+:root[data-theme="dark"] .note-grey { --note: #2e3137; --note-border: #565b65; --note-text: #e2e4e8; }
 .comment-node p { margin: 0 0 4px; }
 .comment-node p:last-child, .comment-node ul:last-child { margin-bottom: 0; }
 .comment-node ul { margin: 0 0 4px; padding-left: 16px; }
@@ -999,6 +1023,12 @@ tr.bypassed td { background: var(--warn-soft); }
 .comment-node.editable { cursor: grab; }
 .comment-node.selected { outline: 2px solid var(--accent); }
 .comment-node.empty { font-style: italic; }
+/* the color picker of a comment card (pipeline editor): a swatch per named color, and any other one */
+.comment-colors { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.comment-swatch { width: 22px; height: 22px; padding: 0; border-radius: 4px; border: 1px solid var(--note-border); background: var(--note); cursor: pointer; }
+.comment-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.comment-swatch.custom { position: relative; overflow: hidden; background: conic-gradient(#f66, #fd6, #6d6, #6cf, #96f, #f6c, #f66); border-color: var(--border); }
+.comment-swatch.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
 .comment-pin { font-size: 10.5px; font-weight: 600; opacity: 0.75; margin-bottom: 2px; font-family: var(--mono); }
 .comment-pin.lost { color: var(--bad); text-decoration: line-through; }
 

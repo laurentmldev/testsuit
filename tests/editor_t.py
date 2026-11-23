@@ -236,7 +236,7 @@ def test_workspace_session(repos):
                    {"id": "stop", "slot": "dut", "do": "stop", "needs": ["wait"]}],
                    # comment cards: notes, checked as such and never read for keys
                    "comments": [{"text": "Why **wait**: {{ nowhere }}", "x": 10, "y": 200}, "short note", {"text": " "},
-                                {"text": "pinned", "step": "wait", "x": 0, "y": -60}]}]}}
+                                {"text": "pinned", "step": "wait", "x": 0, "y": -60, "color": "blue"}]}]}}
     written = editor.write(session, "testdef/count/testdef.yml", data=testdef)
     assert written["kind"] == "testdef"
     # its criteria: a kind of their own, and the criteria editor's services on the session's folder
@@ -258,8 +258,10 @@ def test_workspace_session(repos):
     flat = editor.flatten(session, "testdef/count/testdef.yml")
     start = next(s for s in flat["phases"][0]["steps"] if s["id"] == "start")
     assert start["targets"][0]["concrete"] == "counter_1" and "app.sh" in str(start["targets"][0]["command"])
-    assert flat["phases"][0]["comments"] == [{"text": "Why **wait**: {{ nowhere }}", "step": None},
-                                             {"text": "short note", "step": None}, {"text": "pinned", "step": "wait"}]
+    top = {"group": "", "part": "steps"}
+    assert flat["phases"][0]["comments"] == [{"text": "Why **wait**: {{ nowhere }}", "step": None, "color": None, **top},
+                                             {"text": "short note", "step": None, "color": None, **top},
+                                             {"text": "pinned", "step": "wait", "color": "blue", **top}]
     assert not flat["key_problems"]
     # a card pinned to a step the phase does not have: a warning on its line
     testdef["pipeline"]["phases"][0]["comments"].append({"text": "lost", "step": "gone"})

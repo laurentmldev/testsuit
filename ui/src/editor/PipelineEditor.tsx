@@ -19,7 +19,7 @@ import {
   applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from "@xyflow/react";
 import { get, post } from "../api";
-import { COMMENT_WIDTH, CommentNode, commentCard, type CommentCard } from "../comments";
+import { COMMENT_COLORS, COMMENT_WIDTH, CommentNode, commentCard, commentColor, type CommentCard } from "../comments";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
 import { Named } from "../kinds";
@@ -206,7 +206,7 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
       const position = anchor ? { x: anchor.x + (placed ? c.x! : PIN_OFFSET.x), y: anchor.y + (placed ? c.y! : PIN_OFFSET.y) }
         : placed ? { x: c.x!, y: c.y! } : { x: (free++) * (COMMENT_WIDTH + 16), y: bottom + 30 };
       const prev = old.find((n) => n.id === id);
-      return { ...(prev || {}), id, type: "comment", position, data: { text: c.text, editable: true, pin: c.step, lost: !!c.step && !anchor && Object.keys(stepAt).length > 0 },
+      return { ...(prev || {}), id, type: "comment", position, data: { text: c.text, color: c.color, editable: true, pin: c.step, lost: !!c.step && !anchor && Object.keys(stepAt).length > 0 },
         style: { width: c.width || COMMENT_WIDTH }, draggable: true, zIndex: 1000 };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -685,9 +685,29 @@ function CommentForm({ card, steps, onChange, onPin, onDelete }: {
         <Choices value={card.width ? String(card.width) : null} onChange={(v) => onChange({ width: v ? Number(v) : undefined })} allowNone={`${COMMENT_WIDTH} (default)`}
           choices={[...new Set([160, 320, 440, ...(card.width ? [card.width] : [])])].filter((w) => w !== COMMENT_WIDTH).sort((x, y) => x - y).map((w) => ({ value: String(w), label: String(w) }))} />
       </Field>
-      <p className="muted small">Drag the card on the graph to move it (a pinned card keeps that place next to its step); Delete removes it when it is selected. A comment is a note for the people who read the pipeline: the sequencer never runs it, and the run page shows it under its phase.</p>
+      <Field label="Color" help="Of the card, on the graph and on the run page: a color by name (it has a light and a dark shade), or any other one.">
+        <div className="comment-colors">
+          {COMMENT_COLORS.map((c) => {
+            const tint = commentColor(c);
+            const on = (card.color || "yellow") === c;
+            return <button key={c} type="button" title={c === "yellow" ? "yellow (default)" : c} aria-label={c} aria-pressed={on}
+              className={classes("comment-swatch", tint.className, on && "on")} onClick={() => onChange({ color: c === "yellow" ? undefined : c })} />;
+          })}
+          <label className={classes("comment-swatch custom", !!card.color?.startsWith("#") && "on")} title="another color"
+            style={card.color?.startsWith("#") ? { background: card.color } : undefined}>
+            <input type="color" value={card.color?.startsWith("#") ? fullHex(card.color) : "#ffffff"} onChange={(e) => onChange({ color: e.target.value })} />
+          </label>
+          <span className="muted small mono">{card.color || "yellow"}</span>
+        </div>
+      </Field>
+      <p className="muted small">Drag the card on the graph to move it (a pinned card keeps that place next to its step); Delete removes it when it is selected. A comment is a note for the people who read the pipeline: the sequencer never runs it, and the run page shows it under its phase, or at the bottom of its sub-pipeline.</p>
     </div>
   );
+}
+
+/** A '#rgb' color as '#rrggbb' (what a color input takes). */
+function fullHex(color: string): string {
+  return color.length === 4 ? "#" + color.slice(1).split("").map((c) => c + c).join("") : color;
 }
 
 function GroupDialog({ subs, onClose, onGroup }: { subs: Record<string, any>; onClose: () => void; onGroup: (name: string) => void }) {
@@ -756,7 +776,7 @@ function Palette({ palette, held, subs, part, setPart, onAdd, selected, onCommen
           onMouseEnter={() => setHelp({ title: "manual", text: "An operation a person does on the bench (plug a cable, press a button): the run waits. The run page opens a dialog with its text (Markdown, pictures of the test definition's folder) and its checks; the operator ticks each, then answers Done or Failed." })}>manual operation</button>
         {(ctx.step_types || []).map((t: string) => <button key={t} className="palette-item" onClick={() => onAdd({ id: t, [t]: {} })}>{t}</button>)}
         <button className="palette-item comment-item" onClick={onComment}
-          onMouseEnter={() => setHelp({ title: "comment", text: "A note on the graph, like a sticky note (Markdown): why the steps are this way, what to beware of. It is kept in the file with its place on the graph, never run, and shown under its phase on the run page." })}>comment</button>
+          onMouseEnter={() => setHelp({ title: "comment", text: "A note on the graph, like a sticky note (Markdown): why the steps are this way, what to beware of. It is kept in the file with its place on the graph and its color, never run, and shown on the run page under its phase, or at the bottom of its sub-pipeline." })}>comment</button>
       </div>
       <SubPalette subs={subs} onAdd={onAdd} />
     </div>

@@ -129,6 +129,14 @@ function FrameNode({ data }: NodeProps) {
 
 const nodeTypes = { step: StepNode, frame: FrameNode, comment: CommentNode };
 
+/** About how tall a comment card of the run graph is (its Markdown at 12px, COMMENT_WIDTH wide): the room its
+ *  sub-pipeline frame keeps for it, laid out before the card is drawn. */
+function commentHeight(text: string): number {
+  const perLine = Math.floor((COMMENT_WIDTH - 20) / 6.6);
+  const lines = text.trim().split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / perLine)), 0);
+  return 14 + lines * 17;
+}
+
 export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
   pipeline: any; records: any[]; selected: string | null; onSelect: (key: string, step: any, phase: string) => void;
   focus?: string | null;                         // a step ('phase:step') to bring into view, at the same zoom
@@ -191,6 +199,20 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
         for (const l of lasts) edgeList.push({ id: `${phase.id}:${l.id}~>finally`, source: `${pid}/${l.id}`, target: lane, className: "finally-edge" });
       }
     }
+    // the comment cards of each sub-pipeline, at the bottom of its frame (one frame per 'uses' step): room for them
+    // there, below its steps, and a frame wide enough for them side by side
+    const groupCards: Record<string, { card: any; height: number }[]> = {};
+    for (const phase of pipeline.phases) {
+      for (const c of phase.comments || []) {
+        const frame = c.group ? `phase:${phase.id}/${c.group}/${c.part || "steps"}` : "";
+        if (frame && lay.some((n) => n.id === frame)) (groupCards[frame] ||= []).push({ card: c, height: commentHeight(c.text) });
+      }
+    }
+    for (const [frame, cards] of Object.entries(groupCards)) {
+      const n = lay.find((l) => l.id === frame);
+      n.padding = `[top=36,left=16,bottom=${16 + Math.max(...cards.map((c) => c.height)) + 14},right=16]`;
+      n.minWidth = 32 + cards.length * COMMENT_WIDTH + (cards.length - 1) * 12;
+    }
     // one arrow from a sub-pipeline rather than one from each of its last steps (to the finally lane, or to the
     // steps after it), and one into it rather than one to each of its first steps
     edgeList = mergeGroupEdges(edgeList, members);
@@ -216,15 +238,29 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
           list.push({ ...base, type: "step", data: { step, phase: phaseId }, style: { width: p.width } });
         }
       }
-      // the comment cards of each phase (notes, never run), side by side under its frame
+      // the comment cards of each phase (notes, never run), side by side under its frame, and those of its
+      // sub-pipelines at the bottom of theirs (or under the phase when their frame is not drawn)
+      // (a card pinned to a step says which: the run graph is laid out otherwise than the Editor's)
+      const cardData = (c: any) => (typeof c === "string" ? { text: c } : { text: c.text, pin: c.step || undefined, color: c.color || undefined });
       for (const phase of pipeline.phases) {
         const p = placed[`phase:${phase.id}`];
         if (!p) continue;
-        // (a card pinned to a step says which: the run graph is laid out otherwise than the Editor's)
-        (phase.comments || []).forEach((c: any, i: number) => list.push({
-          id: `comment:${phase.id}:${i}`, type: "comment", position: { x: p.x + i * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
-          data: typeof c === "string" ? { text: c } : { text: c.text, pin: c.step || undefined }, style: { width: COMMENT_WIDTH }, draggable: false, selectable: false,
-        }));
+        let free = 0;
+        (phase.comments || []).forEach((c: any, i: number) => {
+          const frame = c.group ? `phase:${phase.id}/${c.group}/${c.part || "steps"}` : "";
+          const id = `comment:${phase.id}:${i}`;
+          const style = { width: COMMENT_WIDTH };
+          const g = groupCards[frame] && placed[frame];
+          if (g) {
+            const at = groupCards[frame].findIndex((x) => x.card === c);
+            const room = Math.max(...groupCards[frame].map((x) => x.height));
+            list.push({ id, type: "comment", parentId: frame, extent: "parent", position: { x: 16 + at * (COMMENT_WIDTH + 12), y: g.height - room - 16 },
+              data: cardData(c), style, draggable: false, selectable: false });
+          } else {
+            list.push({ id, type: "comment", position: { x: p.x + (free++) * (COMMENT_WIDTH + 12), y: p.y + p.height + 16 },
+              data: cardData(c), style, draggable: false, selectable: false });
+          }
+        });
       }
       setNodes(list);
       setEdges(edgeList.map((e) => ({
