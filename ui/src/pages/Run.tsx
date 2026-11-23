@@ -460,20 +460,29 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
-  // the step running now is followed (selected, its log shown, brought into view) until a step is picked by hand
+  // the step running now is followed (selected, its log shown, brought into view) until another step is picked by
+  // hand; picking a step that is running (or the button) follows again, to the next step when it starts
   const [pinned, setPinned] = useState(false);
-  const pick = (key: string | null) => {
-    setSelected(key);
-    setPinned(true);
-  };
   const r = run.data;
   const records: any[] = r?.steps || [];
   const live = r && (ACTIVE.includes(r.state) || ["queued", "waiting_resources"].includes(r.state));
   const running = records.filter((s) => s.state === "running").sort((a, b) => String(b.started || "").localeCompare(String(a.started || "")))[0];
   const runningKey = running ? stepKey(running.phase, running.id, slotOf(running)) : null;
+  // whether a key ('phase:id' for the whole step, or 'phase:id[slot]') is of a step running now
+  const isRunningKey = (key: string | null) => !!key && records.some((s) => s.state === "running"
+    && (stepKey(s.phase, s.id, slotOf(s)) === key || key === `${s.phase}:${s.id}`));
+  const pick = (key: string | null) => {
+    setSelected(key);
+    setPinned(!(live && isRunningKey(key)));
+  };
+  const followRunning = () => {
+    if (runningKey) setSelected(runningKey);
+    setPinned(false);
+  };
+  // a step that starts is selected when following (not on a resume: the running step picked stays selected)
   useEffect(() => {
     if (!pinned && runningKey && runningKey !== selected) setSelected(runningKey);
-  }, [runningKey, pinned]);
+  }, [runningKey]);
   // the finally steps of each phase ('phase:step'), marked as such in the list of steps
   const finals = useMemo(() => new Set<string>((pipeline.data?.phases || []).flatMap((ph: any) => ph.steps.filter((s: any) => s.part === "finally").map((s: any) => `${ph.id}:${s.id}`))), [pipeline.data]);
   const recordFor = (key: string) => records.find((s) => stepKey(s.phase, s.id, slotOf(s)) === key);
@@ -533,8 +542,8 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
           <div className="split-side">
             {selected ? (
               <>
-                {live && pinned && <button className="small" onClick={() => setPinned(false)} title="Select the step running now, and keep following the steps as they run">Follow the running step</button>}
-                {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop.</p>}
+                {live && pinned && <button className="small" onClick={followRunning} title="Select the step running now, and keep following the steps as they run (clicking a running step does it too)">Follow the running step</button>}
+                {live && !pinned && runningKey && <p className="muted small">Following the running step: click another to stop, a running one to follow again.</p>}
                 <StepActions run={r} record={logRecord} part={finals.has(`${logRecord?.phase}:${logRecord?.id}`) ? "finally" : undefined} onChanged={run.refresh} />
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {editor && logRecord && <EditLabCommand record={logRecord} />}
