@@ -1084,6 +1084,7 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .file-plot.hidden { height: 0; border: 0; margin: 0; overflow: hidden; }   /* not display: none: its width is known */
 .file-plot-canvas { width: 100%; height: 298px; }
 .file-plot-note { margin: 0 0 8px; }
+.file-more { margin: 0 0 8px; }
 
 /* what a name is (kinds.tsx): a small glyph before it, the kind on hover */
 .named { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
