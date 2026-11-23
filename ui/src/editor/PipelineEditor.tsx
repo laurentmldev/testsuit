@@ -19,7 +19,7 @@ import {
   applyEdgeChanges, applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from "@xyflow/react";
 import { get, post } from "../api";
-import { COMMENT_COLORS, COMMENT_WIDTH, CommentNode, commentCard, commentColor, type CommentCard } from "../comments";
+import { COMMENT_COLORS, COMMENT_WIDTH, CommentNode, commentCard, commentColor, PinEdge, pinEdge, type CommentCard } from "../comments";
 import { Choices, Combo, Dialog, Field, helpText, IdText, KeysProvider, KeyValues, Section, Tags, Text, Toggle, useHelp, type Choice } from "../fields";
 import { layout } from "../graph";
 import { Named } from "../kinds";
@@ -81,6 +81,7 @@ function LaneNode({ data }: NodeProps) {
 }
 
 const nodeTypes = { step: EditStepNode, lane: LaneNode, comment: CommentNode };
+const edgeTypes = { pin: PinEdge };
 
 /** What the editor asks the graph, to place a card: the middle of the view, a step's place, a card's place. */
 interface GraphApi {
@@ -221,10 +222,17 @@ function StepGraph({ lanes, selected, onSelect, onConnect, onDisconnect, onDelet
     card: (i) => cards.find((n) => n.id === `comment:${i}`)?.position || null,
   };
   const shown = useMemo(() => [...live, ...cards.map((n) => ({ ...n, selected: selectedComment === Number(n.id.slice(8)) }))], [live, cards, selectedComment]);
+  // a pinned card: a line to its step (not an arrow of the pipeline: never selected nor deleted)
+  const pins = useMemo(() => {
+    const nodeOf: Record<string, string> = {};
+    for (const n of live) if (n.type === "step") nodeOf[(n.data as any).id] = n.id;
+    return comments.flatMap((c, i) => (c.step && nodeOf[c.step] ? [pinEdge(`comment:${i}`, nodeOf[c.step])] : []));
+  }, [live, comments]);
+  const allEdges = useMemo(() => [...pins, ...edges], [pins, edges]);
   return (
     <>
     <div className="graph-box editable">
-      <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={(f) => { flow.current = f as any; }} fitView fitViewOptions={{ maxZoom: 1.1 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
+      <ReactFlow nodes={shown} edges={allEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={(f) => { flow.current = f as any; }} fitView fitViewOptions={{ maxZoom: 1.1 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
         // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
         // measured again, which does not happen when its size did not change (the graph went blank on an update)
         onNodesChange={(changes) => {

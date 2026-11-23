@@ -486,7 +486,7 @@ Kinds: `state` (§4.6), `tcp`, `http` (§4.5.2 `expect`), `file`, `log` (`{file,
 
 ### 6.7 Comment cards
 
-`comments` on phases and sub-pipelines: `<text>` or `{text, step, x, y, width, color}`. `color` is one of `yellow` (default), `orange`, `red`, `pink`, `purple`, `blue`, `green`, `grey`, or `#rgb`/`#rrggbb`; anything else MUST be rejected. They MUST NOT be executed or rendered; a card pinned to a missing step is shown free with a warning, never an error. `GET /runs/{id}/pipeline` gives each phase's non-empty cards and those of every sub-pipeline it uses (at any depth, once per `uses` step) as `{text, step, color, group, part}` (`group`: the namespaced `uses` step id, empty for the phase's own); the run graph shows each in its group.
+`comments` on phases and sub-pipelines: `<text>` or `{text, step, x, y, width, color}`. `color` is one of `yellow` (default), `orange`, `red`, `pink`, `purple`, `blue`, `green`, `grey`, or `#rgb`/`#rrggbb`; anything else MUST be rejected. They MUST NOT be executed or rendered; a card pinned to a missing step is shown free with a warning, never an error. `GET /runs/{id}/pipeline` gives each phase's non-empty cards and those of every sub-pipeline it uses (at any depth, once per `uses` step) as `{text, step, color, group, part}` (`group`: the namespaced `uses` step id, empty for the phase's own); the run graph shows each in its group, a pinned one linked to its step by a line.
 
 ### 6.8 `exploit` action
 

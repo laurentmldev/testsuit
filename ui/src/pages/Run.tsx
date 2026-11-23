@@ -18,7 +18,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import { get, getText, post, url, useLabels, useResource } from "../api";
 import { FileBrowser } from "../files";
-import { COMMENT_WIDTH, CommentNode } from "../comments";
+import { COMMENT_WIDTH, CommentNode, PinEdge, pinEdge } from "../comments";
 import { layout, mergeGroupEdges } from "../graph";
 import { ago, attempt, Badge, classes, ConsoleText, Elapsed, openInNewTab, setQuery, Spinner, STATE_COLORS, time, useTick, ViaTag } from "../util";
 import { Named } from "../kinds";
@@ -128,6 +128,7 @@ function FrameNode({ data }: NodeProps) {
 }
 
 const nodeTypes = { step: StepNode, frame: FrameNode, comment: CommentNode };
+const edgeTypes = { pin: PinEdge };
 
 /** About how tall a comment card of the run graph is (its Markdown at 12px, COMMENT_WIDTH wide): the room its
  *  sub-pipeline frame keeps for it, laid out before the card is drawn. */
@@ -262,11 +263,21 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
           }
         });
       }
+      // a pinned card: a line to its step (an id of its phase, or of its sub-pipeline under its 'uses' step)
+      const pins: Edge[] = [];
+      for (const phase of pipeline.phases) {
+        (phase.comments || []).forEach((c: any, i: number) => {
+          // (pinned to a 'uses' step: to the frame of its sub-pipeline)
+          const step = typeof c === "object" && c.step ? `phase:${phase.id}/${c.group ? `${c.group}.` : ""}${c.step}` : "";
+          const node = step && [step, `${step}/steps`, `${step}/finally`].find((id) => list.some((n) => n.id === id));
+          if (node) pins.push(pinEdge(`comment:${phase.id}:${i}`, node));
+        });
+      }
       setNodes(list);
-      setEdges(edgeList.map((e) => ({
+      setEdges(pins.concat(edgeList.map((e) => ({
         ...e, markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
         style: e.className === "finally-edge" ? { strokeDasharray: "4 3", opacity: 0.5 } : e.className === "phase-edge" ? { strokeWidth: 2 } : undefined,
-      })));
+      }))));
     });
     return () => {
       cancelled = true;
@@ -321,7 +332,7 @@ export function RunGraph({ pipeline, records, selected, onSelect, focus }: {
 
   return (
     <div className="graph-box">
-      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }}
+      <ReactFlow nodes={live} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView minZoom={0.2} onInit={(f) => { flow.current = f as any; }}
         // the sizes React Flow measures are kept in the nodes: a node given again without them is hidden until
         // measured again, which does not happen when its size did not change (the graph went blank on an update)
         onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes.filter((c) => c.type === "dimensions"), ns))} nodesConnectable={false} proOptions={{ hideAttribution: true }}

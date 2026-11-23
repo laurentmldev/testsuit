@@ -15,7 +15,7 @@
 // like sticky notes, in Markdown, free or pinned to a step, in a color. Never run: the Editor draws them where they
 // were put (a pinned one follows its step), the run graph under their phase or at the bottom of their sub-pipeline.
 import type React from "react";
-import type { NodeProps } from "@xyflow/react";
+import { BaseEdge, Handle, Position, useInternalNode, type EdgeProps, type InternalNode, type NodeProps } from "@xyflow/react";
 import { classes, Markdown } from "./util";
 
 export const COMMENT_WIDTH = 220;
@@ -60,8 +60,37 @@ export function CommentNode({ data, selected }: NodeProps) {
   return (
     <div className={classes("comment-node", tint.className, selected && "selected", d.editable && "editable", empty && "empty", d.pin && "pinned")} style={tint.style}
       title={d.editable ? `Comment${d.pin ? ` pinned to ${d.pin}${d.lost ? " (no such step: shown free)" : ""}` : ""}: drag it to move it, click it to edit it` : "Comment (never run)"}>
+      {/* where the line to its step ends (drawn by PinEdge, from border to border): never connectable */}
+      <Handle type="target" position={Position.Top} isConnectable={false} className="comment-handle" />
       {d.pin && <div className={classes("comment-pin", d.lost && "lost")}>📌 {d.pin}</div>}
       {empty ? <span className="muted small">empty comment: write it in the panel on the right</span> : <Markdown text={d.text} />}
     </div>
   );
+}
+
+/** The point where the line from the center of a node to ``to`` leaves the node's box. */
+function border(node: InternalNode, to: { x: number; y: number }): { x: number; y: number; cx: number; cy: number } {
+  const { x, y } = node.internals.positionAbsolute;
+  const w = node.measured.width || 0, h = node.measured.height || 0;
+  const cx = x + w / 2, cy = y + h / 2;
+  const dx = to.x - cx, dy = to.y - cy;
+  const t = Math.min(dx ? w / 2 / Math.abs(dx) : Infinity, dy ? h / 2 / Math.abs(dy) : Infinity, 1);
+  return { x: cx + dx * t, y: cy + dy * t, cx, cy };
+}
+
+/** The line from a pinned comment card to its step (the edge's source is the step, its target the card): straight,
+ *  dashed, from border to border, whatever the sides they face. */
+export function PinEdge({ id, source, target, style }: EdgeProps) {
+  const step = useInternalNode(source);
+  const card = useInternalNode(target);
+  if (!step?.measured.width || !card?.measured.width) return null;
+  const centerOf = (n: InternalNode) => ({ x: n.internals.positionAbsolute.x + (n.measured.width || 0) / 2, y: n.internals.positionAbsolute.y + (n.measured.height || 0) / 2 });
+  const a = border(step, centerOf(card));
+  const b = border(card, centerOf(step));
+  return <BaseEdge id={id} path={`M ${a.x},${a.y} L ${b.x},${b.y}`} className="pin-edge" style={style} />;
+}
+
+/** The line of a card pinned to the step of that node id, for the graph's edges. */
+export function pinEdge(card: string, step: string): { id: string; source: string; target: string; type: "pin"; selectable: false; deletable: false; focusable: false; zIndex: number } {
+  return { id: `pin:${card}`, source: step, target: card, type: "pin", selectable: false, deletable: false, focusable: false, zIndex: 999 };
 }
