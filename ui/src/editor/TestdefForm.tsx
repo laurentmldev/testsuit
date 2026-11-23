@@ -13,6 +13,7 @@
 
 // Test definition form (sequencer README, section 8.3): what it is, the setup configuration it uses and its
 // key files. The pipeline itself has its own view (PipelineEditor).
+import { Named } from "../kinds";
 import { useState } from "react";
 import { Combo, Field, helpText, Section, Tags, Text, type Choice } from "../fields";
 import { joinPath, Markdown, relPath } from "../util";
@@ -81,7 +82,7 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
                   <td><code>{id}</code> <span className="muted small">{c.name}</span></td>
                   <td>{c.slot_class}</td><td>{c.configuration}</td>
                   <td>{c.stage_slot ? `${c.stage_slot} (${config.stage_slots?.[c.stage_slot] || "?"})` : <span className="muted">ad hoc</span>}</td>
-                  <td>{c.role}</td><td className="small">{(c.needs || []).join(", ")}</td>
+                  <td>{c.role && <Named kind="role" name={c.role} />}</td><td className="small">{(c.needs || []).join(", ")}</td>
                 </tr>
               ))}
             </tbody>

@@ -16,7 +16,7 @@
 // roles with the components that have them...).
 import { createContext, CSSProperties, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { classes, idInput, idProblem, Markdown, notify } from "./util";
-import { KindIcon, kindName, KINDS, type Kind } from "./kinds";
+import { KindIcon, kindName, KINDS, nameClass, type Kind } from "./kinds";
 
 // ── help panel ──────────────────────────────────────────────────────────
 
@@ -407,7 +407,7 @@ export function Combo({
   return (
     <div className={classes("combo", shownKind && "with-kind")} ref={box}>
       {shownKind && <KindIcon kind={shownKind} title={v ? kindName(shownKind, v) : KINDS[shownKind].label} />}
-      <input ref={input} className={classes(mono && "mono", strict && v && !known && "invalid")} value={v} placeholder={placeholder}
+      <input ref={input} className={classes(mono && "mono", nameClass(shownKind), strict && v && !known && "invalid")} value={v} placeholder={placeholder}
         autoFocus={autoFocus}
         onFocus={() => {
           setOpen(true);
@@ -437,7 +437,7 @@ export function Combo({
                 pick(c);
               }} onMouseEnter={() => setActive(i)}>
               <div className="combo-value">
-                {c.kind && <KindIcon kind={c.kind} />}{c.label || c.value}
+                {c.kind && <KindIcon kind={c.kind} />}<span className={nameClass(c.kind) || undefined}>{c.label || c.value}</span>
                 {c.group ? <span className="combo-group">{c.group}</span> : mixed && c.kind && <span className="combo-kind">{KINDS[c.kind].label}</span>}
               </div>
               {c.description && <div className="combo-item-desc"><Markdown text={c.description} /></div>}
@@ -467,7 +467,7 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
   return (
     <div className="tags">
       {list.map((t) => (
-        <span key={t} className="tag" title={kind ? kindName(kind, t) : undefined}>
+        <span key={t} className={classes("tag", nameClass(kind))} title={kind ? kindName(kind, t) : undefined}>
           {kind && <KindIcon kind={kind} />}
           {onOpen ? <button type="button" className="tag-open" onClick={() => onOpen(t)} title={openTitle}>{t}</button> : t}
           <button type="button" onClick={() => onChange(list.filter((x) => x !== t))} title="Remove">×</button>
