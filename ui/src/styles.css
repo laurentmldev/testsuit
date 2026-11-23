@@ -1112,8 +1112,16 @@ main.plot-host .subtabs-row { margin: 0; max-width: none; }
 .kind-legend-title { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
 .kind-legend-pop p { margin: 8px 0 0; white-space: normal; }
 
-/* Datapacks: the Test definitions and Campaigns subtabs; a campaign, its dataset versions; a campaign run */
-.datapacks-subtabs { margin: 6px 0 12px; }
+/* Datapacks: the Test definitions, Campaigns and Requirements subtabs; a campaign, its dataset versions; a campaign run */
+.datapacks-subtabs { margin: 10px 0 14px; gap: 6px; border-bottom-width: 2px; }
+.datapacks-subtabs button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; margin-bottom: -2px;
+  border-bottom-width: 3px; border-radius: 7px 7px 0 0; font-size: 15px; font-weight: 600; color: var(--muted); }
+.datapacks-subtabs button .nav-icon { flex-shrink: 0; opacity: .85; }
+.datapacks-subtabs button:hover:not(:disabled) { color: var(--text); background: var(--panel-2); border-bottom-color: var(--border); }
+.datapacks-subtabs button.selected, .datapacks-subtabs button.selected:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); border-bottom-color: var(--accent); }
+.datapacks-subtabs button.selected .nav-icon { opacity: 1; }
+.datapacks-subtabs .count { padding: 0 7px; border-radius: 10px; font-size: 11.5px; line-height: 18px; background: var(--panel-2); color: var(--muted); }
+.datapacks-subtabs button.selected .count { background: var(--accent); color: var(--panel); }
 .campaign-pick { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
 .campaign-pick .mono { word-break: break-all; }
 .synthesis.campaign table.baseline code.replaced { text-decoration: line-through; opacity: .6; }
