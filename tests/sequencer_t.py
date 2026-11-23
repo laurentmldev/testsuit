@@ -1928,37 +1928,38 @@ def test_local_process_closed_when_the_loop_stops(tmp_path, monkeypatch):
 
 def test_zip_entry_ranges(tmp_path):
     """A file of a zip, whole or a byte range of it (HTTP Range: the file viewer reads a big file in parts)."""
+    import asyncio
     import zipfile
 
-    from fastapi import FastAPI, Header
-    from fastapi.testclient import TestClient
+    from fastapi import HTTPException
 
     from testsuit.sequencer.api import zip_entry
     data = bytes(range(256)) * 4000
     archive = tmp_path / "pack.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("pack/data/big.csv", data)
-    app = FastAPI()
 
-    @app.get("/f/{path:path}")
-    def get(path: str, range_header: str | None = Header(None, alias="range")):
-        return zip_entry(archive, path, range_header)
+    def get(path, asked=None):
+        answer = zip_entry(archive, path, asked)
 
-    client = TestClient(app)
-    whole = client.get("/f/data/big.csv")
-    assert whole.status_code == 200 and whole.content == data and whole.headers["Accept-Ranges"] == "bytes"
+        async def body():
+            return b"".join([chunk async for chunk in answer.body_iterator])
+        return answer, asyncio.run(body())
+
+    whole, content = get("data/big.csv")
+    assert whole.status_code == 200 and content == data and whole.headers["Accept-Ranges"] == "bytes"
     for asked, start, end in (("bytes=1000-1999", 1000, 1999), ("bytes=900000-", 900000, len(data) - 1),
                               ("bytes=-10", len(data) - 10, len(data) - 1), ("bytes=5-99999999", 5, len(data) - 1)):
-        r = client.get("/f/data/big.csv", headers={"Range": asked})
-        assert r.status_code == 206 and r.content == data[start:end + 1], asked
+        r, content = get("data/big.csv", asked)
+        assert r.status_code == 206 and content == data[start:end + 1], asked
         assert r.headers["Content-Range"] == f"bytes {start}-{end}/{len(data)}"
         assert r.headers["Content-Length"] == str(end - start + 1)
-    outside = client.get("/f/data/big.csv", headers={"Range": f"bytes={len(data)}-"})
-    assert outside.status_code == 416 and outside.headers["Content-Range"] == f"bytes */{len(data)}"
-    # several ranges, or not bytes: the whole file
-    assert client.get("/f/data/big.csv", headers={"Range": "bytes=0-1,5-6"}).content == data
-    assert [e["name"] for e in client.get("/f/data", headers={"Range": "bytes=0-1"}).json()] == ["big.csv"]
-
+    with pytest.raises(HTTPException) as outside:
+        zip_entry(archive, "data/big.csv", f"bytes={len(data)}-")
+    assert outside.value.status_code == 416 and outside.value.headers["Content-Range"] == f"bytes */{len(data)}"
+    # several ranges: the whole file
+    assert get("data/big.csv", "bytes=0-1,5-6")[1] == data
+    assert [e["name"] for e in zip_entry(archive, "data", "bytes=0-1")] == ["big.csv"]
 
 def test_daemon_api_and_cli(daemon, capsys):
     import requests
