@@ -1259,8 +1259,6 @@ input.manual-note { flex: 1; min-width: 200px; }
 /* Role names: weaker content than the names around them (a role is only a list of commands), lighter and italic. */
 .role-name, .named.role-name, input.role-name { color: var(--weak); font-style: italic; }
 button.link .role-name:hover { color: var(--accent); }
-.req-sub { border-left: 2px solid var(--border); padding-left: 10px; }
-.req-sub .field { grid-template-columns: 120px minmax(0, 1fr); margin: 4px 0; }
 .req-auth { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
 .req-auth > * { flex: 1 1 160px; min-width: 0; }
 .req-auth > select { flex: 0 0 auto; }
@@ -1268,3 +1266,8 @@ button.link .role-name:hover { color: var(--accent); }
 .req-fields td:first-child { width: 110px; }
 .req-fields input { width: 100%; }
 table.grid.req-fields td { vertical-align: middle; }
+.req-group { border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px 8px; margin: 10px 0 12px; background: color-mix(in srgb, var(--border) 18%, transparent); }
+.req-group > legend { padding: 0 6px; font-weight: 600; font-size: 13px; }
+.req-group > legend .q { margin-left: 4px; }
+.req-group .field { grid-template-columns: 150px minmax(0, 1fr); }
+.req-group > .req-fields { margin: 6px 0; }
