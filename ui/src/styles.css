@@ -496,6 +496,11 @@ button .spinner { width: 11px; height: 11px; vertical-align: -1px; margin-right:
 .synthesis-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .synthesis-head h3 { margin: 0 0 2px; }
 .synthesis-head p { margin: 4px 0 0; }
+.synthesis-actions { display: flex; gap: 8px; }
+.synthesis-actions .nav-icon { flex-shrink: 0; margin-right: 2px; }
+/* Edit (the test definition, in the Editor) beside Generate…: violet, so it is not taken for the blue primary action */
+button.edit-testdef { color: var(--wait); background: var(--wait-soft); border-color: color-mix(in srgb, var(--wait) 45%, var(--border)); font-weight: 500; }
+button.edit-testdef:hover:not(:disabled) { border-color: var(--wait); }
 .synthesis .chip { margin-right: 4px; }
 .synthesis table.keys tr.off td { opacity: .55; text-decoration: line-through; }
 .version-edit { display: flex; gap: 6px; align-items: center; }
@@ -943,7 +948,7 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .webui-nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .workspace-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 8px; padding: 6px 10px;
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; background: var(--panel); }
-.workspace-actions .edit-workspace { margin-left: auto; padding: 5px 16px; font-weight: 600; }
+.workspace-actions .edit-workspace { margin-left: auto; }
 .workspace-actions .repo-sync-slot { display: contents; }
 .keys-explorer .row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .keys-explorer input[type="search"] { flex: 1; }
