@@ -16,6 +16,7 @@
 // labels of the nodes, and each requirement with its path in the tree).
 import { useMemo, useState } from "react";
 import { Combo, Field, helpText, IdText, KeyValues, Section, Tags, Text, type Choice } from "../fields";
+import { send } from "../api";
 import { classes, joinPath } from "../util";
 import { clone, useSession, type Doc } from "./state";
 
@@ -145,7 +146,19 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   help: (p: (string | number)[]) => string | undefined;
   onChange: (spec: Data) => void; onRename: (to: string) => void; onDefault: () => void; onRemove: () => void;
 }) {
-  const { files, open } = useSession();
+  const { sid, files, open } = useSession();
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const test = async () => {
+    setTesting(true);
+    try {
+      setResult(await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name }));
+    } catch (e: any) {
+      setResult({ ok: false, error: String(e?.message || e) });
+    } finally {
+      setTesting(false);
+    }
+  };
   const backend = backends.find((b) => b.name === String(spec.backend || "").toLowerCase());
   const options: Data = spec.options || {};
   const credentials: Data = spec.credentials || {};
@@ -172,8 +185,29 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <input type="radio" checked={isDefault} onChange={onDefault} /> default
         </label>
         <span className="grow" />
+        <button className="small" disabled={testing} onClick={test}
+          title="Read this source as datapack generation does, from the file as saved: its credentials are read from the environment of the sequencer host">
+          {testing ? "Testing…" : "Test connection"}</button>
         <button className="icon" title="Remove this source" onClick={onRemove}>×</button>
       </div>
+      {result && (
+        <div className={classes("req-test", result.ok ? "ok" : "bad")}>
+          {result.ok ? (
+            <>
+              <div><strong>{result.count}</strong> requirement(s), {result.nodes} node(s), read in {result.seconds} s{result.count > result.sample.length ? `; the first ${result.sample.length}:` : ":"}</div>
+              {result.sample.length > 0 && (
+                <table className="grid compact">
+                  <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th><th>Version</th></tr></thead>
+                  <tbody>{result.sample.map((r: any) => (
+                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{r.title}</td><td>{r.status}</td><td className="mono small">{r.version}</td></tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </>
+          ) : <div className="error-text">{result.error}</div>}
+          <button className="link small" onClick={() => setResult(null)}>hide</button>
+        </div>
+      )}
       <Field label="Backend" help={help(["sources", name, "backend"])}
         error={spec.backend && !backend ? `no backend '${spec.backend}' here: a plugin registers it` : null}>
         <Combo mono value={spec.backend} onChange={(v) => set("backend", v)} choices={backendChoices} />

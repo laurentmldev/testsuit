@@ -479,3 +479,112 @@ def test_reqif_backend(tmp_path):
         create_req_backend("reqif", {"file": "bad.reqif"}, None, tmp_path)
     reqif = next(d for d in describe_req_backends() if d["name"] == "reqif")
     assert {"file", "id_attribute", "specifications"} <= set(reqif["options"])
+
+
+ALM = [{"key": f"ALM-{i}", "fields": {"name": f"Item {i}", "text": f"Text {i}", "status": {"name": "approved" if i != 3 else "rejected"}},
+        "folder": [{"name": "SYS"}, {"name": "BRAKE" if i < 3 else "SPEED"}], "labels": [{"name": "critical"}] if i == 1 else []}
+       for i in range(1, 6)]
+
+
+@pytest.fixture
+def alm_server():
+    """A requirements tool with a JSON REST API: bearer token, pages, a cursor, get by ids and by id."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+    calls = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            url = urlparse(self.path)
+            q = {k: v[0] for k, v in parse_qs(url.query).items()}
+            calls.append(self.path)
+            if self.headers.get("Authorization") != "Bearer s3cret":
+                return self.answer(401, {"error": "who are you"})
+            if url.path == "/api/items":                       # ?page=N, 2 per page
+                page = int(q.get("page", 1))
+                return self.answer(200, {"data": ALM[(page - 1) * 2:page * 2]})
+            if url.path == "/api/cursor":                      # links.next
+                start = int(q.get("from", 0))
+                nxt = f"/api/cursor?from={start + 3}" if start + 3 < len(ALM) else None
+                return self.answer(200, {"data": ALM[start:start + 3], "links": {"next": nxt}})
+            if url.path == "/api/byids":
+                ids = q.get("ids", "").split(",")
+                return self.answer(200, {"data": [a for a in ALM if a["key"] in ids]})
+            if url.path.startswith("/api/item/"):
+                found = [a for a in ALM if a["key"] == url.path.rsplit("/", 1)[1]]
+                return self.answer(200, found[0]) if found else self.answer(404, {"error": "no such item"})
+            self.answer(404, {})
+
+        def answer(self, status, body):
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}", calls
+    server.shutdown()
+
+
+def test_rest_backend(tmp_path, alm_server, monkeypatch):
+    """The built-in generic REST backend: authentication, pagination by page or cursor, jq fields, get by ids or id."""
+    from testsuit.reqs.backend import create_req_backend
+    base, calls = alm_server
+    fields = {"id": ".key", "title": ".fields.name", "description": ".fields.text", "status": ".fields.status.name",
+              "path": '[.folder[]?.name] | join("/")', "tags": "[.labels[]?.name]"}
+    options = {"base": base + "/api", "auth": {"bearer": "token"}, "fields": fields, "url": "https://alm/{id}",
+               "list": {"url": "items?page={page}", "items": ".data[]"}}
+    b = create_req_backend("rest", options, {"token": "s3cret"}, tmp_path)
+    reqs = {r.id: r for r in b.list("", True)}
+    assert list(reqs) == [f"ALM-{i}" for i in range(1, 6)] and len(calls) == 4     # 3 pages and an empty one
+    r1 = reqs["ALM-1"]
+    assert (r1.title, r1.description, r1.path, r1.tags, r1.status, r1.url) == (
+        "Item 1", "Text 1", "SYS/BRAKE", ["critical"], "approved", "https://alm/ALM-1")
+    assert reqs["ALM-3"].inactive and len(r1.version) == 8
+    assert [n.as_dict()["id"] for n in b.tree()] == ["SYS"] and [r.id for r in b.list("SYS/SPEED")] == ["ALM-3", "ALM-4", "ALM-5"]
+
+    # a cursor (next), get by ids then by id (404: unknown)
+    cursor = {**options, "list": {"url": "cursor", "items": ".data[]", "next": ".links.next // empty"},
+              "get": {"url": "byids?ids={ids}", "items": ".data[]"}}
+    calls.clear()
+    b = create_req_backend("rest", cursor, {"token": "s3cret"}, tmp_path)
+    got = b.get(["ALM-2", "ALM-9"])
+    assert got["ALM-2"].title == "Item 2" and got["ALM-9"] is None and calls == ["/api/byids?ids=ALM-2,ALM-9"]
+    assert len(b.list("", True)) == 5 and len(calls) == 3
+    one = {**options, "get": {"url": "item/{id}", "items": "."}}
+    b = create_req_backend("rest", one, {"token": "s3cret"}, tmp_path)
+    got = b.get(["ALM-4", "NOPE"])
+    assert got["ALM-4"].path == "SYS/SPEED" and got["NOPE"] is None
+
+    # errors: a bad token, a bad jq expression, an unknown credential, an unknown field
+    with pytest.raises(ReqError, match="HTTP 401"):
+        create_req_backend("rest", options, {"token": "wrong"}, tmp_path).list()
+    with pytest.raises(ReqError, match="field 'title': jq expression"):
+        create_req_backend("rest", {**options, "fields": {**fields, "title": ".fields[["}}, {"token": "x"}, tmp_path)
+    with pytest.raises(ReqError, match="credential 'token'"):
+        create_req_backend("rest", options, None, tmp_path)
+    with pytest.raises(ReqError, match="unknown field"):
+        create_req_backend("rest", {**options, "fields": {"colour": ".c"}}, {"token": "x"}, tmp_path)
+
+    # through a sources file and the Editor's Test connection
+    from editor_t import Repos
+    monkeypatch.setenv("ALM_TOKEN", "s3cret")
+    repos = Repos(tmp_path / "repos")
+    editor = repos.editor
+    session = editor.open("workspace0")
+    editor.write(session, "requirements.yml", content=yaml.safe_dump({"sources": {"alm": {
+        "backend": "rest", "credentials": {"token": "env:ALM_TOKEN"}, "options": options}}}))
+    assert editor.check_file(session, "requirements.yml") == []
+    result = editor.requirements_test(session, "requirements.yml", "alm")
+    assert result["ok"] and result["count"] == 5 and result["nodes"] == 3 and result["sample"][0]["id"] == "ALM-1"
+    monkeypatch.setenv("ALM_TOKEN", "wrong")
+    result = editor.requirements_test(session, "requirements.yml", "alm")
+    assert not result["ok"] and "HTTP 401" in result["error"]

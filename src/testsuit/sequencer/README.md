@@ -1279,7 +1279,7 @@ The **report** gives, for each run: its test definition, verdict, duration, the 
 
 ### 10.3 Requirements coverage
 
-Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API. Two backends are built in: `yaml` reads a YAML file of the tests repository, and `reqif` reads a ReqIF export (`.reqif`, or `.reqifz`) of any requirements tool kept in it.
+Tests can say which **requirements** they verify, and `reqs` shows how well a set of tests or a campaign covers them ([SPEC §5.5](SPEC.md#55-requirements-coverage)). The requirements stay in their own tool (Polarion, DOORS, Jama, a wiki...): a plugin gives access to it through a small read-only API. Three backends are built in: `yaml` reads a YAML file of the tests repository, `reqif` a ReqIF export (`.reqif`, or `.reqifz`) of any requirements tool kept in it, and `rest` any tool with a JSON REST API, its fields picked with jq expressions.
 
 ```yaml
 # requirements.yml, at the root of the tests repository: the requirements themselves (one source, 'reqs')...
@@ -1300,6 +1300,31 @@ sources:
   sys: {backend: reqif, options: {file: reqs/system.reqifz, url: "https://doors.example/rm/{id}"}}
   jama: {backend: jama, options: {url: https://jama.example/rest}, credentials: {token: env:JAMA_TOKEN}}
 ```
+
+**REST** (`backend: rest`): any tool with a JSON REST API, configured in the sources file alone. Its options give the base URL, the authentication (with the names of the credentials: `auth: {bearer: token}`, `{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`), how to list every requirement (`list: {url, items, next}`: `items` a [jq](https://jqlang.org/manual/) expression giving the requirements of an answer, pagination with `next` (jq giving the next page's URL) or `{page}` / `{offset}` in the URL), optionally how to get some by id (`get: {url, items}` with `{ids}` or `{id}` in the URL), and a jq expression per field of a requirement:
+
+```yaml
+sources:
+  alm:
+    backend: rest
+    credentials: {token: env:ALM_TOKEN}
+    options:
+      base: https://alm.example/api/v2
+      auth: {bearer: token}
+      list: {url: "/projects/12/items?type=requirement&page={page}", items: ".data[]"}
+      get: {url: "/items?ids={ids}", items: ".data[]"}
+      fields:
+        id: .fields.documentKey
+        title: .fields.name
+        description: .fields.description
+        path: '[.location.folder[]?.name] | join("/")'      # the tree: the paths of the requirements
+        status: .fields.status.name
+        tags: '[.tags[]?.name]'
+        version: .version                                     # default: a hash of the content
+      url: https://alm.example/items/{id}
+```
+
+**Test connection**, on each source of the Editor's form, reads it as datapack generation does (with the credentials of the sequencer host's environment) and shows how many requirements and nodes it found and the first ones, or the error.
 
 **ReqIF** (`backend: reqif`): the OMG interchange format DOORS, DOORS Next, Polarion, Jama, Codebeamer and most other tools export. Export the requirements to the tests repository and commit the file; export again when they change (a test that verified a requirement whose text changed since shows *changed since*). Each specification of the file is a top node of the tree, each heading in it a node under it, and each other object a requirement in the node of the headings above it. The id, title, text (XHTML, kept as text), rationale, status and comments are read from the usual attributes (`ReqIF.ForeignID`, `ReqIF.Name`, `ReqIF.Text`, `ReqIF.ChapterName`, `Status`...); options name others when a tool uses its own (`id_attribute`, `title_attribute`, `description_attribute`, `heading_attribute`, `status_attribute`, `tags_attribute`...), pick specifications (`specifications`), tell headings and requirements by their type (`heading_types`, `requirement_types`), and take the version from an attribute or the date of the last change (`version_attribute: LAST-CHANGE`; default: a hash of the content). The Editor's form lists them with their help.
 
@@ -1357,7 +1382,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
-| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml`, `reqif` |
+| `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml`, `reqif`, `rest` |
 
 Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
 
@@ -1409,7 +1434,7 @@ tsq config                                                  # settings in use, a
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `GET` gives the file's `version`, a hash of its content; a `PUT` of `data` merges it into the file, keeping its comments; a `PUT` with `base: <version>` is refused, 409 with the file as it is now in `current`, when the file is another version), `GET .../version/{path}`, `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
   - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `.../exploit_keys` (the keys the criteria of an exploit step read that nothing defines), `POST /edit/reachability`;
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
-  - `GET .../requirements[/report]?source=&campaign=` (the requirements tree and coverage of the Requirements subtab, section 10.3);
+  - `GET .../requirements[/report]?source=&campaign=` (the requirements tree and coverage of the Requirements subtab, section 10.3), `POST .../requirements/test` (`path`, `source`: read one source, its count, nodes and first requirements, or the error);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
   - campaigns: `POST .../campaign/synthesis` (its test definitions, the datasets they import against the versions it pins, its routing against the lab, its problems), `POST .../campaign/jobs` (generate it in the background; followed as a datapack generation, `GET .../datapack/jobs/{job}`), `GET .../campaign/{name}/files/{zip}`, `POST .../campaign/{name}/submit`;
   - `GET .../diff`, `POST .../push` (the user's credentials in the request body, required, never stored), `POST .../rebase`; then `POST /lab/reload` with a revision.
