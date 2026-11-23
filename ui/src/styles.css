@@ -1259,3 +1259,12 @@ input.manual-note { flex: 1; min-width: 200px; }
 /* Role names: weaker content than the names around them (a role is only a list of commands), lighter and italic. */
 .role-name, .named.role-name, input.role-name { color: var(--weak); font-style: italic; }
 button.link .role-name:hover { color: var(--accent); }
+.req-sub { border-left: 2px solid var(--border); padding-left: 10px; }
+.req-sub .field { grid-template-columns: 120px minmax(0, 1fr); margin: 4px 0; }
+.req-auth { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.req-auth > * { flex: 1 1 160px; min-width: 0; }
+.req-auth > select { flex: 0 0 auto; }
+.req-fields { width: 100%; }
+.req-fields td:first-child { width: 110px; }
+.req-fields input { width: 100%; }
+table.grid.req-fields td { vertical-align: middle; }
