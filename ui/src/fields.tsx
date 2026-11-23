@@ -386,7 +386,8 @@ export function Combo({
   const v = value ?? "";
   const shown = useMemo(() => {
     const q = typed ? v.toLowerCase() : "";
-    return choices.filter((c) => !q || c.value.toLowerCase().includes(q) || (c.label || "").toLowerCase().includes(q)).slice(0, 60);
+    return choices.filter((c) => !q || c.value.toLowerCase().includes(q) || (c.label || "").toLowerCase().includes(q)
+      || (c.group || "").toLowerCase().includes(q)).slice(0, 60);
   }, [choices, v, typed]);
   useEffect(() => {
     const close = (e: MouseEvent) => box.current && !box.current.contains(e.target as Node) && setOpen(false);

@@ -318,6 +318,11 @@ def test_editor_requirements_page(tmp_path):
     rows = {r["key"]: r["coverage"] for r in data["coverage"]["requirements"]}
     assert rows == {"REQ-1": "not run", "REQ-2": "uncovered", "REQ-3": "uncovered", "REQ-5": "uncovered"}
     assert data["coverage"]["tests"][0]["origin"] == "testdef/count/testdef.yml"
+    # the quick search of the test definition form: active requirements of every source, by reference
+    found = editor.requirements_search(session, "testdef/count/testdef.yml")
+    assert found["sources_file"] == "requirements.yml" and found["default"] == "reqs" and not found["errors"]
+    assert {i["key"] for i in found["items"]} == {"REQ-1", "REQ-2", "REQ-3", "REQ-5"}         # REQ-4: rejected
+    assert next(i for i in found["items"] if i["key"] == "REQ-1")["path"] == "SYS/COUNT"
 
 
 def test_editor_requirements_form(tmp_path, monkeypatch):

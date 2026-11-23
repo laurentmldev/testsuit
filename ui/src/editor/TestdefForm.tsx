@@ -14,14 +14,15 @@
 // Test definition form (sequencer README, section 8.3): what it is, the setup configuration it uses and its
 // key files. The pipeline itself has its own view (PipelineEditor).
 import { Named } from "../kinds";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useResource } from "../api";
 import { Combo, Field, helpText, Section, Tags, Text, type Choice } from "../fields";
 import { joinPath, Markdown, relPath } from "../util";
 import { DictionaryDialog } from "./DictionaryDialog";
 import { clone, useSession, type Doc } from "./state";
 
 export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void } }) {
-  const { ctx, schemas, files, open } = useSession();
+  const { sid, ctx, schemas, files, open } = useSession();
   const data = doc.data || {};
   const help = (f: string) => helpText(schemas.testdef, [f]);
   const set = (k: string, v: any) => {
@@ -45,6 +46,12 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   const config = setup?.configurations?.[data.setup_config];
   const dictChoices: Choice[] = files.filter((f) => f.kind === "dictionary").map((f) => ({ value: relPath(doc.path, f.path), description: f.path }));
   const [dictionary, setDictionary] = useState<string | null>(null);
+  // every requirement of the sources, for the quick search of the Requirements field
+  const reqSearch = useResource<any>(`edit/sessions/${sid}/requirements/search?path=${encodeURIComponent(doc.path)}`);
+  const reqChoices: Choice[] = useMemo(() => (reqSearch.data?.items || []).map((r: any) => ({
+    value: r.key, label: r.title ? `${r.key} · ${r.title}` : r.key, group: r.path || undefined,
+    description: r.status || undefined,
+  })), [reqSearch.data]);
   const usedIds = (ctx.workspace?.testdefs || []).filter((t: any) => t.path !== doc.path).map((t: any) => t.id);
   return (
     <div className="form pad">
@@ -96,8 +103,12 @@ export function TestdefForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
       </Section>
       <Section title="Requirements" collapsed={!(Array.isArray(data.reqs) ? data.reqs.length : data.reqs)}
         help="Requirements the test verifies, `[<source>:]<id>[@<version>]`, from the sources of `requirements.yml` at the root of the tests repository. A check of the criteria can list its own (`reqs`); a requirement listed here is verified by the run verdict. Unknown, deleted or rejected ones are problems, and fail the generation unless forced.">
-        <Field label="Requirements" help={help("reqs")}>
-          <Tags value={Array.isArray(data.reqs) ? data.reqs : data.reqs ? [String(data.reqs)] : []} onChange={(v) => set("reqs", v)} placeholder="REQ-12" />
+        <Field label="Requirements" help={help("reqs")}
+          hint={reqSearch.data && (reqSearch.data.sources_file
+            ? <>{reqSearch.data.items.length} requirement(s) from <code>{reqSearch.data.sources_file}</code>: click the field and type an id, a title or a path{reqSearch.data.errors?.length ? <span className="bad-text"> · {reqSearch.data.errors.join("; ")}</span> : null}</>
+            : <>No <code>requirements.yml</code> in this repository yet.</>)}>
+          <Tags value={Array.isArray(data.reqs) ? data.reqs : data.reqs ? [String(data.reqs)] : []} onChange={(v) => set("reqs", v)}
+            placeholder="search: id, title or path…" choices={reqChoices} />
         </Field>
       </Section>
       <Section title="Keys given at each generation" collapsed={!Object.keys(data.user_keys || {}).length}

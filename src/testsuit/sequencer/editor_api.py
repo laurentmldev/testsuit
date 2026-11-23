@@ -208,6 +208,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         """The requirements of a tests repository and their coverage by its test definitions (SPEC §5.5)."""
         return await run(editor.requirements, session(sid), source, campaign)
 
+    @app.get("/edit/sessions/{sid}/requirements/search")
+    async def requirements_search(sid: str, path: str | None = None):
+        """Every active requirement of every source, by the reference a test definition writes: the quick search of
+        the Requirements field of the test definition form."""
+        return await run(editor.requirements_search, session(sid), path)
+
     @app.post("/edit/sessions/{sid}/requirements/test")
     async def requirements_test(sid: str, body: dict):
         """Read one source of a sources file as saved (`path`, `source`): count, tree size, first requirements, or the

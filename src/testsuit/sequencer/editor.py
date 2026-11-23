@@ -1516,6 +1516,38 @@ class Editor:
         out, cov = self.requirements_coverage(session, source, campaign)
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
 
+    def requirements_search(self, session: EditSession, path: str | None = None) -> dict:
+        """Every active requirement of every source of the sources file of the tests repository, by the reference a
+        test definition writes (its id, prefixed by its source unless the default one): the quick search of the
+        Requirements field of the test definition form. ``path``: the file being edited (the nearest sources file)."""
+        from testsuit.reqs.backend import ReqError, list_requirements
+        from testsuit.reqs.sources import Sources, find_sources_file
+        start = self.path(session, path) if path else session.folder
+        file = find_sources_file(start if start.exists() else session.folder) or find_sources_file(session.folder)
+        out: dict[str, Any] = {"sources_file": None, "default": None, "items": [], "errors": []}
+        if file is None:
+            return out
+        out["sources_file"] = self.rel(session, file) if file.is_relative_to(session.folder) else str(file)
+        try:
+            sources = Sources(file)
+        except ReqError as e:
+            out["errors"].append(str(e))
+            return out
+        out["default"] = sources.default
+        for name in sources.names:
+            try:
+                reqs = list_requirements(sources.backend(name), "", True)
+            except ReqError as e:
+                out["errors"].append(f"{name}: {e}")
+                continue
+            for r in reqs:
+                if r.inactive:
+                    continue
+                key = r.id if name == sources.default else f"{name}:{r.id}"
+                out["items"].append({"key": key, "id": r.id, "source": name, "title": r.title, "path": r.path,
+                                     "status": r.status})
+        return out
+
     def requirements_test(self, session: EditSession, path: str, source: str) -> dict:
         """Read one source of a sources file of the session as it is saved, as datapack generation would: how many
         requirements, how long it took, the tree and the first requirements, or what went wrong (Editor form)."""
