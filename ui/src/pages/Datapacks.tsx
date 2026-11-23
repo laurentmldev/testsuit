@@ -349,7 +349,7 @@ function LogicalConfig({ data, edit, sid, config }: { data: any; edit: (f: strin
         <tbody>
           {data.slots.map((c: any) => (
             <tr key={c.id}>
-              <td>{c.role || <span className="muted">none</span>}</td>
+              <td>{c.role ? <Named kind="role" name={c.role} /> : <span className="muted">none</span>}</td>
               <td><strong>{c.id}</strong><div className="muted small">{c.name}</div></td>
               <td><code>{c.slot_class}</code></td>
               <td>{c.configuration}</td>
