@@ -1307,7 +1307,7 @@ sources:
   jama: {backend: jama, options: {url: https://jama.example/rest}, credentials: {token: env:JAMA_TOKEN}}
 ```
 
-**REST** (`backend: rest`): any tool with a JSON REST API, configured in the sources file alone. Its options give the base URL, the authentication (with the names of the credentials: `auth: {bearer: token}`, `{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`), how to list every requirement (`list: {url, items, next}`: `items` a [jq](https://jqlang.org/manual/) expression giving the requirements of an answer, pagination with `next` (jq giving the next page's URL) or `{page}` / `{offset}` in the URL), optionally how to get some by id (`get: {url, items}` with `{ids}` or `{id}` in the URL), and a jq expression per field of a requirement:
+**REST** (`backend: rest`): any tool with a JSON REST API, configured in the sources file alone. Its options give the base URL, the authentication (with the names of the credentials: `auth: {bearer: token}`, `{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`), how to list every requirement (`list: {url, items, next}`: `items` a [jq](https://jqlang.org/manual/) expression giving the requirements of an answer, pagination with `next` (jq giving the next page's URL) or `{{ page }}` / `{{ offset }}` in the URL), optionally how to get some by id (`get: {url, items}` with `{{ ids }}` or `{{ id }}` in the URL), and a jq expression per field of a requirement:
 
 ```yaml
 sources:
@@ -1317,8 +1317,8 @@ sources:
     options:
       base: https://alm.example/api/v2
       auth: {bearer: token}
-      list: {url: "/projects/12/items?type=requirement&page={page}", items: ".data[]"}
-      get: {url: "/items?ids={ids}", items: ".data[]"}
+      list: {url: "/projects/12/items?type=requirement&page={{ page }}", items: ".data[]"}
+      get: {url: "/items?ids={{ ids }}", items: ".data[]"}
       fields:
         id: .fields.documentKey
         title: .fields.name
@@ -1327,12 +1327,34 @@ sources:
         status: .fields.status.name
         tags: '[.tags[]?.name]'
         version: .version                                     # default: a hash of the content
-      url: https://alm.example/items/{id}
+      url: https://alm.example/items/{{ id }}
 ```
+
+**Variables** (`vars`, on any source): `{{ name }}` in its options, `$name` in the rest backend's jq expressions. A value can be a Jinja2 expression of the datapack keys, so `datapack --set` and campaign keys set it, with a `default` for where there are none (the Editor's coverage view, `reqs`). A **mandatory** variable must have a value, and is the context of the requirements: shown in the coverage matrices and reports (`alm: branch=main, version=3.2`) and recorded in the datapack, with every variable as resolved. Give one to a branch or a version, when the tool has them.
+
+**Steps** (rest backend): calls made before the others, each extracting variables with jq for the next ones; a variable gives one value at most (several: an error), none gives its `default`, else empty, else an error when it is mandatory. `cache` keeps an answer that long (a call that takes long, such as the whole system):
+
+```yaml
+sources:
+  alm:
+    backend: rest
+    vars:
+      branch: {value: "{{ sut.branch | default('main') }}", mandatory: true}
+      subsystem: Power unit
+    options:
+      steps:
+        - url: /systems?branch={{ branch }}
+          cache: 1h
+          extract:
+            subsystem_id: {jq: '.items[] | select(.name == $subsystem) | .id', mandatory: true}
+      list: {url: "/subsystems/{{ subsystem_id }}/items?page={{ page }}", items: ".data[]"}
+```
+
+In URLs, values are URL-encoded; in a body, a string made of one `{{ name }}` keeps the value's type. `{id}`, `{ids}`, `{page}` and `{offset}` (one brace) still work.
 
 Credentials are never written in the sources file: each is `env:<VARIABLE>`, an environment variable, or `file:<path>`, the content of a file (trailing white space dropped; a relative path is relative to the sources file, so keep such files out of the repository), the way Docker and Kubernetes give secrets (`file:/run/secrets/alm_token`).
 
-**Test connection**, on each source of the Editor's form, reads it as datapack generation does (with the credentials of the sequencer host's environment) and shows how many requirements and nodes it found and the first ones, or the error.
+**Test connection**, on each source of the Editor's form, reads it as datapack generation does (with the credentials of the sequencer host's environment) and shows how many requirements and nodes it found, the variables as resolved (steps included) and the first requirements, or the error.
 
 **ReqIF** (`backend: reqif`): the OMG interchange format DOORS, DOORS Next, Polarion, Jama, Codebeamer and most other tools export. Export the requirements to the tests repository and commit the file; export again when they change (a test that verified a requirement whose text changed since shows *changed since*). Each specification of the file is a top node of the tree, each heading in it a node under it, and each other object a requirement in the node of the headings above it. The id, title, text (XHTML, kept as text), rationale, status and comments are read from the usual attributes (`ReqIF.ForeignID`, `ReqIF.Name`, `ReqIF.Text`, `ReqIF.ChapterName`, `Status`...); options name others when a tool uses its own (`id_attribute`, `title_attribute`, `description_attribute`, `heading_attribute`, `status_attribute`, `tags_attribute`...), pick specifications (`specifications`), tell headings and requirements by their type (`heading_types`, `requirement_types`), and take the version from an attribute or the date of the last change (`version_attribute: LAST-CHANGE`; default: a hash of the content). The Editor's form lists them with their help.
 

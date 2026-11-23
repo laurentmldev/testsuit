@@ -18,7 +18,8 @@ A backend gives access to the requirements of one tool. It is created by a facto
 
 - ``options``: the ``options`` of its entry in the sources file (a URL, a project...);
 - ``credentials``: ``{name: value}`` read from the environment or a file (``token: env:JAMA_TOKEN``, ``token: file:/run/secrets/jama``), or None;
-- ``base_dir``: the folder of the sources file, for relative paths.
+- ``base_dir``: the folder of the sources file, for relative paths;
+- ``vars`` (keyword, only if the factory takes it): the variables of the source, resolved. A factory without it gets its options with ``{{ name }}`` replaced by their values.
 
 Example, from an external library::
 
@@ -45,7 +46,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable
+import re
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +94,11 @@ class ReqBackend:
         """A revision of the whole source, recorded in the baseline (None: none)."""
         return None
 
+    def resolved_vars(self) -> dict[str, Any]:
+        """Variables the backend found itself (the rest backend's steps), recorded in the baseline and shown by the
+        Editor's Test connection."""
+        return {}
+
     def create(self, req: Requirement) -> Requirement:
         raise ReqError(f"{type(self).__name__} is read-only")
 
@@ -131,12 +138,42 @@ def describe_req_backends() -> list[dict[str, Any]]:
     return out
 
 
-def create_req_backend(name: str, options: dict, credentials: dict | None, base_dir: Path) -> ReqBackend:
+def accepts_vars(factory: Any) -> bool:
+    """Whether a factory takes the variables of its source itself (a ``vars`` keyword argument)."""
+    import inspect
+    try:
+        params = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        return False
+    return "vars" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+_VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def fill_vars(data: Any, vars: Mapping[str, Any]) -> Any:
+    """``{{ name }}`` replaced by the variable's value in every string of ``data`` (others left as written)."""
+    if isinstance(data, str):
+        return _VAR.sub(lambda m: str(vars[m.group(1)]) if m.group(1) in vars else m.group(0), data)
+    if isinstance(data, dict):
+        return {k: fill_vars(v, vars) for k, v in data.items()}
+    if isinstance(data, list):
+        return [fill_vars(v, vars) for v in data]
+    return data
+
+
+def create_req_backend(name: str, options: dict, credentials: dict | None, base_dir: Path,
+                       vars: Mapping[str, Any] | None = None) -> ReqBackend:
+    """The backend of a source. Its variables go to a factory taking a ``vars`` keyword argument; for another,
+    ``{{ name }}`` in its options is replaced by their values."""
     factory = _backends.get(str(name).lower())
     if factory is None:
         raise ReqError(f"unknown requirements backend '{name}' (known: {', '.join(sorted(_backends)) or 'none'}); "
                        "a plugin registers it with testsuit.reqs.register_req_backend()")
-    return factory(dict(options or {}), credentials, base_dir)
+    vars = dict(vars or {})
+    if accepts_vars(factory):
+        return factory(dict(options or {}), credentials, base_dir, vars=vars)
+    return factory(fill_vars(dict(options or {}), vars), credentials, base_dir)
 
 
 def under(path: str, node: str, children: bool) -> bool:

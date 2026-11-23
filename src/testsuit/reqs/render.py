@@ -57,6 +57,8 @@ def text(cov: Coverage) -> str:
     out.append("Tests × requirements")
     for t in cov.tests:
         out.append(f"{t.label}" + (f"  verdict {t.verdict}" if t.run else "  not run"))
+        if t.context:
+            out.append(f"  context: {t.context_text}")
         for where, links in _groups(t).items():
             out.append(f"  {where}: " + ", ".join(f"{lk.req} {lk.status}" for lk in links))
         for p in t.problems:
@@ -150,7 +152,8 @@ def _test_head(t: Test, base: str) -> str:
     label = e(t.testdef)
     if t.run and base:
         label = f'<a href="{base}#/runs/{quote(t.run)}">{label}</a>'
-    return label + (f'<div class="muted">{e(t.run)}</div>' if t.run else '<div class="muted">not run</div>')
+    return label + (f'<div class="muted">{e(t.run)}</div>' if t.run else '<div class="muted">not run</div>') + (
+        f'<div class="muted">{e(t.context_text)}</div>' if t.context else "")
 
 
 def tiles_html(cov: Coverage) -> str:

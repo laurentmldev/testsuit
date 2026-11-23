@@ -873,6 +873,20 @@ SOURCE = h(
                          "refused.",
                          type="object", additionalProperties=h("`env:<VARIABLE>` or `file:<path>`", type="string",
                                                                pattern="^(env:[A-Za-z_][A-Za-z0-9_]*|file:.+)$")),
+        "vars": h("Variables of the source, by name: `{{ name }}` in its options (`$name` in the jq expressions of "
+                  "the rest backend). A value can be a Jinja2 expression of the datapack keys, with a default for where "
+                  "there are none (`{{ sut.version | default('3.2') }}`: the Editor's coverage view). "
+                  "`{value, mandatory: true}`: it must have a value, and is the context of the requirements, shown with "
+                  "them and recorded in the datapack (a branch, a version).",
+                  type="object", propertyNames={"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+                  additionalProperties={"anyOf": [
+                      {"type": ["string", "number", "boolean", "null"]},
+                      h("A variable with qualifiers.", type="object", additionalProperties=False, properties={
+                          "value": h("Its value (a Jinja2 expression of the datapack keys, or a constant).",
+                                     type=["string", "number", "boolean", "null"]),
+                          "mandatory": h("It must have a value; it is the context of the requirements.", type="boolean"),
+                          "default": h("Its value when the value is empty.", type=["string", "number", "boolean"]),
+                      })]}),
     })
 
 REQUIREMENTS_FILE = {

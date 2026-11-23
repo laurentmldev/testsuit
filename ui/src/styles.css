@@ -1271,3 +1271,11 @@ table.grid.req-fields td { vertical-align: middle; }
 .req-group > legend .q { margin-left: 4px; }
 .req-group .field { grid-template-columns: 150px minmax(0, 1fr); }
 .req-group > .req-fields { margin: 6px 0; }
+.req-vars-rows .req-var-name { flex: 0 0 22%; overflow: hidden; text-overflow: ellipsis; }
+.req-vars-rows .req-var-default { flex: 0 0 14%; min-width: 0; }
+.req-vars-rows .strong, .req-vars .strong { font-weight: 600; }
+.req-vars { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0; }
+.req-steps { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.req-step { align-self: stretch; border: 1px dashed var(--border); border-radius: 6px; padding: 4px 10px; }
+.req-step-head { display: flex; align-items: center; gap: 8px; }
+.req-step-head .grow { flex: 1; }

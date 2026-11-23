@@ -1568,7 +1568,8 @@ class Editor:
             out["error"] = f"{type(e).__name__}: {e}"
         else:
             out.update({"ok": True, "count": len(reqs), "nodes": sum(1 for _ in req_paths(tree)),
-                        "sample": [r.as_dict() for r in reqs[:5]]})
+                        "sample": [r.as_dict() for r in reqs[:5]], "context": sources.context(source),
+                        "vars": {**sources.vars(source), **backend.resolved_vars()}})
         out["seconds"] = round(time.monotonic() - start, 2)
         return out
 
