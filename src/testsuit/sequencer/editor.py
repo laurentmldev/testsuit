@@ -64,10 +64,19 @@ MAX_FILES = 2000
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
+# file_version() hashes files up to this size; a bigger one is versioned by its size and modification time
+VERSION_HASH_BYTES = 8 << 20
+
+
 def file_version(path: Path) -> str | None:
     """The version of a file as the Editor read it: a hash of its bytes (None: no such file). A save giving the
-    version it started from is refused when the file changed since (another browser, a pull, a hand edit)."""
+    version it started from is refused when the file changed since (another browser, a pull, a hand edit).
+    A file over VERSION_HASH_BYTES (a data file) is not read, asked every 2 s: its size and modification time
+    stand for its bytes."""
     try:
+        stat = path.stat()
+        if stat.st_size > VERSION_HASH_BYTES:
+            return "s" + hashlib.sha1(f"{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:15]
         return hashlib.sha1(path.read_bytes()).hexdigest()[:16]
     except (FileNotFoundError, IsADirectoryError):
         return None

@@ -99,6 +99,29 @@ def test_read_write_and_conflicts(folder):
         folder.read("limits/none.yml")
 
 
+@pytest.mark.parametrize("module", ["testsuit.exploit.editor.service", "testsuit.sequencer.editor"])
+def test_big_file_version_not_read(module, tmp_path, monkeypatch):
+    """A file over VERSION_HASH_BYTES (a data file the Editor shows, asked for its version every 2 s) is
+    versioned by its size and modification time, not read; a change still gives another version."""
+    import importlib
+    import os
+    mod = importlib.import_module(module)
+    monkeypatch.setattr(mod, "VERSION_HASH_BYTES", 10)
+    small, big = tmp_path / "small.yml", tmp_path / "big.csv"
+    small.write_text("a: 1\n")
+    big.write_text("time,value\n0,1\n")
+    reads = []
+    real = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda self: reads.append(self.name) or real(self))
+    version = mod.file_version(big)
+    assert mod.file_version(small) and reads == ["small.yml"]
+    assert mod.file_version(big) == version
+    big.write_text("time,value\n0,2\n")
+    os.utime(big, ns=(1, 1))
+    assert mod.file_version(big) != version and reads == ["small.yml"]
+    assert mod.file_version(tmp_path / "none.csv") is None
+
+
 def test_keys_lint_and_params(folder):
     keys = folder.keys("limits/scenario")
     assert {"key": "limits.max", "value": "5", "origin": "limits/limits.yml"} in keys["keys"]

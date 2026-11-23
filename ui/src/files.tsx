@@ -204,6 +204,53 @@ function InlinePlot({ file, onSkip }: { file: Readable; onSkip: (why: string) =>
   return <div className={classes("file-plot", !shown && "hidden")}><div ref={box} className="file-plot-canvas" /></div>;
 }
 
+// what the viewer shows of a file: its first bytes only, the rest is not downloaded (a data file can be GBs)
+const VIEW_BYTES = 5 << 20;
+
+/** The first max bytes of a response's body, and whether it has more: the download stops there. */
+async function head(r: Response, max: number): Promise<{ bytes: Uint8Array; more: boolean }> {
+  if (!r.body) {
+    const all = new Uint8Array(await r.arrayBuffer());
+    return { bytes: all.subarray(0, max), more: all.length > max };
+  }
+  const reader = r.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  let more = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    n += value.length;
+    if (n > max) {
+      more = true;
+      break;
+    }
+  }
+  if (more) reader.cancel().catch(() => { /* the connection is closed anyway */ });
+  const bytes = new Uint8Array(Math.min(n, max));
+  let at = 0;
+  for (const p of parts) {
+    if (at >= bytes.length) break;
+    const take = p.subarray(0, bytes.length - at);
+    bytes.set(take, at);
+    at += take.length;
+  }
+  return { bytes, more };
+}
+
+/** Where to cut UTF-8 bytes so that no character is split: before the last one when it is incomplete. */
+function utf8Cut(bytes: Uint8Array): number {
+  let i = bytes.length;
+  let back = 0;
+  // up to 3 continuation bytes (10xxxxxx) before the lead byte of the last character
+  while (i > 0 && back < 4 && (bytes[i - 1] & 0xc0) === 0x80) { i--; back++; }
+  if (i === 0) return bytes.length;
+  const lead = bytes[i - 1];
+  const len = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return back + 1 >= len ? bytes.length : i - 1;
+}
+
 export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
   const [text, setText] = useState<string | null>(null);
   const [readable, setReadable] = useState<Readable | null>(null);
@@ -224,14 +271,18 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
     setText(null);
     setError(null);
     if (IMAGE.test(path) || !isText) return;
-    fetch(href)
+    const aborted = new AbortController();
+    fetch(href, { signal: aborted.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-        const blob = await r.blob();
-        if (blob.size > 5 << 20) return setText((await blob.slice(0, 5 << 20).text()) + "\n… (truncated: download the whole file)");
-        setText(await blob.text());
+        const { bytes, more } = await head(r, VIEW_BYTES);
+        // a file cut at a byte: a character split there is left out
+        const text = new TextDecoder().decode(bytes.subarray(0, more ? utf8Cut(bytes) : bytes.length));
+        setText(more ? text + "\n… (truncated: download the whole file)" : text);
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => !aborted.signal.aborted && setError(e.message));
+    // another file picked meanwhile: the rest of this one is not downloaded
+    return () => aborted.abort();
   }, [href, path, isText]);
   const keys = Object.entries(rendered?.keys || {});
   const openPlot = () => readable && openInNewTab({ path: "exploit/plot", query: { source: readable.path } });

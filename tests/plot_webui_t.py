@@ -238,6 +238,57 @@ def test_readable(data, tmp_path):
         PlotData(lambda p: (_ for _ in ()).throw(CriteriaError("outside"))).readable(str(data / "brake.csv"))
 
 
+def test_readable_lists_fields_once(data, monkeypatch):
+    """A loader still listing the fields of a big file past READABLE_TIMEOUT_S is not started again each time
+    the file is shown: the next look waits for the same listing, and gets the fields once it is done."""
+    from testsuit.datatools.DataFileMgrs.CsvFileMgr import CsvFileMgr
+    from testsuit.datatools.DataFileMgrs.formats import register_file_format, unregister_file_format
+    from testsuit.exploit.editor import plots as module
+
+    calls = []
+    release = threading.Event()
+
+    class Slow(CsvFileMgr):         # as the InfluxDB CSV loader: reads the whole file to list its fields
+        def getFieldNames(self):
+            calls.append(self.getFileName())
+            release.wait(10)
+            return super().getFieldNames()
+
+    monkeypatch.setattr(module, "READABLE_TIMEOUT_S", 0.2)
+    (data / "speed.slow").write_text("time,speed\n0,1\n1,2\n")
+    register_file_format("slow", ["slow"], Slow)
+    try:
+        plots = PlotData()
+        for _ in range(3):
+            assert plots.readable(str(data / "speed.slow"))["fields"] is None
+        assert len(calls) == 1
+        release.set()
+        time.sleep(0.3)
+        assert plots.readable(str(data / "speed.slow"))["names"] == ["time", "speed"] and len(calls) == 1
+        (data / "speed.slow").write_text("time,speed,torque\n0,1,2\n")        # another version: listed again
+        assert plots.readable(str(data / "speed.slow"))["fields"] == 3 and len(calls) == 2
+    finally:
+        release.set()
+        unregister_file_format("slow")
+
+
+def test_loaded_fields_kept_within_memory(data, monkeypatch):
+    """The loaded parameters kept take MAX_CACHED_BYTES at most, the oldest going first; the last one stays."""
+    from testsuit.exploit.editor import plots as module
+    plots = PlotData()
+    fields = ["motor.tdms::Motor___speed", "motor.tdms::Position___x", "motor.tdms::Position___y"]
+    plots.figure({"sources": files(data), "traces": [trace([f]) for f in fields]})
+    assert len(plots._params) == 3
+    one = max(plots._sizes.values())
+    monkeypatch.setattr(module, "MAX_CACHED_BYTES", one * 2)
+    plots.figure({"sources": files(data), "traces": [trace(["brake.csv::pressure"])]})
+    assert sum(plots._sizes.values()) <= one * 2 and set(plots._sizes) == set(plots._params)
+    assert any(k[1] == "brake.csv::pressure" for k in plots._params)
+    monkeypatch.setattr(module, "MAX_CACHED_BYTES", 0)
+    answer = json.loads(plots.figure({"sources": files(data), "traces": [trace(["motor.tdms::Motor___speed"])]}))
+    assert not answer["traces"][0]["error"] and [k[1] for k in plots._params] == ["motor.tdms::Motor___speed"]
+
+
 def test_webui_plot_routes(data):
     """The /plot routes of ``mxp webui``, through HTTP."""
     import uvicorn
