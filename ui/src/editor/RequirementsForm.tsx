@@ -534,7 +534,7 @@ function RestOptions({ options, help, set, credentials }: {
       </Field>
       <Field label="List" help={help.list}>
         <div className="req-sub">
-          <Field label="URL"><Text mono value={list.url} placeholder="items?project=12&page={page}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+          <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={page}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
           <Field label="Items (jq)"><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
           <Field label="Next page (jq)"><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
           <Field label="Method">
@@ -549,7 +549,7 @@ function RestOptions({ options, help, set, credentials }: {
       </Field>
       <Field label="Get by id" help={help.get}>
         <div className="req-sub">
-          <Field label="URL"><Text mono value={get.url} placeholder="optional: items?ids={ids} or items/{id}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+          <Field label="URL suffix"><Text mono value={get.url} placeholder="optional: items?ids={ids} or items/{id}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
           {get.url && <Field label="Items (jq)"><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
         </div>
       </Field>
