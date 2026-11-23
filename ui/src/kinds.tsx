@@ -60,7 +60,7 @@ export function Named({ kind, name, detail, className, children }: {
 }) {
   const title = `${KINDS[kind].label}${name ? ` ${name}` : ""}${detail ? ` · ${detail}` : ""}`;
   return (
-    <span className={["named", nameClass(kind), className].filter(Boolean).join(" ")} title={title}>
+    <span className={["named", name && nameClass(kind), className].filter(Boolean).join(" ")} title={title}>
       <KindIcon kind={kind} title={title} />{children ?? name}
     </span>
   );
