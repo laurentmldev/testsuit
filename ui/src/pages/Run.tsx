@@ -502,7 +502,7 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
   );
 }
 
-export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?: boolean }) {
+export function RunPage({ id, tab, editor, file, line }: { id: string; tab: string; editor?: boolean; file?: string | null; line?: number | null }) {
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation", "pause", "intervention"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   const labelOf = useLabels();
@@ -627,7 +627,8 @@ export function RunPage({ id, tab, editor }: { id: string; tab: string; editor?:
           </div>
         </div>
       )}
-      {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} plot={editor ? `plot/runs/${r.id}` : undefined} />}
+      {tab === "files" && <FileBrowser base={`runs/${r.id}/files`} plot={editor ? `plot/runs/${r.id}` : undefined}
+        initial={file || undefined} line={line} />}
       {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
       {tab === "requirements" && <RunsCoverage path={`runs/${r.id}/requirements`} events={["run", "step"]} title="The requirements this test and its checks verify, by this run" />}
       {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" plot={editor ? `plot/runs/${r.id}` : undefined} />}

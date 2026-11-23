@@ -82,7 +82,7 @@ async function renderedFiles(base: string, q: string): Promise<Record<string, Re
 
 /** Browses a folder API: base + "/" + path lists a folder (JSON array) or downloads a file. With plot, plot +
  * "/" + path says whether the Plot page can open the file (a data loader reads it): it then gets a link there. */
-export function FileBrowser({ base, query, initial, plot }: { base: string; query?: string; initial?: string; plot?: string }) {
+export function FileBrowser({ base, query, initial, line, plot }: { base: string; query?: string; initial?: string; line?: number | null; plot?: string }) {
   const [open, setOpen] = useState<Record<string, Entry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [selected, setSelected] = useState<Entry | null>(null);
@@ -112,8 +112,17 @@ export function FileBrowser({ base, query, initial, plot }: { base: string; quer
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, query]);
   useEffect(() => {
-    if (initial) setSelected({ name: initial.split("/").pop()!, path: initial, dir: false, size: null });
-  }, [initial]);
+    if (!initial) return;
+    setSelected({ name: initial.split("/").pop()!, path: initial, dir: false, size: null });
+    // its folders opened in the tree
+    const parts = initial.split("/").slice(0, -1);
+    const folders = parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+    if (folders.length) {
+      setExpanded((e) => new Set([...e, ...folders]));
+      folders.forEach((f) => load(f));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial, base]);
   const toggle = (e: Entry) => {
     if (!e.dir) return setSelected(e);
     const next = new Set(expanded);
@@ -144,7 +153,7 @@ export function FileBrowser({ base, query, initial, plot }: { base: string; quer
       </div>
       <div className="viewer">
         {selected ? <FileView href={url(`${base}/${selected.path}${q}`)} path={selected.path} rendered={rendered[selected.path]}
-          plot={plot && `${plot}/${selected.path}`} /> : <p className="muted">Pick a file to see it.</p>}
+          plot={plot && `${plot}/${selected.path}`} line={selected.path === initial ? line : null} /> : <p className="muted">Pick a file to see it.</p>}
       </div>
     </div>
   );
@@ -265,7 +274,8 @@ function utf8Cut(bytes: Uint8Array): number {
   return back + 1 >= len ? bytes.length : i - 1;
 }
 
-export function FileView({ href, path, rendered, plot }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false }) {
+export function FileView({ href, path, rendered, plot, line }: { href: string; path: string; rendered?: RenderedFile; plot?: string | false;
+  line?: number | null }) {
   const [text, setText] = useState<string | null>(null);
   // how far the text shown goes in the file (bytes), whether the file has more, its size (when known)
   const [shown, setShown] = useState<{ next: number; more: boolean; total: number | null }>({ next: 0, more: false, total: null });
@@ -284,7 +294,7 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"auto" | "raw">("auto");
   // a file rendered from a template is text, whatever its extension
-  const isText = TEXT.test(path) || !!rendered;
+  const isText = TEXT.test(path) || !!rendered || !!line;      // a line to show: a text file (a script)
   /** Shows the bytes of the file from start, max at most, after the text shown (from 0: instead of it). */
   const load = (start: number, max: number) => {
     loads.current?.abort();
@@ -365,9 +375,9 @@ export function FileView({ href, path, rendered, plot }: { href: string; path: s
       {text !== null && /\.(csv|tsv)$/i.test(path) && mode === "auto" && <CsvTable key={href} text={text} tab={/\.tsv$/i.test(path)} partial={shown.more}
         onMore={shown.more && room > 0 && !loading ? loadMore : undefined} />}
       {text !== null && !(/\.(csv|tsv)$/i.test(path) && mode === "auto") && (
-        /\.(log|txt)$/i.test(path) && !rendered?.values?.length ? <pre className="log">{text}</pre>
+        /\.(log|txt)$/i.test(path) && !rendered?.values?.length && !line ? <pre className="log">{text}</pre>
           : <CodeEditor uri={`file:///view/${encodeURIComponent(href)}`} value={text} readOnly language={languageOf(path)} height="calc(100vh - 260px)"
-            values={rendered?.values} />
+            values={rendered?.values} revealLine={line} />
       )}
     </div>
   );

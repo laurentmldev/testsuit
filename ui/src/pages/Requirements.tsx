@@ -83,6 +83,11 @@ function RequirementDetail({ req }: { req: any }) {
   );
 }
 
+/** The Files tab of a run, on a file of its datapack at a line. */
+export function inputHref(run: string, file: string, line?: number): string {
+  return `#/runs/${encodeURIComponent(run)}?tab=files&file=${encodeURIComponent(file)}${line ? `&line=${line}` : ""}`;
+}
+
 function testHref(t: any) {
   return t.run ? `#/runs/${encodeURIComponent(t.run)}?tab=requirements` : null;
 }
@@ -176,7 +181,10 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                       return (
                         <tr key={where}>
                           <td />
-                          <td><code className="small">{where}</code>{report && <> · <a href={url(`runs/${encodeURIComponent(t.run)}/files/${report}`)} target="_blank" rel="noreferrer">exploit report</a></>}</td>
+                          <td>{t.run && links[0].level === "input" && links[0].file
+                            ? <a href={inputHref(t.run, links[0].file, links[0].line)} title="Open the file of the datapack at this line (Files tab of the run)"><code className="small">{where}</code></a>
+                            : <code className="small">{where}</code>}
+                            {report && <> · <a href={url(`runs/${encodeURIComponent(t.run)}/files/${report}`)} target="_blank" rel="noreferrer">exploit report</a></>}</td>
                           <td className="cov-links">{links.map((lk, i) => <span key={i}><span className="mono">{lk.req}</span> <CoverageBadge status={lk.status} changed={lk.changed} /></span>)}</td>
                         </tr>
                       );

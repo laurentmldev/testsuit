@@ -209,7 +209,11 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
             if base and t.run and step in t.reports:
                 report = f' · <a href="{base}runs/{quote(t.run)}/files/{quote(t.reports[step])}">exploit report</a>'
             reqs = " ".join(f"{_req_link(cov, lk.req)} {_badge(lk.status, cov.stale(lk.req, t))}" for lk in links)
-            test_rows.append(f"<tr><td></td><td><code>{e(where)}</code>{report}</td><td>{reqs}</td></tr>")
+            label = f"<code>{e(where)}</code>"
+            if base and t.run and links[0].level == "input" and links[0].file:     # the file of the datapack at that line
+                label = (f'<a href="{base}#/runs/{quote(t.run)}?tab=files&amp;file={quote(links[0].file, safe="")}'
+                         f'&amp;line={links[0].line}">{label}</a>')
+            test_rows.append(f"<tr><td></td><td>{label}{report}</td><td>{reqs}</td></tr>")
         for p in t.problems:
             test_rows.append(f'<tr><td></td><td colspan="2" class="warn">problem: {e(p)}</td></tr>')
         for w in t.warnings:

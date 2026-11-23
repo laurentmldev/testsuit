@@ -135,7 +135,8 @@ function App() {
   const tabLabel = page === "edit" ? "Editor" : nav.find(([key]) => key === tabOf(page))?.[1] ?? "Runs";
   useTabTitle(editing ? undefined : tabLabel);
   let content;
-  if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor} />;
+  if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor}
+    file={route.query.get("file")} line={Number(route.query.get("line")) || null} />;
   else if (page === "runs") content = <RunsPage />;
   else if (page === "campaigns" && route.parts[1]) content = <CampaignRunPage id={route.parts[1]} />;
   else if (page === "lab") content = <LabPage editor={editor} />;

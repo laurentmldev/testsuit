@@ -167,6 +167,7 @@ class Coverage:
             "tests": [{"key": t.key, "testdef": t.testdef, "name": t.name, "origin": t.origin,
                        **({"run": t.run, "verdict": t.verdict, "reports": t.reports} if t.run else {}),
                        "links": [{"req": lk.req, "where": lk.where, "level": lk.level, "step": lk.step,
+                                  **({"file": lk.file, "line": lk.line} if lk.level == "input" else {}),
                                   "status": lk.status, **({"changed": True} if self.stale(lk.req, t) else {})}
                                  for lk in t.links],
                        **({"context": t.context} if t.context else {}),

@@ -741,6 +741,11 @@ def test_input_file_tags(bench, tmp_path, monkeypatch):
     assert (cov.status("REQ-3"), cov.status("REQ-5")) == ("passed", "passed")
     wheres = {lk.where for lk in cov.tests[0].links if lk.level == "input"}
     assert wheres == {f"{conf}:2", f"TC-1 ({conf}:4)"}
+    page = as_html(cov, sequencer="http://tsq:8640/")
+    assert (f'href="http://tsq:8640/#/runs/{run["id"]}?tab=files&amp;file=data%2F{slot}%2Finput%2Fconf.txt&amp;line=4"'
+            in page)
+    link = next(lk for lk in cov.as_dict()["tests"][0]["links"] if lk["level"] == "input")
+    assert link["file"] == conf and link["line"] in (2, 4)
 
     # an unknown requirement, a test case defined twice: generation fails, unless nocheck
     write(bench.dp / "setup" / "files" / "conf.txt", "{{ testdef.id }}\n# @uid{TC-1}\n# @tr{REQ-9}\n# @uid{TC-1}\n")
