@@ -14,8 +14,8 @@
 // Requirements form (sequencer README, section 10.3): the sources file (`requirements.yml`: its sources, each with its
 // backend, options and credentials, and the default one) and the requirements of the built-in YAML backend (the
 // labels of the nodes, and each requirement with its path in the tree).
-import { useMemo, useState } from "react";
-import { Combo, Field, helpText, IdText, KeyValues, Section, Tags, Text, type Choice } from "../fields";
+import { useMemo, useState, type ReactNode } from "react";
+import { Combo, Field, helpText, IdText, KeyValues, scalar, Section, Tags, Text, type Choice } from "../fields";
 import { send } from "../api";
 import { classes, joinPath } from "../util";
 import { clone, useSession, type Doc } from "./state";
@@ -163,19 +163,11 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const options: Data = spec.options || {};
   const credentials: Data = spec.credentials || {};
   const set = (k: string, v: any) => onChange({ ...spec, [k]: v });
-  const knownOptions: Choice[] = Object.entries<string>(backend?.options || {}).map(([value, description]) => ({ value, description }));
   const knownCredentials: string[] = Object.keys(backend?.credentials || {});
   // the file a yaml source reads, in the session
   const yamlFile = backend?.name === "yaml" ? joinPath(doc.path, String(options.file || SOURCES_FILE)) : null;
   const yamlFound = yamlFile && files.some((f) => f.path === yamlFile);
   const credRows = [...new Set([...Object.keys(credentials), ...knownCredentials])];
-  const [credName, setCredName] = useState("");
-  // a credential is read from an environment variable (env:NAME) or a file (file:/run/secrets/name)
-  const setCred = (k: string, kind: "env" | "file", where: string) => {
-    const next = { ...credentials };
-    next[k] = `${kind}:${where.trim().replace(/^(env|file):/, "")}`;
-    set("credentials", next);
-  };
   return (
     <div className={classes("req-source", isDefault && "default")}>
       <div className="req-source-head">
@@ -216,35 +208,12 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
         hint={yamlFile && (yamlFound
           ? <button className="link small" onClick={() => open(yamlFile)}>open {yamlFile}</button>
           : <span className="bad-text small">no file {yamlFile} in the session</span>)}>
-        <KeyValues value={options} onChange={(v) => set("options", v)} known={knownOptions} />
+        <BackendOptions backend={backend} options={options} onChange={(v) => set("options", v)}
+          credentials={credentials} onCredentials={(v) => set("credentials", v)} />
       </Field>
-      {(credRows.length > 0 || backend?.name !== "yaml") && (
+      {backend?.name !== "rest" && (credRows.length > 0 || backend?.name !== "yaml") && (
         <Field label="Credentials" help={help(["sources", name, "credentials"])} wide>
-          <div className="kv">
-            {credRows.map((k) => {
-              const value = String(credentials[k] ?? "");
-              const kind: "env" | "file" = value.startsWith("file:") ? "file" : "env";
-              const literal = value !== "" && !/^(env|file):/.test(value);
-              const where = literal ? "" : value.replace(/^(env|file):/, "");
-              return (
-                <div key={k} className="kv-row" title={backend?.credentials?.[k]}>
-                  <span className="mono kv-key">{k}</span>
-                  <select value={kind} onChange={(e) => setCred(k, e.target.value as "env" | "file", e.target.value === "file" ? `/run/secrets/${k}` : k.toUpperCase())}
-                    title="Read from an environment variable, or from a file such as a Docker secret">
-                    <option value="env">env:</option><option value="file">file:</option>
-                  </select>
-                  <input className={classes("mono kv-value", literal && "invalid")} placeholder={kind === "file" ? "/run/secrets/name" : "VARIABLE"}
-                    value={where} onChange={(e) => setCred(k, kind, e.target.value)} />
-                  {literal && <span className="bad-text small">a value written here is refused: name an environment variable or a file</span>}
-                  <button className="icon" title="Remove" onClick={() => { const next = { ...credentials }; delete next[k]; set("credentials", next); }}>×</button>
-                </div>
-              );
-            })}
-            <div className="kv-row">
-              <input className="mono kv-key" placeholder="new credential (token…)" value={credName} onChange={(e) => setCredName(e.target.value.trim())} />
-              {credName && <button className="small" onClick={() => { setCred(credName, "env", credName.toUpperCase()); setCredName(""); }}>add</button>}
-            </div>
-          </div>
+          <Credentials value={credentials} rows={credRows} help={backend?.credentials} onChange={(v) => set("credentials", v)} />
         </Field>
       )}
     </div>
@@ -408,5 +377,243 @@ function ReqIdText({ value, taken, onChange }: { value: string; taken: string[];
       onChange={(e) => setDraft(e.target.value.trim())}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       onBlur={() => { if (!problem && draft !== value) onChange(draft); else setDraft(value); }} />
+  );
+}
+
+// ── backend options ────────────────────────────────────────────────────
+
+/** Sets a key of an object, or removes it when the value is empty. */
+function put(data: Data | undefined, k: string, v: any): Data {
+  const next = { ...(data || {}) };
+  if (v === undefined || v === null || v === "" || (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0)) delete next[k];
+  else next[k] = v;
+  return next;
+}
+
+/** The options of a source: each option its backend knows, as a field with its help (the rest backend has its own
+ * form), and the other options as free keys. */
+function BackendOptions({ backend, options, onChange, credentials, onCredentials }: {
+  backend: any; options: Data; onChange: (v: Data) => void; credentials: Data; onCredentials: (v: Data) => void;
+}) {
+  const known: Record<string, string> = backend?.options || {};
+  const names = Object.keys(known);
+  const set = (k: string, v: any) => onChange(put(options, k, v));
+  const others = Object.keys(options).filter((k) => !names.includes(k));
+  return (
+    <div className="req-options">
+      {backend?.name === "rest" ? <RestOptions options={options} help={known} set={set} credentials={credentials} onCredentials={onCredentials} credHelp={backend.credentials} />
+        : names.map((k) => (
+          <Field key={k} label={k} help={known[k]}><OptionValue value={options[k]} onChange={(v) => set(k, v)} /></Field>
+        ))}
+      {(others.length > 0 || names.length === 0) && (
+        <Field label={names.length ? "Other options" : "Options"} help={names.length ? "Options this backend does not describe: a plugin may read them." : undefined}>
+          <KeyValues value={options} onChange={onChange} exclude={names} nested />
+        </Field>
+      )}
+      {names.length > 0 && others.length === 0 && (
+        <AddOption onAdd={(k) => !names.includes(k) && set(k, "")} />
+      )}
+    </div>
+  );
+}
+
+function AddOption({ onAdd }: { onAdd: (k: string) => void }) {
+  const [k, setK] = useState("");
+  const add = () => { if (k) onAdd(k); setK(""); };
+  return (
+    <div className="req-toolbar">
+      <input className="mono small" placeholder="other option…" value={k} onChange={(e) => setK(e.target.value.trim())}
+        onKeyDown={(e) => e.key === "Enter" && add()} />
+      {k && <button className="small" onClick={add}>Add</button>}
+    </div>
+  );
+}
+
+/** A value of an option: a list as tags, a mapping as keys, a scalar as text (numbers and booleans as such). */
+function OptionValue({ value, onChange, placeholder }: { value: any; onChange: (v: any) => void; placeholder?: string }) {
+  if (Array.isArray(value)) return <Tags value={value.map(String)} onChange={onChange} />;
+  if (value && typeof value === "object") return <KeyValues value={value} onChange={onChange} nested />;
+  return <Text mono value={value} placeholder={placeholder} onChange={(v) => onChange(scalar(v))} />;
+}
+
+const AUTH_KINDS = [
+  { value: "", label: "none" },
+  { value: "bearer", label: "bearer token" },
+  { value: "basic", label: "basic (user, password)" },
+  { value: "header", label: "header" },
+  { value: "query", label: "query parameter" },
+];
+const REST_FIELDS: [string, string][] = [
+  ["id", "Its id, as test definitions name it (required)"],
+  ["title", "Its title"],
+  ["description", "Its text"],
+  ["path", "Its place in the tree: nodes joined by /"],
+  ["status", "draft, approved, deleted, rejected…"],
+  ["tags", "A list"],
+  ["version", "Its version or revision"],
+  ["rationale", "Why it is required"],
+  ["comments", "Comments"],
+  ["url", "A link to it in its tool (default: the URL template)"],
+];
+
+/** The rest backend's options: base URL and authentication, how to list and get the requirements, and the jq
+ * expression giving each field of a requirement from an item of an answer. */
+function RestOptions({ options, help, set, credentials: creds, onCredentials, credHelp }: {
+  options: Data; help: Record<string, string>; set: (k: string, v: any) => void;
+  credentials: Data; onCredentials: (v: Data) => void; credHelp?: Record<string, string>;
+}) {
+  const credentials = Object.keys(creds);
+  const auth: Data = options.auth && typeof options.auth === "object" ? options.auth : {};
+  const kind = AUTH_KINDS.find((a) => a.value && auth[a.value] !== undefined)?.value || "";
+  const credChoices: Choice[] = [...new Set([...credentials, ...Object.keys(credHelp || {})])].map((value) => ({ value, description: credHelp?.[value] || "a credential of this source" }));
+  const list: Data = options.list || {};
+  const get: Data = options.get || {};
+  const fields: Data = options.fields || {};
+  const setIn = (k: string, obj: Data, sub: string, v: any) => set(k, put(obj, sub, v));
+  const basic: any[] = Array.isArray(auth.basic) ? auth.basic : auth.basic ? [auth.basic] : [];
+  // the credentials the authentication names: only those are asked for (a token, or a user and a password...)
+  const needed: string[] = (kind === "bearer" ? [auth.bearer] : kind === "basic" ? basic
+    : kind ? Object.values(auth[kind] || {}) : []).filter(Boolean).map(String);
+  const credRows = [...new Set([...needed, ...credentials])];
+  const setAuth = (to: string) => set("auth", to === "" ? undefined
+    : to === "bearer" ? { bearer: "token" }
+    : to === "basic" ? { basic: ["user", "password"] }
+    : to === "header" ? { header: { "X-Api-Key": "token" } }
+    : { query: { api_key: "token" } });
+  return (
+    <>
+      <Group title="Connection" note="the server, and how to sign in">
+        <Field label="Base URL" help={help.base}>
+          <Text mono value={options.base} placeholder="https://reqs.example.com/rest/v1" onChange={(v) => set("base", v.trim())} />
+        </Field>
+        <Field label="Authentication" help={help.auth}>
+          <div className="req-auth">
+            <select value={kind} onChange={(e) => setAuth(e.target.value)}>
+              {AUTH_KINDS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+            {kind === "bearer" && (
+              <Combo mono value={auth.bearer} choices={credChoices} placeholder="credential" onChange={(v) => set("auth", { bearer: v })} />
+            )}
+            {kind === "basic" && (
+              <>
+                <Combo mono value={basic[0]} choices={credChoices} placeholder="user credential" onChange={(v) => set("auth", { basic: [v, basic[1] ?? "password"] })} />
+                <Combo mono value={basic[1]} choices={credChoices} placeholder="password credential" onChange={(v) => set("auth", { basic: [basic[0] ?? "user", v] })} />
+              </>
+            )}
+          </div>
+          {(kind === "header" || kind === "query") && (
+            <KeyValues value={auth[kind]} onChange={(v) => set("auth", { [kind]: v })} valueChoices={() => credChoices} />
+          )}
+          </Field>
+        {credRows.length > 0 && (
+          <Field label="Credentials" help="Where each credential named above is read, on the sequencer host: an environment variable or a file (a Docker secret). Its value is never written in this file.">
+            <Credentials value={creds} rows={credRows} help={credHelp} onChange={onCredentials}
+              unused={(k) => !needed.includes(k)} />
+          </Field>
+        )}
+        <Field label="Headers" help={help.headers}>
+          <KeyValues value={options.headers} onChange={(v) => set("headers", v)} />
+        </Field>
+        <Field label="Timeout (s)" help={help.timeout}><Text mono value={options.timeout} placeholder="30" onChange={(v) => set("timeout", scalar(v))} /></Field>
+        <Field label="Verify TLS" help={help.verify}>
+          <Text mono value={options.verify === undefined ? "" : String(options.verify)} placeholder="true, false, or a CA bundle path"
+            onChange={(v) => set("verify", scalar(v))} />
+        </Field>
+      </Group>
+      <Group title="List call" note="reads every requirement" help={help.list}>
+        <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={page}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+        <Field label="Items (jq)"><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
+        <Field label="Next page (jq)"><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
+        <Field label="First page" help={help.first_page}><Text mono value={options.first_page} placeholder="1" onChange={(v) => set("first_page", scalar(v))} /></Field>
+        <Field label="Method">
+          <select value={String(list.method || "GET").toUpperCase()} onChange={(e) => setIn("list", list, "method", e.target.value === "GET" ? undefined : e.target.value)}>
+            <option>GET</option><option>POST</option>
+          </select>
+        </Field>
+        {String(list.method || "").toUpperCase() === "POST" && (
+          <Field label="Body (JSON)"><JsonText value={list.body} onChange={(v) => setIn("list", list, "body", v)} /></Field>
+        )}
+      </Group>
+      <Group title="Get by id call" note="optional: fetches only the requirements needed" help={help.get}>
+        <Field label="URL suffix"><Text mono value={get.url} placeholder="items?ids={ids} or items/{id}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+        {get.url && <Field label="Items (jq)"><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
+      </Group>
+      <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
+        <table className="grid compact req-fields">
+          <tbody>{REST_FIELDS.map(([f, what]) => (
+            <tr key={f} title={what}>
+              <td className="mono">{f}</td>
+              <td><input className="mono" value={fields[f] ?? ""} placeholder={f === "url" ? "(the link template below)" : `.${f}`}
+                onChange={(e) => set("fields", put(fields, f, e.target.value))} /></td>
+            </tr>
+          ))}</tbody>
+        </table>
+        <Field label="Link template" help={help.url}>
+          <Text mono value={options.url} placeholder="https://reqs.example.com/items/{id}" onChange={(v) => set("url", v.trim())} />
+        </Field>
+      </Group>
+    </>
+  );
+}
+
+/** A titled box of related fields. */
+function Group({ title, note, help, children }: { title: string; note?: string; help?: string; children: ReactNode }) {
+  return (
+    <fieldset className="req-group">
+      <legend>{title}{help && <span className="q" title={help.replace(/[`*]/g, "")}>?</span>}{note && <span className="muted small"> {note}</span>}</legend>
+      {children}
+    </fieldset>
+  );
+}
+
+/** A JSON value, edited as text: applied when it parses. */
+function JsonText({ value, onChange }: { value: any; onChange: (v: any) => void }) {
+  const [text, setText] = useState(value === undefined ? "" : JSON.stringify(value, null, 1));
+  const [bad, setBad] = useState(false);
+  return (
+    <textarea className={classes("mono", bad && "invalid")} rows={3} value={text} onChange={(e) => {
+      setText(e.target.value);
+      if (!e.target.value.trim()) { setBad(false); return onChange(undefined); }
+      try { onChange(JSON.parse(e.target.value)); setBad(false); } catch { setBad(true); }
+    }} />
+  );
+}
+
+/** Where each credential is read: an environment variable (env:NAME) or a file (file:/run/secrets/name). */
+function Credentials({ value, rows, help, onChange, unused }: {
+  value: Data; rows: string[]; help?: Record<string, string>; onChange: (v: Data) => void; unused?: (k: string) => boolean;
+}) {
+  const [credName, setCredName] = useState("");
+  const setCred = (k: string, kind: "env" | "file", where: string) =>
+    onChange({ ...value, [k]: `${kind}:${where.trim().replace(/^(env|file):/, "")}` });
+  return (
+    <div className="kv">
+      {rows.map((k) => {
+        const v = String(value[k] ?? "");
+        const kind: "env" | "file" = v.startsWith("file:") ? "file" : "env";
+        const literal = v !== "" && !/^(env|file):/.test(v);
+        const where = literal ? "" : v.replace(/^(env|file):/, "");
+        return (
+          <div key={k} className="kv-row" title={help?.[k]}>
+            <span className="mono kv-key">{k}</span>
+            <select value={kind} onChange={(e) => setCred(k, e.target.value as "env" | "file", e.target.value === "file" ? `/run/secrets/${k}` : k.toUpperCase())}
+              title="Read from an environment variable, or from a file such as a Docker secret">
+              <option value="env">env:</option><option value="file">file:</option>
+            </select>
+            <input className={classes("mono kv-value", (literal || (unused && !v && !unused(k))) && "invalid")} placeholder={kind === "file" ? "/run/secrets/name" : "VARIABLE"}
+              value={where} onChange={(e) => setCred(k, kind, e.target.value)} />
+            {literal && <span className="bad-text small">a value written here is refused: name an environment variable or a file</span>}
+            {unused?.(k) && <span className="muted small">not used</span>}
+            {k in value && <button className="icon" title="Remove" onClick={() => { const next = { ...value }; delete next[k]; onChange(next); }}>×</button>}
+          </div>
+        );
+      })}
+      {!unused && (
+        <div className="kv-row">
+          <input className="mono kv-key" placeholder="new credential (token…)" value={credName} onChange={(e) => setCredName(e.target.value.trim())} />
+          {credName && <button className="small" onClick={() => { setCred(credName, "env", credName.toUpperCase()); setCredName(""); }}>add</button>}
+        </div>
+      )}
+    </div>
   );
 }
