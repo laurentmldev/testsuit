@@ -68,18 +68,22 @@ def rollup(statuses: list[str]) -> str:
 @dataclass
 class Link:
     req: str
-    level: str                       # 'testdef' or 'check'
+    level: str                       # 'testdef', 'check' or 'input' (a @tr of an input file)
     status: str = NOT_RUN
     step: str = ""
     criteria: str = ""
     scenario: str = ""
     file: str = ""
     check: str = ""
+    line: int = 0
+    uid: str = ""                    # the test case (@uid) of an input file's link
 
     @property
     def where(self) -> str:
         if self.level == "testdef":
             return "test definition"
+        if self.level == "input":
+            return (f"{self.uid} ({self.file}:{self.line})" if self.uid else f"{self.file}:{self.line}")
         folder = self.criteria if self.criteria.rstrip("/").rsplit("/", 1)[-1] == self.scenario \
             else f"{self.criteria}/{self.scenario}"
         return f"{self.step}: {folder}/{self.file}::{self.check}"
@@ -181,6 +185,9 @@ def _links_from_snapshot(snap: dict) -> list[Link]:
     for c in snap.get("checks") or []:
         links += [Link(r, "check", step=c.get("step", ""), criteria=c.get("criteria", ""), scenario=c.get("scenario", ""),
                        file=c.get("file", ""), check=c.get("check", "")) for r in c.get("reqs") or []]
+    for lk in snap.get("inputs") or []:
+        links += [Link(r, "input", file=str(lk.get("file", "")), line=int(lk.get("line") or 0), uid=str(lk.get("uid") or ""))
+                  for r in lk.get("reqs") or []]
     return links
 
 
@@ -200,7 +207,7 @@ def apply_run(test: Test, run: dict) -> None:
         if (s.get("exploit") or {}).get("report"):
             test.reports[str(s.get("id"))] = s["exploit"]["report"]
     for lk in test.links:
-        if lk.level == "testdef":
+        if lk.level in ("testdef", "input"):
             lk.status = _VERDICT.get(test.verdict, NOT_RUN)
             continue
         rec = _record(steps, lk.step)

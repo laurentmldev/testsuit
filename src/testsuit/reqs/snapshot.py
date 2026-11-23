@@ -24,6 +24,9 @@ Reports and coverage then work offline, on the text that was tested::
     checks:                                 # links of the checks of its exploit steps
       - {step: analyse, criteria: criteria/max_speed, scenario: max_speed, file: max_speed.mexploit.yml,
          check: speed_never_over_limit, reqs: [REQ-12, jama:SYS-4]}
+    cases: [{uid: TC-12, file: data/bench/input/run.py, line: 40}]   # test cases of the input files (@uid)
+    inputs:                                 # links of the input files (@tr), verified by the run verdict
+      - {file: data/bench/input/run.py, line: 41, uid: TC-12, reqs: [REQ-12]}
     requirements:                           # each linked requirement as fetched
       REQ-12: {id: REQ-12, source: reqs, path: SYS/BRAKE, description: ..., version: 3f2a..., pinned: 2}
     problems: [...]                         # unknown, deleted or rejected requirements (generated with --nocheck)
@@ -84,9 +87,11 @@ def resolve(sources: Sources, refs: list[str]) -> tuple[dict[str, dict], dict[st
 
 
 def build(sources_file: Path | None, testdef_reqs: list[str], checks: list[dict],
-          link_problems: list[str] = (), keys: Mapping[str, Any] | None = None) -> dict:
+          link_problems: list[str] = (), keys: Mapping[str, Any] | None = None,
+          inputs: list[dict] = (), cases: list[dict] = ()) -> dict:
     """The snapshot of these links (sources_file None: every link is a problem)."""
-    refs = list(dict.fromkeys([*testdef_reqs, *(r for c in checks for r in c["reqs"])]))
+    refs = list(dict.fromkeys([*testdef_reqs, *(r for c in checks for r in c["reqs"]),
+                               *(r for lk in inputs for r in lk["reqs"])]))
     snap: dict[str, Any] = {"format": FORMAT}
     problems = list(link_problems)
     if sources_file is None:
@@ -105,6 +110,8 @@ def build(sources_file: Path | None, testdef_reqs: list[str], checks: list[dict]
     snap.update({"default_source": default, "sources": record,
                  "testdef": [keys.get(r, r) for r in testdef_reqs],
                  "checks": [{**c, "reqs": [keys.get(r, r) for r in c["reqs"]]} for c in checks],
+                 **({"cases": list(cases)} if cases else {}),
+                 **({"inputs": [{**lk, "reqs": [keys.get(r, r) for r in lk["reqs"]]} for lk in inputs]} if inputs else {}),
                  "requirements": requirements})
     if problems:
         snap["problems"] = problems
@@ -127,9 +134,13 @@ def links_of_testdef(testdef_file: Path, raw: Mapping[str, Any], keys: Mapping[s
 
 
 def snapshot_of_testdef(testdef_file: Path, raw: Mapping[str, Any], keys: Mapping[str, Any] | None = None,
-                        locate=None) -> dict | None:
-    """The snapshot of a test definition's links, None when it lists no requirement."""
+                        locate=None, input_dirs: list[Path] = (), root: Path | None = None) -> dict | None:
+    """The snapshot of a test definition's links, None when it lists no requirement. ``input_dirs``: folders of
+    input files scanned for @uid and @tr (files named relative to ``root``)."""
+    from testsuit.reqs.links import scan_files
     own, checks, problems = links_of_testdef(testdef_file, raw, keys, locate)
-    if not own and not checks and not problems:
+    cases, inputs, found = scan_files(root or testdef_file.parent, list(input_dirs)) if input_dirs else ([], [], [])
+    problems += found
+    if not own and not checks and not problems and not inputs:
         return None
-    return build(find_sources_file(testdef_file), own, checks, problems, keys)
+    return build(find_sources_file(testdef_file), own, checks, problems, keys, inputs, cases)

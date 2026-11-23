@@ -712,3 +712,53 @@ def test_source_variables_for_any_backend(tmp_path):
     assert sources.record()[0]["context"] == {"version": 3}
     with pytest.raises(ReqError, match="v4.yml"):
         Sources(file, {"sut": {"version": 4}}).list("", True)
+
+
+def test_input_file_tags(bench, tmp_path, monkeypatch):
+    """@uid and @tr in the input files of a datapack: links with their file and line, verified by the run verdict;
+    an unknown requirement or a test case defined twice fails the generation (unless nocheck); the Editor flags them
+    in the file."""
+    from testsuit.reqs.links import scan_text
+    cases, links, problems = scan_text("# @tr{REQ-3}\n# @uid{TC-1} first\n// @tr{REQ-2, jama:X@2}\n@uid{bad id}\n@tr{}\n",
+                                       "f.py")
+    assert cases == [{"uid": "TC-1", "file": "f.py", "line": 2}]
+    assert links == [{"file": "f.py", "line": 1, "reqs": ["REQ-3"]},
+                     {"file": "f.py", "line": 3, "uid": "TC-1", "reqs": ["REQ-2", "jama:X@2"]}]
+    assert len(problems) == 2 and "f.py:4" in problems[0] and "f.py:5" in problems[1]
+
+    monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
+    write(bench.dp / "setup" / "files" / "conf.txt", "{{ testdef.id }}\n# @tr{REQ-3}\n# @uid{TC-1}\n# @tr{REQ-2, REQ-5}\n")
+    ok = datapack(_bench(bench, "tags", [], min_count=3), output_dir=tmp_path / "zips")
+    snap = _member(ok, "definition/requirements.yml")
+    [slot] = {lk["file"].split("/")[1] for lk in snap["inputs"]}
+    conf = f"data/{slot}/input/conf.txt"
+    assert snap["cases"] == [{"uid": "TC-1", "file": conf, "line": 3}]
+    assert snap["inputs"] == [{"file": conf, "line": 2, "reqs": ["REQ-3"]},
+                              {"file": conf, "line": 4, "uid": "TC-1", "reqs": ["REQ-2", "REQ-5"]}]
+    assert {"REQ-2", "REQ-3", "REQ-5"} <= set(snap["requirements"])
+    run = run_one(bench, ok)
+    cov = coverage([Path(run["results"])])
+    assert (cov.status("REQ-3"), cov.status("REQ-5")) == ("passed", "passed")
+    wheres = {lk.where for lk in cov.tests[0].links if lk.level == "input"}
+    assert wheres == {f"{conf}:2", f"TC-1 ({conf}:4)"}
+
+    # an unknown requirement, a test case defined twice: generation fails, unless nocheck
+    write(bench.dp / "setup" / "files" / "conf.txt", "{{ testdef.id }}\n# @uid{TC-1}\n# @tr{REQ-9}\n# @uid{TC-1}\n")
+    with pytest.raises(DatapackError, match="REQ-9.*unknown|unknown.*REQ-9"):
+        datapack(_bench(bench, "tags", [], min_count=3), output_dir=tmp_path / "zips")
+    snap = _member(datapack(_bench(bench, "tags", [], min_count=3), nocheck=True, output_dir=tmp_path / "zips"),
+                   "definition/requirements.yml")
+    assert any("'TC-1' defined twice" in p for p in snap["problems"])
+
+    # the Editor: problems at their lines in the file
+    from editor_t import Repos
+    repos = Repos(tmp_path / "repos")
+    editor = repos.editor
+    session = editor.open("workspace0")
+    editor.write(session, "requirements.yml", content=yaml.safe_dump(REQS))
+    editor.write(session, "scripts/run.py", content="# @uid{TC-1}\n# @tr{REQ-1, REQ-9}\nx = 1  # @tr{REQ-4}\n# @uid{TC-1}\n")
+    found = {(p["line"], p["severity"], p["message"].split(": ", 1)[-1][:40]) for p in editor.check_file(session, "scripts/run.py")}
+    assert (2, "error", "requirement 'REQ-9' is unknown to source") in found
+    assert (3, "error", "requirement 'REQ-4' is rejected") in found
+    assert any(line == 4 and "already defined line 1" in msg for line, _, msg in found)
+    assert not any(line == 2 and "REQ-1" in msg for line, _, msg in found)
