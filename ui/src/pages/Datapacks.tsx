@@ -29,7 +29,7 @@ import { Named } from "../kinds";
 import { Dialog, Field, Section, Text } from "../fields";
 import { attempt, classes, Markdown, navigate, notify, openInNewTab, setQuery, Spinner, type Route } from "../util";
 
-const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit…** (on the right of the workspace bar) opens them in the Editor in a new browser tab, where they can be reviewed and pushed.`;
+const INTRO = `Each **test definition** gives one datapack: pick one to see what it is made of, update the versions it is built from, and generate it. The files are read and changed where the sequencer reads them (in place); **Edit workspace files…** (on the right of the workspace bar) opens them in the Editor in a new browser tab, where they can be reviewed and pushed; **Edit** beside **Generate…** opens the test definition picked there.`;
 
 /** The in-place editing session of a tests repository: opened once, then reused. */
 function useWorkspace(repo: string | null) {
@@ -91,7 +91,8 @@ export function DatapacksPage({ route }: { route: Route }) {
             ? <button className="small" onClick={() => setRemoving(true)} title="Remove this repository, added from its URL: its clone on the sequencer host. Only once it is clean (nothing to commit or push).">Remove…</button>
             : <button className="small" disabled title="This workspace is set in the server configuration (server.workspaces of tsq.yml): remove it there. Only the repositories added with Add repository… are removed from here.">Remove…</button>}
           <span className="repo-sync-slot" ref={setSyncSlot} />
-          <button className="primary edit-workspace" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">✎ Edit…</button>
+          <button className="small edit-workspace" disabled={!sid} onClick={() => openInNewTab({ path: `edit/${sid}` })} title="Open this workspace's test definitions, setups, dictionaries and templates in the Editor, in a new browser tab">
+            <NavIcon name="edit" size={14} />Edit workspace files…</button>
         </div>
       )}
       {current && (
@@ -201,7 +202,12 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
             </select>
           </label>
         )}
-        <button className="primary" disabled={!data} onClick={() => setGenerate(true)}>Generate…</button>
+        <div className="synthesis-actions">
+          <button className="edit-testdef" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: testdef } })}
+            title={`Open this test definition (${testdef}) in the Editor, in a new browser tab`}><NavIcon name="edit" size={16} />Edit</button>
+          <button className="primary" disabled={!data} onClick={() => setGenerate(true)}
+            title="Generate the datapack of this test definition"><NavIcon name="datapacks" size={16} />Generate…</button>
+        </div>
       </div>
       {error && <pre className="error-box">{error}</pre>}
       {data?.problems?.length > 0 && (
@@ -465,7 +471,7 @@ function Baseline({ datasets, edit, onChange }: { datasets: any[]; edit: (f: str
           </tbody>
         </table>
       )}
-      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only; the datapack stays conform when each is a tag of its source. To change a version in the files, open them in the Editor (<strong>Edit…</strong>, or the file under <em>Written in</em>).</p>
+      <p className="muted small">To generate with other versions, use <strong>Generate…</strong> (<strong>Baseline versions</strong>): for that generation only; the datapack stays conform when each is a tag of its source. To change a version in the files, open them in the Editor (<strong>Edit</strong> beside <strong>Generate…</strong>, <strong>Edit workspace files…</strong>, or the file under <em>Written in</em>).</p>
     </Section>
   );
 }

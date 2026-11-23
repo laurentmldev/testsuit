@@ -11,7 +11,7 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// The icons of the top-level tabs, and of the subtabs of Datapacks: line drawings on a 24 px grid, in the text color.
+// The icons of the top-level tabs, of the subtabs of Datapacks and of a few buttons: line drawings on a 24 px grid, in the text color.
 
 const PATHS: Record<string, string> = {
   runs: "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM10 8.5l5.5 3.5l-5.5 3.5z",
@@ -23,6 +23,8 @@ const PATHS: Record<string, string> = {
   testdefs: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6",   // a document
   campaigns: "M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM7 14.5l2 2l3.5-4",   // a stack of documents, run together
   requirements: "M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5l3-3M3.5 12l1.5 1.5l3-3M3.5 18l1.5 1.5l3-3",   // a checklist
+  // in buttons
+  edit: "M4 20h4l10.5-10.5a2.83 2.83 0 0 0-4-4L4 16zM13.5 6.5l4 4",   // a pencil
 };
 
 export function NavIcon({ name, size = 17 }: { name: string; size?: number }) {
