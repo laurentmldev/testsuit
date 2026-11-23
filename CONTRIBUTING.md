@@ -19,6 +19,10 @@ Both commands must pass before a pull request is merged; CI runs them on Python 
 - New runtime dependencies go in `[project].dependencies` of `pyproject.toml`; dependencies only needed by one feature go in an extra under `[project.optional-dependencies]`.
 - Versions come from git tags (setuptools-scm): tag a release as `vX.Y.Z` on `main`.
 
+## Keeping the documents in sync
+
+A change of behaviour or of a file format updates, in the same pull request, the README concerned, the condensed specification [src/testsuit/sequencer/SPEC.md](src/testsuit/sequencer/SPEC.md), and, when it touches test definitions, setups, pipelines, template keys or mexploit scenarios, the AI prompt [docs/ai/testdef_prompt.txt](docs/ai/testdef_prompt.txt). The prompt is read by an AI, not a person: keep it terse and exact, and check it still works by having an AI write a test definition with it, then running `tsq validate` and `mxp lint` on the result.
+
 ## License notice
 
 testsuit is licensed under the GNU AGPL, version 3 or later (see [LICENSE](LICENSE)). Every source file (`.py`, `.sh`, `.ts`, `.tsx`, `.js`, `.mjs`, `.css`, `.html`), new ones included, starts with this notice, in the file's comment syntax and after a `#!` or `<!doctype>` line if there is one:

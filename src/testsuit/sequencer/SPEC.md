@@ -319,13 +319,20 @@ configurations:                        # setup configurations
 ### 5.2 Test definition
 
 ```yaml
-setup: <setup file>
-setup_configuration: <name>
+id: <id>                                          # part of the datapack name
+name: <text>
+description: <text>                               # OPTIONAL
+setup_file: <setup file>                          # relative to the test definition
+setup_config: <name>                              # a configuration of the setup; `datapack --setup-config` MAY replace it
 dictionaries: [<file>...]
-user_keys: {<key>: <free text> | [<choice>...]}   # asked at each generation
+user_keys: {<key>: {description: <text>, choices: [<value>...]}}   # asked at each generation; no choices: free text
 reqs: [<requirement>...]                          # OPTIONAL, §5.5
 pipeline: {...}                                   # §6
 ```
+
+Unknown fields MUST be refused. Every field but `pipeline` is rendered with the dictionary keys at generation; `pipeline` is kept as written and rendered at run time (§7). A key of `user_keys` MUST be set by hand at each generation, to one of its `choices` when it lists some.
+
+`docs/ai/testdef_prompt.txt` (repository root) is a prompt that lets an AI write a test definition from a test specification. It condenses §5.1, §5.2, §6, §7 and the scenario format, and MUST be kept consistent with them.
 
 ### 5.3 Baseline and conformity
 
