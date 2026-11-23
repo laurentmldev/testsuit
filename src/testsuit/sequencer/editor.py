@@ -2453,7 +2453,33 @@ class Editor:
                             "configurations": sorted(raw.get("configurations") or {})},
                 "setup": {"id": raw.get("id"), "name": raw.get("name")},
                 "stage_slots": stage_slots, "slots": components, "dictionaries": dictionaries,
-                "baseline": baseline, "problems": problems}
+                "baseline": baseline, "requirements": self._requirements_of(session, testdef_rel), "problems": problems}
+
+    def _requirements_of(self, session: EditSession, testdef_rel: str) -> dict | None:
+        """The requirements a test definition covers, as generation would snapshot them: each with its title, path,
+        status and link, and what verifies it (the run verdict, or checks of the criteria); None when it lists none."""
+        from testsuit.reqs.snapshot import snapshot_of_testdef
+        path = self.path(session, testdef_rel)
+        try:
+            snap = snapshot_of_testdef(path, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+        except Exception as e:                     # a backend that fails: said, the overview goes on
+            return {"items": [], "problems": [f"requirements not read: {e}"], "warnings": []}
+        if snap is None:
+            return None
+        by: dict[str, list[str]] = {}
+        for key in snap.get("testdef") or []:
+            by.setdefault(key, []).append("run verdict")
+        for c in snap.get("checks") or []:
+            for key in c.get("reqs") or []:
+                by.setdefault(key, []).append(f"check {c.get('check')} ({c.get('step')}: {c.get('scenario')})")
+        reqs = snap.get("requirements") or {}
+        items = []
+        for key, verified_by in by.items():
+            r = reqs.get(key) or {}
+            items.append({"key": key, "title": r.get("title", ""), "path": r.get("path", ""), "status": r.get("status", ""),
+                          "url": r.get("url", ""), "version": r.get("version", ""), "found": bool(r),
+                          "by": list(dict.fromkeys(verified_by))})
+        return {"items": items, "problems": snap.get("problems") or [], "warnings": snap.get("warnings") or []}
 
     _version_cache: dict[tuple[str, str], tuple[float, Any, Any]] = {}
     _tag_cache: dict[tuple[str, str], list[str] | None] = {}    # the versions that are tags (None: not known)
