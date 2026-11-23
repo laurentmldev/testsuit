@@ -170,11 +170,10 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const yamlFound = yamlFile && files.some((f) => f.path === yamlFile);
   const credRows = [...new Set([...Object.keys(credentials), ...knownCredentials])];
   const [credName, setCredName] = useState("");
-  const setCred = (k: string, variable: string) => {
+  // a credential is read from an environment variable (env:NAME) or a file (file:/run/secrets/name)
+  const setCred = (k: string, kind: "env" | "file", where: string) => {
     const next = { ...credentials };
-    const v = variable.trim().replace(/^env:/, "");
-    if (v) next[k] = `env:${v}`;
-    else delete next[k];
+    next[k] = `${kind}:${where.trim().replace(/^(env|file):/, "")}`;
     set("credentials", next);
   };
   return (
@@ -224,21 +223,26 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <div className="kv">
             {credRows.map((k) => {
               const value = String(credentials[k] ?? "");
-              const literal = value && !value.startsWith("env:");
+              const kind: "env" | "file" = value.startsWith("file:") ? "file" : "env";
+              const literal = value !== "" && !/^(env|file):/.test(value);
+              const where = literal ? "" : value.replace(/^(env|file):/, "");
               return (
                 <div key={k} className="kv-row" title={backend?.credentials?.[k]}>
                   <span className="mono kv-key">{k}</span>
-                  <span className="muted">env:</span>
-                  <input className={classes("mono kv-value", literal && "invalid")} placeholder="VARIABLE"
-                    value={literal ? "" : value.replace(/^env:/, "")} onChange={(e) => setCred(k, e.target.value)} />
-                  {literal && <span className="bad-text small">a value written here is refused: name an environment variable</span>}
+                  <select value={kind} onChange={(e) => setCred(k, e.target.value as "env" | "file", e.target.value === "file" ? `/run/secrets/${k}` : k.toUpperCase())}
+                    title="Read from an environment variable, or from a file such as a Docker secret">
+                    <option value="env">env:</option><option value="file">file:</option>
+                  </select>
+                  <input className={classes("mono kv-value", literal && "invalid")} placeholder={kind === "file" ? "/run/secrets/name" : "VARIABLE"}
+                    value={where} onChange={(e) => setCred(k, kind, e.target.value)} />
+                  {literal && <span className="bad-text small">a value written here is refused: name an environment variable or a file</span>}
                   <button className="icon" title="Remove" onClick={() => { const next = { ...credentials }; delete next[k]; set("credentials", next); }}>×</button>
                 </div>
               );
             })}
             <div className="kv-row">
               <input className="mono kv-key" placeholder="new credential (token…)" value={credName} onChange={(e) => setCredName(e.target.value.trim())} />
-              {credName && <button className="small" onClick={() => { setCred(credName, credName.toUpperCase()); setCredName(""); }}>add</button>}
+              {credName && <button className="small" onClick={() => { setCred(credName, "env", credName.toUpperCase()); setCredName(""); }}>add</button>}
             </div>
           </div>
         </Field>

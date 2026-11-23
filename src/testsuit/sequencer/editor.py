@@ -1354,7 +1354,7 @@ class Editor:
 
     def check_requirements(self, session: EditSession, rel: str, text: str) -> list[dict]:
         """A sources file reads, and so does each of its sources (a backend no plugin registers, a file that is not
-        there; a credential whose variable is not set here is a warning: it may be set where datapacks are generated);
+        there; a credential whose variable is not set, or file not readable, here is a warning: it may be set where datapacks are generated);
         a requirements file of the YAML backend reads."""
         from testsuit.reqs.backend import ReqError, YamlBackend
         from testsuit.reqs.sources import SOURCES_FILE, Sources
@@ -1378,7 +1378,7 @@ class Editor:
             try:
                 sources.backend(name)
             except ReqError as e:
-                add(str(e), "warning" if "is not set" in str(e) else "error", f"'{name}'")
+                add(str(e), "warning" if ("is not set" in str(e) or "is not readable" in str(e)) else "error", f"'{name}'")
         return problems
 
     def _message_file(self, session: EditSession, message: str, default: str) -> tuple[str, str]:

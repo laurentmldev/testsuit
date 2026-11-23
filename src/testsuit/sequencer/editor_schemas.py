@@ -864,10 +864,12 @@ SOURCE = h(
                      "(`testsuit.reqs.register_req_backend`).", type="string"),
         "label": h("A readable name, shown in the source picker.", type="string"),
         "options": h("Options of the backend (a URL, a project, a file...).", type="object"),
-        "credentials": h("Credentials of the backend, by name, each read from an environment variable of the "
-                         "machine that reads the source: `env:<VARIABLE>`. A value written here is refused.",
-                         type="object", additionalProperties=h("`env:<VARIABLE>`", type="string",
-                                                               pattern="^env:[A-Za-z_][A-Za-z0-9_]*$")),
+        "credentials": h("Credentials of the backend, by name, each read on the machine that reads the source: "
+                         "`env:<VARIABLE>` (an environment variable) or `file:<path>` (the content of a file, such as "
+                         "a Docker secret `/run/secrets/<name>`; relative to this file). A value written here is "
+                         "refused.",
+                         type="object", additionalProperties=h("`env:<VARIABLE>` or `file:<path>`", type="string",
+                                                               pattern="^(env:[A-Za-z_][A-Za-z0-9_]*|file:.+)$")),
     })
 
 REQUIREMENTS_FILE = {

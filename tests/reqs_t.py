@@ -588,3 +588,22 @@ def test_rest_backend(tmp_path, alm_server, monkeypatch):
     monkeypatch.setenv("ALM_TOKEN", "wrong")
     result = editor.requirements_test(session, "requirements.yml", "alm")
     assert not result["ok"] and "HTTP 401" in result["error"]
+
+    # a credential read from a file (a Docker secret): absolute, or relative to the sources file
+    secret = tmp_path / "secrets" / "alm_token"
+    secret.parent.mkdir()
+    secret.write_text("s3cret\n", encoding="utf-8")
+    for where in (str(secret), "../../secrets/alm_token"):
+        (tmp_path / "repos" / "x").mkdir(exist_ok=True)
+        sources_file = tmp_path / "repos" / "x" / "requirements.yml"
+        sources_file.write_text(yaml.safe_dump({"sources": {"alm": {
+            "backend": "rest", "credentials": {"token": f"file:{where}"}, "options": options}}}), encoding="utf-8")
+        assert len(Sources(sources_file).backend("alm").list("", True)) == 5
+    editor.write(session, "requirements.yml", content=yaml.safe_dump({"sources": {"alm": {
+        "backend": "rest", "credentials": {"token": "file:/nonexistent/secret"}, "options": options}}}))
+    problems = editor.check_file(session, "requirements.yml")
+    assert [p["severity"] for p in problems] == ["warning"] and "is not readable" in problems[0]["message"]
+    with pytest.raises(ReqError, match="env:<VARIABLE>'\\) or a file"):
+        (tmp_path / "repos" / "x" / "requirements.yml").write_text(yaml.safe_dump({"sources": {"alm": {
+            "backend": "rest", "credentials": {"token": "s3cret"}, "options": options}}}), encoding="utf-8")
+        Sources(tmp_path / "repos" / "x" / "requirements.yml").backend("alm")
