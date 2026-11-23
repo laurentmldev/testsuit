@@ -329,7 +329,7 @@ function RoleCard({ name }: { name?: string | null }) {
   if (!r) return null;
   return (
     <div className="type-card">
-      <div><strong>role {name}</strong> <span className="muted small">{r.chain.join(" → ")}</span></div>
+      <div><strong>role <span className="role-name">{name}</span></strong> <span className="muted small">{r.chain.join(" → ")}</span></div>
       {r.description && <Markdown text={r.description} />}
       <table className="grid compact">
         <tbody>
@@ -721,7 +721,7 @@ function NewStage({ inv, onClose, onCreate }: { inv: Inv; onClose: () => void; o
           <thead><tr><th>From</th><th>Role</th><th>Extends</th><th>New component</th></tr></thead>
           <tbody>
             {plan.map((p) => (
-              <tr key={p.from}><td>{p.from}</td><td>{p.role}</td><td>{p.extends}</td>
+              <tr key={p.from}><td>{p.from}</td><td>{p.role && <Named kind="role" name={p.role} />}</td><td>{p.extends}</td>
                 <td>{p.shared ? <span>{p.to} <span className="badge info">shared</span></span> : <input value={names[p.from] ?? p.to} className={classes(labIdProblem(names[p.from] ?? p.to) && "invalid")} onChange={(e) => setNames({ ...names, [p.from]: labIdInput(e.target.value) })} />}</td></tr>
             ))}
           </tbody>

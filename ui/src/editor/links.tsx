@@ -15,7 +15,7 @@
 // file that defines it, on that item (`?file=…&item=<kind>:<name>`, consumed by the form of that file), and on
 // one of its commands opened for editing with `&command=<name>` (the Run page's "Edit the command" of a step).
 import { Fragment, useEffect, type ReactNode } from "react";
-import { KindIcon, type Kind } from "../kinds";
+import { KindIcon, nameClass, type Kind } from "../kinds";
 import { setQuery, useRoute } from "../util";
 import { hostLabel, useSession, type Session } from "./state";
 
@@ -52,10 +52,10 @@ export function ItemLink({ kind, name, label }: { kind: ItemKind; name: string; 
   const text = label ?? (kind === "host" ? hostLabel(session.ctx, name) : name);
   const what = kind === "host" ? "inventory component" : kind === "component" ? "class" : kind;
   const file = itemFile(session, kind, name);
-  if (!file) return <code title={`${what} ${name}`}><KindIcon kind={ITEM_KIND[kind]} title={`${what} ${name}`} />{text}</code>;
+  if (!file) return <code className={nameClass(ITEM_KIND[kind]) || undefined} title={`${what} ${name}`}><KindIcon kind={ITEM_KIND[kind]} title={`${what} ${name}`} />{text}</code>;
   return (
     <button type="button" className="link item-link" title={`Edit the ${what} ${name} (${file})`}
-      onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code><KindIcon kind={ITEM_KIND[kind]} title={`Edit the ${what} ${name}`} />{text}</code></button>
+      onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code className={nameClass(ITEM_KIND[kind]) || undefined}><KindIcon kind={ITEM_KIND[kind]} title={`Edit the ${what} ${name}`} />{text}</code></button>
   );
 }
 

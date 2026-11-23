@@ -17,7 +17,7 @@
 @import "@xyflow/react/dist/style.css";
 
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d9dde3; --text: #1d2330; --muted: #6a7282;
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d9dde3; --text: #1d2330; --muted: #6a7282; --weak: #808897;
   --accent: #2f6fde; --accent-soft: #e4edfc; --ok: #1f8a4c; --ok-soft: #e1f4e8; --run: #2f6fde; --run-soft: #e4edfc;
   --bad: #c8372d; --bad-soft: #fbe5e3; --warn: #a86400; --warn-soft: #fdf0d9; --wait: #7a5bc4; --wait-soft: #eee8fa;
   --idle: #4c8c8c; --lab: #5b6b82; --datapack: #c2408f; --code: #f3f4f7; --shadow: 0 6px 24px rgba(20, 30, 50, 0.16);
@@ -26,7 +26,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --border: #343b47; --text: #e3e6ec; --muted: #9098a6;
+    --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --border: #343b47; --text: #e3e6ec; --muted: #9098a6; --weak: #868e9c;
     --accent: #6c9ef5; --accent-soft: #23324d; --ok: #4cc27f; --ok-soft: #1c3527; --run: #6c9ef5; --run-soft: #23324d;
     --bad: #f0776d; --bad-soft: #43221f; --warn: #e3a64a; --warn-soft: #3e3020; --wait: #ab93e8; --wait-soft: #2f2843;
     --idle: #7cc0c0; --lab: #a4b2c6; --datapack: #f07cbf; --code: #252a33; --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
@@ -1208,3 +1208,7 @@ input.manual-note { flex: 1; min-width: 200px; }
 .req-test.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); background: var(--ok-soft); }
 .req-test.bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); background: var(--bad-soft); }
 .req-test table { margin-top: 6px; }
+
+/* Role names: weaker content than the names around them (a role is only a list of commands), lighter and italic. */
+.role-name, .named.role-name, input.role-name { color: var(--weak); font-style: italic; }
+button.link .role-name:hover { color: var(--accent); }

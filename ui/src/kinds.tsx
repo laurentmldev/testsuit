@@ -40,6 +40,9 @@ export const KINDS: Record<Kind, { label: string; family: "lab" | "test" | "pipe
   command: { label: "command", family: "pipeline", draw: <path {...S} d="M2 3.5L5 6 2 8.5M6 9h4" /> },
 };
 
+/** The extra class of a name of this kind: role names read as weaker content (lighter, italic). */
+export const nameClass = (kind?: Kind | null) => (kind === "role" ? "role-name" : "");
+
 /** The glyph of a kind of name, its kind spelled out on hover (title: a longer hover text). */
 export function KindIcon({ kind, title }: { kind: Kind; title?: string }) {
   const k = KINDS[kind];
@@ -57,7 +60,7 @@ export function Named({ kind, name, detail, className, children }: {
 }) {
   const title = `${KINDS[kind].label}${name ? ` ${name}` : ""}${detail ? ` · ${detail}` : ""}`;
   return (
-    <span className={"named" + (className ? ` ${className}` : "")} title={title}>
+    <span className={["named", name && nameClass(kind), className].filter(Boolean).join(" ")} title={title}>
       <KindIcon kind={kind} title={title} />{children ?? name}
     </span>
   );

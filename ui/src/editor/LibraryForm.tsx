@@ -160,7 +160,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         <div className="nav-title">Roles <button className="small" onClick={() => setCreating("role")}>+ Role</button></div>
         {Object.entries(roles).map(([name, r]) => (
           <div key={name} className={classes("nav-item", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
-            <strong>{name}</strong> {r?.extends && <Named kind="role" name={r.extends} detail="extends it" className="muted small" />}
+            <strong className="role-name">{name}</strong> {r?.extends && <Named kind="role" name={r.extends} detail="extends it" className="muted small" />}
             {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of <ItemLinks kind="host" names={ctx.lab.roles[name].used_by} /></div> : null}
           </div>
         ))}
