@@ -318,6 +318,11 @@ def test_editor_requirements_page(tmp_path):
     rows = {r["key"]: r["coverage"] for r in data["coverage"]["requirements"]}
     assert rows == {"REQ-1": "not run", "REQ-2": "uncovered", "REQ-3": "uncovered", "REQ-5": "uncovered"}
     assert data["coverage"]["tests"][0]["origin"] == "testdef/count/testdef.yml"
+    # the overview of the test definition (Datapacks) lists the requirements it covers
+    covered = editor.synthesis(session, "testdef/count/testdef.yml", versions=False, run_checks=False)["requirements"]
+    assert [(i["key"], i["title"], i["by"], i["found"]) for i in covered["items"]] == [
+        ("REQ-1", REQS["requirements"]["REQ-1"]["title"], ["run verdict"], True)] and not covered["problems"]
+
     # the quick search of the test definition form: active requirements of every source, by reference
     found = editor.requirements_search(session, "testdef/count/testdef.yml")
     assert found["sources_file"] == "requirements.yml" and found["default"] == "reqs" and not found["errors"]

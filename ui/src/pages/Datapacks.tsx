@@ -232,6 +232,7 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
       {data && (
         <>
           <Baseline datasets={data.baseline} edit={edit} onChange={() => setGenerate(true)} />
+          <CoveredRequirements reqs={data.requirements} edit={() => edit(testdef)} />
           <LogicalConfig data={data} edit={edit} sid={sid} config={config} />
           <PipelineGraph sid={sid} testdef={testdef} config={config} edit={edit} />
           <Criteria sid={sid} testdef={testdef} />
@@ -241,6 +242,41 @@ function Synthesis({ sid, ctx, testdef, config, setConfig }: {
       )}
       {generate && <GenerateDatapack sid={sid} workspace={ctx.workspace} repository={ctx.repository} testdef={testdef} config={config || data?.testdef?.setup_config} onClose={() => setGenerate(false)} />}
     </div>
+  );
+}
+
+/** The requirements the test definition covers (its `reqs`, and those of the checks of its criteria), as generation
+ *  will snapshot them: each with its text, and what verifies it. */
+function CoveredRequirements({ reqs, edit }: { reqs: any; edit: () => void }) {
+  if (!reqs) return null;
+  const items: any[] = reqs.items || [];
+  const issues = (reqs.problems?.length || 0) + (reqs.warnings?.length || 0);
+  return (
+    <Section title={<>Requirements <span className="muted small">{items.length} covered{issues ? ` · ${issues} problem(s)` : ""}</span></>}
+      actions={<>
+        <button className="small" onClick={edit} title="Edit the requirements of the test definition">Edit…</button>
+        <button className="small" onClick={() => setQuery("view", "requirements")} title="The coverage of every requirement by the test definitions and their last runs">Coverage…</button>
+      </>}>
+      {items.length > 0 && (
+        <table className="grid compact covered-reqs">
+          <thead><tr><th>Requirement</th><th>Title</th><th>Path</th><th>Status</th><th>Verified by</th></tr></thead>
+          <tbody>
+            {items.map((r) => (
+              <tr key={r.key} className={classes(!r.found && "bad")}>
+                <td>{r.url ? <a href={r.url} target="_blank" rel="noreferrer"><code>{r.key}</code></a> : <code>{r.key}</code>}</td>
+                <td>{r.found ? r.title : <span className="bad-text">not found in its source</span>}</td>
+                <td className="small"><code>{r.path}</code></td>
+                <td className="small">{r.status}</td>
+                <td className="small">{r.by.join("; ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {[...(reqs.problems || []).map((p: string) => ["error", p]), ...(reqs.warnings || []).map((w: string) => ["warning", w])].map(([kind, text], i) => (
+        <div key={i} className={kind === "error" ? "error-text small" : "warn-text small"}>{text}</div>
+      ))}
+    </Section>
   );
 }
 
