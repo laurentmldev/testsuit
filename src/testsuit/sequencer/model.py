@@ -20,6 +20,7 @@ rendered at run time, with the datapack's frozen keys and the run-time keys.
 from __future__ import annotations
 
 import graphlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -175,11 +176,43 @@ class Comment(_Model):
     x: float | None = None
     y: float | None = None
     width: float | None = None
+    color: str | None = None                     # a COMMENT_COLORS name or '#rgb' / '#rrggbb'; none: yellow
 
     @model_validator(mode="before")
     @classmethod
     def _plain(cls, data):
         return {"text": data} if isinstance(data, str) else data      # a card given as its text only
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value):
+        if value is not None and value not in COMMENT_COLORS and not re.fullmatch(r"#(?:[0-9a-fA-F]{3}){1,2}", value):
+            raise ValueError(f"color '{value}': one of {', '.join(COMMENT_COLORS)}, or '#rrggbb'")
+        return value
+
+
+COMMENT_COLORS = ("yellow", "orange", "red", "pink", "purple", "blue", "green", "grey")   # comment card colors
+
+
+def comment_cards(phase: Phase, pipeline: Pipeline) -> list[dict]:
+    """Every comment card of a phase as the run graph shows it: the phase's own, then those of each sub-pipeline it
+    uses (at any depth, once per ``uses`` step), each with ``group`` (the namespaced ``uses`` step id, '' for the
+    phase) and ``part`` (``steps`` or ``finally``). Empty cards are left out; ``step`` stays as written."""
+    def card(c: Comment, group: str, part: str) -> dict:
+        return {"text": c.text, "step": c.step, "color": c.color, "group": group, "part": part}
+    cards = [card(c, "", "steps") for c in phase.comments if c.text.strip()]
+
+    def walk(steps: list[Step], prefix: str, part: str, stack: tuple) -> None:
+        for s in steps:
+            sub = pipeline.subpipelines.get(s.uses) if s.uses is not None else None
+            if sub is None or s.uses in stack:
+                continue
+            full = prefix + s.id
+            cards.extend(card(c, full, part) for c in sub.comments if c.text.strip())
+            walk(sub.steps, full + ".", part, stack + (s.uses,))
+    walk(phase.steps, "", "steps", ())
+    walk(phase.finally_, "", "finally", ())
+    return cards
 
 
 def comment_problems(pipeline: Pipeline) -> list[str]:

@@ -25,6 +25,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from testsuit.sequencer.model import COMMENT_COLORS
 from testsuit.sequencer.inventory import ICON_EXTENSIONS, ICONS
 
 
@@ -53,7 +54,9 @@ COMMENT_CARDS = h(
                       type="string"),
             "x": h("Horizontal place on the graph (pixels).", type="number"),
             "y": h("Vertical place on the graph (pixels).", type="number"),
-            "width": h("Width of the card (pixels, default 220).", type="number")}}]})
+            "width": h("Width of the card (pixels, default 220).", type="number"),
+            "color": h("Color of the card: a name, or `#rrggbb`; none: yellow.", type="string",
+                       anyOf=[{"enum": list(COMMENT_COLORS)}, {"pattern": "^#([0-9a-fA-F]{3}){1,2}$"}])}}]})
 
 STRICT_NOTE = ("Its lines run in one shell (a `cd` or `export` holds for the next lines) and it stops at the first "
                "line that fails (`set -e`); `|| true` lets a line fail.")

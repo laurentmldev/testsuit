@@ -107,7 +107,7 @@ pipeline:
       steps: [<step>...]
       finally: [<step>...]            always run after steps, even on failure/cancel/kill. Without needs: in written order.
       timeout: <duration>
-      comments: [<markdown> | {text, step}]   notes, never run
+      comments: [<markdown> | {text, step, color}]   notes, never run. color: yellow|orange|red|pink|purple|blue|green|grey|#rrggbb
 
 STEP:
 - id: <id>                            unique in its phase (steps+finally together) or sub-pipeline; no . [ /
