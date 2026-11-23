@@ -163,7 +163,7 @@ A test never names a host: the same datapack runs on any stage of the right type
 
 **UC-5 Run a test and follow it** (test author; sections 9 and 10):
 - Post it with `tsq submit <zip> --priority 70 --follow`, or from the **Queue** subtab of the **Runs** tab.
-- See it waiting with `tsq queue` (change its priority with `tsq priority <run> 90`), then running with `tsq show <run>` and `tsq logs <run>`, or on its page (**Runs** tab) with its pipeline graph and live logs.
+- See it waiting with `tsq queue` (change its priority with `tsq priority <run> 90`), then running with `tsq show <run>` and `tsq logs <run>`, or on its page (**Runs** tab) with its pipeline graph and live logs. The page follows the step running now (selected, its log shown) until another step is clicked; clicking a running step, or **Follow the running step**, follows again, to each next step as it starts.
 
 **UC-6 Stop a run** (section 11): `tsq cancel <run>` stops the commands, then kills them; `tsq kill <run>` kills at once. Either way the `finally` steps still run and collect the outputs. `tsq repost <run>` puts an ended run back in the queue.
 
