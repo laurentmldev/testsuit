@@ -186,6 +186,12 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           {result.ok ? (
             <>
               <div><strong>{result.count}</strong> requirement(s), {result.nodes} node(s), read in {result.seconds} s{result.count > result.sample.length ? `; the first ${result.sample.length}:` : ":"}</div>
+              {result.vars && Object.keys(result.vars).length > 0 && (
+                <div className="req-vars small">Variables: {Object.entries<any>(result.vars).map(([k, v]) => (
+                  <span key={k} className={classes("mono", k in (result.context || {}) && "strong")} title={k in (result.context || {}) ? "mandatory: the context of the requirements" : undefined}>
+                    {k}={typeof v === "object" ? JSON.stringify(v) : String(v) || "∅"}</span>
+                ))}</div>
+              )}
               {result.sample.length > 0 && (
                 <table className="grid compact">
                   <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th><th>Version</th></tr></thead>
@@ -204,6 +210,9 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
         <Combo mono value={spec.backend} onChange={(v) => set("backend", v)} choices={backendChoices} />
       </Field>
       <Field label="Label" help={help(["sources", name, "label"])}><Text value={spec.label} onChange={(v) => set("label", v)} placeholder={name} /></Field>
+      <Field label="Variables" help={help(["sources", name, "vars"])}>
+        <Variables value={spec.vars} onChange={(v) => set("vars", Object.keys(v).length ? v : undefined)} />
+      </Field>
       <Field label="Options" help={help(["sources", name, "options"])} wide
         hint={yamlFile && (yamlFound
           ? <button className="link small" onClick={() => open(yamlFile)}>open {yamlFile}</button>
@@ -520,8 +529,11 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
             onChange={(v) => set("verify", scalar(v))} />
         </Field>
       </Group>
+      <Group title="Steps" note="optional calls made first, each extracting variables for the next ones" help={help.steps}>
+        <Steps value={options.steps} onChange={(v) => set("steps", v.length ? v : undefined)} />
+      </Group>
       <Group title="List call" note="reads every requirement" help={help.list}>
-        <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={page}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+        <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
         <Field label="Items (jq)"><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
         <Field label="Next page (jq)"><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
         <Field label="First page" help={help.first_page}><Text mono value={options.first_page} placeholder="1" onChange={(v) => set("first_page", scalar(v))} /></Field>
@@ -535,7 +547,7 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         )}
       </Group>
       <Group title="Get by id call" note="optional: fetches only the requirements needed" help={help.get}>
-        <Field label="URL suffix"><Text mono value={get.url} placeholder="items?ids={ids} or items/{id}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+        <Field label="URL suffix"><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
         {get.url && <Field label="Items (jq)"><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
       </Group>
       <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
@@ -549,7 +561,7 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
           ))}</tbody>
         </table>
         <Field label="Link template" help={help.url}>
-          <Text mono value={options.url} placeholder="https://reqs.example.com/items/{id}" onChange={(v) => set("url", v.trim())} />
+          <Text mono value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
         </Field>
       </Group>
     </>
@@ -614,6 +626,106 @@ function Credentials({ value, rows, help, onChange, unused }: {
           {credName && <button className="small" onClick={() => { setCred(credName, "env", credName.toUpperCase()); setCredName(""); }}>add</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── variables ──────────────────────────────────────────────────────────
+
+const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** A variable as written: a value, or {value | jq, mandatory, default}. */
+function varParts(spec: any, key: "value" | "jq"): { value: any; mandatory: boolean; dflt: any } {
+  if (spec && typeof spec === "object" && !Array.isArray(spec)) return { value: spec[key], mandatory: !!spec.mandatory, dflt: spec.default };
+  return { value: spec, mandatory: false, dflt: undefined };
+}
+
+function varSpec(key: "value" | "jq", value: any, mandatory: boolean, dflt: any): any {
+  if (!mandatory && (dflt === undefined || dflt === "")) return value ?? "";
+  return { [key]: value ?? "", ...(mandatory ? { mandatory: true } : {}), ...(dflt !== undefined && dflt !== "" ? { default: dflt } : {}) };
+}
+
+/** Rows of variables: name, value (or jq), mandatory, default. Mandatory ones are the context of the requirements. */
+function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
+  value?: Data | null; onChange: (v: Data) => void; keyName: "value" | "jq"; placeholder: string; namePlaceholder: string;
+}) {
+  const data: Data = value || {};
+  const [name, setName] = useState("");
+  const bad = name && (!VAR_NAME.test(name) ? "letters, digits and _" : name in data ? "already there" : null);
+  const put = (k: string, v: any) => onChange({ ...data, [k]: v });
+  const add = () => { if (name && !bad) { put(name, keyName === "jq" ? "" : ""); setName(""); } };
+  return (
+    <div className="kv req-vars-rows">
+      {Object.entries(data).map(([k, spec]) => {
+        const { value: v, mandatory, dflt } = varParts(spec, keyName);
+        return (
+          <div key={k} className="kv-row">
+            <span className={classes("mono req-var-name", mandatory && "strong")}>{k}</span>
+            <input className="mono kv-value" placeholder={placeholder} value={v === null || v === undefined ? "" : String(v)}
+              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory, dflt))} />
+            <input className="mono req-var-default" placeholder="default" value={dflt === null || dflt === undefined ? "" : String(dflt)}
+              title="Its value when it has none" onChange={(e) => put(k, varSpec(keyName, v, mandatory, e.target.value === "" ? undefined : scalar(e.target.value)))} />
+            <label className="toggle small" title="It must have a value, and is the context of the requirements: shown with them and recorded in the datapack">
+              <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked, dflt))} /> mandatory
+            </label>
+            <button className="icon" title="Remove" onClick={() => { const next = { ...data }; delete next[k]; onChange(next); }}>×</button>
+          </div>
+        );
+      })}
+      <div className="kv-row">
+        <input className={classes("mono kv-key", bad && "invalid")} placeholder={namePlaceholder} value={name}
+          onChange={(e) => setName(e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && add()} />
+        {name && !bad && <button className="small" onClick={add}>add</button>}
+        {bad && <span className="bad-text small">{bad}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** The variables of a source: {{ name }} in its options, $name in jq; a value can use the datapack keys. */
+function Variables({ value, onChange }: { value?: Data | null; onChange: (v: Data) => void }) {
+  return (
+    <>
+      <VarRows value={value} onChange={onChange} keyName="value" namePlaceholder="new variable (branch, version…)"
+        placeholder="value, or {{ sut.version | default('3.2') }}" />
+      {value && Object.keys(value).length > 0 && (
+        <div className="hint">{"{{ name }}"} in the options, <code>$name</code> in jq expressions</div>
+      )}
+    </>
+  );
+}
+
+/** The rest backend's steps: calls made before the others, each extracting variables with jq. */
+function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[]) => void }) {
+  const steps: Data[] = Array.isArray(value) ? value : [];
+  const setStep = (i: number, step: Data) => onChange(steps.map((s, j) => (j === i ? step : s)));
+  const setIn = (i: number, k: string, v: any) => setStep(i, put(steps[i], k, v));
+  return (
+    <div className="req-steps">
+      {steps.map((step, i) => (
+        <div key={i} className="req-step">
+          <div className="req-step-head">
+            <strong className="small">Step {i + 1}</strong>
+            <span className="grow" />
+            <button className="icon" title="Remove this step" onClick={() => onChange(steps.filter((_, j) => j !== i))}>×</button>
+          </div>
+          <Field label="URL suffix"><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+          <Field label="Variables (jq)">
+            <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
+              namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id" />
+          </Field>
+          <Field label="Cache"><Text mono value={step.cache} placeholder="none: once per generation; or 10m, 1h, 1d" onChange={(v) => setIn(i, "cache", scalar(v.trim()))} /></Field>
+          <Field label="Method">
+            <select value={String(step.method || "GET").toUpperCase()} onChange={(e) => setIn(i, "method", e.target.value === "GET" ? undefined : e.target.value)}>
+              <option>GET</option><option>POST</option>
+            </select>
+          </Field>
+          {String(step.method || "").toUpperCase() === "POST" && (
+            <Field label="Body (JSON)"><JsonText value={step.body} onChange={(v) => setIn(i, "body", v)} /></Field>
+          )}
+        </div>
+      ))}
+      <button className="small" onClick={() => onChange([...steps, { url: "", extract: {} }])}>Add step</button>
     </div>
   );
 }

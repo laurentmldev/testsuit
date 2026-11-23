@@ -98,6 +98,13 @@ class Test:
     versions: dict[str, str] = field(default_factory=dict)  # requirement -> version it was linked against
     problems: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    context: dict[str, dict] = field(default_factory=dict)  # source -> its mandatory variables (branch, version...)
+
+    @property
+    def context_text(self) -> str:
+        """``alm: branch=main, version=3.2``, a source by line."""
+        return "; ".join(f"{source}: " + ", ".join(f"{k}={v}" for k, v in values.items())
+                         for source, values in self.context.items())
 
     @property
     def label(self) -> str:
@@ -158,6 +165,7 @@ class Coverage:
                        "links": [{"req": lk.req, "where": lk.where, "level": lk.level, "step": lk.step,
                                   "status": lk.status, **({"changed": True} if self.stale(lk.req, t) else {})}
                                  for lk in t.links],
+                       **({"context": t.context} if t.context else {}),
                        **({"problems": t.problems} if t.problems else {}),
                        **({"warnings": t.warnings} if t.warnings else {})} for t in self.tests],
             "by_path": self.by_path(),
@@ -266,6 +274,9 @@ def add_test(cov: Coverage, snap: dict, test: Test, keys: dict[str, int] | None 
     while test.key in taken:
         n += 1
         test.key = f"{base}#{n}"
+    for source in snap.get("sources") or []:
+        if isinstance(source, dict) and source.get("context"):
+            test.context[str(source.get("name"))] = dict(source["context"])
     for key, req in (snap.get("requirements") or {}).items():
         cov.requirements.setdefault(key, req)
         test.versions[key] = str(req.get("version", ""))

@@ -525,6 +525,14 @@ def alm_server():
             if url.path == "/api/byids":
                 ids = q.get("ids", "").split(",")
                 return self.answer(200, {"data": [a for a in ALM if a["key"] in ids]})
+            if url.path == "/api/systems":                     # the system, by branch (steps)
+                if q.get("branch") != "main":
+                    return self.answer(404, {"error": "no such branch"})
+                return self.answer(200, {"items": [{"name": "Brakes", "id": 7}, {"name": "Speed", "id": 9},
+                                                   {"name": "Speed limiter", "id": 10}]})
+            if url.path.startswith("/api/sub/"):              # the items of a subsystem
+                folder = {"7": "BRAKE", "9": "SPEED"}.get(url.path.split("/")[3])
+                return self.answer(200, {"data": [a for a in ALM if a["folder"][1]["name"] == folder]})
             if url.path.startswith("/api/item/"):
                 found = [a for a in ALM if a["key"] == url.path.rsplit("/", 1)[1]]
                 return self.answer(200, found[0]) if found else self.answer(404, {"error": "no such item"})
@@ -617,3 +625,90 @@ def test_rest_backend(tmp_path, alm_server, monkeypatch):
         (tmp_path / "repos" / "x" / "requirements.yml").write_text(yaml.safe_dump({"sources": {"alm": {
             "backend": "rest", "credentials": {"token": "s3cret"}, "options": options}}}), encoding="utf-8")
         Sources(tmp_path / "repos" / "x" / "requirements.yml").backend("alm")
+
+
+def test_rest_variables_and_steps(tmp_path, alm_server):
+    """Variables of a source in URLs ({{ name }}) and jq ($name); steps extracting variables, mandatory or not, their
+    answers cached; the context recorded with the requirements."""
+    from testsuit.reqs import rest
+    from testsuit.reqs.sources import Sources
+    base, calls = alm_server
+    rest.clear_cache()
+    fields = {"id": ".key", "title": ".fields.name", "path": '[.folder[]?.name] | join("/")'}
+    options = {"base": base + "/api", "auth": {"bearer": "token"}, "fields": fields,
+               "url": "https://alm/{{ branch }}/{{ id }}",
+               "steps": [{"url": "systems?branch={{ branch }}", "cache": "1h",
+                          "extract": {"sub_id": {"jq": ".items[] | select(.name == $subsystem) | .id", "mandatory": True},
+                                      "other": ".items[] | select(.name == \"none\") | .id"}}],
+               "list": {"url": "sub/{{ sub_id }}/items", "items": ".data[] | select(.key != $skip)"}}
+    spec = {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"}, "options": options,
+            "vars": {"branch": {"value": "{{ sut.branch | default('main') }}", "mandatory": True},
+                     "subsystem": "Speed", "skip": "ALM-5"}}
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"sources": {"alm": spec}}), encoding="utf-8")
+    import os
+    os.environ["ALM_TOKEN"] = "s3cret"
+    try:
+        sources = Sources(file)
+        reqs = sources.list("", True)
+        assert list(reqs) == ["ALM-3", "ALM-4"] and reqs["ALM-3"].url == "https://alm/main/ALM-3"
+        assert calls == ["/api/systems?branch=main", "/api/sub/9/items"]
+        record = sources.record()[0]
+        assert record["context"] == {"branch": "main", "sub_id": 9}
+        assert record["vars"] == {"branch": "main", "subsystem": "Speed", "skip": "ALM-5", "sub_id": 9, "other": ""}
+
+        # the snapshot records the variables, and the coverage shows the context
+        from testsuit.reqs.coverage import Coverage, Test, add_test
+        from testsuit.reqs.render import text
+        snap = __import__("testsuit.reqs.snapshot", fromlist=["build"]).build(file, ["ALM-3"], [])
+        assert snap["sources"][0]["context"] == {"branch": "main", "sub_id": 9} and "problems" not in snap
+        cov = Coverage()
+        add_test(cov, snap, Test(key="t", testdef="t"))
+        assert cov.as_dict()["tests"][0]["context"] == {"alm": {"branch": "main", "sub_id": 9}}
+        assert "context: alm: branch=main, sub_id=9" in text(cov)
+
+        # the step's answer is cached across backends; datapack keys set a variable
+        calls.clear()
+        assert list(Sources(file).list("", True)) == ["ALM-3", "ALM-4"] and calls == ["/api/sub/9/items"]
+        with pytest.raises(ReqError, match="HTTP 404"):
+            Sources(file, {"sut": {"branch": "dev"}}).list("", True)
+
+        def fails(match, **change):
+            file.write_text(yaml.safe_dump({"sources": {"alm": {**spec, **change}}}), encoding="utf-8")
+            rest.clear_cache()
+            with pytest.raises(ReqError, match=match):
+                Sources(file).list("", True)
+
+        # a mandatory step variable without a value; several values; a mandatory source variable without one
+        fails("variable 'sub_id': no value, and it is mandatory", vars={**spec["vars"], "subsystem": "Nope"})
+        fails("variable 'sub_id': 2 values", options={**options, "steps": [{**options["steps"][0], "extract": {
+            "sub_id": ".items[] | select(.name | startswith(\"Speed\")) | .id"}}]})
+        fails("mandatory variable 'branch' has no value", vars={**spec["vars"], "branch": {"value": "", "mandatory": True}})
+        fails("'sut' is undefined", vars={**spec["vars"], "branch": "{{ sut.branch }}"})
+        # unknown variables: in a URL, in jq
+        fails("unknown variable 'nope'", options={**options, "list": {"url": "sub/{{ nope }}/items"}})
+        fails(r"\$nope is not defined", options={**options, "list": {**options["list"], "items": ".data[] | $nope"}})
+        # a default: no value is not an error
+        file.write_text(yaml.safe_dump({"sources": {"alm": {**spec, "vars": {**spec["vars"], "subsystem": "Nope"},
+                                         "options": {**options, "steps": [{**options["steps"][0], "extract": {
+                                             "sub_id": {"jq": options["steps"][0]["extract"]["sub_id"]["jq"],
+                                                        "default": 7}}}]}}}}), encoding="utf-8")
+        assert list(Sources(file).list("", True)) == ["ALM-1", "ALM-2"]
+    finally:
+        os.environ.pop("ALM_TOKEN", None)
+        rest.clear_cache()
+
+
+def test_source_variables_for_any_backend(tmp_path):
+    """A backend without a vars argument gets its options with {{ name }} replaced (the yaml backend's file)."""
+    from testsuit.reqs.sources import Sources
+    (tmp_path / "v3.yml").write_text(yaml.safe_dump({"requirements": {"R-1": {"title": "One"}}}), encoding="utf-8")
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"sources": {"reqs": {
+        "backend": "yaml", "options": {"file": "v{{ version }}.yml"},
+        "vars": {"version": {"value": "{{ sut.version | default(3) }}", "mandatory": True}}}}}), encoding="utf-8")
+    sources = Sources(file)
+    assert list(sources.list("", True)) == ["R-1"]
+    assert sources.record()[0]["context"] == {"version": 3}
+    with pytest.raises(ReqError, match="v4.yml"):
+        Sources(file, {"sut": {"version": 4}}).list("", True)

@@ -23,6 +23,14 @@ git root (a repository holding several trees of tests, such as an example, can h
         backend: jama                   # a backend registered by a plugin
         options: {url: https://jama.example/rest, project: 12}
         credentials: {token: env:JAMA_TOKEN}      # env:<VARIABLE> or file:<path> (a Docker secret), never written here
+        vars:                           # variables: {{ name }} in the options ($name in the rest backend's jq)
+          project: 12
+          version: {value: "{{ sut.version | default('3.2') }}", mandatory: true}
+
+A variable's value can be a Jinja2 expression of the datapack keys (dictionaries, keys set by hand with
+``datapack --set``, campaign keys), with a ``default`` for where there are none (the Editor's coverage view,
+``tsq-reqs``). A mandatory variable must have a value (not empty), and is the context of the requirements: shown by
+the Editor and the reports (``jama: version=3.2``). The variables, as resolved, are recorded in the datapack.
 
 A sources file without ``sources`` but with ``requirements`` is itself the one source ``reqs`` of the built-in YAML
 backend (the simplest setup: one file).
@@ -30,8 +38,9 @@ backend (the simplest setup: one file).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -101,11 +110,47 @@ def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str
     return out
 
 
+def var_spec(spec: Any, where: str) -> tuple[Any, bool, Any]:
+    """(value, mandatory, default) of a variable: a value, or ``{value, mandatory, default}``."""
+    if not isinstance(spec, dict):
+        return spec, False, None
+    unknown = sorted(set(spec) - {"value", "mandatory", "default"})
+    if unknown:
+        raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)} (value, mandatory, default)")
+    return spec.get("value"), bool(spec.get("mandatory")), spec.get("default")
+
+
+def _render_var(value: Any, keys: Mapping[str, Any] | None, where: str) -> Any:
+    """A variable's value: a Jinja2 expression of the datapack keys rendered (one expression keeps its type)."""
+    if not isinstance(value, str) or "{{" not in value and "{%" not in value:
+        return value
+    import jinja2
+    import jinja2.sandbox
+    class Undefined(jinja2.ChainableUndefined, jinja2.StrictUndefined):      # a.b | default(...) when a is not
+        pass
+    env = jinja2.sandbox.SandboxedEnvironment(undefined=Undefined)
+    try:
+        single = re.fullmatch(r"\s*\{\{(.*)\}\}\s*", value, re.S)
+        if single and "{{" not in single.group(1) and "}}" not in single.group(1):
+            result = env.compile_expression(single.group(1), undefined_to_none=False)(**dict(keys or {}))
+            if isinstance(result, jinja2.Undefined):
+                str(result)
+            return result
+        return env.from_string(value).render(**dict(keys or {}))
+    except jinja2.UndefinedError as e:
+        raise ReqError(f"{where}: {e}" + ("" if keys else
+                       " (no datapack keys here: give it a default, such as {{ sut.version | default('3.2') }})")) from e
+    except jinja2.TemplateError as e:
+        raise ReqError(f"{where}: {e}") from e
+
+
 class Sources:
     """The requirements sources of a sources file, their backends created on first use."""
 
-    def __init__(self, file: Path) -> None:
+    def __init__(self, file: Path, keys: Mapping[str, Any] | None = None) -> None:
+        """``keys``: the datapack keys the variables of the sources are rendered with (None: none, only defaults)."""
         self.file = file.resolve()
+        self.keys = keys
         try:
             data = yaml.safe_load(self.file.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as e:
@@ -123,14 +168,45 @@ class Sources:
         for name, spec in specs.items():
             if not isinstance(spec, dict) or not spec.get("backend"):
                 raise ReqError(f"'{self.file}': source '{name}' names its 'backend'")
-            unknown = sorted(set(spec) - {"backend", "options", "credentials", "label"})
+            unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars"})
             if unknown:
                 raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
+            if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
+                raise ReqError(f"'{self.file}': source '{name}': 'vars' is a mapping of names to values")
             self.specs[str(name)] = spec
         self.default = str(data.get("default") or next(iter(self.specs)))
         if self.default not in self.specs:
             raise ReqError(f"'{self.file}': default source '{self.default}' is not one of its sources")
         self._backends: dict[str, ReqBackend] = {}
+        self._vars: dict[str, dict[str, Any]] = {}
+
+    def vars(self, name: str) -> dict[str, Any]:
+        """The variables of a source, resolved."""
+        if name not in self._vars:
+            out = {}
+            for key, spec in (self.specs[name].get("vars") or {}).items():
+                value, mandatory, default = var_spec(spec, f"'{self.file}': source '{name}': variable '{key}'")
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
+                    raise ReqError(f"'{self.file}': source '{name}': variable '{key}' is not a name (letters, digits, _)")
+                value = _render_var(value, self.keys, f"source '{name}': variable '{key}'")
+                if value in (None, "") and default is not None:
+                    value = default
+                if mandatory and value in (None, ""):
+                    raise ReqError(f"source '{name}': mandatory variable '{key}' has no value")
+                out[str(key)] = "" if value is None else value
+            self._vars[name] = out
+        return self._vars[name]
+
+    def mandatory(self, name: str) -> list[str]:
+        """The names of the mandatory variables of a source (those it declares; a backend adds its own)."""
+        return [str(k) for k, spec in (self.specs[name].get("vars") or {}).items()
+                if isinstance(spec, dict) and spec.get("mandatory")]
+
+    def context(self, name: str) -> dict[str, Any]:
+        """The mandatory variables of a source and their values: the context of its requirements."""
+        variables = {**self.vars(name), **(self._backends[name].resolved_vars() if name in self._backends else {})}
+        names = self.mandatory(name) + (getattr(self._backends.get(name), "mandatory_vars", None) or [])
+        return {k: variables[k] for k in dict.fromkeys(names) if k in variables}
 
     @property
     def names(self) -> list[str]:
@@ -143,7 +219,7 @@ class Sources:
             spec = self.specs[name]
             self._backends[name] = create_req_backend(spec["backend"], spec.get("options") or {},
                                                       _credentials(name, spec.get("credentials"), self.file.parent),
-                                                      self.file.parent)
+                                                      self.file.parent, self.vars(name))
         return self._backends[name]
 
     def ref(self, text: str) -> Ref:
@@ -187,6 +263,14 @@ class Sources:
                 revision = backend.revision()
             except Exception:
                 revision = None
+            try:
+                found = backend.resolved_vars()
+            except Exception:
+                found = {}
+            variables = {**self.vars(name), **(found or {})}
+            context = self.context(name)
             out.append({"name": name, "backend": self.specs[name]["backend"],
+                        **({"context": context} if context else {}),
+                        **({"vars": variables} if variables else {}),
                         **({"revision": revision} if revision else {})})
         return out

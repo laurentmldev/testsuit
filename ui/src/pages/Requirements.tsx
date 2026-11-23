@@ -117,6 +117,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                   return (
                     <th key={t.key} title={t.origin}>
                       {href ? <a href={href}>{t.testdef || t.key}</a> : t.testdef || t.key}
+                      {t.context && <div className="muted small mono" title="The context of its requirements: the mandatory variables of their sources">{contextText(t.context)}</div>}
                       <div className="muted small mono">{t.run || "not run"}</div>
                     </th>
                   );
@@ -167,7 +168,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                 return (
                   <Fragment key={t.key}>
                     <tr className="cov-node">
-                      <td colSpan={2}>{href ? <a href={href}>{t.testdef || t.key}</a> : t.testdef || t.key} <span className="muted small mono">{t.run || t.origin}</span></td>
+                      <td colSpan={2}>{href ? <a href={href}>{t.testdef || t.key}</a> : t.testdef || t.key} <span className="muted small mono">{t.run || t.origin}</span>{t.context && <span className="muted small mono" title="The context of its requirements"> · {contextText(t.context)}</span>}</td>
                       <td>{t.run ? <CoverageBadge status={{ succeeded: "passed", failed: "failed", error: "error" }[t.verdict as string] || "not run"} /> : <span className="muted small">not run</span>}</td>
                     </tr>
                     {byWhere.map(([where, links]) => {
@@ -305,4 +306,10 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
       )}
     </div>
   );
+}
+
+/** The context of the requirements of a test: `alm: branch=main, version=3.2`, a source after another. */
+export function contextText(context: Record<string, Record<string, unknown>>): string {
+  return Object.entries(context).map(([source, values]) =>
+    `${source}: ${Object.entries(values).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`).join(", ")}`).join("; ");
 }

@@ -17,7 +17,9 @@ Reports and coverage then work offline, on the text that was tested::
 
     format: 1
     default_source: reqs
-    sources: [{name: reqs, backend: yaml, revision: 3f2a...}]
+    sources: [{name: reqs, backend: yaml, revision: 3f2a...},     # with its variables as resolved, the mandatory
+              {name: alm, backend: rest, context: {version: '3.2'},  # ones as its context
+               vars: {version: '3.2', subsystem: Power, subsystem_id: 42}}]
     testdef: [REQ-12]                       # links of the test definition (keys: no version, no default prefix)
     checks:                                 # links of the checks of its exploit steps
       - {step: analyse, criteria: criteria/max_speed, scenario: max_speed, file: max_speed.mexploit.yml,
@@ -82,7 +84,7 @@ def resolve(sources: Sources, refs: list[str]) -> tuple[dict[str, dict], dict[st
 
 
 def build(sources_file: Path | None, testdef_reqs: list[str], checks: list[dict],
-          link_problems: list[str] = ()) -> dict:
+          link_problems: list[str] = (), keys: Mapping[str, Any] | None = None) -> dict:
     """The snapshot of these links (sources_file None: every link is a problem)."""
     refs = list(dict.fromkeys([*testdef_reqs, *(r for c in checks for r in c["reqs"])]))
     snap: dict[str, Any] = {"format": FORMAT}
@@ -93,7 +95,7 @@ def build(sources_file: Path | None, testdef_reqs: list[str], checks: list[dict]
         requirements, warnings, record, default = {}, [], [], ""
     else:
         try:
-            sources = Sources(sources_file)
+            sources = Sources(sources_file, keys)
             requirements, keys, found, warnings = resolve(sources, refs)
             problems += found
             record, default = sources.record(), sources.default
@@ -130,4 +132,4 @@ def snapshot_of_testdef(testdef_file: Path, raw: Mapping[str, Any], keys: Mappin
     own, checks, problems = links_of_testdef(testdef_file, raw, keys, locate)
     if not own and not checks and not problems:
         return None
-    return build(find_sources_file(testdef_file), own, checks, problems)
+    return build(find_sources_file(testdef_file), own, checks, problems, keys)

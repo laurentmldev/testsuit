@@ -11,6 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
+
 """The built-in generic REST backend: the requirements of a tool with a JSON REST API, configured in the sources file
 alone, its fields picked from the answers with jq expressions::
 
@@ -18,14 +19,22 @@ alone, its fields picked from the answers with jq expressions::
       alm:
         backend: rest
         credentials: {token: env:ALM_TOKEN}
+        vars:                                    # see testsuit.reqs.sources
+          subsystem: Power unit
+          branch: {value: "{{ sut.branch | default('main') }}", mandatory: true}
         options:
           base: https://alm.example/api/v2
           auth: {bearer: token}                  # or basic: [user, password], header: {X-Api-Key: token}
+          steps:                                 # optional: calls run first, each extracting variables
+            - url: /systems?branch={{ branch }}
+              extract:                           # jq; $name: a variable
+                subsystem_id: '.items[] | select(.name == $subsystem) | .id'
+              cache: 1h                          # the answer kept that long (default: one generation)
           list:                                  # every requirement, page by page
-            url: /projects/12/items?type=requirement&page={page}
+            url: /subsystems/{{ subsystem_id }}/items?type=requirement&page={{ page }}
             items: .data[]                       # the requirements in an answer
             next: .links.next                    # optional: the next page's URL (relative to the page; none: the last)
-          get: {url: "/items?ids={ids}", items: .data[]}     # optional: by ids (else: from the list)
+          get: {url: "/items?ids={{ ids }}", items: .data[]}     # optional: by ids (else: from the list)
           fields:                                # jq, on each item
             id: .fields.documentKey
             title: .fields.name
@@ -34,16 +43,28 @@ alone, its fields picked from the answers with jq expressions::
             status: .fields.status.name
             tags: '[.tags[]?.name]'
             version: .version
-          url: https://alm.example/items/{id}
+          url: https://alm.example/items/{{ id }}
 
-Pagination: ``next`` (a jq expression giving the URL of the next page), else ``{page}`` in the URL (from ``first_page``,
-default 1) or ``{offset}`` (stepping by the number of items received), until a page has no item. Without any of them,
-one call. The tree is made of the paths of the requirements.
+Variables: ``{{ name }}`` in URLs (URL-encoded), headers and bodies (a body string made of one ``{{ name }}`` keeps the
+value's type); ``$name`` in jq expressions. Those of the source, those the steps extract, and ``page``, ``offset``,
+``id`` and ``ids`` where they apply (also written ``{page}``, ``{offset}``, ``{id}``, ``{ids}``).
+
+A step's variable is ``name: <jq>`` or ``name: {jq, mandatory, default}``. It must give one value at most (several:
+an error); none gives its ``default``, else empty, else an error when it is mandatory. Mandatory ones are the
+context of the requirements, recorded and shown with them, like the source's mandatory variables.
+
+Pagination: ``next`` (a jq expression giving the URL of the next page), else ``{{ page }}`` in the URL (from
+``first_page``, default 1) or ``{{ offset }}`` (stepping by the number of items received), until a page has no item.
+Without any of them, one call. The tree is made of the paths of the requirements.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
-from collections.abc import Iterable
+import threading
+import time
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urljoin
@@ -53,17 +74,28 @@ from testsuit.reqs.model import Node, Requirement
 
 FIELDS = ("id", "path", "title", "description", "rationale", "tags", "comments", "status", "version", "url")
 MAX_PAGES = 1000
+BUILT_IN = ("page", "offset", "id", "ids")
+NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}|\{(page|offset|ids|id)\}")
+_ONE_VAR = re.compile(r"\s*\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}\s*")
+
+# answers of steps with a cache, by request: (expiry, answer). Shared by the backends of the process (the daemon).
+_cache: dict[str, tuple[float, Any]] = {}
+_cache_lock = threading.Lock()
 
 
-def _jq(expr: str, where: str):
+def _jq(expr: str, where: str, args: Mapping[str, Any] | None = None):
     try:
         import jq
     except ImportError as e:            # a core dependency: only a broken install lacks it
         raise ReqError("the rest backend needs the 'jq' Python package (pip install jq)") from e
     try:
-        return jq.compile(str(expr))
+        return jq.compile(str(expr), args=dict(args or {}))
     except ValueError as e:
-        raise ReqError(f"{where}: jq expression '{expr}': {str(e).splitlines()[0]}") from e
+        message = str(e).splitlines()[0]
+        if "is not defined" in message:
+            message += " (variables: those of the source and of earlier steps)"
+        raise ReqError(f"{where}: jq expression '{expr}': {message}") from e
 
 
 def _all(program, value: Any, where: str) -> list[Any]:
@@ -71,6 +103,21 @@ def _all(program, value: Any, where: str) -> list[Any]:
         return program.input_value(value).all()
     except ValueError as e:
         raise ReqError(f"{where}: {str(e).splitlines()[0]}") from e
+
+
+def duration(value: Any, where: str) -> float:
+    """Seconds of a duration: a number of seconds, or 30s, 10m, 2h, 1d."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*", str(value))
+    if not m:
+        raise ReqError(f"{where}: '{value}' is not a duration (seconds, or 30s, 10m, 2h, 1d)")
+    return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
 
 
 class RestBackend(ReqBackend):
@@ -83,16 +130,21 @@ class RestBackend(ReqBackend):
         "auth": "How to authenticate, with the names of the credentials: `{bearer: token}` (Authorization: Bearer), "
                 "`{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`.",
         "headers": "Other headers sent with each request (not secrets: those are credentials).",
+        "steps": "Optional calls made first, each extracting variables for the next ones: `[{url, extract, cache}]`. "
+                 "`extract`: `{name: <jq>}` or `{name: {jq, mandatory, default}}`, one value at most; `$name` in jq "
+                 "and `{{ name }}` in URLs read variables. `cache`: how long to keep the answer (`1h`). Optional "
+                 "`method` and `body`.",
         "list": "How to get every requirement: `{url, items, next}`. `items`: jq giving the requirements of an answer "
-                "(`.data[]`); pagination with `next` (jq giving the next page's URL), or `{page}` / `{offset}` in the "
-                "URL (until a page has no item). Optional `method` (GET) and `body` (JSON, for a POST).",
-        "get": "Optional: how to get requirements by id: `{url, items}`, with `{ids}` (comma-separated) or `{id}` "
-               "(one call each, a 404 meaning unknown) in the URL. Default: from the list.",
+                "(`.data[]`); pagination with `next` (jq giving the next page's URL), or `{{ page }}` / "
+                "`{{ offset }}` in the URL (until a page has no item). Optional `method` (GET) and `body` (JSON, "
+                "for a POST).",
+        "get": "Optional: how to get requirements by id: `{url, items}`, with `{{ ids }}` (comma-separated) or "
+               "`{{ id }}` (one call each, a 404 meaning unknown) in the URL. Default: from the list.",
         "fields": "jq expressions giving each field of a requirement from an item: `id` (required), `title`, "
                   "`description`, `path` (nodes joined by `/`), `rationale`, `status`, `tags` (a list), `comments`, "
                   "`version`, `url`. Default for a field not given (but `url`): `.<field>`.",
-        "url": "A link to each requirement in its tool, `{id}` replaced by its id (when no `url` field).",
-        "first_page": "The first `{page}` (default 1).",
+        "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field).",
+        "first_page": "The first `{{ page }}` (default 1).",
         "timeout": "Seconds to wait for each answer (default 30).",
         "verify": "Check the server's TLS certificate: true (default), false, or the path of a CA bundle.",
     }
@@ -102,33 +154,108 @@ class RestBackend(ReqBackend):
         "password": "Its password.",
     }
 
-    def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path) -> None:
+    def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path,
+                 vars: Mapping[str, Any] | None = None) -> None:
         super().__init__(options, credentials, base_dir)
         o = self.options
+        self.vars: dict[str, Any] = dict(vars or {})
         if not isinstance(o.get("list"), dict) or not o["list"].get("url"):
             raise ReqError("the rest backend needs its 'list' option: {url, items[, next]}")
         self.base = str(o.get("base") or "")
         self.timeout = float(o.get("timeout") or 30)
         verify = o.get("verify", True)
         self.verify = str((base_dir / str(verify)).resolve()) if isinstance(verify, str) else bool(verify)
+        self.steps = self._steps(o.get("steps"))
+        self.mandatory_vars = [n for s in self.steps for n, e in s["extract"].items() if e["mandatory"]]
+        names = [*self.vars, *(n for s in self.steps for n in s["extract"])]
+        known = {n: None for n in names}
         fields = o.get("fields") or {}
         if not isinstance(fields, dict):
             raise ReqError("rest backend: 'fields' is a mapping of field names to jq expressions")
         unknown = sorted(set(fields) - set(FIELDS))
         if unknown:
             raise ReqError(f"rest backend: unknown field(s) {', '.join(unknown)} (fields: {', '.join(FIELDS)})")
-        self.fields = {f: _jq(fields.get(f) or f".{f}?", f"field '{f}'") for f in FIELDS if f in fields or f != "url"}
-        self.list_spec = self._spec(o["list"], "list")
-        self.get_spec = self._spec(o["get"], "get") if o.get("get") else None
+        self.fields = {f: str(fields.get(f) or f".{f}?") for f in FIELDS if f in fields or f != "url"}
+        for f, expr in self.fields.items():
+            _jq(expr, f"field '{f}'", known)
+        self.list_spec = self._spec(o["list"], "list", known)
+        self.get_spec = self._spec(o["get"], "get", known) if o.get("get") else None
+        self._check_names(names)
         self.session = self._session()
         self._all: dict[str, Requirement] | None = None
+        self._found: dict[str, Any] | None = None           # the variables the steps extracted, once run
+        self._programs: dict[str, Any] = {}
 
-    def _spec(self, spec: dict, name: str) -> dict:
+    def _steps(self, steps: Any) -> list[dict]:
+        if steps in (None, []):
+            return []
+        if not isinstance(steps, list):
+            raise ReqError("rest backend: 'steps' is a list of calls: [{url, extract}]")
+        out, names = [], list(self.vars)
+        for n, step in enumerate(steps, 1):
+            where = f"rest backend: step {n}"
+            if not isinstance(step, dict) or not step.get("url"):
+                raise ReqError(f"{where}: {{url, extract[, cache, method, body]}} expected")
+            extract = step.get("extract") or {}
+            if not isinstance(extract, dict) or not extract:
+                raise ReqError(f"{where}: 'extract' gives variables: {{name: <jq>}}")
+            spec = {**step, "extract": {}, "cache": duration(step["cache"], f"{where}: cache") if step.get("cache") else 0}
+            for name, e in extract.items():
+                if not NAME.fullmatch(str(name)) or name in BUILT_IN:
+                    raise ReqError(f"{where}: '{name}' cannot be a variable name"
+                                   + (" (a built-in one)" if name in BUILT_IN else " (letters, digits, _)"))
+                if isinstance(e, dict):
+                    bad = sorted(set(e) - {"jq", "mandatory", "default"})
+                    if bad or not e.get("jq"):
+                        raise ReqError(f"{where}: variable '{name}': {{jq, mandatory, default}} expected")
+                    e = {"jq": str(e["jq"]), "mandatory": bool(e.get("mandatory")), "default": e.get("default")}
+                else:
+                    e = {"jq": str(e), "mandatory": False, "default": None}
+                _jq(e["jq"], f"{where}: variable '{name}'", {k: None for k in names})
+                spec["extract"][str(name)] = e
+            names += list(spec["extract"])
+            out.append(spec)
+        return out
+
+    def _check_names(self, names: list[str]) -> None:
+        """Each {{ name }} of the URLs, headers and bodies is a variable."""
+        def texts(value: Any, where: str) -> Iterable[tuple[str, str]]:
+            if isinstance(value, str):
+                yield value, where
+            elif isinstance(value, dict):
+                for k, v in value.items():
+                    yield from texts(v, f"{where}.{k}")
+            elif isinstance(value, list):
+                for i, v in enumerate(value):
+                    yield from texts(v, f"{where}[{i}]")
+        o = self.options
+        for i, step in enumerate(self.steps):
+            earlier = [*self.vars, *(n for s in self.steps[:i] for n in s["extract"])]
+            for text, where in texts({k: step.get(k) for k in ("url", "body")}, f"step {i + 1}"):
+                self._names(text, where, earlier)
+        for key in ("list", "get"):
+            for text, where in texts({k: (o.get(key) or {}).get(k) for k in ("url", "body")}, key):
+                self._names(text, where, [*names, *BUILT_IN])
+        for text, where in texts({"headers": o.get("headers"), "url": o.get("url")}, "options"):
+            self._names(text, where, [*names, *BUILT_IN])
+
+    @staticmethod
+    def _names(text: str, where: str, known: list[str]) -> None:
+        for m in _VAR.finditer(text):
+            name = m.group(1) or m.group(2)
+            if name not in known:
+                raise ReqError(f"rest backend: {where}: unknown variable '{name}' (known here: "
+                               f"{', '.join(dict.fromkeys(known)) or 'none'})")
+
+    def _spec(self, spec: dict, name: str, known: Mapping[str, Any]) -> dict:
         if not isinstance(spec, dict) or not spec.get("url"):
             raise ReqError(f"rest backend: '{name}' is {{url, items, ...}}")
         out = dict(spec)
-        out["items"] = _jq(spec.get("items") or ".[]", f"{name}.items")
-        out["next"] = _jq(spec["next"], f"{name}.next") if spec.get("next") else None
+        out["items"] = str(spec.get("items") or ".[]")
+        _jq(out["items"], f"{name}.items", known)
+        out["next"] = str(spec["next"]) if spec.get("next") else None
+        if out["next"]:
+            _jq(out["next"], f"{name}.next", known)
         return out
 
     def _credential(self, name: Any) -> str:
@@ -136,7 +263,6 @@ class RestBackend(ReqBackend):
         if str(name) not in creds:
             raise ReqError(f"rest backend: auth names the credential '{name}', not in 'credentials' of the source")
         return creds[str(name)]
-
     def _session(self):
         import requests
         s = requests.Session()
@@ -160,18 +286,89 @@ class RestBackend(ReqBackend):
 
     # ── HTTP ──────────────────────────────────────────────────────────
 
-    def _url(self, url: str) -> str:
-        url = str(url)
-        if re.match(r"^https?://", url) or not self.base:
-            return url
-        return urljoin(self.base.rstrip("/") + "/", url.lstrip("/"))
+    # ── variables ─────────────────────────────────────────────────────
 
-    def _call(self, spec: dict, url: str, missing_ok: bool = False) -> Any:
+    def _variables(self) -> dict[str, Any]:
+        """The variables, after the steps (run on first use)."""
+        if self._found is None:
+            found: dict[str, Any] = {}
+            for n, step in enumerate(self.steps, 1):
+                answer = self._step_answer(step, {**self.vars, **found})
+                for name, e in step["extract"].items():
+                    where = f"rest backend: step {n}: variable '{name}'"
+                    values = [v for v in _all(_jq(e["jq"], where, {**self.vars, **found}), answer, where)
+                              if v not in (None, "")]
+                    if len(values) > 1:
+                        shown = ", ".join(json.dumps(v)[:40] for v in values[:5])
+                        raise ReqError(f"{where}: {len(values)} values ({shown}{'...' if len(values) > 5 else ''}): "
+                                       "one at most (make the jq expression select one)")
+                    if values:
+                        found[name] = values[0]
+                    elif e["default"] is not None:
+                        found[name] = e["default"]
+                    elif e["mandatory"]:
+                        raise ReqError(f"{where}: no value, and it is mandatory (check the jq expression, or give "
+                                       "it a default)")
+                    else:
+                        found[name] = ""
+            self._found = found
+        return {**self.vars, **self._found}
+
+    def resolved_vars(self) -> dict[str, Any]:
+        return dict(self._found or {})
+
+    def _program(self, expr: str, where: str):
+        """A jq expression compiled with the variables as $name."""
+        if expr not in self._programs:
+            self._programs[expr] = _jq(expr, where, self._variables())
+        return self._programs[expr]
+
+    def _fill(self, text: str, extra: Mapping[str, Any] | None = None, encode: bool = False,
+              raw: Iterable[str] = (), variables: Mapping[str, Any] | None = None) -> str:
+        """{{ name }} (and {page}, {offset}, {id}, {ids}) replaced by the values of the variables."""
+        values = {**(self._variables() if variables is None else variables), **(extra or {})}
+        raw = set(raw)
+
+        def value(m: re.Match) -> str:
+            name = m.group(1) or m.group(2)
+            if name not in values:
+                raise ReqError(f"rest backend: '{text}': unknown variable '{name}'")
+            v = values[name]
+            v = json.dumps(v) if isinstance(v, (dict, list, bool)) else "" if v is None else str(v)
+            return quote(v, safe="") if encode and name not in raw else v
+        return _VAR.sub(value, text)
+
+    def _fill_data(self, data: Any, variables: Mapping[str, Any] | None = None) -> Any:
+        """A body: {{ name }} replaced in its strings; a string of one {{ name }} is the value itself."""
+        variables = self._variables() if variables is None else variables
+        if isinstance(data, str):
+            one = _ONE_VAR.fullmatch(data)
+            if one and one.group(1) in variables:
+                return variables[one.group(1)]
+            return self._fill(data, variables=variables)
+        if isinstance(data, dict):
+            return {k: self._fill_data(v, variables) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._fill_data(v, variables) for v in data]
+        return data
+
+    # ── HTTP ──────────────────────────────────────────────────────────
+
+    def _url(self, url: str, variables: Mapping[str, Any] | None = None) -> str:
+        url = str(url)
+        base = self._fill(self.base, variables=variables)
+        if re.match(r"^https?://", url) or not base:
+            return url
+        return urljoin(base.rstrip("/") + "/", url.lstrip("/"))
+
+    def _call(self, spec: dict, url: str, missing_ok: bool = False, variables: Mapping[str, Any] | None = None) -> Any:
         import requests
-        url = self._url(url)
+        url = self._url(url, variables)
+        body = self._fill_data(spec.get("body"), variables) if spec.get("body") is not None else None
+        headers = {str(k): self._fill(str(v), variables=variables) for k, v in (self.options.get("headers") or {}).items()}
         try:
             r = self.session.request(str(spec.get("method") or "GET").upper(), url, params=self.params or None,
-                                     json=spec.get("body"), timeout=self.timeout, verify=self.verify)
+                                     json=body, timeout=self.timeout, verify=self.verify, headers=headers or None)
         except requests.RequestException as e:
             raise ReqError(f"rest backend: {url}: {e}") from e
         if missing_ok and r.status_code == 404:
@@ -183,31 +380,54 @@ class RestBackend(ReqBackend):
         except ValueError as e:
             raise ReqError(f"rest backend: {url}: the answer is not JSON ({r.text[:100]!r})") from e
 
+    def _step_answer(self, step: dict, variables: Mapping[str, Any]) -> Any:
+        """The answer of a step's call, from the cache when it has one (keyed by the request, credentials included)."""
+        url = self._url(self._fill(str(step["url"]), encode=True, variables=variables), variables)
+        if not step["cache"]:
+            return self._call(step, url, variables=variables)
+        key = hashlib.sha256(json.dumps([str(step.get("method") or "GET").upper(), url,
+                                         self._fill_data(step.get("body"), variables),
+                                         sorted(self.session.headers.items()), sorted(self.params.items()),
+                                         repr(self.session.auth)], default=str).encode()).hexdigest()
+        now = time.monotonic()
+        with _cache_lock:
+            hit = _cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+        answer = self._call(step, url, variables=variables)
+        with _cache_lock:
+            _cache[key] = (now + step["cache"], answer)
+        return answer
+
     def _pages(self, spec: dict, url: str) -> Iterable[list[Any]]:
         page, offset = int(self.options.get("first_page") or 1), 0
-        paged = "{page}" in url or "{offset}" in url
+        paged = any((m.group(1) or m.group(2)) in ("page", "offset") for m in _VAR.finditer(url))
+        items_program = self._program(spec["items"], f"{spec['name']}.items")
+        next_program = self._program(spec["next"], f"{spec['name']}.next") if spec["next"] else None
+        filled = None
         for _ in range(MAX_PAGES):
-            called = self._url(url.replace("{page}", str(page)).replace("{offset}", str(offset)))
+            called = self._url(filled or self._fill(url, {"page": page, "offset": offset}, encode=True))
             answer = self._call(spec, called)
-            items = _all(spec["items"], answer, "items")
+            items = _all(items_program, answer, "items")
             yield items
-            if spec["next"] is not None:
-                found = [n for n in _all(spec["next"], answer, "next") if n]
+            if next_program is not None:
+                found = [n for n in _all(next_program, answer, "next") if n]
                 if not found or not items:
                     return
-                url = urljoin(called, str(found[0]))         # a next link is relative to the page it comes in
+                filled = urljoin(called, str(found[0]))         # a next link is relative to the page it comes in
                 continue
             if not paged or not items:
                 return
             page, offset = page + 1, offset + len(items)
-        raise ReqError(f"rest backend: more than {MAX_PAGES} pages: check the pagination ('next', {{page}}, {{offset}})")
+        raise ReqError(f"rest backend: more than {MAX_PAGES} pages: check the pagination ('next', {{{{ page }}}}, "
+                       "{{ offset }})")
 
     # ── fields ────────────────────────────────────────────────────────
 
     def requirement(self, item: Any) -> Requirement | None:
         values: dict[str, Any] = {}
-        for name, program in self.fields.items():
-            found = _all(program, item, f"field '{name}'")
+        for name, expr in self.fields.items():
+            found = _all(self._program(expr, f"field '{name}'"), item, f"field '{name}'")
             value = found[0] if found else None
             if name == "tags":
                 value = [str(t) for t in (value if isinstance(value, list) else [value] if value not in (None, "") else [])]
@@ -222,10 +442,8 @@ class RestBackend(ReqBackend):
         req = Requirement.from_dict(values)
         req.path = req.path.strip("/")
         if not req.url and self.options.get("url"):
-            req.url = str(self.options["url"]).replace("{id}", req.id)
+            req.url = self._fill(str(self.options["url"]), {"id": req.id})
         if not req.version:
-            import hashlib
-            import json
             content = json.dumps({k: v for k, v in req.as_dict().items() if k not in ("version", "url", "path")},
                                  sort_keys=True)
             req.version = hashlib.sha256(content.encode()).hexdigest()[:8]
@@ -234,14 +452,13 @@ class RestBackend(ReqBackend):
     def _everything(self) -> dict[str, Requirement]:
         if self._all is None:
             found: dict[str, Requirement] = {}
-            for items in self._pages(self.list_spec, str(self.list_spec["url"])):
+            for items in self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"])):
                 for item in items:
                     req = self.requirement(item)
                     if req is not None:
                         found.setdefault(req.id, req)
             self._all = found
         return self._all
-
     # ── API ───────────────────────────────────────────────────────────
 
     def tree(self) -> list[Node]:
@@ -269,13 +486,17 @@ class RestBackend(ReqBackend):
             return {i: everything.get(i) for i in ids}
         out: dict[str, Requirement | None] = {i: None for i in ids}
         url = str(spec["url"])
-        calls = [url.replace("{ids}", ",".join(quote(i, safe="") for i in ids))] if "{ids}" in url else \
-            [url.replace("{id}", quote(i, safe="")) for i in ids]
+        names = {m.group(1) or m.group(2) for m in _VAR.finditer(url)}
+        if "ids" in names:
+            calls = [self._fill(url, {"ids": ",".join(quote(i, safe="") for i in ids)}, encode=True, raw=["ids"])]
+        else:
+            calls = [self._fill(url, {"id": i}, encode=True) for i in ids]
+        items_program = self._program(spec["items"], "get.items")
         for call in calls:
-            answer = self._call(spec, call, missing_ok="{id}" in url)
+            answer = self._call(spec, call, missing_ok="ids" not in names)
             if answer is None:
                 continue
-            for item in _all(spec["items"], answer, "get.items"):
+            for item in _all(items_program, answer, "get.items"):
                 req = self.requirement(item)
                 if req is not None and req.id in out:
                     out[req.id] = req
