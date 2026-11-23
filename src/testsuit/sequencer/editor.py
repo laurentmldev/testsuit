@@ -1334,11 +1334,61 @@ class Editor:
     # ── checks ───────────────────────────────────────────────────────────
 
     def check_file(self, session: EditSession, rel: str) -> list[dict]:
-        """Problems of one file: YAML syntax, then what it means for the lab or the datapacks."""
+        """Problems of one file: YAML syntax, then what it means for the lab or the datapacks; and the requirements
+        its @tr tags name."""
         path = self.path(session, rel)
         if not path.is_file():
             return []
         text = path.read_text(encoding="utf-8", errors="replace")
+        tags = self.check_req_tags(session, rel, text) if "@tr{" in text or "@uid{" in text else []
+        return self._check_file(session, rel, text) + tags
+
+    def check_req_tags(self, session: EditSession, rel: str, text: str) -> list[dict]:
+        """The @uid and @tr tags of an input file (sequencer README section 10.3): a requirement a @tr names that
+        is unknown, deleted or rejected is an error (generation would fail), a test case id used twice in the file
+        an error too."""
+        from testsuit.reqs.links import scan_text
+        from testsuit.reqs.snapshot import resolve
+        from testsuit.reqs.sources import Sources, find_sources_file
+        if session.kind != "workspace":
+            return []
+        cases, links, problems = scan_text(text, rel)
+        out = []
+
+        def add(line: int, message: str, severity: str = "error") -> None:
+            out.append({"file": rel, "line": line, "column": 1, "severity": severity, "message": message})
+        for p in problems:
+            line = int(p.split(":", 2)[1]) if p.count(":") >= 2 and p.split(":", 2)[1].isdigit() else 1
+            add(line, p.split(": ", 1)[-1])
+        seen: dict[str, int] = {}
+        for c in cases:
+            if c["uid"] in seen:
+                add(c["line"], f"test case '{c['uid']}' already defined line {seen[c['uid']]}")
+            seen.setdefault(c["uid"], c["line"])
+        if not links:
+            return out
+        file = find_sources_file(self.path(session, rel))
+        if file is None:
+            add(links[0]["line"], "@tr names requirements, but there is no requirements.yml in this repository", "warning")
+            return out
+        try:
+            sources = Sources(file)
+            refs = list(dict.fromkeys(r for lk in links for r in lk["reqs"]))
+            _, keys, found, warnings = resolve(sources, refs)      # one call per source
+            lines: dict[str, list[int]] = {}
+            for lk in links:
+                for r in lk["reqs"]:
+                    lines.setdefault(keys.get(r, r), []).append(lk["line"])
+            for severity, messages in (("error", found), ("warning", warnings)):
+                for p in messages:
+                    m = re.search(r"requirement '([^']+)'", p)
+                    for line in (lines.get(m[1]) if m and m[1] in lines else [links[0]["line"]]):
+                        add(line, f"requirements: {p}", severity)
+        except Exception as e:                     # a source that cannot be read here: said once
+            add(links[0]["line"], f"requirements not checked: {e}", "warning")
+        return out
+
+    def _check_file(self, session: EditSession, rel: str, text: str) -> list[dict]:
         kind = self.kind(session, rel, text)
         if kind in ("other", "template"):
             return []

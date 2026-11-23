@@ -15,6 +15,13 @@
 exploit steps run (sequencer SPEC section 5.4).
 
 A link on the test definition is verified by the run verdict; a link on a check by the check's status.
+
+The input files of a datapack can hold links too, in comments, the way Doxygen and Spexygen write them::
+
+    # @uid{TC-12}                   a test case of this file, until the next @uid
+    # @tr{REQ-12, jama:SYS-4@3}     requirements it verifies (before any @uid: the file's)
+
+They are verified by the run verdict (the scripts report no result per test case).
 """
 from __future__ import annotations
 
@@ -26,6 +33,9 @@ from typing import Any
 import yaml
 
 SCENARIO = re.compile(r".*\.mexploit\.ya?ml$")
+TAG = re.compile(r"@(uid|tr)\{([^}\n]*)\}")
+UID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/]*$")
+MAX_SCANNED = 10 * 1024 * 1024           # bytes: a bigger input file is data, not a script
 
 
 def as_reqs(value: Any, where: str = "") -> list[str]:
@@ -127,3 +137,60 @@ def all_refs(testdef_reqs: list[str], checks: list[dict]) -> list[str]:
         for r in c["reqs"]:
             seen.setdefault(r)
     return list(seen)
+
+
+def scan_text(text: str, file: str) -> tuple[list[dict], list[dict], list[str]]:
+    """(test cases ``[{uid, file, line}]``, links ``[{file, line, uid?, reqs}]``, problems) of a file's text."""
+    cases, links, problems = [], [], []
+    uid = None
+    for number, line in enumerate(text.splitlines(), 1):
+        for m in TAG.finditer(line):
+            kind, body = m.group(1), m.group(2).strip()
+            if kind == "uid":
+                if not UID.match(body):
+                    problems.append(f"{file}:{number}: @uid{{{body}}} is not a test case id (letters, digits, _ . - /)")
+                    continue
+                uid = body
+                cases.append({"uid": uid, "file": file, "line": number})
+                continue
+            reqs = [r.strip() for r in body.split(",") if r.strip()]
+            if not reqs:
+                problems.append(f"{file}:{number}: @tr{{}} names no requirement")
+                continue
+            links.append({"file": file, "line": number, **({"uid": uid} if uid else {}), "reqs": reqs})
+    return cases, links, problems
+
+
+def readable(path: Path) -> str | None:
+    """A file's text, None for a binary or too big one."""
+    try:
+        if path.stat().st_size > MAX_SCANNED:
+            return None
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if b"\0" in data[:8192]:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def scan_files(root: Path, folders: list[Path]) -> tuple[list[dict], list[dict], list[str]]:
+    """(test cases, links, problems) of every text file under the folders, files named relative to ``root``. A test
+    case id used twice is a problem."""
+    cases, links, problems = [], [], []
+    for folder in folders:
+        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+            text = readable(path)
+            if text is None or "@uid{" not in text and "@tr{" not in text:
+                continue
+            c, lk, pb = scan_text(text, path.relative_to(root).as_posix())
+            cases += c
+            links += lk
+            problems += pb
+    seen: dict[str, dict] = {}
+    for case in cases:
+        first = seen.setdefault(case["uid"], case)
+        if first is not case:
+            problems.append(f"test case '{case['uid']}' defined twice: {first['file']}:{first['line']} and "
+                            f"{case['file']}:{case['line']}")
+    return cases, links, problems

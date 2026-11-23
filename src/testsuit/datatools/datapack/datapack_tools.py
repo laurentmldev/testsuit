@@ -862,12 +862,14 @@ class _Builder:
             target.chmod(stat.S_IREAD | stat.S_IWRITE | stat.S_IRGRP | stat.S_IROTH)
 
     def write_requirements(self, testdef: Testdef, context: dict) -> None:
-        """The requirements the test and its checks list, fetched once: definition/requirements.yml (sequencer
-        SPEC section 5.4). An unknown, deleted or rejected one fails the generation, unless nocheck (non-conform)."""
+        """The requirements the test, its checks and its input files (@tr, under @uid test cases) list, fetched once:
+        definition/requirements.yml (sequencer SPEC section 5.4). An unknown, deleted or rejected one, or a test case
+        id used twice, fails the generation, unless nocheck (non-conform)."""
         from testsuit.reqs.snapshot import SNAPSHOT, snapshot_of_testdef
         raw = load_yaml_mapping(self.testdef_file)
+        inputs = sorted(p for p in (self.work / "data").glob("*/input") if p.is_dir())
         self.requirements = snapshot_of_testdef(self.testdef_file, {"reqs": testdef.reqs, "pipeline": raw.get("pipeline")},
-                                                context)
+                                                context, input_dirs=inputs, root=self.work)
         if self.requirements is None:
             return
         problems = self.requirements.get("problems") or []

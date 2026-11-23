@@ -1360,6 +1360,16 @@ Credentials are never written in the sources file: each is `env:<VARIABLE>`, an 
 
 Links use the same key at both levels, `reqs`: on the test definition (`reqs: [REQ-12, jama:SYS-4@3]`), verified by the run verdict, and on any check of the criteria (`reqs: [REQ-12]` beside its `description`), verified by that check. `@3` pins the version the test was written against.
 
+**In input files**, links are tags in comments, the way Doxygen and [Spexygen](https://github.com/QuantumLeaps/Spexygen) write them: `@uid{TC-12}` names a test case, and each `@tr{REQ-12, jama:SYS-4@3}` after it (up to the next `@uid` of the file) lists requirements it verifies; a `@tr` before any `@uid` is the file's. Any text file works, whatever its language:
+
+```python
+# @uid{TC-12}
+# @tr{REQ-12, REQ-14}
+def test_braking_distance(): ...
+```
+
+Generation scans the input files of the datapack, as generated, and records each link with its file and line (`TC-12 (data/bench/input/run.py:41)` in the matrices). They are verified by the run verdict, like the test definition's: a script reports no result per test case. A test case id used twice in a datapack is a problem, like an unknown requirement. The Editor flags an unknown, deleted or rejected requirement at its line as you edit the file.
+
 1. **Generation** fetches every linked requirement once and keeps it in the datapack (`definition/requirements.yml`), so reports and coverage work offline on the text that was tested. An unknown, deleted or rejected requirement fails the generation; `--nocheck` forces it, and the datapack is then non-conform. A pinned version that changed since is a warning. The Editor shows the same problems on the test definition.
 2. **Coverage**: `reqs matrix <targets>` reads test definitions and campaign files (linked only), datapack zips, and results zips or folders of them (verified). Each requirement gets a status per test and overall: `passed`, `failed`, `error`, `partial` (some links passed, others skipped or not run), `skipped`, `not run`, or `uncovered`. The current version of each requirement is read from its source, and a test that verified an older one is marked *changed since* (`--offline`: snapshots only).
 3. **Matrices**: requirements × tests (rolled up per path node) and tests × requirements (each test, its test definition and each check, with the requirements they verify), as text, YAML, CSV (`--view reqs|tests`) or an HTML page (`--format html`) with links to the requirements and, with `--sequencer <url>`, to the runs and their exploit reports.
