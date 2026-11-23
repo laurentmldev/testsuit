@@ -904,6 +904,8 @@ The criteria are not inputs of a slot: the exploit steps of the pipeline name th
 
 The pipeline lives in the test definition (already kept as is in the datapack). Its syntax is close to GitLab CI so that it reads familiar. Every phase follows the same rules, the exploit phase included: it lists the stage slots and ad hoc slots it needs, can take earlier phases' outputs as inputs, and runs steps.
 
+An AI can write a whole test definition (pipeline, dictionaries, criteria) from a test specification with the prompt [docs/ai/testdef_prompt.txt](../../../docs/ai/testdef_prompt.txt): give it the prompt, the specification, the roles of the lab library and the setup to reuse, then check its output with `tsq validate <testdef.yml> --lab <inventory>` and `mxp lint`.
+
 ```yaml
 pipeline:
   timeout: 15m
