@@ -1598,28 +1598,49 @@ class Editor:
                                      "status": r.status})
         return out
 
-    def requirements_test(self, session: EditSession, path: str, source: str) -> dict:
-        """Read one source of a sources file of the session as it is saved, as datapack generation would: how many
-        requirements, how long it took, the tree and the first requirements, or what went wrong (Editor form)."""
+    def requirements_test(self, session: EditSession, path: str, source: str, spec: dict | None = None,
+                          upto: str | None = None) -> dict:
+        """Read one source of a sources file of the session, as datapack generation would: how many requirements, how
+        long it took, the tree and the first requirements, or what went wrong (Editor form). ``spec``: the source as
+        being edited (default: as saved). ``upto``: only the calls up to a stage of a backend that has stages (the rest
+        backend: ``step:N``, ``list``). ``calls``: each call to the server, for a backend that describes them (its
+        URL, headers, status, answer, what it extracted; credentials masked)."""
         import time
 
         from testsuit.reqs.backend import ReqError, list_requirements
         from testsuit.reqs.sources import Sources
         start = time.monotonic()
-        out: dict[str, Any] = {"source": source, "ok": False}
+        out: dict[str, Any] = {"source": source, "ok": False, **({"upto": upto} if upto else {})}
+        backend = None
         try:
             sources = Sources(self.path(session, path))
+            if spec is not None:
+                sources.replace(source, spec)
             backend = sources.backend(source)
-            reqs = list_requirements(backend, "", True)
-            tree = backend.tree()
+            backend.trace = []
+            if upto:
+                if not hasattr(backend, "probe"):
+                    raise ReqError(f"the {sources.specs[source]['backend']} backend has no stages to test")
+                probe = backend.probe(upto)
+            else:
+                reqs = list_requirements(backend, "", True)
+                tree = backend.tree()
         except ReqError as e:
             out["error"] = str(e).replace(str(session.folder) + os.sep, "")
         except Exception as e:                 # a plugin's bug: shown, not raised
             out["error"] = f"{type(e).__name__}: {e}"
         else:
-            out.update({"ok": True, "count": len(reqs), "nodes": sum(1 for _ in req_paths(tree)),
-                        "sample": [r.as_dict() for r in reqs[:5]], "context": sources.context(source),
-                        "vars": {**sources.vars(source), **backend.resolved_vars()}})
+            out["ok"] = True
+            if upto:
+                out.update({**probe, "vars": {**sources.vars(source), **probe.get("vars", {})}})
+            else:
+                out.update({"count": len(reqs), "nodes": sum(1 for _ in req_paths(tree)),
+                            "sample": [r.as_dict() for r in reqs[:5]], "context": sources.context(source),
+                            "vars": {**sources.vars(source), **backend.resolved_vars()}})
+        if backend is not None and backend.trace:
+            out["calls"] = backend.trace
+            if getattr(backend, "trace_more", 0):
+                out["calls_more"] = backend.trace_more
         out["seconds"] = round(time.monotonic() - start, 2)
         return out
 

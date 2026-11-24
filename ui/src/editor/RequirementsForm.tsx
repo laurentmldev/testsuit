@@ -149,12 +149,18 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const { sid, files, open } = useSession();
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  // a test of the source as in the form (saved or not): every call, or those up to a stage (step:N, list)
+  const runTest: RunTest = async (upto) => {
+    try {
+      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}) });
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  };
   const test = async () => {
     setTesting(true);
     try {
-      setResult(await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name }));
-    } catch (e: any) {
-      setResult({ ok: false, error: String(e?.message || e) });
+      setResult(await runTest());
     } finally {
       setTesting(false);
     }
@@ -183,7 +189,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
         </label>
         <span className="grow" />
         <button className="small" disabled={testing} onClick={test}
-          title="Read this source as datapack generation does, from the file as saved: its credentials are read from the environment of the sequencer host">
+          title="Read this source as datapack generation does, as in this form (saved or not): its credentials are read from the environment of the sequencer host">
           {testing ? "Testing…" : "Test connection"}</button>
         <button className="icon" title="Remove this source" onClick={onRemove}>×</button>
       </div>
@@ -208,6 +214,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
               )}
             </>
           ) : <div className="error-text">{result.error}</div>}
+          <Calls result={result} />
           <button className="link small" onClick={() => setResult(null)}>hide</button>
         </div>
       )}
@@ -224,7 +231,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           ? <button className="link small" onClick={() => open(yamlFile)}>open {yamlFile}</button>
           : <span className="bad-text small">no file {yamlFile} in the session</span>)}>
         <BackendOptions backend={backend} options={options} onChange={(v) => set("options", v)}
-          credentials={credentials} onCredentials={(v) => set("credentials", v)} />
+          credentials={credentials} onCredentials={(v) => set("credentials", v)} runTest={runTest} />
       </Field>
       {backend?.name !== "rest" && (credRows.length > 0 || backend?.name !== "yaml") && (
         <Field label="Credentials" help={help(["sources", name, "credentials"])} wide>
@@ -407,8 +414,8 @@ function put(data: Data | undefined, k: string, v: any): Data {
 
 /** The options of a source: each option its backend knows, as a field with its help (the rest backend has its own
  * form), and the other options as free keys. */
-function BackendOptions({ backend, options, onChange, credentials, onCredentials }: {
-  backend: any; options: Data; onChange: (v: Data) => void; credentials: Data; onCredentials: (v: Data) => void;
+function BackendOptions({ backend, options, onChange, credentials, onCredentials, runTest }: {
+  backend: any; options: Data; onChange: (v: Data) => void; credentials: Data; onCredentials: (v: Data) => void; runTest: RunTest;
 }) {
   const known: Record<string, string> = backend?.options || {};
   const names = Object.keys(known);
@@ -416,7 +423,7 @@ function BackendOptions({ backend, options, onChange, credentials, onCredentials
   const others = Object.keys(options).filter((k) => !names.includes(k));
   return (
     <div className="req-options">
-      {backend?.name === "rest" ? <RestOptions options={options} help={known} set={set} credentials={credentials} onCredentials={onCredentials} credHelp={backend.credentials} />
+      {backend?.name === "rest" ? <RestOptions options={options} help={known} set={set} credentials={credentials} onCredentials={onCredentials} credHelp={backend.credentials} runTest={runTest} />
         : names.map((k) => (
           <Field key={k} label={k} help={known[k]}><OptionValue value={options[k]} onChange={(v) => set(k, v)} /></Field>
         ))}
@@ -473,9 +480,9 @@ const REST_FIELDS: [string, string][] = [
 
 /** The rest backend's options: base URL and authentication, how to list and get the requirements, and the jq
  * expression giving each field of a requirement from an item of an answer. */
-function RestOptions({ options, help, set, credentials: creds, onCredentials, credHelp }: {
+function RestOptions({ options, help, set, credentials: creds, onCredentials, credHelp, runTest }: {
   options: Data; help: Record<string, string>; set: (k: string, v: any) => void;
-  credentials: Data; onCredentials: (v: Data) => void; credHelp?: Record<string, string>;
+  credentials: Data; onCredentials: (v: Data) => void; credHelp?: Record<string, string>; runTest: RunTest;
 }) {
   const credentials = Object.keys(creds);
   const auth: Data = options.auth && typeof options.auth === "object" ? options.auth : {};
@@ -536,9 +543,11 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         </Field>
       </Group>
       <Group title="Steps" note="optional calls made first, each extracting variables for the next ones" help={help.steps}>
-        <Steps value={options.steps} onChange={(v) => set("steps", v.length ? v : undefined)} />
+        <Steps value={options.steps} onChange={(v) => set("steps", v.length ? v : undefined)} runTest={runTest} />
       </Group>
       <Group title="List call" note="reads every requirement" help={help.list}>
+        <StageTest upto="list" runTest={runTest} label="Test the first page"
+          title="Run the steps, then the list call's first page: its URL, the answer, how many items, and the requirements the fields give" />
         <Field label="URL suffix" help={urlHelp("The URL of the list call")}><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
         <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
         <Field label="Next page (jq)" help={`The URL of the next page, from an answer (none: the last page). ${JQ_HELP}`}><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
@@ -711,7 +720,7 @@ const urlHelp = (what: string) => `${what}, relative to the base URL (or absolut
 const BODY_HELP = `The JSON body of the POST. A string made of one \`{{ name }}\` keeps the value's type. ${SUBST_HELP}`;
 
 /** The rest backend's steps: calls made before the others, each extracting variables with jq. */
-function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[]) => void }) {
+function Steps({ value, onChange, runTest }: { value?: any[] | null; onChange: (v: any[]) => void; runTest: RunTest }) {
   const steps: Data[] = Array.isArray(value) ? value : [];
   const setStep = (i: number, step: Data) => onChange(steps.map((s, j) => (j === i ? step : s)));
   const setIn = (i: number, k: string, v: any) => setStep(i, put(steps[i], k, v));
@@ -724,6 +733,8 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
             <span className="grow" />
             <button className="icon" title="Remove this step" onClick={() => onChange(steps.filter((_, j) => j !== i))}>×</button>
           </div>
+          <StageTest upto={`step:${i + 1}`} runTest={runTest} label={i ? `Test steps 1 to ${i + 1}` : "Test this step"}
+            title="Call the server for this step (and the earlier ones, whose variables it reads), as in this form: each call's URL, headers, status and answer, and the variables extracted. The cache is not used." />
           <Field label="URL suffix" help={urlHelp("The URL of this step")}><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
           <Field label="Variables (jq)" help={`Each variable this step extracts from its answer, for the next steps and calls: one value at most (none: no value, an error when mandatory). ${JQ_HELP}`}>
             <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
@@ -742,5 +753,105 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
       ))}
       <button className="small" onClick={() => onChange([...steps, { url: "", extract: {} }])}>Add step</button>
     </div>
+  );
+}
+
+// ── tests of a source: what each call to the server does ───────────────
+
+type RunTest = (upto?: string) => Promise<any>;
+
+/** A Test button for a stage of a source (a step, the list call), and what its calls did. */
+function StageTest({ upto, runTest, label, title }: { upto: string; runTest: RunTest; label: string; title: string }) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const test = async () => {
+    setTesting(true);
+    try { setResult(await runTest(upto)); } finally { setTesting(false); }
+  };
+  return (
+    <div className="req-stage-test">
+      <button className="small" disabled={testing} onClick={test} title={title}>{testing ? "Testing…" : `${label}…`}</button>
+      {result && (
+        <div className={classes("req-test", result.ok ? "ok" : "bad")}>
+          {result.ok ? (
+            <>
+              <div>Done in {result.seconds} s{upto === "list" && <>: <strong>{result.items}</strong> item(s) in the first page</>}.</div>
+              {result.vars && Object.keys(result.vars).length > 0 && (
+                <div className="req-vars small">Variables: {Object.entries<any>(result.vars).map(([k, v]) => (
+                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                ))}</div>
+              )}
+              {result.sample?.length > 0 && (
+                <table className="grid compact">
+                  <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th></tr></thead>
+                  <tbody>{result.sample.map((r: any, n: number) => (
+                    <tr key={n}><td>{r.id ? <code>{r.id}</code> : <span className="bad-text small">no id: left out</span>}</td><td className="small">{r.path}</td><td>{r.title}</td><td>{r.status}</td></tr>
+                  ))}</tbody>
+                </table>
+              )}
+              {result.first_item && (
+                <details className="req-call-part"><summary className="small">The first item (what the field expressions read)</summary>
+                  <pre className="mono small">{result.first_item}</pre></details>
+              )}
+            </>
+          ) : <div className="error-text">{result.error}</div>}
+          <Calls result={result} openLast={upto.startsWith("step:")} />
+          <button className="link small" onClick={() => setResult(null)}>hide</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const shownValue = (v: any) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "") || "∅");
+
+/** The calls a test made: each with its method, full URL (credentials masked) and status, opened on the details. */
+function Calls({ result, openLast }: { result: any; openLast?: boolean }) {
+  const calls: any[] = result?.calls || [];
+  if (!calls.length) return null;
+  return (
+    <div className="req-calls">
+      <div className="small muted">{calls.length} call(s) to the server{result.calls_more ? `, and ${result.calls_more} more not shown` : ""}:</div>
+      {calls.map((c, i) => <Call key={i} call={c} open={(openLast || !result.ok) && i === calls.length - 1} />)}
+    </div>
+  );
+}
+
+function Call({ call, open }: { call: any; open: boolean }) {
+  const bad = !!call.error || (call.status ?? 0) >= 400;
+  const copy = () => navigator.clipboard?.writeText(call.url).catch(() => undefined);
+  return (
+    <details className={classes("req-call", bad && "bad")} open={open}>
+      <summary>
+        <span className="small req-call-name">{call.call}</span>{" "}
+        <span className={classes("req-call-status mono small", bad ? "bad-text" : "ok")}>
+          {call.status ? `${call.status} ${call.reason || ""}` : "no answer"}</span>{" "}
+        <span className="mono small">{call.method}</span>{" "}
+        <span className="mono small req-call-url">{call.url}</span>
+        {call.seconds !== undefined && <span className="muted small"> {call.seconds} s</span>}
+      </summary>
+      <div className="req-call-body">
+        <div className="req-call-url-row">
+          <code className="small">{call.url}</code>
+          <button className="link small" onClick={copy} title="Copy the URL (credentials masked: ***)">copy</button>
+        </div>
+        {call.error && <div className="error-text small">{call.error}</div>}
+        {call.extracted && Object.keys(call.extracted).length > 0 && (
+          <div className="req-vars small">Extracted: {Object.entries<any>(call.extracted).map(([k, v]) => <span key={k} className="mono">{k}={shownValue(v)}</span>)}</div>
+        )}
+        {call.items !== undefined && <div className="small">{call.items} item(s){call.next ? <>; next page: <code>{call.next}</code></> : ""}</div>}
+        <details className="req-call-part"><summary className="small">Request headers</summary>
+          <pre className="mono small">{Object.entries<any>(call.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n")}</pre></details>
+        {call.body !== undefined && (
+          <details className="req-call-part"><summary className="small">Request body</summary>
+            <pre className="mono small">{JSON.stringify(call.body, null, 1)}</pre></details>
+        )}
+        {call.answer !== undefined && (
+          <details className="req-call-part" open={bad || !!call.extracted}>
+            <summary className="small">Answer{call.content_type ? ` (${call.content_type}, ${call.size} bytes${call.cut ? ", the beginning" : ""})` : ""}</summary>
+            <pre className="mono small">{call.answer || "(empty)"}</pre></details>
+        )}
+      </div>
+    </details>
   );
 }

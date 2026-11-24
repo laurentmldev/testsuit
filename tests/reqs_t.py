@@ -14,6 +14,7 @@
 """Requirements coverage (testsuit.reqs, sequencer SPEC section 5.4): sources, YAML backend, links, snapshot at
 generation, coverage of runs and campaigns, matrices."""
 import copy
+import json
 import zipfile
 from pathlib import Path
 
@@ -709,6 +710,69 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
     finally:
         os.environ.pop("ALM_TOKEN", None)
         rest.clear_cache()
+
+
+def test_rest_debugging(tmp_path, alm_server, monkeypatch):
+    """Debugging a rest source: an error names the call and its full URL (credentials masked); the Editor's tests
+    describe each call (URL, headers, status, answer, what it extracted), up to a step or the list call, with the
+    source as being edited."""
+    from testsuit.reqs import rest
+    from testsuit.reqs.backend import create_req_backend
+    base, calls = alm_server
+    rest.clear_cache()
+    fields = {"id": ".key", "title": ".fields.name"}
+    options = {"base": base + "/api", "auth": {"bearer": "token", "query": {"api_key": "token"}}, "fields": fields,
+               "steps": [{"url": "systems?branch={{ branch }}", "cache": "1h",
+                          "extract": {"sub_id": {"jq": ".items[] | select(.name == $subsystem) | .id", "mandatory": True}}}],
+               "list": {"url": "sub/{{ sub_id }}/items", "items": ".data[]"}}
+    b = create_req_backend("rest", options, {"token": "s3cret"}, tmp_path, {"branch": "dev", "subsystem": "Speed"})
+    with pytest.raises(ReqError) as e:
+        b.list()
+    assert f"step 1: GET {base}/api/systems?branch=dev&api_key=***: HTTP 404" in str(e.value)
+    assert "s3cret" not in str(e.value)
+
+    from editor_t import Repos
+    monkeypatch.setenv("ALM_TOKEN", "s3cret")
+    editor = Repos(tmp_path / "repos").editor
+    session = editor.open("workspace0")
+    spec = {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"}, "options": options,
+            "vars": {"branch": "main", "subsystem": "Speed"}}
+    editor.write(session, "requirements.yml", content=yaml.safe_dump({"sources": {"alm": spec}}))
+
+    # up to the step: its call, and the variable it extracts (the cache not used)
+    for _ in range(2):
+        result = editor.requirements_test(session, "requirements.yml", "alm", upto="step:1")
+        assert result["ok"] and result["vars"]["sub_id"] == 9 and len(result["calls"]) == 1
+    call = result["calls"][0]
+    assert (call["call"], call["method"], call["status"], call["extracted"]) == ("step 1", "GET", 200, {"sub_id": 9})
+    assert call["url"] == f"{base}/api/systems?branch=main&api_key=***" and call["headers"]["Authorization"] == "Bearer ***"
+    assert '"Speed limiter"' in call["answer"] and "s3cret" not in json.dumps(result)
+
+    # up to the list call: its first page, its items, the requirements their fields give
+    result = editor.requirements_test(session, "requirements.yml", "alm", upto="list")
+    assert result["ok"] and result["items"] == 3 and [r["id"] for r in result["sample"]] == ["ALM-3", "ALM-4", "ALM-5"]
+    assert [c["call"] for c in result["calls"]] == ["step 1", "list, page 1"] and result["calls"][1]["items"] == 3
+    assert '"ALM-3"' in result["first_item"]
+
+    # the source as being edited (not saved): a jq expression extracting several values, shown with the answer
+    edited = {**spec, "options": {**options, "steps": [{**options["steps"][0], "extract": {
+        "sub_id": ".items[] | select(.name | startswith(\"Speed\")) | .id"}}]}}
+    result = editor.requirements_test(session, "requirements.yml", "alm", spec=edited, upto="step:1")
+    assert not result["ok"] and "2 values" in result["error"] and "2 values" in result["calls"][0]["error"]
+    assert result["calls"][0]["status"] == 200 and result["calls"][0]["extracted"] == {}
+    result = editor.requirements_test(session, "requirements.yml", "alm", upto="step:2")
+    assert not result["ok"] and "no step 2" in result["error"]
+
+    # the whole test: each call; a server error shows the call with its full URL and the answer
+    result = editor.requirements_test(session, "requirements.yml", "alm")
+    assert result["ok"] and result["count"] == 3 and [c["call"] for c in result["calls"]] == ["step 1", "list, page 1"]
+    result = editor.requirements_test(session, "requirements.yml", "alm", spec={**spec, "vars": {**spec["vars"], "branch": "dev"}})
+    assert not result["ok"] and "api_key=***" in result["error"] and result["calls"][0]["status"] == 404
+    assert "no such branch" in result["calls"][0]["answer"]
+    monkeypatch.setenv("ALM_TOKEN", "wrong")
+    result = editor.requirements_test(session, "requirements.yml", "alm")
+    assert result["calls"][0]["status"] == 401 and "wrong" not in json.dumps(result)
+    rest.clear_cache()
 
 
 def test_source_variables_for_any_backend(tmp_path):
