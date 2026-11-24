@@ -1656,10 +1656,13 @@ class Editor:
             return None
         return {"file": self.rel(session, file), "source": source}
 
-    def requirements_coverage(self, session: EditSession, source: str | None = None, campaign: str | None = None):
+    def requirements_coverage(self, session: EditSession, source: str | None = None, campaign: str | None = None,
+                              node: str = "", children: bool = True):
         """(description, Coverage or None): the requirements of a tests repository and how its test definitions cover them (Datapacks, Requirements; SPEC
         §5.5): the tree of a source, every requirement of it, and the coverage by the latest run of each test
-        definition that has one (else as linked). ``campaign``: only the test definitions of that campaign file."""
+        definition that has one (else as linked); with no ``source`` (and several), every source, each a top node of
+        the tree and of the paths. ``campaign``: only the test definitions of that campaign file. ``node``: only the
+        requirements of that node of the tree (``children``: and of its descendants), as the page shows them."""
         from testsuit.reqs.backend import ReqError
         from testsuit.reqs.coverage import Coverage, add_sources, add_test, read_testdef, snapshot_of_run, test_of_run
         from testsuit.reqs.sources import Sources, find_sources_file
@@ -1683,13 +1686,16 @@ class Editor:
         out["sources_file"] = self.rel(session, file) if file.is_relative_to(session.folder) else str(file)
         try:
             sources = Sources(file)
-            source = source if source in sources.names else sources.default
+            # the source picked; none (or an unknown one): every source, a top node each (the only one when alone)
+            source = source if source in sources.names else (sources.names[0] if len(sources.names) == 1 else None)
             out.update({"sources": sources.names, "source": source,                 # kept when the source fails
                         "source_cards": [{"name": n, "backend": str(sources.specs[n].get("backend")),
                                           **({"label": str(sources.specs[n]["label"])} if sources.specs[n].get("label") else {}),
                                           **({"default": True} if n == sources.default else {})} for n in sources.names],
                         "edit": self._source_edit(session, file, sources, source)})
-            out["tree"] = [n.as_dict() for n in sources.tree(source)]
+            out["tree"] = [n.as_dict() for n in sources.tree(source)] if source else [
+                {"id": n, "label": f"{sources.specs[n]['label']} ({n})" if sources.specs[n].get("label") else n, "children": [c.as_dict() for c in sources.tree(n)]}
+                for n in sources.names]
         except ReqError as e:
             out["error"] = str(e)
             if "edit" not in out and file.is_relative_to(session.folder):      # the sources file does not read
@@ -1716,10 +1722,32 @@ class Editor:
                 found[1].name = str(t.get("name") or "")
                 found[1].origin = t["path"]
                 add_test(cov, *found)
+        if source:              # one source picked: only its requirements, and the links of the tests to them
+            for t in cov.tests:
+                t.links = [lk for lk in t.links if sources.ref(lk.req).source == source]
         try:
-            add_sources(cov, sources, [f"{source}:"] if source != sources.default else [""], True, live=True)
+            add_sources(cov, sources, [f"{n}:" for n in ([source] if source else sources.names)], True, live=True)
         except Exception as e:
-            cov.problems.append(f"requirements of '{source}' not read: {e}")
+            cov.problems.append(f"requirements of '{source or ', '.join(sources.names)}' not read: {e}")
+        if not source:          # every source: each one a top node of the paths, as in the tree
+            for key in cov.rows():
+                req = cov.requirements.setdefault(key, {})
+                req["path"] = "/".join(p for p in (sources.ref(key).source, str(req.get("path") or "").strip("/")) if p)
+        node = node.strip("/")
+        if node:                # the node picked in the tree: its requirements only, and the links to them
+            def under(path: str) -> bool:
+                return path == node or (children and path.startswith(node + "/"))
+            keep = {k for k in cov.rows() if under(str(cov.requirements.get(k, {}).get("path") or "").strip("/"))}
+            cov.universe = [k for k in cov.universe or [] if k in keep]
+            for t in cov.tests:
+                t.links = [lk for lk in t.links if lk.req in keep]
+        # what the page and the report cover, said in words
+        names = [source] if source else sources.names
+        out["scope"] = {"sources": [{"name": n, **({"label": str(sources.specs[n]["label"])} if sources.specs[n].get("label") else {})}
+                                    for n in names],
+                        "all_sources": not source and len(sources.names) > 1,
+                        **({"node": node, "children": children} if node else {}),
+                        **({"campaign": campaign} if campaign else {})}
         return out, cov
 
     def _reqs_problems(self, session: EditSession, testdef_rel: str, raw: dict) -> list[tuple[str, str]]:

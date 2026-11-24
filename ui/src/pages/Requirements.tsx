@@ -266,15 +266,24 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const res = useResource<any>(path, ["run"]);
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
-  // the sources, as cards: the one picked shows its tree below it
-  const picker = d && (d.source_cards || []).length > 0 && (
+  // the sources, as cards: the one picked (none: every source) shows its tree below them; a click on it again unpicks it
+  const cards: any[] = d?.source_cards || [];
+  const pick = (name: string | null) => { setSource(name); setNode(""); };
+  const picker = cards.length > 0 && (
     <div className="req-sources">
-      {d.source_cards.map((c: any) => (
-        <button key={c.name} className={classes("testdef-item", c.name === d.source && "active")} onClick={() => { setSource(c.name); setNode(""); }}
-          title={`The requirements of the source '${c.name}'`}>
+      {cards.length > 1 && (
+        <button className={classes("testdef-item", !d.source && "active")} onClick={() => pick(null)} title="The requirements of every source">
+          <strong>All sources</strong>
+          <span className="muted small">{cards.length} sources</span>
+        </button>
+      )}
+      {cards.map((c: any) => (
+        <button key={c.name} className={classes("testdef-item", c.name === d.source && "active")}
+          onClick={() => pick(c.name === d.source && cards.length > 1 ? null : c.name)}
+          title={c.name === d.source && cards.length > 1 ? "Show every source again" : `Only the requirements of the source '${c.name}'`}>
           <strong>{c.label || c.name}</strong>
           <span className="muted small mono">{c.label && c.label !== c.name ? `${c.name} · ` : ""}{c.backend}</span>
-          {c.default && <span className="muted small">default source</span>}
+          {c.default && <span className="muted small" title="A reference with no source prefix (REQ-1, not reqs:REQ-1) is to this source">default source</span>}
         </button>
       ))}
     </div>
@@ -283,8 +292,12 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const edit = d?.edit && (
     <button className="edit-testdef" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.edit.file, ...(d.edit.source ? { source: d.edit.source } : {}) } })}
       title={d.edit.source ? `Edit the source '${d.edit.source}' (its backend, options, credentials) in the Editor, in a new browser tab`
-        : `Edit the requirements of '${d.source}' (${d.edit.file}) in the Editor, in a new browser tab`}><NavIcon name="edit" size={16} />Edit</button>
+        : d.source ? `Edit the requirements of '${d.source}' (${d.edit.file}) in the Editor, in a new browser tab` : `Edit the sources (${d.edit.file}) in the Editor, in a new browser tab`}><NavIcon name="edit" size={16} />Edit</button>
   );
+  // the report shows what the page shows: the source (or every source), the campaign, and the node picked
+  const rq = new URLSearchParams(q);
+  if (node) { rq.set("node", node); if (!children) rq.set("children", "false"); }
+  const reportQuery = rq.toString();
   const rows: any[] = d?.coverage?.requirements || [];
   return (
     <div className="requirements-tab">
@@ -313,7 +326,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
         <div className="requirements-layout">
           <nav className="req-tree">
             {picker}
-            <div className="req-tree-head muted small">Tree of <code>{d.source}</code></div>
+            <div className="req-tree-head muted small">{d.source ? <>Tree of <code>{d.source}</code></> : "Tree of every source"}</div>
             <button className={classes("req-tree-item", node === "" && "active")} onClick={() => setNode("")}>
               <span>All requirements</span><span className="muted small">{rows.length}</span>
             </button>
@@ -326,13 +339,13 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
             <div className="synthesis-head">
               <div>
                 <h3 className={node ? "mono" : undefined}>{node || "All requirements"}</h3>
-                <div className="muted small">source <code>{d.source}</code>{d.edit && <> · <code>{d.edit.file}</code></>}</div>
+                <div className="muted small">{d.source ? <>source <code>{d.source}</code></> : "every source"}{d.edit && <> · <code>{d.edit.file}</code></>}</div>
               </div>
               <span className="spacer" />
               <div className="synthesis-actions">
                 {edit}
-                <a className="button primary" href={url(`edit/sessions/${sid}/requirements/report${q.toString() ? "?" + q : ""}`)} target="_blank" rel="noreferrer"
-                  title="Both matrices as a page of their own, in a new browser tab"><NavIcon name="requirements" size={16} />Report</a>
+                <a className="button primary" href={url(`edit/sessions/${sid}/requirements/report?${reportQuery}`)} target="_blank" rel="noreferrer"
+                  title="Both matrices of what is shown here (the source, the campaign and the node picked) as a page of their own, in a new browser tab"><NavIcon name="requirements" size={16} />Report</a>
               </div>
             </div>
             <div className="cov-actions">

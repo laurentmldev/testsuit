@@ -1191,3 +1191,43 @@ def test_campaign_synthesis_generation_and_submission(repos, tmp_path):
                for r in view["runs"])
     with pytest.raises(SequencerError, match="no generated campaign"):
         editor.generated_campaign(session, "nope")
+
+
+def test_requirements_view_follows_the_source_picked(repos):
+    """No source picked: every source, each a top node; one picked: only its requirements and the links to them."""
+    editor = repos.editor
+    session = editor.open("workspace0")
+    editor.write(session, "requirements.yml", content="default: sw\nsources:\n"
+                 "  sw: {backend: yaml, label: Software, options: {file: sw.yml}}\n"
+                 "  hw: {backend: yaml, options: {file: hw.yml}}\n")
+    editor.write(session, "sw.yml", content="nodes: {SW: Software}\nrequirements:\n"
+                 "  A-1: {path: SW, title: Linked}\n  A-2: {path: SW, title: Not linked}\n")
+    editor.write(session, "hw.yml", content="nodes: {HW: Hardware}\nrequirements:\n  H-1: {path: HW, title: Linked}\n")
+    editor.write(session, "testdef/count/testdef.yml", data={
+        "id": "count", "name": "Count", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench",
+        "reqs": ["A-1", "hw:H-1"],
+        "pipeline": {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "start", "slot": "dut", "do": "start"}]}]}})
+
+    every = editor.requirements(session)
+    assert every["source"] is None and [c["name"] for c in every["source_cards"]] == ["sw", "hw"]
+    assert [(n["id"], n["label"], [c["id"] for c in n["children"]]) for n in every["tree"]] == \
+        [("sw", "Software (sw)", ["SW"]), ("hw", "hw", ["HW"])]
+    rows = {r["key"]: (r["path"], r["coverage"]) for r in every["coverage"]["requirements"]}
+    assert rows == {"A-1": ("sw/SW", "not run"), "A-2": ("sw/SW", "uncovered"), "hw:H-1": ("hw/HW", "not run")}
+
+    hw = editor.requirements(session, "hw")
+    assert hw["source"] == "hw" and [n["id"] for n in hw["tree"]] == ["HW"]
+    assert {r["key"]: r["path"] for r in hw["coverage"]["requirements"]} == {"hw:H-1": "HW"}
+    assert [lk["req"] for t in hw["coverage"]["tests"] for lk in t["links"]] == ["hw:H-1"]
+
+    sw = editor.requirements(session, "sw")
+    assert sorted(r["key"] for r in sw["coverage"]["requirements"]) == ["A-1", "A-2"]
+
+    # the report: what the page shows, the node picked too, said at its top
+    from testsuit.reqs.render import as_html, scope_text
+    out, cov = editor.requirements_coverage(session, None, None, "sw/SW", False)
+    assert cov.rows() == ["A-1", "A-2"] and [lk.req for t in cov.tests for lk in t.links] == ["A-1"]
+    assert scope_text(out["scope"]) == "Covers every source: Software (sw), hw · node sw/SW only · every test definition"
+    out, cov = editor.requirements_coverage(session, "hw", "")
+    assert scope_text(out["scope"]) == "Covers source hw · every test definition"
+    assert "Covers source hw" in as_html(cov, "t", scope=scope_text(out["scope"]))
