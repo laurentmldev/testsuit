@@ -1228,7 +1228,7 @@ input.manual-note { flex: 1; min-width: 200px; }
 .cov-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .cov-actions { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
 .cov-actions .spacer { flex: 1; }
-.requirements-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
+.requirements-layout { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
 .req-tree { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--topbar-h) + 8px); }
 .req-tree select { margin-bottom: 0; }
 .req-tree-item { display: flex; align-items: center; gap: 6px; text-align: left; border: none; background: none; padding: 4px 8px; border-radius: 6px; }
@@ -1283,5 +1283,5 @@ table.grid.req-fields td { vertical-align: middle; }
 .req-step-head { display: flex; align-items: center; gap: 8px; }
 .req-step-head .grow { flex: 1; }
 .req-source.target { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
-.req-source-pick { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.req-source-pick > select { flex: 1; min-width: 0; }
+.req-sources { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.req-tree-head { padding: 2px 8px; text-transform: uppercase; letter-spacing: 0.04em; }

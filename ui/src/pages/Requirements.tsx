@@ -266,12 +266,17 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const res = useResource<any>(path, ["run"]);
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
-  // the source shown
-  const picker = d && d.sources.length > 1 && (
-    <div className="req-source-pick">
-      <select value={d.source} onChange={(e) => { setSource(e.target.value); setNode(""); }} title="The source of the requirements">
-        {d.sources.map((s: string) => <option key={s} value={s}>{s}</option>)}
-      </select>
+  // the sources, as cards: the one picked shows its tree below it
+  const picker = d && (d.source_cards || []).length > 0 && (
+    <div className="req-sources">
+      {d.source_cards.map((c: any) => (
+        <button key={c.name} className={classes("testdef-item", c.name === d.source && "active")} onClick={() => { setSource(c.name); setNode(""); }}
+          title={`The requirements of the source '${c.name}'`}>
+          <strong>{c.label || c.name}</strong>
+          <span className="muted small mono">{c.label && c.label !== c.name ? `${c.name} · ` : ""}{c.backend}</span>
+          {c.default && <span className="muted small">default source</span>}
+        </button>
+      ))}
     </div>
   );
   // a button to edit the source shown in the Editor (its YAML requirements, or its entry in the sources file)
@@ -295,11 +300,20 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
           }}>Create requirements.yml…</button>
         </div>
       )}
-      {d?.error && <>{(picker || edit) && <div className="synthesis-head">{picker}<span className="spacer" /><div className="synthesis-actions">{edit}</div></div>}<div className="error-box">{d.error}</div></>}
+      {d?.error && (
+        <div className="requirements-layout">
+          <nav className="req-tree">{picker}</nav>
+          <div className="req-main">
+            {edit && <div className="synthesis-head"><span className="spacer" /><div className="synthesis-actions">{edit}</div></div>}
+            <div className="error-box">{d.error}</div>
+          </div>
+        </div>
+      )}
       {d?.coverage && (
         <div className="requirements-layout">
           <nav className="req-tree">
             {picker}
+            <div className="req-tree-head muted small">Tree of <code>{d.source}</code></div>
             <button className={classes("req-tree-item", node === "" && "active")} onClick={() => setNode("")}>
               <span>All requirements</span><span className="muted small">{rows.length}</span>
             </button>
