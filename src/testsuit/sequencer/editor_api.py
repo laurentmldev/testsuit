@@ -228,7 +228,8 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         spec = body.get("spec")
         return await run(editor.requirements_test, session(sid), str(body.get("path") or "requirements.yml"),
                          str(body.get("source") or ""), spec if isinstance(spec, dict) else None,
-                         str(body["upto"]) if body.get("upto") else None)
+                         str(body["upto"]) if body.get("upto") else None,
+                         str(body["expr"]) if body.get("expr") else None, str(body.get("on") or "list"))
 
     @app.get("/edit/sessions/{sid}/requirements/report")
     async def requirements_report(sid: str, source: str | None = None, campaign: str | None = None,

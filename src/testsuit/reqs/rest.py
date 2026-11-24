@@ -203,6 +203,8 @@ class RestBackend(ReqBackend):
             raise ReqError("the rest backend needs its 'list' option: {url, items[, next]}")
         self.base = str(o.get("base") or "")
         self.timeout = float(o.get("timeout") or 30)
+        self.deadline: float | None = None           # time.monotonic() when a test of the Editor stops calling
+        self.test_limit = 0.0
         verify = o.get("verify", True)
         self.verify = str((base_dir / str(verify)).resolve()) if isinstance(verify, str) else bool(verify)
         self.steps = self._steps(o.get("steps"))
@@ -539,9 +541,18 @@ class RestBackend(ReqBackend):
                 self.trace_more += 1
         self._record = record
         start = time.monotonic()
+        timeout = self.timeout
+        if self.deadline is not None:                # a test of the Editor: the whole of it within a limit
+            left = self.deadline - start
+            if left <= 0:
+                message = f"stopped: the test takes more than {self.test_limit:g} s"
+                if record is not None:
+                    record.update(seconds=0, error=message)
+                raise ReqError(f"{where}: {message}")
+            timeout = min(timeout, left)
         try:
             r = self.session.request(method, url, params=self.params or None,
-                                     json=body, timeout=self.timeout, verify=self.verify, headers=headers or None)
+                                     json=body, timeout=timeout, verify=self.verify, headers=headers or None)
         except requests.RequestException as e:
             message = self._mask(str(e)).replace(_MASKED, MASK)
             if record is not None:
@@ -668,10 +679,13 @@ class RestBackend(ReqBackend):
         return self._all
     # ── the Editor's tests ────────────────────────────────────────────
 
-    def probe(self, upto: str) -> dict[str, Any]:
+    def probe(self, upto: str, expr: str | None = None, on: str = "list") -> dict[str, Any]:
         """Run the calls up to a stage, to see what they do (with a trace: each call described): ``step:N`` (the first
         N steps: the variables they extract), ``list`` (the steps, then the first page of the list call: how many
-        items, and the first requirements their fields give)."""
+        items, and the first requirements their fields give). With ``expr`` (Debug): that jq expression alone, on the
+        answer of the stage (see ``_debug``)."""
+        if expr is not None:
+            return self._debug(upto, expr, on)
         m = re.fullmatch(r"step:(\d+)", upto)
         if m:
             count = int(m.group(1))
@@ -751,17 +765,7 @@ class RestBackend(ReqBackend):
     def _probe_item(self, wanted: str) -> dict[str, Any]:
         """The steps, the list until the requirement of this id, then each field (from the list item or a details call)
         evaluated on its own: its value, or its error; and the requirement they make."""
-        self._variables()
-        item = None
-        for candidate in self._list_items():
-            try:
-                if self._one(self.fields["id"], candidate, "field 'id'", "id") == wanted:
-                    item = candidate
-                    break
-            except ReqError:
-                continue
-        if item is None:
-            raise ReqError(f"rest backend: no requirement '{wanted}' in the list")
+        item = self._item(wanted)
         rows: list[dict[str, Any]] = []
         values: dict[str, Any] = {}
         given = self.options.get("fields") or {}
@@ -806,6 +810,91 @@ class RestBackend(ReqBackend):
                 rows.append(row)
         return {"vars": dict(self._found or {}), "item_vars": item_values, "fields": self._mask_data(rows),
                 "first_item": self._mask(json.dumps(item, indent=1, ensure_ascii=False)[:TRACE_ANSWER])}
+
+    EXPR_VALUES = 50                        # the values of a tested expression shown at most
+
+    def _item(self, wanted: str) -> Any:
+        """The list item of the requirement of this id (the steps, then the list until it)."""
+        self._variables()
+        for candidate in self._list_items():
+            try:
+                if self._one(self.fields["id"], candidate, "field 'id'", "id") == wanted:
+                    return candidate
+            except ReqError:
+                continue
+        raise ReqError(f"rest backend: no requirement '{wanted}' in the list")
+
+    def _debug(self, upto: str, expr: str, on: str) -> dict[str, Any]:
+        """Any jq expression, with the variables known at that stage, on what the stage's jq reads: ``step:N``, the
+        answer of step N (the variables of the steps before it); ``list``, the list call's first page; ``details:N``,
+        the answer of that call for the list's first requirement; ``item:<id>``, the list item of that requirement, or
+        (``on``: ``details:N``) the answer of that details call for it. Every value it gives (as JSON, not as a field
+        keeps it), or its error."""
+        m = re.fullmatch(r"step:(\d+)", upto)
+        if m:
+            n = int(m.group(1))
+            if not 1 <= n <= len(self.steps):
+                raise ReqError(f"rest backend: no step {n} (steps: {len(self.steps)})")
+            found = self._run_steps(n - 1)
+            variables = {**self.vars, **found}
+            answer = self._step_answer(self.steps[n - 1], variables, f"step {n}")
+            return self._evaluate(expr, answer, variables, f"the answer of step {n}", {"vars": found})
+        if upto == "list":
+            variables = self._variables()
+            url = self._fill(str(self.list_spec["url"]), {"page": int(self.options.get("first_page") or 1), "offset": 0},
+                             encode=True)
+            answer = self._call({**self.list_spec, "name": "list"}, self._url(url), label="list, page 1")
+            return self._evaluate(expr, answer, variables, "the answer of the list call (first page)",
+                                  {"vars": dict(self._found or {})})
+        m = re.fullmatch(r"details:(\d+)", upto)
+        if m:
+            self._variables()
+            first = None
+            for item in self._list_items():                 # its id only: the other fields may be the bug
+                try:
+                    first = self._one(self.fields["id"], item, "field 'id'", "id")
+                except ReqError:
+                    continue
+                if first:
+                    break
+            if not first:
+                raise ReqError("rest backend: the list has no requirement to read the details of")
+            return self._debug(f"item:{first}", expr, upto)
+        if not upto.startswith("item:"):
+            raise ReqError(f"rest backend: '{upto}': step:<N>, list, details:<N> or item:<id> expected")
+        wanted = upto[len("item:"):]
+        item = self._item(wanted)
+        m = re.fullmatch(r"details:(\d+)", on)
+        if not m:
+            if on != "list":
+                raise ReqError(f"rest backend: '{on}': list or details:<N> expected")
+            return self._evaluate(expr, item, self._variables(), f"the list item of {wanted}",
+                                  {"vars": dict(self._found or {})})
+        n = int(m.group(1))
+        if not 1 <= n <= len(self.details):
+            raise ReqError(f"rest backend: no details call {n} (details calls: {len(self.details)})")
+        item_values: dict[str, Any] = {}
+        for name, e in self.item_vars.items():
+            found = _all(self._program(e, f"item_vars '{name}'"), item, f"item_vars '{name}'")
+            item_values[name] = found[0] if found and found[0] is not None else ""
+        local = {**self._variables(), **item_values, "id": wanted}
+        call = self.details[n - 1]
+        answer = self._call(call, self._url(self._fill(str(call["url"]), encode=True, variables=local), local),
+                            variables=local, label=f"{call['name']} of {wanted}", missing_ok=True)
+        if answer is None:
+            raise ReqError(f"rest backend: {call['name']} of {wanted}: HTTP 404, no answer")
+        return self._evaluate(expr, answer, self._variables(), f"the answer of {call['name']} of {wanted}",
+                              {"vars": dict(self._found or {}), "item_vars": item_values})
+
+    def _evaluate(self, expr: str, data: Any, variables: Mapping[str, Any], on: str, out: dict) -> dict[str, Any]:
+        result: dict[str, Any] = {"jq": expr, "on": on}
+        try:
+            values = _all(_jq(expr, "expression", variables), data, "expression")
+        except ReqError as e:
+            result["error"] = str(e)
+        else:
+            result.update(values=self._mask_data(values[:self.EXPR_VALUES]), count=len(values))
+        return {**out, "expr": result}
 
     # ── API ───────────────────────────────────────────────────────────
 

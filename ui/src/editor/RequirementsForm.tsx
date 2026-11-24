@@ -160,15 +160,16 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
   // a test of the source as in the form (saved or not): every call, or those up to a stage (step:N, list)
-  const runTest: RunTest = async (upto) => {
+  const runTest: RunTest = async (upto, debug) => {
     try {
-      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}) });
+      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}), ...(debug || {}) });
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e) };
     }
   };
   const test = async () => {
     setTesting(true);
+    setResult(null);                                         // the values of the last test go: no mixing them up
     try {
       setResult(await runTest());
     } finally {
@@ -766,11 +767,13 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
   const [busy, setBusy] = useState("");
   const [picked, setPicked] = useState("");
   const [tested, setTested] = useState<any>(null);          // the item test: {ok, fields, item_vars, error, calls}
-  const pick = async () => { setBusy("ids"); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
+  const [debugging, setDebugging] = useState(false);
+  const pick = async () => { setBusy("ids"); setPicking(null); setTested(null); setPicked(""); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
   const test = async (id: string) => {
     setPicked(id);
     if (!id) return;
     setBusy("item");
+    setTested(null);
     try { setTested(await runTest(`item:${id}`)); } finally { setBusy(""); }
   };
   const results: Record<string, any> = {};
@@ -790,10 +793,14 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
             onChange={setPicked} onPick={test} />
         )}
         {picking?.ok && picked && <button className="small" disabled={!!busy} onClick={() => test(picked)}>{busy === "item" ? "Testing…" : "Test"}</button>}
+        {picking?.ok && picked && <button className="small" onClick={() => setDebugging(!debugging)}
+          title={`Evaluate any jq expression on ${DEBUG_ON.item}, with the variables known there`}>Debug…</button>}
         {picking && !picking.ok && <span className="error-text small">{picking.error}</span>}
         {tested && !tested.ok && <span className="error-text small">{tested.error}</span>}
-        {(picking || tested) && <button className="link small" onClick={() => { setPicking(null); setTested(null); setPicked(""); }}>hide</button>}
+        {(picking || tested) && <button className="link small" onClick={() => { setPicking(null); setTested(null); setPicked(""); setDebugging(false); }}>hide</button>}
       </div>
+      {debugging && picking?.ok && picked && <Debug key={picked} upto={`item:${picked}`} runTest={runTest} onClose={() => setDebugging(false)}
+        ons={[{ value: "list", label: "the list item" }, ...calls.map((_, i) => ({ value: `details:${i + 1}`, label: `details call ${i + 1}'s answer` }))]} />}
       <table className={classes("grid compact req-fields req-fields-from", shown && "tested")}>
         <thead><tr><th>Field</th><th>Read from</th><th>jq{shown && <span className="muted"> → value for <code>{picked}</code></span>}</th><th /></tr></thead>
         <tbody>{rows.map((r) => (
@@ -820,11 +827,11 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
       {shown && (
         <div className="req-fields-tested small">
           {extra.length > 0 && <div>Also read by default (the item's key of the same name): {extra.map((r: any) => (
-            <span key={r.field} className="mono">{r.field}={shownValue(r.value)} </span>))}</div>}
+            <VarValue key={r.field} name={r.field} value={r.value} />))}</div>}
           {Object.keys(tested.vars || {}).length > 0 && <div>Variables (the source's, and those the steps extracted, their calls below): {Object.entries<any>(tested.vars).map(([k, v]) => (
-            <span key={k} className="mono">{k}={shownValue(v).length > 80 ? shownValue(v).slice(0, 80) + "…" : shownValue(v)} </span>))}</div>}
+            <VarValue key={k} name={k} value={v} />))}</div>}
           {Object.keys(tested.item_vars || {}).length > 0 && <div>Item variables: {Object.entries<any>(tested.item_vars).map(([k, v]) => (
-            <span key={k} className="mono">{k}={shownValue(v)} </span>))}</div>}
+            <VarValue key={k} name={k} value={v} />))}</div>}
           {tested.first_item && <details className="req-call-part"><summary>The list item of <code>{picked}</code></summary>
             <pre className="mono small">{tested.first_item}</pre></details>}
         </div>
@@ -924,19 +931,78 @@ function Steps({ value, onChange, runTest }: { value?: any[] | null; onChange: (
 
 // ── tests of a source: what each call to the server does ───────────────
 
-type RunTest = (upto?: string) => Promise<any>;
+type RunTest = (upto?: string, debug?: { expr: string; on?: string }) => Promise<any>;
+
+/** Debug: any jq expression on what a stage's jq reads (a step's answer, the list's first page, a details call's
+ * answer, a list item), with the variables known there: every value it gives, or its error. */
+function Debug({ upto, runTest, ons, onClose }: { upto: string; runTest: RunTest; ons?: { value: string; label: string }[]; onClose: () => void }) {
+  const [expr, setExpr] = useState(".");
+  const [on, setOn] = useState(ons?.[0]?.value || "list");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const run = async () => {
+    if (!expr.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try { setResult(await runTest(upto, { expr, on })); } finally { setBusy(false); }
+  };
+  const e = result?.expr;
+  const known = Object.keys({ ...(result?.vars || {}), ...(result?.item_vars || {}) });
+  return (
+    <div className="req-debug">
+      <div className="req-debug-row">
+        {ons && ons.length > 1 && (
+          <select value={on} onChange={(ev) => setOn(ev.target.value)} title="What the expression reads">
+            {ons.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
+        <GrowText className="mono grow" lines value={expr} placeholder=". | keys   ($variable, [.data[] | .id]…)"
+          onChange={(v) => setExpr(v)} onKeyDown={(ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); run(); } }} />
+        <button className="small" disabled={busy || !expr.trim()} onClick={run}
+          title="Evaluate this jq expression, with the variables known at this stage (Ctrl+Enter)">{busy ? "Running…" : "Run"}</button>
+        <button className="link small" onClick={onClose}>close</button>
+      </div>
+      {result && !result.ok && <div className="error-text small">{result.error}</div>}
+      {e && (
+        <div className={classes("req-test small", e.error ? "bad" : "ok")}>
+          <div className="muted">On {e.on}{known.length > 0 && <>; variables: {known.map((k) => <code key={k}>${k} </code>)}</>}</div>
+          {e.error ? <div className="error-text">{e.error}</div>
+            : e.count === 0 ? <div className="muted">No value (empty).</div>
+            : <>
+              {e.values.map((v: any, i: number) => (
+                <pre key={i} className="mono small req-var-box">{typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v, null, 1)}</pre>
+              ))}
+              {e.count > e.values.length && <div className="muted">and {e.count - e.values.length} more value(s)</div>}
+            </>}
+        </div>
+      )}
+      {result?.calls?.length > 0 && <details className="req-call-part"><summary className="small muted">{result.calls.length} call(s) to the server</summary>
+        <Calls result={result} /></details>}
+    </div>
+  );
+}
+
+const DEBUG_ON: Record<string, string> = {
+  step: "the answer of this step (the variables of the steps before it)", list: "the answer of the list call's first page",
+  details: "the answer of this call for the first requirement", item: "the list item of this requirement, or a details call's answer",
+};
 
 /** A Test button for a stage of a source (a step, the list call), and what its calls did. */
 function StageTest({ upto, runTest, label, title }: { upto: string; runTest: RunTest; label: string; title: string }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [debugging, setDebugging] = useState(false);
   const test = async () => {
     setTesting(true);
+    setResult(null);
     try { setResult(await runTest(upto)); } finally { setTesting(false); }
   };
   return (
     <div className="req-stage-test">
-      <button className="small" disabled={testing} onClick={test} title={title}>{testing ? "Testing…" : `${label}…`}</button>
+      <button className="small" disabled={testing} onClick={test} title={title}>{testing ? "Testing…" : `${label}…`}</button>{" "}
+      <button className="small" onClick={() => setDebugging(!debugging)}
+        title={`Evaluate any jq expression on ${DEBUG_ON[upto.split(":")[0]]}, with the variables known there`}>Debug…</button>
+      {debugging && <Debug upto={upto} runTest={runTest} onClose={() => setDebugging(false)} />}
       {result && (
         <div className={classes("req-test", result.ok ? "ok" : "bad")}>
           {result.ok ? (
@@ -944,7 +1010,7 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
               <div>Done in {result.seconds} s{upto === "list" && <>: <strong>{result.items}</strong> item(s) in the first page</>}.</div>
               {result.vars && Object.keys(result.vars).length > 0 && (
                 <div className="req-vars small">Variables: {Object.entries<any>(result.vars).map(([k, v]) => (
-                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                  <VarValue key={k} name={k} value={v} />
                 ))}</div>
               )}
               {result.sample?.length > 0 && (
@@ -957,7 +1023,7 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
               )}
               {result.item_vars && Object.keys(result.item_vars).length > 0 && (
                 <div className="req-vars small">Item variables: {Object.entries<any>(result.item_vars).map(([k, v]) => (
-                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                  <VarValue key={k} name={k} value={v} />
                 ))}</div>
               )}
               {result.requirement && (
@@ -988,6 +1054,22 @@ function FieldValue({ r }: { r?: any }) {
   const v = r.value;
   if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return <span className="muted small">empty</span>;
   return <span className="small req-field-shown">{Array.isArray(v) ? v.join(", ") : String(v)}</span>;
+}
+
+/** A variable and its value in a test's result: a long value (a whole structure a step extracted) cut on one line,
+ *  a click showing it whole in a box of limited height, so that what follows stays in view. */
+function VarValue({ name, value }: { name: string; value: any }) {
+  const [open, setOpen] = useState(false);
+  const text = shownValue(value);
+  if (text.length <= 100) return <span className="mono">{name}={text}</span>;
+  const pretty = typeof value === "object" && value !== null ? JSON.stringify(value, null, 1) : text;
+  return (
+    <span className={classes("mono req-var-long", open && "open")}>
+      <button className="link small" onClick={() => setOpen(!open)} title={open ? "Fold it" : `Show it whole (${text.length} characters)`}>
+        {name}={open ? "" : text.slice(0, 100) + "…"}{open ? "▾" : " ▸"}</button>
+      {open && <pre className="mono small req-var-box">{pretty}</pre>}
+    </span>
+  );
 }
 
 const shownValue = (v: any) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "") || "∅");
@@ -1024,7 +1106,7 @@ function Call({ call, open }: { call: any; open: boolean }) {
         </div>
         {call.error && <div className="error-text small">{call.error}</div>}
         {call.extracted && Object.keys(call.extracted).length > 0 && (
-          <div className="req-vars small">Extracted: {Object.entries<any>(call.extracted).map(([k, v]) => <span key={k} className="mono">{k}={shownValue(v)}</span>)}</div>
+          <div className="req-vars small">Extracted: {Object.entries<any>(call.extracted).map(([k, v]) => <VarValue key={k} name={k} value={v} />)}</div>
         )}
         {call.items !== undefined && <div className="small">{call.items} item(s){call.next ? <>; next page: <code>{call.next}</code></> : ""}</div>}
         <details className="req-call-part"><summary className="small">Request headers</summary>

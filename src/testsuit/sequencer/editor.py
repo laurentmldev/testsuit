@@ -61,6 +61,7 @@ from testsuit.sequencer.util import SequencerError, now
 WORK_DIRS = (".current_datapack/", ".work/")     # what the datapack tool writes next to the definitions: never committed
 SKIP_DIRS = {".git", ".work", ".current_datapack", "__pycache__", "node_modules", ".pytest_cache", ".venv"}
 MAX_FILES = 2000
+TEST_LIMIT = 30.0                                  # seconds: a test of a requirements source (Editor) stops calling after it
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -1619,7 +1620,7 @@ class Editor:
         return out
 
     def requirements_test(self, session: EditSession, path: str, source: str, spec: dict | None = None,
-                          upto: str | None = None) -> dict:
+                          upto: str | None = None, expr: str | None = None, on: str = "list") -> dict:
         """Read one source of a sources file of the session, as datapack generation would: how many requirements, how
         long it took, the tree and the first requirements, or what went wrong (Editor form). ``spec``: the source as
         being edited (default: as saved). ``upto``: only the calls up to a stage of a backend that has stages (the rest
@@ -1638,10 +1639,13 @@ class Editor:
                 sources.replace(source, spec)
             backend = sources.backend(source)
             backend.trace = []
+            if hasattr(backend, "deadline"):        # a test answers within about 30 s, whatever the server does
+                backend.test_limit = TEST_LIMIT
+                backend.deadline = start + TEST_LIMIT
             if upto:
                 if not hasattr(backend, "probe"):
                     raise ReqError(f"the {sources.specs[source]['backend']} backend has no stages to test")
-                probe = backend.probe(upto)
+                probe = backend.probe(upto, expr=expr, on=on) if expr is not None else backend.probe(upto)
             else:
                 reqs = list_requirements(backend, "", True)
                 tree = backend.tree()
