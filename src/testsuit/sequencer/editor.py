@@ -1620,7 +1620,7 @@ class Editor:
         return out
 
     def requirements_test(self, session: EditSession, path: str, source: str, spec: dict | None = None,
-                          upto: str | None = None) -> dict:
+                          upto: str | None = None, expr: str | None = None, on: str = "list") -> dict:
         """Read one source of a sources file of the session, as datapack generation would: how many requirements, how
         long it took, the tree and the first requirements, or what went wrong (Editor form). ``spec``: the source as
         being edited (default: as saved). ``upto``: only the calls up to a stage of a backend that has stages (the rest
@@ -1645,7 +1645,7 @@ class Editor:
             if upto:
                 if not hasattr(backend, "probe"):
                     raise ReqError(f"the {sources.specs[source]['backend']} backend has no stages to test")
-                probe = backend.probe(upto)
+                probe = backend.probe(upto, expr=expr, on=on) if expr is not None else backend.probe(upto)
             else:
                 reqs = list_requirements(backend, "", True)
                 tree = backend.tree()

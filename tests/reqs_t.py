@@ -687,6 +687,13 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
         assert record["context"] == {"branch": "main", "sub_id": 9}
         assert record["vars"] == {"branch": "main", "subsystem": "Speed", "skip": "ALM-5", "sub_id": 9, "other": ""}
 
+        # Debug of a step: any jq on its answer, with the variables known before it (the source's)
+        b = sources.backend("alm")
+        b.trace = []
+        e = b.probe("step:1", expr="[.items[] | select(.name == $subsystem)] | length")["expr"]
+        assert e["values"] == [1] and e["on"] == "the answer of step 1"
+        assert "error" in b.probe("step:1", expr="$sub_id")["expr"]          # not known before step 1
+
         # the snapshot records the variables, and the coverage shows the context
         from testsuit.reqs.coverage import Coverage, Test, add_test
         from testsuit.reqs.render import text
@@ -809,6 +816,17 @@ def test_rest_details(tmp_path, alm_server):
         assert '"key": "ALM-3"' in probe["first_item"]
         with pytest.raises(ReqError, match="no requirement 'NOPE'"):
             backend.probe("item:NOPE")
+
+        # any expression, on the list item or a details answer: every value it gives, or its error
+        e = backend.probe("item:ALM-3", expr=".fields.name, .key")["expr"]
+        assert e == {"jq": ".fields.name, .key", "on": "the list item of ALM-3", "values": ["Item 3", "ALM-3"], "count": 2}
+        e = backend.probe("item:ALM-3", expr="{t: .fields.text}", on="details:1")["expr"]
+        assert e["values"] == [{"t": "Text 3"}] and "of ALM-3" in e["on"]
+        assert backend.probe("details:1", expr=".key")["expr"]["values"] == ["ALM-1"]      # the first requirement
+        assert backend.probe("list", expr=".data | length")["expr"]["values"] == [2]       # the first page
+        assert "error" in backend.probe("item:ALM-3", expr=".key | tonumber")["expr"]
+        with pytest.raises(ReqError, match="no details call 9"):
+            backend.probe("item:ALM-3", expr=".", on="details:9")
 
         # a details call no field is read from yet (being written in the Editor): not made
         calls.clear()

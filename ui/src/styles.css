@@ -1344,3 +1344,7 @@ textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-sp
 .req-var-long > button { font-family: inherit; text-align: left; display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .req-var-box { max-height: 240px; overflow: auto; margin: 4px 0; padding: 6px 8px; border-radius: 4px; background: var(--panel-2); white-space: pre-wrap; word-break: break-word; }
 .req-call-part pre, .req-test pre { max-height: 240px; overflow: auto; }
+.req-debug { margin: 6px 0; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px; }
+.req-debug-row { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
+.req-debug-row .grow { flex: 1 1 260px; min-width: 0; }
+.req-debug .req-test { margin-top: 6px; }

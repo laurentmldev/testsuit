@@ -160,9 +160,9 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
   // a test of the source as in the form (saved or not): every call, or those up to a stage (step:N, list)
-  const runTest: RunTest = async (upto) => {
+  const runTest: RunTest = async (upto, debug) => {
     try {
-      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}) });
+      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}), ...(debug || {}) });
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e) };
     }
@@ -767,6 +767,7 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
   const [busy, setBusy] = useState("");
   const [picked, setPicked] = useState("");
   const [tested, setTested] = useState<any>(null);          // the item test: {ok, fields, item_vars, error, calls}
+  const [debugging, setDebugging] = useState(false);
   const pick = async () => { setBusy("ids"); setPicking(null); setTested(null); setPicked(""); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
   const test = async (id: string) => {
     setPicked(id);
@@ -792,10 +793,14 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
             onChange={setPicked} onPick={test} />
         )}
         {picking?.ok && picked && <button className="small" disabled={!!busy} onClick={() => test(picked)}>{busy === "item" ? "Testing…" : "Test"}</button>}
+        {picking?.ok && picked && <button className="small" onClick={() => setDebugging(!debugging)}
+          title={`Evaluate any jq expression on ${DEBUG_ON.item}, with the variables known there`}>Debug…</button>}
         {picking && !picking.ok && <span className="error-text small">{picking.error}</span>}
         {tested && !tested.ok && <span className="error-text small">{tested.error}</span>}
-        {(picking || tested) && <button className="link small" onClick={() => { setPicking(null); setTested(null); setPicked(""); }}>hide</button>}
+        {(picking || tested) && <button className="link small" onClick={() => { setPicking(null); setTested(null); setPicked(""); setDebugging(false); }}>hide</button>}
       </div>
+      {debugging && picking?.ok && picked && <Debug key={picked} upto={`item:${picked}`} runTest={runTest} onClose={() => setDebugging(false)}
+        ons={[{ value: "list", label: "the list item" }, ...calls.map((_, i) => ({ value: `details:${i + 1}`, label: `details call ${i + 1}'s answer` }))]} />}
       <table className={classes("grid compact req-fields req-fields-from", shown && "tested")}>
         <thead><tr><th>Field</th><th>Read from</th><th>jq{shown && <span className="muted"> → value for <code>{picked}</code></span>}</th><th /></tr></thead>
         <tbody>{rows.map((r) => (
@@ -926,12 +931,67 @@ function Steps({ value, onChange, runTest }: { value?: any[] | null; onChange: (
 
 // ── tests of a source: what each call to the server does ───────────────
 
-type RunTest = (upto?: string) => Promise<any>;
+type RunTest = (upto?: string, debug?: { expr: string; on?: string }) => Promise<any>;
+
+/** Debug: any jq expression on what a stage's jq reads (a step's answer, the list's first page, a details call's
+ * answer, a list item), with the variables known there: every value it gives, or its error. */
+function Debug({ upto, runTest, ons, onClose }: { upto: string; runTest: RunTest; ons?: { value: string; label: string }[]; onClose: () => void }) {
+  const [expr, setExpr] = useState(".");
+  const [on, setOn] = useState(ons?.[0]?.value || "list");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const run = async () => {
+    if (!expr.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try { setResult(await runTest(upto, { expr, on })); } finally { setBusy(false); }
+  };
+  const e = result?.expr;
+  const known = Object.keys({ ...(result?.vars || {}), ...(result?.item_vars || {}) });
+  return (
+    <div className="req-debug">
+      <div className="req-debug-row">
+        {ons && ons.length > 1 && (
+          <select value={on} onChange={(ev) => setOn(ev.target.value)} title="What the expression reads">
+            {ons.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
+        <GrowText className="mono grow" lines value={expr} placeholder=". | keys   ($variable, [.data[] | .id]…)"
+          onChange={(v) => setExpr(v)} onKeyDown={(ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); run(); } }} />
+        <button className="small" disabled={busy || !expr.trim()} onClick={run}
+          title="Evaluate this jq expression, with the variables known at this stage (Ctrl+Enter)">{busy ? "Running…" : "Run"}</button>
+        <button className="link small" onClick={onClose}>close</button>
+      </div>
+      {result && !result.ok && <div className="error-text small">{result.error}</div>}
+      {e && (
+        <div className={classes("req-test small", e.error ? "bad" : "ok")}>
+          <div className="muted">On {e.on}{known.length > 0 && <>; variables: {known.map((k) => <code key={k}>${k} </code>)}</>}</div>
+          {e.error ? <div className="error-text">{e.error}</div>
+            : e.count === 0 ? <div className="muted">No value (empty).</div>
+            : <>
+              {e.values.map((v: any, i: number) => (
+                <pre key={i} className="mono small req-var-box">{typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v, null, 1)}</pre>
+              ))}
+              {e.count > e.values.length && <div className="muted">and {e.count - e.values.length} more value(s)</div>}
+            </>}
+        </div>
+      )}
+      {result?.calls?.length > 0 && <details className="req-call-part"><summary className="small muted">{result.calls.length} call(s) to the server</summary>
+        <Calls result={result} /></details>}
+    </div>
+  );
+}
+
+const DEBUG_ON: Record<string, string> = {
+  step: "the answer of this step (the variables of the steps before it)", list: "the answer of the list call's first page",
+  details: "the answer of this call for the first requirement", item: "the list item of this requirement, or a details call's answer",
+};
 
 /** A Test button for a stage of a source (a step, the list call), and what its calls did. */
 function StageTest({ upto, runTest, label, title }: { upto: string; runTest: RunTest; label: string; title: string }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [debugging, setDebugging] = useState(false);
   const test = async () => {
     setTesting(true);
     setResult(null);
@@ -939,7 +999,10 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
   };
   return (
     <div className="req-stage-test">
-      <button className="small" disabled={testing} onClick={test} title={title}>{testing ? "Testing…" : `${label}…`}</button>
+      <button className="small" disabled={testing} onClick={test} title={title}>{testing ? "Testing…" : `${label}…`}</button>{" "}
+      <button className="small" onClick={() => setDebugging(!debugging)}
+        title={`Evaluate any jq expression on ${DEBUG_ON[upto.split(":")[0]]}, with the variables known there`}>Debug…</button>
+      {debugging && <Debug upto={upto} runTest={runTest} onClose={() => setDebugging(false)} />}
       {result && (
         <div className={classes("req-test", result.ok ? "ok" : "bad")}>
           {result.ok ? (
