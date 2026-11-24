@@ -1371,7 +1371,7 @@ In URLs, values are URL-encoded; in a body, a string made of one `{{ name }}` ke
           cache: 1h
 ```
 
-When a version comes from no field, it is a hash of the list's fields, so that a requirement compares the same with or without its details: a change of a detail alone then shows only with a modification field.
+In the Editor's form, **Fields** is one table: each field with where it is read (the list item, or a details call) and its jq expression; `id`, `title` and `path` are always there (`id`, `path` and `version` from the list only), the other fields when given, **Add a field…** for more. A details call no field is read from is not made. When a version comes from no field, it is a hash of the list's fields, so that a requirement compares the same with or without its details: a change of a detail alone then shows only with a modification field.
 
 Credentials are never written in the sources file: each is `env:<VARIABLE>`, an environment variable, or `file:<path>`, the content of a file (trailing white space dropped; a relative path is relative to the sources file, so keep such files out of the repository), the way Docker and Kubernetes give secrets (`file:/run/secrets/alm_token`).
 

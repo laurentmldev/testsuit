@@ -181,7 +181,7 @@ class RestBackend(ReqBackend):
         "details": "Optional calls made per requirement, each adding fields from its answer: `[{url, fields, cache}]`, "
                    "with `{{ id }}` and the item variables in the URL. Made only for the requirements needed in full "
                    "(linked by a test definition, at generation; opened in the Requirements tab), never for listing. "
-                   "`fields`: jq on the answer, as `fields` (not `id`, `path`, `version`: those come from the list); "
+                   "`fields`: jq on the answer, as `fields` (not `id`, `path`, `version`: those come from the list; none: the call is not made); "
                    "a later call wins. `cache`: how long to keep an answer (`1d`); a requirement whose version "
                    "changed is read again. A 404 leaves its fields out. Optional `method` and `body`." + _SUBST,
         "first_page": "The first `{{ page }}` (default 1).",
@@ -293,7 +293,7 @@ class RestBackend(ReqBackend):
             if not isinstance(call, dict) or not call.get("url"):
                 raise ReqError(f"{where}: {{url, fields[, cache, method, body]}} expected")
             fields = call.get("fields") or {}
-            if not isinstance(fields, dict) or not fields:
+            if not isinstance(fields, dict):
                 raise ReqError(f"{where}: 'fields' gives fields of the requirement: {{description: <jq>}}")
             bad = sorted(set(fields) - set(FIELDS))
             if bad:
@@ -754,6 +754,8 @@ class RestBackend(ReqBackend):
             values = {k: v for k, v in req.as_dict().items() if v not in (None, "", [])}
             local = {**variables, **self._items.get(req.id, {}), "id": req.id}
             for call in self.details:
+                if not call["fields"]:                     # no field read from it (yet): not made
+                    continue
                 answer = self._step_answer(call, local, f"{call['name']} of {req.id}", missing_ok=True,
                                            version=req.version if self.version_given else None)
                 if answer is None:

@@ -1325,3 +1325,11 @@ table.grid.req-fields td { vertical-align: middle; }
 .rich-html pre { overflow-x: auto; }
 /* a field of one line growing with its text (jq expressions, URLs): no resize handle, no scrollbar */
 textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+.req-fields-from { table-layout: fixed; width: 100%; }
+.req-fields-from th:nth-child(1) { width: 120px; } .req-fields-from th:nth-child(2) { width: 190px; } .req-fields-from th:nth-child(4) { width: 28px; }
+.req-fields-from select { width: 100%; }
+.req-fields-from td { vertical-align: top; }
+.req-field-role { font-family: system-ui, sans-serif; font-size: 10.5px; white-space: nowrap; }
+.req-fields-add { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 6px 0 10px; }
+.req-fields-add select { width: auto; }
+.req-field-chip { margin-right: 4px; }
