@@ -277,17 +277,22 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   // leaving a lab session offers to reload the lab, so that tsqd runs what was edited: the folder as it is
   // (in place), or the latest pushed commit (a clone on a branch, once pushed)
   // closing the session (closeTab) in a tab the Lab or Datapacks page opened closes that tab and refreshes the
-  // page that opened it; a tab opened otherwise (a bookmark, a typed address) goes back to that page instead
-  const leave = async (closeTab = false) => {
-    if (info.repo === "lab" && window.confirm(info.local
+  // page that opened it; a tab opened otherwise (a bookmark, a typed address) goes back to that page instead.
+  // The tab that opened this one is brought to the front at once, before the work (dropping the session,
+  // reloading the lab): browsers let a page bring another tab forward only for a few seconds after a click,
+  // and once it is in front, closing this tab (now behind) leaves it there, rather than the tab seen last.
+  // `work` runs in this tab meanwhile. Closing the tab with the browser's own × is not seen by the page: the
+  // browser then picks the tab itself.
+  const leave = async (closeTab = false, work?: () => Promise<unknown>) => {
+    const reloadLab = info.repo === "lab" && window.confirm(info.local
       ? "Reload the lab now, so that the sequencer uses the files as they are?"
-      : "Reload the lab now from its latest pushed commit (tsq lab reload --pull)?")) {
-      await attempt(() => post("lab/reload", { pull: !info.local, revision: null }), "lab reloaded");
-    }
-    if (closeTab && openerOfThisApp()) {
-      const opener = window.opener as Window;
+      : "Reload the lab now from its latest pushed commit (tsq lab reload --pull)?");
+    const opener = closeTab && openerOfThisApp() ? window.opener as Window : null;
+    opener?.focus();
+    if (work) await work();
+    if (reloadLab) await attempt(() => post("lab/reload", { pull: !info.local, revision: null }), "lab reloaded");
+    if (opener && !opener.closed) {
       opener.location.reload();
-      opener.focus();
       window.close();
       if (window.closed) return;
     }
@@ -312,8 +317,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               {info.git !== false && <button className="primary" onClick={() => setDialog("publish")}>Review and push…</button>}
               <button onClick={async () => {
                 if (!info.local && info.changed && !window.confirm("Close the session and drop the changes that were not pushed?")) return;
-                await attempt(() => del(`edit/sessions/${id}`));
-                await leave(true);
+                await leave(true, () => attempt(() => del(`edit/sessions/${id}`)));
               }} title={`Close the session and this tab, back to the ${back.label} page`}>Close</button>
             </div>
             <div className="session-main">
