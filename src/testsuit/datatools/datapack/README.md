@@ -213,7 +213,8 @@ description: Markdown text
 priority: 50                           # of its runs (default: the sequencer's queue.default_priority)
 testdefs:                              # relative to this file
   - ../testdef/max_speed/testdef.yml
-  - {testdef: ../testdef/front_contact/testdef.yml, setup_config: emulated, priority: 60}
+  - {testdef: ../testdef/front_contact/testdef.yml, setup_config: emulated, priority: 60,
+     keys: {bench_mode: quick}}        # keys pinned for this test definition only
 routing:                               # tags the lab resources of its runs must carry, over those of their slots
   stage_tags: [train_1]                # every stage slot; or {<stage type>: [tags]}
   component_tags: {pilot: [rev_b]}    # the slots of that role
@@ -221,6 +222,8 @@ datasets:                              # the version of EVERY dataset its test d
   toytrain_sw: v0.3.0
   toytrain_sim: v1.1.0
 baseline: ../baseline_expected.yml     # optional: checked on every run, instead of the test definitions' own
+keys:                                  # optional: keys pinned for every test definition
+  operator.team: night_shift
 ```
 
 `datapack <file>.campaign.yml` generates the datapack of each test definition, in the order given, into one folder `<output dir>/<campaign id>_<user>_<date>_<time>[_DRAFT]/`, with a `campaign.yml` manifest: the campaign, its git state, and each datapack with its priority and conformity. It is all or nothing: when one datapack cannot be generated, the folder is removed. `--nocheck`, `--lenient`, `--set` and `--output-dir` apply to every datapack; `--setup-config`, `--dataset-version` and `--baseline` are refused, since the campaign file gives them. `tsq submit-campaign <folder>` posts the folder to the sequencer as one campaign run ([sequencer README](../../sequencer/README.md), section 10.2).
@@ -230,6 +233,12 @@ baseline: ../baseline_expected.yml     # optional: checked on every run, instead
 - The campaign file is a source of role `campaign`, with its git state, and `baseline.yml` names the campaign (`campaign: {id, name, file}`). The keys `campaign.{id, name, file}` are available to the templates.
 - The datapack stays **conform** when the campaign file is a clean git tag (like the test definition and the setup) and each pinned version that differs from the written one is a tag of its source. A pinned version that is not a tag (a branch, a commit) makes it non-conform, with the reason.
 - A dataset the campaign pins but none of its test definitions imports is a warning.
+
+**Keys.** The keys its test definitions ask at each generation (`user_keys`) are **shared by name**: one value for every test definition that asks it.
+- The campaign file can **pin** a key: `keys:` for every test definition, or the `keys:` of an entry for that one only (over the campaign's). A pinned key is set like a key set by hand, written in a file under git: it is recorded under `keys_set_by_hand` with `pinned_by_campaign: true`. Setting a key no dictionary defines (a `user_keys` one) keeps the datapack conform; overriding a defined key makes it non-conform.
+- The keys not pinned are given at generation, for every test definition: `datapack <file>.campaign.yml --set name=value` (the **Generate and run** dialog of the Campaigns subtab). A key the campaign pins in its `keys:` cannot be given at generation; an entry's own `keys:` are kept over the value given, for that entry.
+- A value must be one of the `choices` of each test definition that asks it, and the generation stops on a key not given. The manifest records the campaign's `keys`, the `given_keys` and, for each datapack, the `keys` it was generated with.
+- A key the campaign pins but none of its test definitions asks is a warning in the Campaigns subtab.
 
 The per-test-definition baseline (the versions written in the dictionaries, shown on the Datapacks page) is unchanged: it applies when a test definition is generated on its own.
 

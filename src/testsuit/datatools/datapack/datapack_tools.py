@@ -66,6 +66,8 @@ A datapack can be generated for a **campaign** (see campaign: ``datapack <file>.
 argument): the campaign gives the version of every dataset the setup imports (one missing is an error), recorded as
 ``versions_pinned_by_campaign``, with the campaign file as a source of role ``campaign`` (its git state counts for
 conformity like the test definition's) and the keys ``campaign.{id, name, file}``. Versions cannot be set by hand then.
+The keys the campaign pins (its ``keys``, an entry's ``keys``: ``campaign["keys"]``) are passed among ``manual_keys``
+and recorded under ``keys_set_by_hand`` with ``pinned_by_campaign: true``.
 """
 from __future__ import annotations
 
@@ -527,6 +529,7 @@ class _Builder:
             if name not in self.manual_values or self.manual_values[name] in (None, ""):
                 problems.append(f"key '{name}' is to be given at each generation (user_keys of the test definition"
                                 f"{': ' + spec.description if spec.description else ''}): --set {name}=<value>"
+                                + (" (or pinned in the campaign file, keys:)" if self.campaign is not None else "")
                                 + (f", one of {', '.join(str(c) for c in spec.choices)}" if spec.choices else ""))
             elif spec.choices and str(parse_value(self.manual_values[name])) not in [str(c) for c in spec.choices]:
                 problems.append(f"key '{name}': '{self.manual_values[name]}' is not one of its choices "
@@ -546,12 +549,17 @@ class _Builder:
                 raise DatapackError(f"key '{name}' cannot be set by hand: '{clash}' is a built-in key of the datapack tool")
         base = self.keys(with_manual=False)
         entries = keys_set_by_hand(base.data, self.manual_values, base.origins)
+        pinned = (self.campaign or {}).get("keys") or {}
         for entry in entries:
+            how = "set by hand"
+            if entry["key"] in pinned:                   # pinned by the campaign file: set like a key set by hand
+                entry["pinned_by_campaign"] = True
+                how = "pinned by the campaign"
             if entry["overrides"]:
-                _warn(f"key '{entry['key']}' set by hand to {entry['value']!r}: it overrides {entry['was']!r}"
+                _warn(f"key '{entry['key']}' {how} to {entry['value']!r}: it overrides {entry['was']!r}"
                       + (f" (from {entry['origin']})" if entry["origin"] else "") + ", the datapack is non-conform")
             else:
-                _info(Fore.LIGHTBLACK_EX + f"key '{entry['key']}' set by hand to {entry['value']!r} (not defined by a dictionary)")
+                _info(Fore.LIGHTBLACK_EX + f"key '{entry['key']}' {how} to {entry['value']!r} (not defined by a dictionary)")
         return entries
 
     def _version_by_hand(self, dataset, pinned: bool = False):

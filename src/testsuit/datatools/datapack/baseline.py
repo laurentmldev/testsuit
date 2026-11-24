@@ -122,7 +122,8 @@ def nonconform_reasons(baseline: dict | None) -> list[str]:
     reasons = []
     for key in baseline.get("keys_set_by_hand") or []:
         if key.get("overrides"):
-            reasons.append(f"key '{key.get('key')}' overridden by hand: {key.get('value')!r} instead of {key.get('was')!r}"
+            how = "pinned by the campaign" if key.get("pinned_by_campaign") else "by hand"
+            reasons.append(f"key '{key.get('key')}' overridden {how}: {key.get('value')!r} instead of {key.get('was')!r}"
                            + (f" (from {key['origin']})" if key.get("origin") else ""))
     for entry in baseline.get("versions_set_by_hand") or []:
         if entry.get("overrides") and not entry.get("tag"):

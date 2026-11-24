@@ -1087,6 +1087,47 @@ def test_setup_type_role_inputs(repos):
     assert [i["name"] for i in described] == ["app.sh", "extra/", "notes.txt"] and described[1]["from"] == "dut"
 
 
+def test_campaign_keys(repos):
+    """the keys its test definitions ask, shared by name in a campaign: the choices they have in common, what the
+    campaign pins, what is given at generation"""
+    editor = repos.editor
+    session = editor.open("workspace0", local=True)
+    pipeline = {"phases": [{"id": "run", "stage_slots": ["bench"], "steps": [{"id": "deploy", "slot": "dut", "do": "deploy"}]}]}
+    asks = {"count": {"mode": {"choices": ["quick", "full"], "description": "how long"}, "operator": {}},
+            "again": {"mode": {"choices": ["full", "slow"]}}}
+    for name, user_keys in asks.items():
+        editor.write(session, f"testdef/{name}/testdef.yml", data={
+            "id": name, "name": name, "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench", "pipeline": pipeline,
+            "user_keys": user_keys})
+    campaign = {"id": "nightly", "testdefs": ["../testdef/count/testdef.yml", "../testdef/again/testdef.yml"]}
+    editor.write(session, "campaigns/nightly.campaign.yml", content=yaml.safe_dump(campaign, sort_keys=False))
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    assert not found["problems"], found["problems"]
+    keys = {k["key"]: k for k in found["keys"]}
+    assert keys["mode"]["choices"] == ["full"] and keys["mode"]["description"] == "how long"
+    assert [a["testdef"] for a in keys["mode"]["asked_by"]] == ["../testdef/count/testdef.yml", "../testdef/again/testdef.yml"]
+    assert keys["mode"]["given_at_generation"] and keys["operator"]["given_at_generation"] and keys["operator"]["choices"] is None
+
+    asks["again"]["mode"]["choices"] = ["slow"]
+    editor.write(session, "testdef/again/testdef.yml", data={
+        "id": "again", "name": "again", "setup_file": "../../setup/bench_setup.yml", "setup_config": "bench", "pipeline": pipeline,
+        "user_keys": asks["again"]})
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    assert any(p.startswith("key 'mode': its test definitions have no choice in common") for p in found["problems"])
+
+    campaign.update(keys={"operator": "jd", "unused": 1},
+                    testdefs=[{"testdef": "../testdef/count/testdef.yml", "keys": {"mode": "full"}},
+                              {"testdef": "../testdef/again/testdef.yml", "keys": {"mode": "slow"}}])
+    editor.write(session, "campaigns/nightly.campaign.yml", content=yaml.safe_dump(campaign, sort_keys=False))
+    found = editor.campaign_synthesis(session, "campaigns/nightly.campaign.yml")
+    keys = {k["key"]: k for k in found["keys"]}
+    assert not keys["mode"]["given_at_generation"] and not keys["operator"]["given_at_generation"]
+    assert keys["operator"]["pinned"] == "jd" and [p["value"] for p in keys["mode"]["pinned_for"]] == ["full", "slow"]
+    assert not any("mode" in p for p in found["problems"])
+    assert "key 'unused' is pinned by the campaign but no test definition asks it (user_keys): it is set like a key " \
+           "set by hand" in found["warnings"]
+
+
 def test_campaign_synthesis_generation_and_submission(repos, tmp_path):
     """a campaign in the Datapacks page: its test definitions, the datasets they import against the versions it pins
     (every one must be), its routing against the lab; generated whole, then queued as one campaign run"""
