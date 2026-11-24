@@ -19,7 +19,8 @@ import { useEffect, useRef, useState } from "react";
 import { get, post, put, url, useResource } from "../api";
 import { Dialog, Field, IdText, Section, Text, Toggle } from "../fields";
 import { LiveLog, logWarnings } from "../editor/Generate";
-import { ago, attempt, Badge, classes, duration, Markdown, navigate, setQuery, Spinner, time, type Route } from "../util";
+import { ago, attempt, Badge, classes, duration, Markdown, navigate, openInNewTab, setQuery, Spinner, time, type Route } from "../util";
+import { NavIcon } from "../navicons";
 import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 import { Named } from "../kinds";
@@ -153,8 +154,13 @@ function CampaignSynthesis({ sid, campaign }: { sid: string; campaign: string })
           {c?.description && <Markdown text={c.description} className="small" />}
         </div>
         <span className="spacer" />
-        <button className="primary" disabled={!data || data.problems.length > 0} onClick={() => setRunning(true)}
-          title={data?.problems?.length ? "Fix the problems first" : "Generate the datapack of every test definition, then post them to the queue as one campaign run"}>Generate and run…</button>
+        <div className="synthesis-actions">
+          <button className="edit-testdef" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: campaign } })}
+            title={`Open this campaign (${campaign}) in the Editor, in a new browser tab`}><NavIcon name="edit" size={16} />Edit</button>
+          <button className="primary" disabled={!data || data.problems.length > 0} onClick={() => setRunning(true)}
+            title={data?.problems?.length ? "Fix the problems first" : "Generate the datapack of every test definition, then post them to the queue as one campaign run"}>
+            <NavIcon name="campaigns" size={16} />Generate and run…</button>
+        </div>
       </div>
       {error && <pre className="error-box">{error}</pre>}
       {!data && !error && <Spinner className="block" text="Reading the campaign and its test definitions…" />}
