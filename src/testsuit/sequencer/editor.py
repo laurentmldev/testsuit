@@ -1685,6 +1685,9 @@ class Editor:
             sources = Sources(file)
             source = source if source in sources.names else sources.default
             out.update({"sources": sources.names, "source": source,                 # kept when the source fails
+                        "source_cards": [{"name": n, "backend": str(sources.specs[n].get("backend")),
+                                          **({"label": str(sources.specs[n]["label"])} if sources.specs[n].get("label") else {}),
+                                          **({"default": True} if n == sources.default else {})} for n in sources.names],
                         "edit": self._source_edit(session, file, sources, source)})
             out["tree"] = [n.as_dict() for n in sources.tree(source)]
         except ReqError as e:
