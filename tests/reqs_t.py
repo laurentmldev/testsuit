@@ -791,6 +791,13 @@ def test_rest_details(tmp_path, alm_server):
         fails("unknown variable 'nope'", details=[{"url": "item/{{ nope }}", "fields": {"title": ".t"}}])
         fails("unknown field", details=[{"url": "item/{{ id }}", "fields": {"colour": ".c"}}])
         fails("a built-in one", item_vars={"id": ".key"})
+        # a details call no field is read from yet (being written in the Editor): not made
+        calls.clear()
+        idle = Sources(file)
+        idle.replace("alm", {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"},
+                             "options": {**options, "details": [{"url": "item/{{ id }}", "fields": {}}]}})
+        assert idle.get([Ref("alm", "ALM-4")])[Ref("alm", "ALM-4")].title == "Item 4"
+        assert not [c for c in calls if "/item/" in c]
     finally:
         os.environ.pop("ALM_TOKEN", None)
 

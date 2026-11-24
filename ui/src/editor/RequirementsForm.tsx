@@ -435,7 +435,7 @@ function BackendOptions({ backend, options, onChange, credentials, onCredentials
   const others = Object.keys(options).filter((k) => !names.includes(k));
   return (
     <div className="req-options">
-      {backend?.name === "rest" ? <RestOptions options={options} help={known} set={set} credentials={credentials} onCredentials={onCredentials} credHelp={backend.credentials} runTest={runTest} />
+      {backend?.name === "rest" ? <RestOptions options={options} help={known} set={set} setOptions={onChange} credentials={credentials} onCredentials={onCredentials} credHelp={backend.credentials} runTest={runTest} />
         : names.map((k) => (
           <Field key={k} label={k} help={known[k]}><OptionValue value={options[k]} onChange={(v) => set(k, v)} /></Field>
         ))}
@@ -492,8 +492,8 @@ const REST_FIELDS: [string, string][] = [
 
 /** The rest backend's options: base URL and authentication, how to list and get the requirements, and the jq
  * expression giving each field of a requirement from an item of an answer. */
-function RestOptions({ options, help, set, credentials: creds, onCredentials, credHelp, runTest }: {
-  options: Data; help: Record<string, string>; set: (k: string, v: any) => void;
+function RestOptions({ options, help, set, setOptions, credentials: creds, onCredentials, credHelp, runTest }: {
+  options: Data; help: Record<string, string>; set: (k: string, v: any) => void; setOptions: (v: Data) => void;
   credentials: Data; onCredentials: (v: Data) => void; credHelp?: Record<string, string>; runTest: RunTest;
 }) {
   const credentials = Object.keys(creds);
@@ -502,7 +502,6 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
   const credChoices: Choice[] = [...new Set([...credentials, ...Object.keys(credHelp || {})])].map((value) => ({ value, description: credHelp?.[value] || "a credential of this source" }));
   const list: Data = options.list || {};
   const get: Data = options.get || {};
-  const fields: Data = options.fields || {};
   const setIn = (k: string, obj: Data, sub: string, v: any) => set(k, put(obj, sub, v));
   const basic: any[] = Array.isArray(auth.basic) ? auth.basic : auth.basic ? [auth.basic] : [];
   // the credentials the authentication names: only those are asked for (a token, or a user and a password...)
@@ -577,25 +576,17 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         <Field label="URL suffix" help={urlHelp("The URL of the get by id call, with `{{ ids }}` (comma-separated: one call) or `{{ id }}` (one call each)")}><Text mono grow="wrap" value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
         {get.url && <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono grow="lines" value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
       </Group>
-      <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
-        <table className="grid compact req-fields">
-          <tbody>{REST_FIELDS.map(([f, what]) => (
-            <tr key={f} title={what}>
-              <td className="mono">{f}</td>
-              <td><GrowText className="mono" lines value={fields[f] ?? ""} placeholder={f === "url" ? "(the link template below)" : `.${f}`}
-                onChange={(v) => set("fields", put(fields, f, v))} /></td>
-            </tr>
-          ))}</tbody>
-        </table>
-        <Field label="Link template" help={help.url}>
-          <Text mono grow="wrap" value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
-        </Field>
-      </Group>
-      <Group title="Details calls" note="optional: one call (or more) per requirement needed in full, adding fields" help={help.details}>
+      <Group title="Details calls" note="optional: calls per requirement needed in full, for fields the list does not give" help={help.details}>
         <Field label="Item variables (jq)" help={help.item_vars}>
           <KeyValues grow="lines" placeholder=".id" value={options.item_vars} onChange={(v) => set("item_vars", v)} />
         </Field>
         <Details value={options.details} runTest={runTest} onChange={(v) => set("details", v.length ? v : undefined)} />
+      </Group>
+      <Group title="Fields" note="each field of a requirement: where it is read (the list item, or a details call's answer) and the jq expression reading it" help={help.fields}>
+        <RestFields options={options} setOptions={setOptions} />
+        <Field label="Link template" help={help.url}>
+          <Text mono grow="wrap" value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
+        </Field>
       </Group>
     </>
   );
@@ -737,7 +728,76 @@ const JQ_HELP = "A jq expression. The variables (those of the source, those extr
 const urlHelp = (what: string) => `${what}, relative to the base URL (or absolute). ${SUBST_HELP}`;
 const BODY_HELP = `The JSON body of the POST. A string made of one \`{{ name }}\` keeps the value's type. ${SUBST_HELP}`;
 
-const DETAIL_FIELDS = REST_FIELDS.filter(([f]) => !["id", "path", "version"].includes(f));
+const LIST_ONLY = ["id", "path", "version"];
+const SHOWN = ["id", "title", "path"];          // always shown: what the tree and the matrix need
+const ROLE: Record<string, string> = { id: "required", title: "shown in the matrix", path: "builds the tree" };
+
+/** The fields of the rest backend, one row each where it is read: the list item (options.fields) or the answer of
+ *  a details call (options.details[i].fields). id, title and path are always shown; the others when given, or added. */
+function RestFields({ options, setOptions }: { options: Data; setOptions: (v: Data) => void }) {
+  const fields: Data = options.fields || {};
+  const calls: Data[] = Array.isArray(options.details) ? options.details : options.details ? [options.details] : [];
+  const [added, setAdded] = useState<string[]>([]);
+  type Row = { f: string; from: number; expr: string };     // from: -1 the list item, else the details call's index
+  const rows: Row[] = [];
+  for (const f of [...SHOWN, ...REST_FIELDS.map(([x]) => x).filter((x) => !SHOWN.includes(x))]) {
+    const before = rows.length;
+    if (fields[f] !== undefined) rows.push({ f, from: -1, expr: String(fields[f]) });
+    calls.forEach((c, i) => { if (c?.fields?.[f] !== undefined) rows.push({ f, from: i, expr: String(c.fields[f]) }); });
+    if (rows.length === before && (SHOWN.includes(f) || added.includes(f))) rows.push({ f, from: -1, expr: "" });
+  }
+  const present = new Set(rows.map((r) => r.f));
+  const write = (f: string, from: number, expr: string | undefined, next: Data = clone(options)) => {
+    if (from < 0) next.fields = put(next.fields, f, expr);
+    else {
+      const list = (Array.isArray(next.details) ? next.details : [next.details]).map((c: Data) => ({ ...c }));
+      list[from] = { ...list[from], fields: { ...(list[from].fields || {}) } };
+      if (expr === undefined || expr === "") delete list[from].fields[f]; else list[from].fields[f] = expr;
+      next.details = list;
+    }
+    if (next.fields && !Object.keys(next.fields).length) delete next.fields;
+    return next;
+  };
+  const move = (r: Row, to: number) => setOptions(write(r.f, to, r.expr || (to < 0 ? `.${r.f}` : `.data.${r.f}`), write(r.f, r.from, undefined)));
+  const what = Object.fromEntries(REST_FIELDS);
+  const addable = REST_FIELDS.filter(([f]) => !present.has(f));
+  return (
+    <>
+      <table className="grid compact req-fields req-fields-from">
+        <thead><tr><th>Field</th><th>Read from</th><th>jq</th><th /></tr></thead>
+        <tbody>{rows.map((r) => (
+          <tr key={`${r.f}:${r.from}`} title={what[r.f]}>
+            <td className="mono">{r.f}{ROLE[r.f] && <div className="muted small req-field-role">{ROLE[r.f]}</div>}</td>
+            <td>
+              <select value={r.from} disabled={LIST_ONLY.includes(r.f) || !calls.length} onChange={(e) => move(r, Number(e.target.value))}
+                title={LIST_ONLY.includes(r.f) ? "From the list only: the tree, the matrix and the versions are made without details calls"
+                  : !calls.length ? "Add a details call to read it from there" : "Where the field is read"}>
+                <option value={-1}>list item</option>
+                {calls.map((c, i) => <option key={i} value={i} title={c?.url || undefined}>details call {i + 1}</option>)}
+              </select>
+            </td>
+            <td><GrowText className="mono" lines value={r.expr} placeholder={r.from < 0 ? `.${r.f}` : `.data.${r.f}`}
+              onChange={(v) => setOptions(write(r.f, r.from, v))} /></td>
+            <td>{r.f !== "id" && (
+              <button className="icon" title={SHOWN.includes(r.f) ? "Clear it (read as ." + r.f + " when the item has it)" : "Remove this field"}
+                onClick={() => { setAdded(added.filter((x) => x !== r.f)); setOptions(write(r.f, r.from, undefined)); }}>×</button>
+            )}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <div className="req-fields-add">
+        {addable.length > 0 && (
+          <select value="" onChange={(e) => e.target.value && setAdded([...added, e.target.value])} title="Another field of the requirements">
+            <option value="">Add a field…</option>
+            {addable.map(([f, w]) => <option key={f} value={f}>{f}: {w}</option>)}
+          </select>
+        )}
+        <span className="hint">A field not listed is read from the list item's key of the same name when it has one (<code>.status</code>). Fields of a details call
+          are read only for the requirements needed in full (generation, a requirement opened), so keep title and status in the list.</span>
+      </div>
+    </>
+  );
+}
 
 /** The rest backend's details calls: per requirement, each giving fields from its answer. */
 function Details({ value, onChange, runTest }: { value?: any[] | null; onChange: (v: any[]) => void; runTest: RunTest }) {
@@ -759,16 +819,9 @@ function Details({ value, onChange, runTest }: { value?: any[] | null; onChange:
               title="Run the steps and the list call's first page, then this call for its first requirement: its URL, the answer, and the fields it gives" />
             <Field label="URL suffix" help={urlHelp("The URL of this call, for one requirement: `{{ id }}` and the item variables")}>
               <Text mono grow="wrap" value={call.url} placeholder="items/{{ item_id }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
-            <Field label="Fields (jq)" help={`The fields this call gives, from its answer (not id, path, version: those come from the list). A later call wins. ${JQ_HELP}`}>
-              <table className="grid compact req-fields">
-                <tbody>{DETAIL_FIELDS.map(([f, what]) => (
-                  <tr key={f} title={what}>
-                    <td className="mono">{f}</td>
-                    <td><GrowText className="mono" lines value={fields[f] ?? ""} placeholder="—"
-                      onChange={(v) => setIn(i, "fields", put(fields, f, v))} /></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+            <Field label="Fields" help="The fields read from this call's answer: pick this call as their origin under Fields, below.">
+              <span className="small">{Object.keys(fields).length ? Object.keys(fields).map((f) => <code key={f} className="req-field-chip">{f}</code>)
+                : <span className="muted">none yet: pick this call for a field under Fields, below (else it is not made)</span>}</span>
             </Field>
             <Field label="Cache"><Text mono value={call.cache} placeholder="none; or 10m, 1h, 1d (read again when its version changes)" onChange={(v) => setIn(i, "cache", scalar(v.trim()))} /></Field>
             <Field label="Method">
