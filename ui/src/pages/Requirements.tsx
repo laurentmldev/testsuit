@@ -19,6 +19,7 @@ import { Fragment, useMemo, useState } from "react";
 import { url, useResource } from "../api";
 import { createFile } from "../editor/Session";
 import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
+import { NavIcon } from "../navicons";
 
 export const STATUSES = ["passed", "failed", "error", "partial", "skipped", "not run", "uncovered"];
 const MARK: Record<string, string> = { passed: "✓", failed: "✗", error: "!", partial: "◐", skipped: "–", "not run": "·", uncovered: "∅" };
@@ -265,20 +266,19 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const res = useResource<any>(path, ["run"]);
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
-  // the source shown, and a button to edit it in the Editor (its YAML requirements, or its entry in the sources file)
-  const picker = d && (
+  // the source shown
+  const picker = d && d.sources.length > 1 && (
     <div className="req-source-pick">
-      {d.sources.length > 1 && (
-        <select value={d.source} onChange={(e) => { setSource(e.target.value); setNode(""); }} title="The source of the requirements">
-          {d.sources.map((s: string) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      )}
-      {d.edit && (
-        <button className="small" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.edit.file, ...(d.edit.source ? { source: d.edit.source } : {}) } })}
-          title={d.edit.source ? `Edit the source '${d.edit.source}' (its backend, options, credentials) in the Editor, in a new browser tab`
-            : `Edit the requirements of '${d.source}' (${d.edit.file}) in the Editor, in a new browser tab`}>✎ Edit</button>
-      )}
+      <select value={d.source} onChange={(e) => { setSource(e.target.value); setNode(""); }} title="The source of the requirements">
+        {d.sources.map((s: string) => <option key={s} value={s}>{s}</option>)}
+      </select>
     </div>
+  );
+  // a button to edit the source shown in the Editor (its YAML requirements, or its entry in the sources file)
+  const edit = d?.edit && (
+    <button className="edit-testdef" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.edit.file, ...(d.edit.source ? { source: d.edit.source } : {}) } })}
+      title={d.edit.source ? `Edit the source '${d.edit.source}' (its backend, options, credentials) in the Editor, in a new browser tab`
+        : `Edit the requirements of '${d.source}' (${d.edit.file}) in the Editor, in a new browser tab`}><NavIcon name="edit" size={16} />Edit</button>
   );
   const rows: any[] = d?.coverage?.requirements || [];
   return (
@@ -295,7 +295,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
           }}>Create requirements.yml…</button>
         </div>
       )}
-      {d?.error && <>{d.sources?.length > 0 && <div className="req-tree">{picker}</div>}<div className="error-box">{d.error}</div></>}
+      {d?.error && <>{(picker || edit) && <div className="synthesis-head">{picker}<span className="spacer" /><div className="synthesis-actions">{edit}</div></div>}<div className="error-box">{d.error}</div></>}
       {d?.coverage && (
         <div className="requirements-layout">
           <nav className="req-tree">
@@ -309,16 +309,25 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
                 onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.sources_file } })}>✎ Edit…</button></>}</p>
           </nav>
           <div className="req-main">
+            <div className="synthesis-head">
+              <div>
+                <h3 className={node ? "mono" : undefined}>{node || "All requirements"}</h3>
+                <div className="muted small">source <code>{d.source}</code>{d.edit && <> · <code>{d.edit.file}</code></>}</div>
+              </div>
+              <span className="spacer" />
+              <div className="synthesis-actions">
+                {edit}
+                <a className="button primary" href={url(`edit/sessions/${sid}/requirements/report${q.toString() ? "?" + q : ""}`)} target="_blank" rel="noreferrer"
+                  title="Both matrices as a page of their own, in a new browser tab"><NavIcon name="requirements" size={16} />Report</a>
+              </div>
+            </div>
             <div className="cov-actions">
               <label title="Only the test definitions of a campaign">Tests <select value={campaign} onChange={(e) => setCampaign(e.target.value)}>
                 <option value="">every test definition</option>
                 {campaigns.map((c) => <option key={c.path} value={c.path}>campaign {c.name || c.id || c.path}</option>)}
               </select></label>
               {node && <label title="The requirements of the descendants of the node too"><input type="checkbox" checked={children} onChange={(e) => setChildren(e.target.checked)} /> with sub-nodes</label>}
-              <span className="spacer" />
-              <a className="button small" href={url(`edit/sessions/${sid}/requirements/report${q.toString() ? "?" + q : ""}`)} target="_blank" rel="noreferrer" title="Both matrices as a page of their own">Report</a>
             </div>
-            <h3 className="mono">{node || "All requirements"}</h3>
             <CoverageView data={d.coverage} node={node} children={node ? children : true} />
           </div>
         </div>
