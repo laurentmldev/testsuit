@@ -539,9 +539,9 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         <Steps value={options.steps} onChange={(v) => set("steps", v.length ? v : undefined)} />
       </Group>
       <Group title="List call" note="reads every requirement" help={help.list}>
-        <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
-        <Field label="Items (jq)"><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
-        <Field label="Next page (jq)"><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
+        <Field label="URL suffix" help={urlHelp("The URL of the list call")}><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+        <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
+        <Field label="Next page (jq)" help={`The URL of the next page, from an answer (none: the last page). ${JQ_HELP}`}><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
         <Field label="First page" help={help.first_page}><Text mono value={options.first_page} placeholder="1" onChange={(v) => set("first_page", scalar(v))} /></Field>
         <Field label="Method">
           <select value={String(list.method || "GET").toUpperCase()} onChange={(e) => setIn("list", list, "method", e.target.value === "GET" ? undefined : e.target.value)}>
@@ -549,12 +549,12 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
           </select>
         </Field>
         {String(list.method || "").toUpperCase() === "POST" && (
-          <Field label="Body (JSON)"><JsonText value={list.body} onChange={(v) => setIn("list", list, "body", v)} /></Field>
+          <Field label="Body (JSON)" help={BODY_HELP}><JsonText value={list.body} onChange={(v) => setIn("list", list, "body", v)} /></Field>
         )}
       </Group>
       <Group title="Get by id call" note="optional: fetches only the requirements needed" help={help.get}>
-        <Field label="URL suffix"><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
-        {get.url && <Field label="Items (jq)"><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
+        <Field label="URL suffix" help={urlHelp("The URL of the get by id call, with `{{ ids }}` (comma-separated: one call) or `{{ id }}` (one call each)")}><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+        {get.url && <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
       </Group>
       <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
         <table className="grid compact req-fields">
@@ -700,6 +700,16 @@ function Variables({ value, onChange }: { value?: Data | null; onChange: (v: Dat
   );
 }
 
+/** The help of the fields reading variables: which ones, and how. */
+const SUBST_HELP = "`{{ name }}` is replaced by the value of a variable (URL-encoded in a URL). It is a plain substitution, " +
+  "not Jinja2: no filters, no datapack keys. The variables: those of the source (Variables, above), those extracted by " +
+  "an earlier step, and `page`, `offset` (list call), `ids`, `id` (get by id call, link template). A datapack key goes " +
+  "through a variable of the source: `version: \"{{ sut.version | default('3.2') }}\"`, then `{{ version }}` here.";
+const JQ_HELP = "A jq expression. The variables (those of the source, those extracted by an earlier step) are `$name`; " +
+  "a fallback is jq's `//` (`.id // 0`).";
+const urlHelp = (what: string) => `${what}, relative to the base URL (or absolute). ${SUBST_HELP}`;
+const BODY_HELP = `The JSON body of the POST. A string made of one \`{{ name }}\` keeps the value's type. ${SUBST_HELP}`;
+
 /** The rest backend's steps: calls made before the others, each extracting variables with jq. */
 function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[]) => void }) {
   const steps: Data[] = Array.isArray(value) ? value : [];
@@ -714,8 +724,8 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
             <span className="grow" />
             <button className="icon" title="Remove this step" onClick={() => onChange(steps.filter((_, j) => j !== i))}>×</button>
           </div>
-          <Field label="URL suffix"><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
-          <Field label="Variables (jq)">
+          <Field label="URL suffix" help={urlHelp("The URL of this step")}><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+          <Field label="Variables (jq)" help={`Each variable this step extracts from its answer, for the next steps and calls: one value at most (none: no value, an error when mandatory). ${JQ_HELP}`}>
             <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
               namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id   (fallback: // 0)" />
           </Field>
@@ -726,7 +736,7 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
             </select>
           </Field>
           {String(step.method || "").toUpperCase() === "POST" && (
-            <Field label="Body (JSON)"><JsonText value={step.body} onChange={(v) => setIn(i, "body", v)} /></Field>
+            <Field label="Body (JSON)" help={BODY_HELP}><JsonText value={step.body} onChange={(v) => setIn(i, "body", v)} /></Field>
           )}
         </div>
       ))}

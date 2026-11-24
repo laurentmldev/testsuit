@@ -120,30 +120,34 @@ def clear_cache() -> None:
         _cache.clear()
 
 
+_SUBST = (" `{{ name }}`: a plain substitution of a variable (of the source, or extracted by a step), not Jinja2 (no "
+          "filters, no datapack keys: those go through a variable of the source).")
+
+
 class RestBackend(ReqBackend):
     """Requirements of any tool with a JSON REST API: URLs, authentication and jq expressions picking the fields."""
 
     capabilities = frozenset({"children_query", "versions"})
     description = "Built in: any tool with a JSON REST API, its fields picked with jq expressions."
     options_help = {
-        "base": "The base URL of the API; the URLs below are relative to it (or absolute).",
+        "base": "The base URL of the API; the URLs below are relative to it (or absolute)." + _SUBST,
         "auth": "How to authenticate, with the names of the credentials: `{bearer: token}` (Authorization: Bearer), "
                 "`{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`.",
-        "headers": "Other headers sent with each request (not secrets: those are credentials).",
+        "headers": "Other headers sent with each request (not secrets: those are credentials)." + _SUBST,
         "steps": "Optional calls made first, each extracting variables for the next ones: `[{url, extract, cache}]`. "
                  "`extract`: `{name: <jq>}` or `{name: {jq, mandatory}}`, one value at most (a fallback: `.id // 0`); `$name` in jq "
                  "and `{{ name }}` in URLs read variables. `cache`: how long to keep the answer (`1h`). Optional "
-                 "`method` and `body`.",
+                 "`method` and `body`." + _SUBST,
         "list": "How to get every requirement: `{url, items, next}`. `items`: jq giving the requirements of an answer "
                 "(`.data[]`); pagination with `next` (jq giving the next page's URL), or `{{ page }}` / "
                 "`{{ offset }}` in the URL (until a page has no item). Optional `method` (GET) and `body` (JSON, "
-                "for a POST).",
+                "for a POST)." + _SUBST,
         "get": "Optional: how to get requirements by id: `{url, items}`, with `{{ ids }}` (comma-separated) or "
-               "`{{ id }}` (one call each, a 404 meaning unknown) in the URL. Default: from the list.",
+               "`{{ id }}` (one call each, a 404 meaning unknown) in the URL. Default: from the list." + _SUBST,
         "fields": "jq expressions giving each field of a requirement from an item: `id` (required), `title`, "
                   "`description`, `path` (nodes joined by `/`), `rationale`, `status`, `tags` (a list), `comments`, "
                   "`version`, `url`. Default for a field not given (but `url`): `.<field>`.",
-        "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field).",
+        "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field)." + _SUBST,
         "first_page": "The first `{{ page }}` (default 1).",
         "timeout": "Seconds to wait for each answer (default 30).",
         "verify": "Check the server's TLS certificate: true (default), false, or the path of a CA bundle.",
