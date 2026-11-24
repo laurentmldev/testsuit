@@ -72,6 +72,9 @@ class ReqBackend:
     options_help: dict[str, str] = {}
     # the credentials it reads, by name, with their help (their values: 'env:<VARIABLE>' or 'file:<path>')
     credentials_help: dict[str, str] = {}
+    # set to a list by the Editor's tests: a backend calling a server appends a description of each call to it
+    # ({call, method, url, headers, status, answer, error...}, secrets masked), shown to help configure the source
+    trace: list[dict] | None = None
 
     def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path) -> None:
         self.options = dict(options or {})

@@ -1259,6 +1259,19 @@ input.manual-note { flex: 1; min-width: 200px; }
 .req-test.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); background: var(--ok-soft); }
 .req-test.bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); background: var(--bad-soft); }
 .req-test table { margin-top: 6px; }
+.req-stage-test { margin: 4px 0; }
+.req-stage-test > button { margin-bottom: 2px; }
+.req-calls { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.req-call { border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; background: var(--panel); }
+.req-call.bad { border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
+.req-call > summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req-call-url { color: var(--weak); }
+.req-call-name { font-weight: 600; }
+.req-call-status.ok { color: var(--ok); }
+.req-call-body { padding: 4px 0 2px; display: flex; flex-direction: column; gap: 4px; }
+.req-call-url-row { display: flex; gap: 8px; align-items: baseline; }
+.req-call-url-row code { word-break: break-all; }
+.req-call-part pre { max-height: 320px; overflow: auto; margin: 4px 0; padding: 6px 8px; border-radius: 4px; background: var(--panel-2); white-space: pre-wrap; word-break: break-word; }
 
 /* Role names: weaker content than the names around them (a role is only a list of commands), lighter and italic. */
 .role-name, .named.role-name, input.role-name { color: var(--weak); font-style: italic; }

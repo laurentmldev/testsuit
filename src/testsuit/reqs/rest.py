@@ -56,6 +56,10 @@ the context of the requirements, recorded and shown with them, like the source's
 Pagination: ``next`` (a jq expression giving the URL of the next page), else ``{{ page }}`` in the URL (from
 ``first_page``, default 1) or ``{{ offset }}`` (stepping by the number of items received), until a page has no item.
 Without any of them, one call. The tree is made of the paths of the requirements.
+
+Debugging: an error names the call (``step 2``, ``list, page 3``, ``get``), its method and its full URL, credentials
+masked (``***``). With a ``trace`` (the Editor's tests), each call is described in it: URL, headers, body, status, answer,
+what a step extracted, a page's items; ``probe`` runs the calls up to a step or the list call's first page.
 """
 from __future__ import annotations
 
@@ -74,6 +78,10 @@ from testsuit.reqs.model import Node, Requirement
 
 FIELDS = ("id", "path", "title", "description", "rationale", "tags", "comments", "status", "version", "url")
 MAX_PAGES = 1000
+TRACE_CALLS = 30                        # the calls a test describes (the others are counted)
+TRACE_ANSWER = 16000                    # the characters of an answer it shows
+MASK = "***"
+_MASKED = "MASKEDCREDENTIAL"            # a credential in a URL being shown, before it is written MASK
 BUILT_IN = ("page", "offset", "id", "ids")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}|\{(page|offset|ids|id)\}")
@@ -189,6 +197,8 @@ class RestBackend(ReqBackend):
         self._all: dict[str, Requirement] | None = None
         self._found: dict[str, Any] | None = None           # the variables the steps extracted, once run
         self._programs: dict[str, Any] = {}
+        self.trace_more = 0                                  # the calls made beyond the TRACE_CALLS described
+        self._record: dict | None = None                     # the description of the latest call, when traced
 
     def _steps(self, steps: Any) -> list[dict]:
         if steps in (None, []):
@@ -296,9 +306,17 @@ class RestBackend(ReqBackend):
     def _variables(self) -> dict[str, Any]:
         """The variables, after the steps (run on first use)."""
         if self._found is None:
-            found: dict[str, Any] = {}
-            for n, step in enumerate(self.steps, 1):
-                answer = self._step_answer(step, {**self.vars, **found})
+            self._found = self._run_steps(len(self.steps))
+        return {**self.vars, **self._found}
+
+    def _run_steps(self, count: int) -> dict[str, Any]:
+        """The variables extracted by the first ``count`` steps."""
+        found: dict[str, Any] = {}
+        for n, step in enumerate(self.steps[:count], 1):
+            self._record = None
+            answer = self._step_answer(step, {**self.vars, **found}, f"step {n}")
+            record, extracted = self._record, {}
+            try:
                 for name, e in step["extract"].items():
                     where = f"rest backend: step {n}: variable '{name}'"
                     values = [v for v in _all(_jq(e["jq"], where, {**self.vars, **found}), answer, where)
@@ -308,14 +326,20 @@ class RestBackend(ReqBackend):
                         raise ReqError(f"{where}: {len(values)} values ({shown}{'...' if len(values) > 5 else ''}): "
                                        "one at most (make the jq expression select one)")
                     if values:
-                        found[name] = values[0]
+                        found[name] = extracted[name] = values[0]
                     elif e["mandatory"]:
                         raise ReqError(f"{where}: no value, and it is mandatory (check the jq expression, or give "
                                        "it a fallback: .id // 0)")
                     else:
-                        found[name] = ""
-            self._found = found
-        return {**self.vars, **self._found}
+                        found[name] = extracted[name] = ""
+            except ReqError as e:
+                if record is not None:
+                    record["error"] = self._mask(str(e))
+                raise
+            finally:
+                if record is not None:
+                    record["extracted"] = extracted
+        return found
 
     def resolved_vars(self) -> dict[str, Any]:
         return dict(self._found or {})
@@ -364,30 +388,112 @@ class RestBackend(ReqBackend):
             return url
         return urljoin(base.rstrip("/") + "/", url.lstrip("/"))
 
-    def _call(self, spec: dict, url: str, missing_ok: bool = False, variables: Mapping[str, Any] | None = None) -> Any:
+    # ── what is shown of a call: its URL, headers and answer, the credentials masked ──
+
+    def _secrets(self) -> list[str]:
+        values = {str(v) for v in (self.credentials or {}).values() if v and len(str(v)) >= 3}
+        return sorted(values | {quote(v, safe="") for v in values}, key=len, reverse=True)
+
+    def _mask(self, text: str) -> str:
+        """A text with the values of the credentials (as they are, and URL-encoded) replaced by ***."""
+        for secret in self._secrets():
+            text = text.replace(secret, MASK)
+        return text
+
+    def _mask_data(self, data: Any) -> Any:
+        if isinstance(data, str):
+            return self._mask(data)
+        if isinstance(data, dict):
+            return {k: self._mask_data(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._mask_data(v) for v in data]
+        return data
+
+    def shown_url(self, url: str) -> str:
+        """The URL a call requests, in full (the query parameters of the authentication added), credentials masked."""
+        from requests.models import PreparedRequest
+        p = PreparedRequest()
+        try:
+            p.prepare_url(url, {k: _MASKED for k in self.params} or None)
+        except Exception:                       # an invalid URL: shown as it is (the call fails on it)
+            return self._mask(url)
+        return self._mask(str(p.url)).replace(_MASKED, MASK)
+
+    def _shown_headers(self, headers: Mapping[str, str]) -> dict[str, str]:
+        out = {str(k): str(v) for k, v in {**self.session.headers, **headers}.items()}
+        auth = self.options.get("auth") or {}
+        if "Authorization" in out and auth.get("bearer"):
+            out["Authorization"] = f"Bearer {MASK}"
+        for header in auth.get("header") or {}:
+            if str(header) in out:
+                out[str(header)] = MASK
+        if self.session.auth:
+            out["Authorization"] = f"Basic {MASK}"
+        return {k: self._mask(v) for k, v in out.items()}
+
+    def _answer(self, r) -> tuple[str, bool]:
+        """An answer as shown: indented when JSON, its first characters, credentials masked; and whether it is cut."""
+        try:
+            text = json.dumps(r.json(), indent=1, ensure_ascii=False)
+        except ValueError:
+            text = r.text
+        return self._mask(text[:TRACE_ANSWER]), len(text) > TRACE_ANSWER
+
+    def _call(self, spec: dict, url: str, missing_ok: bool = False, variables: Mapping[str, Any] | None = None,
+              label: str = "call") -> Any:
+        """The JSON answer of a call. An error names the call, its method and its full URL (credentials masked);
+        with a trace, the call is described in it (self._record)."""
         import requests
         url = self._url(url, variables)
+        method = str(spec.get("method") or "GET").upper()
         body = self._fill_data(spec.get("body"), variables) if spec.get("body") is not None else None
         headers = {str(k): self._fill(str(v), variables=variables) for k, v in (self.options.get("headers") or {}).items()}
+        shown = self.shown_url(url)
+        where = f"rest backend: {label}: {method} {shown}"
+        record: dict | None = None
+        if self.trace is not None:
+            if len(self.trace) < TRACE_CALLS:
+                record = {"call": label, "method": method, "url": shown, "headers": self._shown_headers(headers),
+                          **({"body": self._mask_data(body)} if body is not None else {})}
+                self.trace.append(record)
+            else:
+                self.trace_more += 1
+        self._record = record
+        start = time.monotonic()
         try:
-            r = self.session.request(str(spec.get("method") or "GET").upper(), url, params=self.params or None,
+            r = self.session.request(method, url, params=self.params or None,
                                      json=body, timeout=self.timeout, verify=self.verify, headers=headers or None)
         except requests.RequestException as e:
-            raise ReqError(f"rest backend: {url}: {e}") from e
+            message = self._mask(str(e)).replace(_MASKED, MASK)
+            if record is not None:
+                record.update(seconds=round(time.monotonic() - start, 3), error=message)
+            raise ReqError(f"{where}: {message}") from e
+        if record is not None:
+            answer, cut = self._answer(r)
+            record.update(seconds=round(time.monotonic() - start, 3), status=r.status_code, reason=r.reason,
+                          content_type=r.headers.get("Content-Type", ""), size=len(r.content), answer=answer,
+                          **({"cut": True} if cut else {}))
         if missing_ok and r.status_code == 404:
             return None
         if r.status_code >= 400:
-            raise ReqError(f"rest backend: {url}: HTTP {r.status_code} {r.reason}: {r.text[:200]}")
+            error = f"HTTP {r.status_code} {r.reason}: {self._mask(r.text[:200])}"
+            if record is not None:
+                record["error"] = error
+            raise ReqError(f"{where}: {error}")
         try:
             return r.json()
         except ValueError as e:
-            raise ReqError(f"rest backend: {url}: the answer is not JSON ({r.text[:100]!r})") from e
+            error = f"the answer is not JSON ({self._mask(r.text[:100])!r})"
+            if record is not None:
+                record["error"] = error
+            raise ReqError(f"{where}: {error}") from e
 
-    def _step_answer(self, step: dict, variables: Mapping[str, Any]) -> Any:
-        """The answer of a step's call, from the cache when it has one (keyed by the request, credentials included)."""
+    def _step_answer(self, step: dict, variables: Mapping[str, Any], label: str = "step") -> Any:
+        """The answer of a step's call, from the cache when it has one (keyed by the request, credentials included).
+        A traced call (a test) does not use the cache: it shows what the server answers now."""
         url = self._url(self._fill(str(step["url"]), encode=True, variables=variables), variables)
-        if not step["cache"]:
-            return self._call(step, url, variables=variables)
+        if not step["cache"] or self.trace is not None:
+            return self._call(step, url, variables=variables, label=label)
         key = hashlib.sha256(json.dumps([str(step.get("method") or "GET").upper(), url,
                                          self._fill_data(step.get("body"), variables),
                                          sorted(self.session.headers.items()), sorted(self.params.items()),
@@ -397,24 +503,35 @@ class RestBackend(ReqBackend):
             hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
-        answer = self._call(step, url, variables=variables)
+        answer = self._call(step, url, variables=variables, label=label)
         with _cache_lock:
             _cache[key] = (now + step["cache"], answer)
         return answer
 
     def _pages(self, spec: dict, url: str) -> Iterable[list[Any]]:
+        """The items of each page of the list call (a traced call tells how many items, and the next page's URL)."""
         page, offset = int(self.options.get("first_page") or 1), 0
         paged = any((m.group(1) or m.group(2)) in ("page", "offset") for m in _VAR.finditer(url))
         items_program = self._program(spec["items"], f"{spec['name']}.items")
         next_program = self._program(spec["next"], f"{spec['name']}.next") if spec["next"] else None
         filled = None
-        for _ in range(MAX_PAGES):
+        for n in range(1, MAX_PAGES + 1):
             called = self._url(filled or self._fill(url, {"page": page, "offset": offset}, encode=True))
-            answer = self._call(spec, called)
-            items = _all(items_program, answer, "items")
+            answer = self._call(spec, called, label=f"{spec['name']}, page {n}")
+            record = self._record
+            try:
+                items = _all(items_program, answer, f"{spec['name']}.items")
+                found = [u for u in _all(next_program, answer, f"{spec['name']}.next") if n] if next_program else []
+            except ReqError as e:
+                if record is not None:
+                    record["error"] = self._mask(str(e))
+                raise
+            if record is not None:
+                record["items"] = len(items)
+                if found:
+                    record["next"] = self.shown_url(urljoin(called, str(found[0])))
             yield items
             if next_program is not None:
-                found = [n for n in _all(next_program, answer, "next") if n]
                 if not found or not items:
                     return
                 filled = urljoin(called, str(found[0]))         # a next link is relative to the page it comes in
@@ -462,6 +579,32 @@ class RestBackend(ReqBackend):
                         found.setdefault(req.id, req)
             self._all = found
         return self._all
+    # ── the Editor's tests ────────────────────────────────────────────
+
+    def probe(self, upto: str) -> dict[str, Any]:
+        """Run the calls up to a stage, to see what they do (with a trace: each call described): ``step:N`` (the first
+        N steps: the variables they extract), ``list`` (the steps, then the first page of the list call: how many
+        items, and the first requirements their fields give)."""
+        m = re.fullmatch(r"step:(\d+)", upto)
+        if m:
+            count = int(m.group(1))
+            if not 1 <= count <= len(self.steps):
+                raise ReqError(f"rest backend: no step {count} (steps: {len(self.steps)})")
+            return {"vars": self._run_steps(count)}
+        if upto != "list":
+            raise ReqError(f"rest backend: '{upto}': step:<N> or list expected")
+        self._variables()
+        items = next(iter(self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"]))), [])
+        sample = []
+        for n, item in enumerate(items[:5], 1):
+            try:
+                req = self.requirement(item)
+            except ReqError as e:
+                raise ReqError(f"rest backend: list, item {n}: {e}") from e
+            sample.append(req.as_dict() if req is not None else {"id": None})
+        return {"vars": dict(self._found or {}), "items": len(items), "sample": sample,
+                "first_item": self._mask(json.dumps(items[0], indent=1, ensure_ascii=False)[:TRACE_ANSWER]) if items else None}
+
     # ── API ───────────────────────────────────────────────────────────
 
     def tree(self) -> list[Node]:
@@ -496,10 +639,13 @@ class RestBackend(ReqBackend):
             calls = [self._fill(url, {"id": i}, encode=True) for i in ids]
         items_program = self._program(spec["items"], "get.items")
         for call in calls:
-            answer = self._call(spec, call, missing_ok="ids" not in names)
+            answer = self._call(spec, call, missing_ok="ids" not in names, label="get")
             if answer is None:
                 continue
-            for item in _all(items_program, answer, "get.items"):
+            items = _all(items_program, answer, "get.items")
+            if self._record is not None:
+                self._record["items"] = len(items)
+            for item in items:
                 req = self.requirement(item)
                 if req is not None and req.id in out:
                     out[req.id] = req

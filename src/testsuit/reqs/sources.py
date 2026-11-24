@@ -167,19 +167,28 @@ class Sources:
             raise ReqError(f"'{self.file}': 'sources' is a mapping of sources by name")
         self.specs: dict[str, dict] = {}
         for name, spec in specs.items():
-            if not isinstance(spec, dict) or not spec.get("backend"):
-                raise ReqError(f"'{self.file}': source '{name}' names its 'backend'")
-            unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars"})
-            if unknown:
-                raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
-            if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
-                raise ReqError(f"'{self.file}': source '{name}': 'vars' is a mapping of names to values")
-            self.specs[str(name)] = spec
+            self.specs[str(name)] = self._checked(str(name), spec)
         self.default = str(data.get("default") or next(iter(self.specs)))
         if self.default not in self.specs:
             raise ReqError(f"'{self.file}': default source '{self.default}' is not one of its sources")
         self._backends: dict[str, ReqBackend] = {}
         self._vars: dict[str, dict[str, Any]] = {}
+
+    def _checked(self, name: str, spec: Any) -> dict:
+        if not isinstance(spec, dict) or not spec.get("backend"):
+            raise ReqError(f"'{self.file}': source '{name}' names its 'backend'")
+        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars"})
+        if unknown:
+            raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
+        if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
+            raise ReqError(f"'{self.file}': source '{name}': 'vars' is a mapping of names to values")
+        return spec
+
+    def replace(self, name: str, spec: Any) -> None:
+        """Use another spec for a source (one being edited, not saved yet: the Editor's tests)."""
+        self.specs[name] = self._checked(name, spec)
+        self._backends.pop(name, None)
+        self._vars.pop(name, None)
 
     def vars(self, name: str) -> dict[str, Any]:
         """The variables of a source, resolved."""
