@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import re
 from datetime import datetime
 from urllib.parse import quote
 
@@ -29,6 +30,18 @@ import yaml
 from testsuit.reqs.coverage import STATUSES, Coverage, Test
 
 _MARK = {"passed": "✓", "failed": "✗", "error": "!", "partial": "◐", "skipped": "–", "not run": "·", "uncovered": "∅"}
+
+
+_TAG = re.compile(r"</?(p|br|div|span|ul|ol|li|b|strong|i|em|u|s|a|table|thead|tbody|tr|td|th|h[1-6]|code|pre|blockquote|img|hr|sub|sup|del|ins|font|small|mark)\b[^>]*>", re.I)
+_BREAK = re.compile(r"<(br\s*/?|/p|/div|/li|/tr|/h[1-6])\s*>", re.I)
+
+
+def plain_text(text: str) -> str:
+    """A long text without its HTML tags, if it has some (the text a tool sent as HTML)."""
+    if not _TAG.search(text):
+        return text
+    text = _BREAK.sub("\n", text)
+    return "\n".join(line.strip() for line in html.unescape(_TAG.sub("", text)).splitlines() if line.strip())
 
 
 def _counts(counts: dict[str, int]) -> str:
@@ -120,7 +133,7 @@ h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:28px 0 8px; }
 .error { background:var(--errbg); color:var(--err); } .partial { background:var(--partbg); color:var(--part); }
 .skipped { background:var(--skipbg); color:var(--skip); } .not-run { color:var(--muted); border:1px solid var(--line); }
 .uncovered { color:var(--bad); border:1px dashed var(--bad); }
-.changed { color:var(--err); font-size:11px; }
+.changed { color:var(--err); font-weight:700; cursor:help; }
 .tiles { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
 .tile { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 14px; min-width:80px; }
 .tile b { display:block; font-size:20px; }
@@ -138,7 +151,8 @@ def _badge(status: str | None, stale: bool = False) -> str:
         return '<span class="muted">–</span>'
     cls = status.replace(" ", "-")
     return (f'<span class="badge {cls}" title="{e(status)}">{_MARK[status]} {e(status)}</span>'
-            + ('<div class="changed">changed since</div>' if stale else ""))
+            + (' <span class="changed" title="Changed since: the requirement changed since the version this test '
+               'verified">⟳</span>' if stale else ""))
 
 
 def _req_link(cov: Coverage, key: str) -> str:
@@ -179,7 +193,7 @@ def matrix_html(cov: Coverage, base: str = "") -> str:
             last = path
             body.append(f'<tr class="node"><td colspan="{3 + len(cov.tests)}"><code>{e(path or "(no path)")}</code> '
                         f'<span class="muted">{e(_counts(by_path.get(path, {})))}</span></td></tr>')
-        title_text = req.get("title") or str(req.get("description", "")).split("\n")[0][:120]
+        title_text = req.get("title") or plain_text(str(req.get("description", ""))).split("\n")[0][:120]
         cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
         body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
     heads = "".join(f"<th>{_test_head(t, base)}</th>" for t in cov.tests)

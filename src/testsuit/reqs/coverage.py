@@ -308,7 +308,7 @@ def add_sources(cov: Coverage, sources: Sources, paths: list[str] | None = None,
     if live:
         refs = {k: sources.ref(k) for k in cov.rows()}
         try:
-            current = sources.get(refs.values())
+            current = sources.get(refs.values(), brief=True)          # versions: no details calls
         except Exception as e:
             cov.problems.append(f"current requirements not read: {e}")
             current = {}

@@ -895,6 +895,8 @@ REQUIREMENTS_FILE = {
         "`file` option of a `yaml` source names holds `nodes` and `requirements` only."),
     "type": "object", "additionalProperties": False,
     "properties": {
+        "label": h("The name of the requirements shown in the Requirements tab and the reports, when this file holds "
+                   "them (the one source `reqs`). With `sources`, each source has its own `label`.", type="string"),
         "default": h("The source of the references without a prefix (`REQ-12`; `jama:SYS-4` names its source). "
                      "Default: the first source.", type="string"),
         "sources": h("The requirements sources, by name: the name is the prefix of the references to them.",

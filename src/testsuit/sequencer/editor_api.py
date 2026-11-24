@@ -214,6 +214,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         the Requirements field of the test definition form."""
         return await run(editor.requirements_search, session(sid), path)
 
+    @app.get("/edit/sessions/{sid}/requirements/item")
+    async def requirement_item(sid: str, source: str, id: str):
+        """One requirement in full, as generation reads it (the rest backend: with its details calls), or the error:
+        a requirement opened in the Requirements tab."""
+        return await run(editor.requirement_item, session(sid), source, id)
+
     @app.post("/edit/sessions/{sid}/requirements/test")
     async def requirements_test(sid: str, body: dict):
         """Read one source of a sources file (`path`, `source`; `spec`: the source as being edited, else as saved):
