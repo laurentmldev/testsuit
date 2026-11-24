@@ -698,8 +698,12 @@ class RestBackend(ReqBackend):
                 self.details = calls
             return {"vars": dict(self._found or {}), "item_vars": self._items.get(first.id, {}),
                     "requirement": self._detailed[first.id].as_dict()}
+        if upto == "ids":
+            return self._probe_ids()
+        if upto.startswith("item:"):
+            return self._probe_item(upto[len("item:"):])
         if upto != "list":
-            raise ReqError(f"rest backend: '{upto}': step:<N>, list or details:<N> expected")
+            raise ReqError(f"rest backend: '{upto}': step:<N>, list, details:<N>, ids or item:<id> expected")
         self._variables()
         items = next(iter(self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"]))), [])
         sample = []
@@ -711,6 +715,97 @@ class RestBackend(ReqBackend):
             sample.append(req.as_dict() if req is not None else {"id": None})
         return {"vars": dict(self._found or {}), "items": len(items), "sample": sample,
                 "first_item": self._mask(json.dumps(items[0], indent=1, ensure_ascii=False)[:TRACE_ANSWER]) if items else None}
+
+    PICK_IDS = 5000                         # the requirements the Editor's field test proposes
+
+    def _list_items(self) -> Iterable[Any]:
+        for items in self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"])):
+            yield from items
+
+    def _one(self, expr: str, data: Any, where: str, field: str) -> Any:
+        """A field's value, from jq on an item or an answer, as the requirement keeps it (ReqError on a jq error)."""
+        found = _all(self._program(expr, where), data, where)
+        value = found[0] if found else None
+        if field == "tags":
+            return [str(t) for t in (value if isinstance(value, list) else [value] if value not in (None, "") else [])]
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value if v is not None)
+        return None if value is None else str(value)
+
+    def _probe_ids(self) -> dict[str, Any]:
+        """The steps, then every page of the list: the id and title of each requirement (the field test's choices)."""
+        self._variables()
+        out, count, bad = [], 0, 0
+        for item in self._list_items():
+            count += 1
+            try:
+                rid = self._one(self.fields["id"], item, "field 'id'", "id")
+                title = self._one(self.fields["title"], item, "field 'title'", "title") if "title" in self.fields else None
+            except ReqError:
+                bad += 1
+                continue
+            if rid and len(out) < self.PICK_IDS:
+                out.append({"id": rid, **({"title": title} if title else {})})
+        return {"vars": dict(self._found or {}), "items": count, "ids": out, **({"bad": bad} if bad else {})}
+
+    def _probe_item(self, wanted: str) -> dict[str, Any]:
+        """The steps, the list until the requirement of this id, then each field (from the list item or a details call)
+        evaluated on its own: its value, or its error; and the requirement they make."""
+        self._variables()
+        item = None
+        for candidate in self._list_items():
+            try:
+                if self._one(self.fields["id"], candidate, "field 'id'", "id") == wanted:
+                    item = candidate
+                    break
+            except ReqError:
+                continue
+        if item is None:
+            raise ReqError(f"rest backend: no requirement '{wanted}' in the list")
+        rows: list[dict[str, Any]] = []
+        values: dict[str, Any] = {}
+        given = self.options.get("fields") or {}
+        for name, expr in self.fields.items():
+            row: dict[str, Any] = {"field": name, "from": "list", "jq": expr, **({} if name in given else {"default": True})}
+            try:
+                row["value"] = self._one(expr, item, f"field '{name}'", name)
+            except ReqError as e:
+                row["error"] = str(e)
+            if row.get("value") not in (None, "", []):
+                values[name] = row["value"]
+            if name in given or row.get("value") not in (None, "", []):
+                rows.append(row)
+        item_values: dict[str, Any] = {}
+        for name, expr in self.item_vars.items():
+            try:
+                found = _all(self._program(expr, f"item_vars '{name}'"), item, f"item_vars '{name}'")
+                item_values[name] = found[0] if found and found[0] is not None else ""
+            except ReqError as e:
+                item_values[name] = f"<error: {e}>"
+        local = {**self._variables(), **item_values, "id": wanted}
+        for n, call in enumerate(self.details, 1):
+            if not call["fields"]:
+                continue
+            try:
+                answer = self._call(call, self._url(self._fill(str(call["url"]), encode=True, variables=local), local),
+                                    variables=local, label=f"{call['name']} of {wanted}", missing_ok=True)
+                failed = None if answer is not None else "HTTP 404: no answer, the fields are left out"
+            except ReqError as e:
+                answer, failed = None, str(e)
+            for name, expr in call["fields"].items():
+                row = {"field": name, "from": f"details:{n}", "jq": expr}
+                if failed:
+                    row["error"] = failed
+                else:
+                    try:
+                        row["value"] = self._one(expr, answer, f"{call['name']}: field '{name}'", name)
+                    except ReqError as e:
+                        row["error"] = str(e)
+                    if row.get("value") not in (None, "", []):
+                        values[name] = row["value"]
+                rows.append(row)
+        return {"vars": dict(self._found or {}), "item_vars": item_values, "fields": self._mask_data(rows),
+                "first_item": self._mask(json.dumps(item, indent=1, ensure_ascii=False)[:TRACE_ANSWER])}
 
     # ── API ───────────────────────────────────────────────────────────
 

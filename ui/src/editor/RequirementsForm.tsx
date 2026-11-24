@@ -583,7 +583,7 @@ function RestOptions({ options, help, set, setOptions, credentials: creds, onCre
         <Details value={options.details} runTest={runTest} onChange={(v) => set("details", v.length ? v : undefined)} />
       </Group>
       <Group title="Fields" note="each field of a requirement: where it is read (the list item, or a details call's answer) and the jq expression reading it" help={help.fields}>
-        <RestFields options={options} setOptions={setOptions} />
+        <RestFields options={options} setOptions={setOptions} runTest={runTest} />
         <Field label="Link template" help={help.url}>
           <Text mono grow="wrap" value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
         </Field>
@@ -734,7 +734,7 @@ const ROLE: Record<string, string> = { id: "required", title: "shown in the matr
 
 /** The fields of the rest backend, one row each where it is read: the list item (options.fields) or the answer of
  *  a details call (options.details[i].fields). id, title and path are always shown; the others when given, or added. */
-function RestFields({ options, setOptions }: { options: Data; setOptions: (v: Data) => void }) {
+function RestFields({ options, setOptions, runTest }: { options: Data; setOptions: (v: Data) => void; runTest: RunTest }) {
   const fields: Data = options.fields || {};
   const calls: Data[] = Array.isArray(options.details) ? options.details : options.details ? [options.details] : [];
   const [added, setAdded] = useState<string[]>([]);
@@ -761,10 +761,41 @@ function RestFields({ options, setOptions }: { options: Data; setOptions: (v: Da
   const move = (r: Row, to: number) => setOptions(write(r.f, to, r.expr || (to < 0 ? `.${r.f}` : `.data.${r.f}`), write(r.f, r.from, undefined)));
   const what = Object.fromEntries(REST_FIELDS);
   const addable = REST_FIELDS.filter(([f]) => !present.has(f));
+  // the field test: a requirement picked among those of the list, each field evaluated on it
+  const [picking, setPicking] = useState<any>(null);        // the ids test: {ok, ids, items, error, calls}
+  const [busy, setBusy] = useState("");
+  const [picked, setPicked] = useState("");
+  const [tested, setTested] = useState<any>(null);          // the item test: {ok, fields, item_vars, error, calls}
+  const pick = async () => { setBusy("ids"); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
+  const test = async (id: string) => {
+    setPicked(id);
+    if (!id) return;
+    setBusy("item");
+    try { setTested(await runTest(`item:${id}`)); } finally { setBusy(""); }
+  };
+  const results: Record<string, any> = {};
+  for (const r of tested?.fields || []) results[`${r.field}:${r.from}`] = r;
+  const resultOf = (r: Row) => results[`${r.f}:${r.from < 0 ? "list" : `details:${r.from + 1}`}`];
+  const extra = (tested?.fields || []).filter((r: any) => r.default && !rows.some((x) => x.f === r.field && x.from < 0));
+  const shown = tested?.ok;
   return (
     <>
-      <table className="grid compact req-fields req-fields-from">
-        <thead><tr><th>Field</th><th>Read from</th><th>jq</th><th /></tr></thead>
+      <div className="req-fields-test">
+        <button className="small" disabled={!!busy} onClick={pick}
+          title="Run the steps and read the whole list, to pick a requirement and see what each field gives for it">
+          {busy === "ids" ? "Reading the list…" : picking?.ok ? "Read the list again" : "Test on a requirement…"}</button>
+        {picking?.ok && (
+          <Combo mono value={picked} placeholder={`pick one of ${picking.ids.length} requirement(s)`}
+            choices={picking.ids.map((r: any) => ({ value: r.id, description: r.title }))}
+            onChange={setPicked} onPick={test} />
+        )}
+        {picking?.ok && picked && <button className="small" disabled={!!busy} onClick={() => test(picked)}>{busy === "item" ? "Testing…" : "Test"}</button>}
+        {picking && !picking.ok && <span className="error-text small">{picking.error}</span>}
+        {tested && !tested.ok && <span className="error-text small">{tested.error}</span>}
+        {(picking || tested) && <button className="link small" onClick={() => { setPicking(null); setTested(null); setPicked(""); }}>hide</button>}
+      </div>
+      <table className={classes("grid compact req-fields req-fields-from", shown && "tested")}>
+        <thead><tr><th>Field</th><th>Read from</th><th>jq{shown && <span className="muted"> → value for <code>{picked}</code></span>}</th><th /></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={`${r.f}:${r.from}`} title={what[r.f]}>
             <td className="mono">{r.f}{ROLE[r.f] && <div className="muted small req-field-role">{ROLE[r.f]}</div>}</td>
@@ -777,7 +808,8 @@ function RestFields({ options, setOptions }: { options: Data; setOptions: (v: Da
               </select>
             </td>
             <td><GrowText className="mono" lines value={r.expr} placeholder={r.from < 0 ? `.${r.f}` : `.data.${r.f}`}
-              onChange={(v) => setOptions(write(r.f, r.from, v))} /></td>
+              onChange={(v) => setOptions(write(r.f, r.from, v))} />
+              {shown && <div className="req-field-value">→ <FieldValue r={resultOf(r)} /></div>}</td>
             <td>{r.f !== "id" && (
               <button className="icon" title={SHOWN.includes(r.f) ? "Clear it (read as ." + r.f + " when the item has it)" : "Remove this field"}
                 onClick={() => { setAdded(added.filter((x) => x !== r.f)); setOptions(write(r.f, r.from, undefined)); }}>×</button>
@@ -785,6 +817,19 @@ function RestFields({ options, setOptions }: { options: Data; setOptions: (v: Da
           </tr>
         ))}</tbody>
       </table>
+      {shown && (
+        <div className="req-fields-tested small">
+          {extra.length > 0 && <div>Also read by default (the item's key of the same name): {extra.map((r: any) => (
+            <span key={r.field} className="mono">{r.field}={shownValue(r.value)} </span>))}</div>}
+          {Object.keys(tested.vars || {}).length > 0 && <div>Variables (the source's, and those the steps extracted, their calls below): {Object.entries<any>(tested.vars).map(([k, v]) => (
+            <span key={k} className="mono">{k}={shownValue(v).length > 80 ? shownValue(v).slice(0, 80) + "…" : shownValue(v)} </span>))}</div>}
+          {Object.keys(tested.item_vars || {}).length > 0 && <div>Item variables: {Object.entries<any>(tested.item_vars).map(([k, v]) => (
+            <span key={k} className="mono">{k}={shownValue(v)} </span>))}</div>}
+          {tested.first_item && <details className="req-call-part"><summary>The list item of <code>{picked}</code></summary>
+            <pre className="mono small">{tested.first_item}</pre></details>}
+        </div>
+      )}
+      {(tested || picking) && <Calls result={tested || picking} />}
       <div className="req-fields-add">
         {addable.length > 0 && (
           <select value="" onChange={(e) => e.target.value && setAdded([...added, e.target.value])} title="Another field of the requirements">
@@ -934,6 +979,15 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
       )}
     </div>
   );
+}
+
+/** A field's value in the field test, or its error. */
+function FieldValue({ r }: { r?: any }) {
+  if (!r) return <span className="muted small">not tested (save or test again)</span>;
+  if (r.error) return <span className="error-text small">{r.error}</span>;
+  const v = r.value;
+  if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return <span className="muted small">empty</span>;
+  return <span className="small req-field-shown">{Array.isArray(v) ? v.join(", ") : String(v)}</span>;
 }
 
 const shownValue = (v: any) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "") || "∅");
