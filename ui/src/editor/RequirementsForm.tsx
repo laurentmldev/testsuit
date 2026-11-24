@@ -14,10 +14,10 @@
 // Requirements form (sequencer README, section 10.3): the sources file (`requirements.yml`: its sources, each with its
 // backend, options and credentials, and the default one) and the requirements of the built-in YAML backend (the
 // labels of the nodes, and each requirement with its path in the tree).
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Combo, Field, helpText, IdText, KeyValues, scalar, Section, Tags, Text, type Choice } from "../fields";
 import { send } from "../api";
-import { classes, joinPath } from "../util";
+import { classes, joinPath, useRoute } from "../util";
 import { clone, useSession, type Doc } from "./state";
 
 const SOURCES_FILE = "requirements.yml";
@@ -160,6 +160,12 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
     }
   };
   const backend = backends.find((b) => b.name === String(spec.backend || "").toLowerCase());
+  // the source the page was opened on (#/edit/<sid>?file=requirements.yml&source=<name>), from the Requirements view
+  const target = useRoute().query.get("source") === name;
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (target) card.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [target]);
   const options: Data = spec.options || {};
   const credentials: Data = spec.credentials || {};
   const set = (k: string, v: any) => onChange({ ...spec, [k]: v });
@@ -169,7 +175,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const yamlFound = yamlFile && files.some((f) => f.path === yamlFile);
   const credRows = [...new Set([...Object.keys(credentials), ...knownCredentials])];
   return (
-    <div className={classes("req-source", isDefault && "default")}>
+    <div ref={card} className={classes("req-source", isDefault && "default", target && "target")}>
       <div className="req-source-head">
         <IdText value={name} taken={taken} onChange={onRename} />
         <label className="toggle" title="The source of the references without a prefix">
@@ -533,9 +539,9 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         <Steps value={options.steps} onChange={(v) => set("steps", v.length ? v : undefined)} />
       </Group>
       <Group title="List call" note="reads every requirement" help={help.list}>
-        <Field label="URL suffix"><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
-        <Field label="Items (jq)"><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
-        <Field label="Next page (jq)"><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
+        <Field label="URL suffix" help={urlHelp("The URL of the list call")}><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+        <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
+        <Field label="Next page (jq)" help={`The URL of the next page, from an answer (none: the last page). ${JQ_HELP}`}><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
         <Field label="First page" help={help.first_page}><Text mono value={options.first_page} placeholder="1" onChange={(v) => set("first_page", scalar(v))} /></Field>
         <Field label="Method">
           <select value={String(list.method || "GET").toUpperCase()} onChange={(e) => setIn("list", list, "method", e.target.value === "GET" ? undefined : e.target.value)}>
@@ -543,12 +549,12 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
           </select>
         </Field>
         {String(list.method || "").toUpperCase() === "POST" && (
-          <Field label="Body (JSON)"><JsonText value={list.body} onChange={(v) => setIn("list", list, "body", v)} /></Field>
+          <Field label="Body (JSON)" help={BODY_HELP}><JsonText value={list.body} onChange={(v) => setIn("list", list, "body", v)} /></Field>
         )}
       </Group>
       <Group title="Get by id call" note="optional: fetches only the requirements needed" help={help.get}>
-        <Field label="URL suffix"><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
-        {get.url && <Field label="Items (jq)"><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
+        <Field label="URL suffix" help={urlHelp("The URL of the get by id call, with `{{ ids }}` (comma-separated: one call) or `{{ id }}` (one call each)")}><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+        {get.url && <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
       </Group>
       <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
         <table className="grid compact req-fields">
@@ -634,18 +640,18 @@ function Credentials({ value, rows, help, onChange, unused }: {
 
 const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** A variable as written: a value, or {value | jq, mandatory, default}. */
-function varParts(spec: any, key: "value" | "jq"): { value: any; mandatory: boolean; dflt: any } {
-  if (spec && typeof spec === "object" && !Array.isArray(spec)) return { value: spec[key], mandatory: !!spec.mandatory, dflt: spec.default };
-  return { value: spec, mandatory: false, dflt: undefined };
+/** A variable as written: a value, or {value | jq, mandatory}. A fallback is written in the value itself (Jinja2's
+ *  default filter, jq's //). */
+function varParts(spec: any, key: "value" | "jq"): { value: any; mandatory: boolean } {
+  if (spec && typeof spec === "object" && !Array.isArray(spec)) return { value: spec[key], mandatory: !!spec.mandatory };
+  return { value: spec, mandatory: false };
 }
 
-function varSpec(key: "value" | "jq", value: any, mandatory: boolean, dflt: any): any {
-  if (!mandatory && (dflt === undefined || dflt === "")) return value ?? "";
-  return { [key]: value ?? "", ...(mandatory ? { mandatory: true } : {}), ...(dflt !== undefined && dflt !== "" ? { default: dflt } : {}) };
+function varSpec(key: "value" | "jq", value: any, mandatory: boolean): any {
+  return mandatory ? { [key]: value ?? "", mandatory: true } : value ?? "";
 }
 
-/** Rows of variables: name, value (or jq), mandatory, default. Mandatory ones are the context of the requirements. */
+/** Rows of variables: name, value (or jq), mandatory. Mandatory ones are the context of the requirements. */
 function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
   value?: Data | null; onChange: (v: Data) => void; keyName: "value" | "jq"; placeholder: string; namePlaceholder: string;
 }) {
@@ -657,16 +663,14 @@ function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
   return (
     <div className="kv req-vars-rows">
       {Object.entries(data).map(([k, spec]) => {
-        const { value: v, mandatory, dflt } = varParts(spec, keyName);
+        const { value: v, mandatory } = varParts(spec, keyName);
         return (
           <div key={k} className="kv-row">
             <span className={classes("mono req-var-name", mandatory && "strong")}>{k}</span>
             <input className="mono kv-value" placeholder={placeholder} value={v === null || v === undefined ? "" : String(v)}
-              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory, dflt))} />
-            <input className="mono req-var-default" placeholder="default" value={dflt === null || dflt === undefined ? "" : String(dflt)}
-              title="Its value when it has none" onChange={(e) => put(k, varSpec(keyName, v, mandatory, e.target.value === "" ? undefined : scalar(e.target.value)))} />
+              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory))} />
             <label className="toggle small" title="It must have a value, and is the context of the requirements: shown with them and recorded in the datapack">
-              <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked, dflt))} /> mandatory
+              <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked))} /> mandatory
             </label>
             <button className="icon" title="Remove" onClick={() => { const next = { ...data }; delete next[k]; onChange(next); }}>×</button>
           </div>
@@ -689,11 +693,22 @@ function Variables({ value, onChange }: { value?: Data | null; onChange: (v: Dat
       <VarRows value={value} onChange={onChange} keyName="value" namePlaceholder="new variable (branch, version…)"
         placeholder="value, or {{ sut.version | default('3.2') }}" />
       {value && Object.keys(value).length > 0 && (
-        <div className="hint">{"{{ name }}"} in the options, <code>$name</code> in jq expressions</div>
+        <div className="hint">{"{{ name }}"} in the options, <code>$name</code> in jq expressions. A value can use the datapack keys,
+          with a fallback where there are none: <code>{"{{ sut.branch | default('main') }}"}</code></div>
       )}
     </>
   );
 }
+
+/** The help of the fields reading variables: which ones, and how. */
+const SUBST_HELP = "`{{ name }}` is replaced by the value of a variable (URL-encoded in a URL). It is a plain substitution, " +
+  "not Jinja2: no filters, no datapack keys. The variables: those of the source (Variables, above), those extracted by " +
+  "an earlier step, and `page`, `offset` (list call), `ids`, `id` (get by id call, link template). A datapack key goes " +
+  "through a variable of the source: `version: \"{{ sut.version | default('3.2') }}\"`, then `{{ version }}` here.";
+const JQ_HELP = "A jq expression. The variables (those of the source, those extracted by an earlier step) are `$name`; " +
+  "a fallback is jq's `//` (`.id // 0`).";
+const urlHelp = (what: string) => `${what}, relative to the base URL (or absolute). ${SUBST_HELP}`;
+const BODY_HELP = `The JSON body of the POST. A string made of one \`{{ name }}\` keeps the value's type. ${SUBST_HELP}`;
 
 /** The rest backend's steps: calls made before the others, each extracting variables with jq. */
 function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[]) => void }) {
@@ -709,10 +724,10 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
             <span className="grow" />
             <button className="icon" title="Remove this step" onClick={() => onChange(steps.filter((_, j) => j !== i))}>×</button>
           </div>
-          <Field label="URL suffix"><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
-          <Field label="Variables (jq)">
+          <Field label="URL suffix" help={urlHelp("The URL of this step")}><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+          <Field label="Variables (jq)" help={`Each variable this step extracts from its answer, for the next steps and calls: one value at most (none: no value, an error when mandatory). ${JQ_HELP}`}>
             <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
-              namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id" />
+              namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id   (fallback: // 0)" />
           </Field>
           <Field label="Cache"><Text mono value={step.cache} placeholder="none: once per generation; or 10m, 1h, 1d" onChange={(v) => setIn(i, "cache", scalar(v.trim()))} /></Field>
           <Field label="Method">
@@ -721,7 +736,7 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
             </select>
           </Field>
           {String(step.method || "").toUpperCase() === "POST" && (
-            <Field label="Body (JSON)"><JsonText value={step.body} onChange={(v) => setIn(i, "body", v)} /></Field>
+            <Field label="Body (JSON)" help={BODY_HELP}><JsonText value={step.body} onChange={(v) => setIn(i, "body", v)} /></Field>
           )}
         </div>
       ))}

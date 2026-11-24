@@ -49,9 +49,9 @@ Variables: ``{{ name }}`` in URLs (URL-encoded), headers and bodies (a body stri
 value's type); ``$name`` in jq expressions. Those of the source, those the steps extract, and ``page``, ``offset``,
 ``id`` and ``ids`` where they apply (also written ``{page}``, ``{offset}``, ``{id}``, ``{ids}``).
 
-A step's variable is ``name: <jq>`` or ``name: {jq, mandatory, default}``. It must give one value at most (several:
-an error); none gives its ``default``, else empty, else an error when it is mandatory. Mandatory ones are the
-context of the requirements, recorded and shown with them, like the source's mandatory variables.
+A step's variable is ``name: <jq>`` or ``name: {jq, mandatory}``. It must give one value at most (several: an
+error); none gives it empty, an error when it is mandatory (a fallback: jq's ``//``, ``.id // 0``). Mandatory ones are
+the context of the requirements, recorded and shown with them, like the source's mandatory variables.
 
 Pagination: ``next`` (a jq expression giving the URL of the next page), else ``{{ page }}`` in the URL (from
 ``first_page``, default 1) or ``{{ offset }}`` (stepping by the number of items received), until a page has no item.
@@ -120,30 +120,34 @@ def clear_cache() -> None:
         _cache.clear()
 
 
+_SUBST = (" `{{ name }}`: a plain substitution of a variable (of the source, or extracted by a step), not Jinja2 (no "
+          "filters, no datapack keys: those go through a variable of the source).")
+
+
 class RestBackend(ReqBackend):
     """Requirements of any tool with a JSON REST API: URLs, authentication and jq expressions picking the fields."""
 
     capabilities = frozenset({"children_query", "versions"})
     description = "Built in: any tool with a JSON REST API, its fields picked with jq expressions."
     options_help = {
-        "base": "The base URL of the API; the URLs below are relative to it (or absolute).",
+        "base": "The base URL of the API; the URLs below are relative to it (or absolute)." + _SUBST,
         "auth": "How to authenticate, with the names of the credentials: `{bearer: token}` (Authorization: Bearer), "
                 "`{basic: [user, password]}`, `{header: {X-Api-Key: token}}` or `{query: {api_key: token}}`.",
-        "headers": "Other headers sent with each request (not secrets: those are credentials).",
+        "headers": "Other headers sent with each request (not secrets: those are credentials)." + _SUBST,
         "steps": "Optional calls made first, each extracting variables for the next ones: `[{url, extract, cache}]`. "
-                 "`extract`: `{name: <jq>}` or `{name: {jq, mandatory, default}}`, one value at most; `$name` in jq "
+                 "`extract`: `{name: <jq>}` or `{name: {jq, mandatory}}`, one value at most (a fallback: `.id // 0`); `$name` in jq "
                  "and `{{ name }}` in URLs read variables. `cache`: how long to keep the answer (`1h`). Optional "
-                 "`method` and `body`.",
+                 "`method` and `body`." + _SUBST,
         "list": "How to get every requirement: `{url, items, next}`. `items`: jq giving the requirements of an answer "
                 "(`.data[]`); pagination with `next` (jq giving the next page's URL), or `{{ page }}` / "
                 "`{{ offset }}` in the URL (until a page has no item). Optional `method` (GET) and `body` (JSON, "
-                "for a POST).",
+                "for a POST)." + _SUBST,
         "get": "Optional: how to get requirements by id: `{url, items}`, with `{{ ids }}` (comma-separated) or "
-               "`{{ id }}` (one call each, a 404 meaning unknown) in the URL. Default: from the list.",
+               "`{{ id }}` (one call each, a 404 meaning unknown) in the URL. Default: from the list." + _SUBST,
         "fields": "jq expressions giving each field of a requirement from an item: `id` (required), `title`, "
                   "`description`, `path` (nodes joined by `/`), `rationale`, `status`, `tags` (a list), `comments`, "
                   "`version`, `url`. Default for a field not given (but `url`): `.<field>`.",
-        "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field).",
+        "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field)." + _SUBST,
         "first_page": "The first `{{ page }}` (default 1).",
         "timeout": "Seconds to wait for each answer (default 30).",
         "verify": "Check the server's TLS certificate: true (default), false, or the path of a CA bundle.",
@@ -205,12 +209,13 @@ class RestBackend(ReqBackend):
                     raise ReqError(f"{where}: '{name}' cannot be a variable name"
                                    + (" (a built-in one)" if name in BUILT_IN else " (letters, digits, _)"))
                 if isinstance(e, dict):
-                    bad = sorted(set(e) - {"jq", "mandatory", "default"})
+                    bad = sorted(set(e) - {"jq", "mandatory"})
                     if bad or not e.get("jq"):
-                        raise ReqError(f"{where}: variable '{name}': {{jq, mandatory, default}} expected")
-                    e = {"jq": str(e["jq"]), "mandatory": bool(e.get("mandatory")), "default": e.get("default")}
+                        raise ReqError(f"{where}: variable '{name}': {{jq, mandatory}} expected (a fallback goes in the jq "
+                                       "expression: .id // 0)")
+                    e = {"jq": str(e["jq"]), "mandatory": bool(e.get("mandatory"))}
                 else:
-                    e = {"jq": str(e), "mandatory": False, "default": None}
+                    e = {"jq": str(e), "mandatory": False}
                 _jq(e["jq"], f"{where}: variable '{name}'", {k: None for k in names})
                 spec["extract"][str(name)] = e
             names += list(spec["extract"])
@@ -304,11 +309,9 @@ class RestBackend(ReqBackend):
                                        "one at most (make the jq expression select one)")
                     if values:
                         found[name] = values[0]
-                    elif e["default"] is not None:
-                        found[name] = e["default"]
                     elif e["mandatory"]:
                         raise ReqError(f"{where}: no value, and it is mandatory (check the jq expression, or give "
-                                       "it a default)")
+                                       "it a fallback: .id // 0)")
                     else:
                         found[name] = ""
             self._found = found

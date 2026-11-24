@@ -1230,7 +1230,7 @@ input.manual-note { flex: 1; min-width: 200px; }
 .cov-actions .spacer { flex: 1; }
 .requirements-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
 .req-tree { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--topbar-h) + 8px); }
-.req-tree select { margin-bottom: 6px; }
+.req-tree select { margin-bottom: 0; }
 .req-tree-item { display: flex; align-items: center; gap: 6px; text-align: left; border: none; background: none; padding: 4px 8px; border-radius: 6px; }
 .req-tree-item span:first-child { flex: 1; }
 .req-tree-item.active { background: var(--accent-soft); color: var(--accent); }
@@ -1276,10 +1276,12 @@ table.grid.req-fields td { vertical-align: middle; }
 .req-group .field { grid-template-columns: 150px minmax(0, 1fr); }
 .req-group > .req-fields { margin: 6px 0; }
 .req-vars-rows .req-var-name { flex: 0 0 22%; overflow: hidden; text-overflow: ellipsis; }
-.req-vars-rows .req-var-default { flex: 0 0 14%; min-width: 0; }
 .req-vars-rows .strong, .req-vars .strong { font-weight: 600; }
 .req-vars { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0; }
 .req-steps { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .req-step { align-self: stretch; border: 1px dashed var(--border); border-radius: 6px; padding: 4px 10px; }
 .req-step-head { display: flex; align-items: center; gap: 8px; }
 .req-step-head .grow { flex: 1; }
+.req-source.target { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.req-source-pick { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.req-source-pick > select { flex: 1; min-width: 0; }

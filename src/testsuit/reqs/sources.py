@@ -28,7 +28,7 @@ git root (a repository holding several trees of tests, such as an example, can h
           version: {value: "{{ sut.version | default('3.2') }}", mandatory: true}
 
 A variable's value can be a Jinja2 expression of the datapack keys (dictionaries, keys set by hand with
-``datapack --set``, campaign keys), with a ``default`` for where there are none (the Editor's coverage view,
+``datapack --set``, campaign keys), with a Jinja2 ``default`` filter for where there are none (the Editor's coverage view,
 ``tsq-reqs``). A mandatory variable must have a value (not empty), and is the context of the requirements: shown by
 the Editor and the reports (``jama: version=3.2``). The variables, as resolved, are recorded in the datapack.
 
@@ -111,13 +111,14 @@ def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str
 
 
 def var_spec(spec: Any, where: str) -> tuple[Any, bool, Any]:
-    """(value, mandatory, default) of a variable: a value, or ``{value, mandatory, default}``."""
+    """(value, mandatory) of a variable: a value, or ``{value, mandatory}`` (a fallback: Jinja2's ``default``)."""
     if not isinstance(spec, dict):
-        return spec, False, None
-    unknown = sorted(set(spec) - {"value", "mandatory", "default"})
+        return spec, False
+    unknown = sorted(set(spec) - {"value", "mandatory"})
     if unknown:
-        raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)} (value, mandatory, default)")
-    return spec.get("value"), bool(spec.get("mandatory")), spec.get("default")
+        raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)} (value, mandatory; a fallback goes in the value: "
+                       "{{ sut.version | default('3.2') }})")
+    return spec.get("value"), bool(spec.get("mandatory"))
 
 
 def _render_var(value: Any, keys: Mapping[str, Any] | None, where: str) -> Any:
@@ -185,12 +186,10 @@ class Sources:
         if name not in self._vars:
             out = {}
             for key, spec in (self.specs[name].get("vars") or {}).items():
-                value, mandatory, default = var_spec(spec, f"'{self.file}': source '{name}': variable '{key}'")
+                value, mandatory = var_spec(spec, f"'{self.file}': source '{name}': variable '{key}'")
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
                     raise ReqError(f"'{self.file}': source '{name}': variable '{key}' is not a name (letters, digits, _)")
                 value = _render_var(value, self.keys, f"source '{name}': variable '{key}'")
-                if value in (None, "") and default is not None:
-                    value = default
                 if mandatory and value in (None, ""):
                     raise ReqError(f"source '{name}': mandatory variable '{key}' has no value")
                 out[str(key)] = "" if value is None else value

@@ -1330,9 +1330,9 @@ sources:
       url: https://alm.example/items/{{ id }}
 ```
 
-**Variables** (`vars`, on any source): `{{ name }}` in its options, `$name` in the rest backend's jq expressions. A value can be a Jinja2 expression of the datapack keys, so `datapack --set` and campaign keys set it, with a `default` for where there are none (the Editor's coverage view, `reqs`). A **mandatory** variable must have a value, and is the context of the requirements: shown in the coverage matrices and reports (`alm: branch=main, version=3.2`) and recorded in the datapack, with every variable as resolved. Give one to a branch or a version, when the tool has them.
+**Variables** (`vars`, on any source): `{{ name }}` in its options, `$name` in the rest backend's jq expressions. A value can be a Jinja2 expression of the datapack keys, so `datapack --set` and campaign keys set it, with a fallback for where there are none (Jinja2's `default` filter: `{{ sut.branch | default('main') }}`; the Editor's coverage view, `reqs`). A **mandatory** variable must have a value, and is the context of the requirements: shown in the coverage matrices and reports (`alm: branch=main, version=3.2`) and recorded in the datapack, with every variable as resolved. Give one to a branch or a version, when the tool has them.
 
-**Steps** (rest backend): calls made before the others, each extracting variables with jq for the next ones; a variable gives one value at most (several: an error), none gives its `default`, else empty, else an error when it is mandatory. `cache` keeps an answer that long (a call that takes long, such as the whole system):
+**Steps** (rest backend): calls made before the others, each extracting variables with jq for the next ones; a variable gives one value at most (several: an error), none gives it empty, or an error when it is mandatory (a fallback: jq's `//`, `.id // 0`). `cache` keeps an answer that long (a call that takes long, such as the whole system):
 
 ```yaml
 sources:

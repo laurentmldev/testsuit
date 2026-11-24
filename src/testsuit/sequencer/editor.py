@@ -1623,6 +1623,18 @@ class Editor:
         out["seconds"] = round(time.monotonic() - start, 2)
         return out
 
+    def _source_edit(self, session: EditSession, file: Path, sources, source: str) -> dict | None:
+        """Where the Editor edits a source: the YAML file of the requirements of a yaml source, else the sources
+        file at that source (its backend, options, credentials); None outside the session."""
+        spec = sources.specs.get(source) or {}
+        if str(spec.get("backend", "")).lower() == "yaml":
+            data = (file.parent / str((spec.get("options") or {}).get("file") or file.name)).resolve()
+            if data.is_relative_to(session.folder.resolve()) and data.is_file():
+                return {"file": self.rel(session, data), "source": None}
+        if not file.is_relative_to(session.folder):
+            return None
+        return {"file": self.rel(session, file), "source": source}
+
     def requirements_coverage(self, session: EditSession, source: str | None = None, campaign: str | None = None):
         """(description, Coverage or None): the requirements of a tests repository and how its test definitions cover them (Datapacks, Requirements; SPEC
         §5.5): the tree of a source, every requirement of it, and the coverage by the latest run of each test
@@ -1651,9 +1663,13 @@ class Editor:
         try:
             sources = Sources(file)
             source = source if source in sources.names else sources.default
-            out.update({"sources": sources.names, "source": source, "tree": [n.as_dict() for n in sources.tree(source)]})
+            out.update({"sources": sources.names, "source": source,                 # kept when the source fails
+                        "edit": self._source_edit(session, file, sources, source)})
+            out["tree"] = [n.as_dict() for n in sources.tree(source)]
         except ReqError as e:
             out["error"] = str(e)
+            if "edit" not in out and file.is_relative_to(session.folder):      # the sources file does not read
+                out["edit"] = {"file": out["sources_file"], "source": None}
             return out, None
         latest: dict[str, dict] = {}
         for run in self.seq.store.runs(["done", "cancelled"], limit=2000):     # newest first
