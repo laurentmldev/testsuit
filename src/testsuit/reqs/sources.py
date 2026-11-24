@@ -237,14 +237,17 @@ class Sources:
     def key(self, ref: Ref) -> str:
         return ref_key(ref, self.default)
 
-    def get(self, refs: Iterable[Ref]) -> dict[Ref, Requirement | None]:
-        """The requirement of each reference, by source in one call each."""
+    def get(self, refs: Iterable[Ref], brief: bool = False) -> dict[Ref, Requirement | None]:
+        """The requirement of each reference, by source in one call each. ``brief``: perhaps without the fields that
+        cost more calls (the rest backend's details), with the versions (ReqBackend.brief)."""
         by_source: dict[str, list[Ref]] = {}
         for r in refs:
             by_source.setdefault(r.source, []).append(r)
         out: dict[Ref, Requirement | None] = {}
         for source, items in by_source.items():
-            found = self.backend(source).get(sorted({r.id for r in items}))
+            backend = self.backend(source)
+            ids = sorted({r.id for r in items})
+            found = backend.brief(ids) if brief else backend.get(ids)
             for r in items:
                 req = found.get(r.id)
                 if req is not None:

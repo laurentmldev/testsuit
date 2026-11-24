@@ -1566,6 +1566,26 @@ class Editor:
         out, cov = self.requirements_coverage(session, source, campaign)
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
 
+    def requirement_item(self, session: EditSession, source: str, req_id: str) -> dict:
+        """One requirement in full, as generation reads it (the rest backend: with its details calls): what the
+        Requirements tab shows when it is opened."""
+        from testsuit.reqs.backend import ReqError
+        from testsuit.reqs.model import Ref
+        from testsuit.reqs.sources import Sources, find_sources_file
+        file = find_sources_file(session.folder)
+        if file is None:
+            raise SequencerError("no requirements.yml in this repository")
+        try:
+            sources = Sources(file)
+            if source not in sources.names:
+                raise SequencerError(f"no source '{source}' (sources: {', '.join(sources.names)})")
+            req = sources.get([Ref(source, req_id)])[Ref(source, req_id)]
+        except ReqError as e:
+            return {"error": str(e)}
+        if req is None:
+            return {"error": f"no requirement '{req_id}' in the source '{source}'"}
+        return {"requirement": req.as_dict()}
+
     def requirements_search(self, session: EditSession, path: str | None = None) -> dict:
         """Every active requirement of every source of the sources file of the tests repository, by the reference a
         test definition writes (its id, prefixed by its source unless the default one): the quick search of the

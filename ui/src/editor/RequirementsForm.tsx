@@ -591,6 +591,12 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
           <Text mono value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
         </Field>
       </Group>
+      <Group title="Details calls" note="optional: one call (or more) per requirement needed in full, adding fields" help={help.details}>
+        <Field label="Item variables (jq)" help={help.item_vars}>
+          <KeyValues value={options.item_vars} onChange={(v) => set("item_vars", v)} />
+        </Field>
+        <Details value={options.details} runTest={runTest} onChange={(v) => set("details", v.length ? v : undefined)} />
+      </Group>
     </>
   );
 }
@@ -731,6 +737,56 @@ const JQ_HELP = "A jq expression. The variables (those of the source, those extr
 const urlHelp = (what: string) => `${what}, relative to the base URL (or absolute). ${SUBST_HELP}`;
 const BODY_HELP = `The JSON body of the POST. A string made of one \`{{ name }}\` keeps the value's type. ${SUBST_HELP}`;
 
+const DETAIL_FIELDS = REST_FIELDS.filter(([f]) => !["id", "path", "version"].includes(f));
+
+/** The rest backend's details calls: per requirement, each giving fields from its answer. */
+function Details({ value, onChange, runTest }: { value?: any[] | null; onChange: (v: any[]) => void; runTest: RunTest }) {
+  const calls: Data[] = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  const setCall = (i: number, call: Data) => onChange(calls.map((s, j) => (j === i ? call : s)));
+  const setIn = (i: number, k: string, v: any) => setCall(i, put(calls[i], k, v));
+  return (
+    <div className="req-steps">
+      {calls.map((call, i) => {
+        const fields: Data = call.fields || {};
+        return (
+          <div key={i} className="req-step">
+            <div className="req-step-head">
+              <strong className="small">Details call {i + 1}</strong>
+              <span className="grow" />
+              <button className="icon" title="Remove this call" onClick={() => onChange(calls.filter((_, j) => j !== i))}>×</button>
+            </div>
+            <StageTest upto={`details:${i + 1}`} runTest={runTest} label="Test on the first requirement"
+              title="Run the steps and the list call's first page, then this call for its first requirement: its URL, the answer, and the fields it gives" />
+            <Field label="URL suffix" help={urlHelp("The URL of this call, for one requirement: `{{ id }}` and the item variables")}>
+              <Text mono value={call.url} placeholder="items/{{ item_id }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+            <Field label="Fields (jq)" help={`The fields this call gives, from its answer (not id, path, version: those come from the list). A later call wins. ${JQ_HELP}`}>
+              <table className="grid compact req-fields">
+                <tbody>{DETAIL_FIELDS.map(([f, what]) => (
+                  <tr key={f} title={what}>
+                    <td className="mono">{f}</td>
+                    <td><input className="mono" value={fields[f] ?? ""} placeholder="—"
+                      onChange={(e) => setIn(i, "fields", put(fields, f, e.target.value))} /></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </Field>
+            <Field label="Cache"><Text mono value={call.cache} placeholder="none; or 10m, 1h, 1d (read again when its version changes)" onChange={(v) => setIn(i, "cache", scalar(v.trim()))} /></Field>
+            <Field label="Method">
+              <select value={String(call.method || "GET").toUpperCase()} onChange={(e) => setIn(i, "method", e.target.value === "GET" ? undefined : e.target.value)}>
+                <option>GET</option><option>POST</option>
+              </select>
+            </Field>
+            {String(call.method || "").toUpperCase() === "POST" && (
+              <Field label="Body (JSON)" help={BODY_HELP}><JsonText value={call.body} onChange={(v) => setIn(i, "body", v)} /></Field>
+            )}
+          </div>
+        );
+      })}
+      <button className="small" onClick={() => onChange([...calls, { url: "", fields: {} }])}>Add details call</button>
+    </div>
+  );
+}
+
 /** The rest backend's steps: calls made before the others, each extracting variables with jq. */
 function Steps({ value, onChange, runTest }: { value?: any[] | null; onChange: (v: any[]) => void; runTest: RunTest }) {
   const steps: Data[] = Array.isArray(value) ? value : [];
@@ -801,13 +857,25 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
                   ))}</tbody>
                 </table>
               )}
+              {result.item_vars && Object.keys(result.item_vars).length > 0 && (
+                <div className="req-vars small">Item variables: {Object.entries<any>(result.item_vars).map(([k, v]) => (
+                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                ))}</div>
+              )}
+              {result.requirement && (
+                <table className="grid compact">
+                  <tbody>{Object.entries<any>(result.requirement).filter(([, v]) => v !== "" && !(Array.isArray(v) && !v.length)).map(([k, v]) => (
+                    <tr key={k}><td className="mono small">{k}</td><td className="small" style={{ whiteSpace: "pre-wrap" }}>{Array.isArray(v) ? v.join(", ") : String(v)}</td></tr>
+                  ))}</tbody>
+                </table>
+              )}
               {result.first_item && (
                 <details className="req-call-part"><summary className="small">The first item (what the field expressions read)</summary>
                   <pre className="mono small">{result.first_item}</pre></details>
               )}
             </>
           ) : <div className="error-text">{result.error}</div>}
-          <Calls result={result} openLast={upto.startsWith("step:")} />
+          <Calls result={result} openLast={upto.startsWith("step:") || upto.startsWith("details:")} />
           <button className="link small" onClick={() => setResult(null)}>hide</button>
         </div>
       )}

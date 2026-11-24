@@ -725,6 +725,70 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
         rest.clear_cache()
 
 
+def test_rest_details(tmp_path, alm_server):
+    """Details calls: made only for the requirements needed in full (get), several at once, their fields added to
+    those of the list; item variables; cached by request and version; brief (the coverage's versions) without them."""
+    import os
+    from testsuit.reqs import rest
+    from testsuit.reqs.sources import Sources
+    base, calls = alm_server
+    rest.clear_cache()
+    options = {"base": base + "/api", "auth": {"bearer": "token"},
+               "fields": {"id": ".key", "title": ".fields.name", "path": '[.folder[]?.name] | join("/")',
+                          "description": ".nothing"},
+               "list": {"url": "items?page={{ page }}", "items": ".data[]"},
+               "item_vars": {"k": ".key"},
+               "details": [{"url": "item/{{ k }}", "fields": {"description": ".fields.text", "title": '"Full " + .fields.name'},
+                            "cache": "1h"},
+                           {"url": "item/{{ id }}", "fields": {"comments": '"c " + .key', "rationale": ".nope"}}]}
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"sources": {"alm": {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"},
+                                                        "options": options}}}), encoding="utf-8")
+    os.environ["ALM_TOKEN"] = "s3cret"
+    try:
+        sources = Sources(file)
+        listed = sources.list("", True)
+        assert len(listed) == 5 and not listed["ALM-1"].description and listed["ALM-1"].title == "Item 1"
+        assert not [c for c in calls if "/item/" in c]                          # listing: no details call
+        from testsuit.reqs.model import Ref
+        found = sources.get([Ref("alm", "ALM-1"), Ref("alm", "ALM-2"), Ref("alm", "NOPE")])
+        one = found[Ref("alm", "ALM-1")]
+        assert (one.description, one.title, one.comments, one.rationale) == ("Text 1", "Full Item 1", "c ALM-1", "")
+        assert one.version == listed["ALM-1"].version and one.path == "SYS/BRAKE" and found[Ref("alm", "NOPE")] is None
+        assert sorted(c for c in calls if "/item/" in c) == ["/api/item/ALM-1", "/api/item/ALM-1", "/api/item/ALM-2",
+                                                             "/api/item/ALM-2"]
+        # the coverage's check of the versions: no details call
+        calls.clear()
+        brief = Sources(file).get([Ref("alm", "ALM-3")], brief=True)[Ref("alm", "ALM-3")]
+        assert brief.version and not brief.description and not [c for c in calls if "/item/" in c]
+        # another backend: the cached call is not made again, the other one is
+        calls.clear()
+        assert Sources(file).get([Ref("alm", "ALM-1")])[Ref("alm", "ALM-1")].description == "Text 1"
+        assert [c for c in calls if "/item/" in c] == ["/api/item/ALM-1"]
+        # the snapshot of a generation keeps the details
+        snap = __import__("testsuit.reqs.snapshot", fromlist=["build"]).build(file, ["alm:ALM-2"], [])
+        assert snap["requirements"]["ALM-2"]["description"] == "Text 2", snap
+        # the Editor's test of a details call: on the first requirement of the list
+        backend = Sources(file).backend("alm")
+        backend.trace = []
+        probe = backend.probe("details:1")
+        assert probe["item_vars"] == {"k": "ALM-1"} and probe["requirement"]["description"] == "Text 1"
+        assert [c["call"] for c in backend.trace] == ["list, page 1", "details 1 of ALM-1"]
+        assert "comments" not in probe["requirement"]
+
+        def fails(match, **change):
+            bad = Sources(file)
+            bad.replace("alm", {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"}, "options": {**options, **change}})
+            with pytest.raises(ReqError, match=match):
+                bad.backend("alm")
+        fails("come.s. from the list only", details=[{"url": "item/{{ id }}", "fields": {"version": ".v"}}])
+        fails("unknown variable 'nope'", details=[{"url": "item/{{ nope }}", "fields": {"title": ".t"}}])
+        fails("unknown field", details=[{"url": "item/{{ id }}", "fields": {"colour": ".c"}}])
+        fails("a built-in one", item_vars={"id": ".key"})
+    finally:
+        os.environ.pop("ALM_TOKEN", None)
+
+
 def test_rest_debugging(tmp_path, alm_server, monkeypatch):
     """Debugging a rest source: an error names the call and its full URL (credentials masked); the Editor's tests
     describe each call (URL, headers, status, answer, what it extracted), up to a step or the list call, with the

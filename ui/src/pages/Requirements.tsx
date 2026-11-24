@@ -66,9 +66,16 @@ export function CoverageTiles({ rows }: { rows: any[] }) {
   );
 }
 
-function RequirementDetail({ req }: { req: any }) {
+/** A requirement opened. With a session (the Requirements tab, live): read again in full from its source, as
+ *  generation reads it (a REST source's details calls), the row's fields shown meanwhile. */
+function RequirementDetail({ req: row, sid }: { req: any; sid?: string }) {
+  const full = useResource<any>(sid && row.source && row.id
+    ? `edit/sessions/${sid}/requirements/item?source=${encodeURIComponent(row.source)}&id=${encodeURIComponent(row.id)}` : null);
+  const req = { ...row, ...(full.data?.requirement || {}), version: row.version };
   return (
     <div className="req-detail">
+      {full.loading && !full.data && <Spinner text="Reading it in full…" />}
+      {(full.data?.error || full.error) && <div className="warn small">Not read in full: {full.data?.error || full.error}</div>}
       {req.title && <strong>{req.title}</strong>}
       <RichText text={req.description} />
       {req.rationale && <div className="small req-long"><span className="muted">Rationale</span><RichText text={req.rationale} /></div>}
@@ -95,7 +102,7 @@ function testHref(t: any) {
 }
 
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
-export function CoverageView({ data, node = "", children = true, showTests = true }: { data: any; node?: string; children?: boolean; showTests?: boolean }) {
+export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
   const [open, setOpen] = useState<string | null>(null);
   const tests: any[] = data.tests || [];
   const rows: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
@@ -146,7 +153,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>
-                        {open === r.key && <tr className="cov-detail"><td colSpan={3 + tests.length}><RequirementDetail req={r} /></td></tr>}
+                        {open === r.key && <tr className="cov-detail"><td colSpan={3 + tests.length}><RequirementDetail req={r} sid={sid} /></td></tr>}
                       </Fragment>
                     ))}
                   </Fragment>
@@ -357,7 +364,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
               </select></label>
               {node && <label title="The requirements of the descendants of the node too"><input type="checkbox" checked={children} onChange={(e) => setChildren(e.target.checked)} /> with sub-nodes</label>}
             </div>
-            <CoverageView data={d.coverage} node={node} children={node ? children : true} />
+            <CoverageView data={d.coverage} node={node} children={node ? children : true} sid={sid} />
           </div>
         </div>
       )}

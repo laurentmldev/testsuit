@@ -44,6 +44,13 @@ alone, its fields picked from the answers with jq expressions::
             tags: '[.tags[]?.name]'
             version: .version
           url: https://alm.example/items/{{ id }}
+          item_vars: {item_id: .id}              # optional: jq on each list item, for the details calls
+          details:                               # optional: calls per requirement, adding fields
+            - url: /items/{{ item_id }}
+              fields: {description: .data.text, rationale: .data.custom.rationale}
+              cache: 1d
+            - url: /items/{{ item_id }}/comments
+              fields: {comments: '[.data[].body] | join("\\n\\n")'}
 
 Variables: ``{{ name }}`` in URLs (URL-encoded), headers and bodies (a body string made of one ``{{ name }}`` keeps the
 value's type); ``$name`` in jq expressions. Those of the source, those the steps extract, and ``page``, ``offset``,
@@ -52,6 +59,16 @@ value's type); ``$name`` in jq expressions. Those of the source, those the steps
 A step's variable is ``name: <jq>`` or ``name: {jq, mandatory}``. It must give one value at most (several: an
 error); none gives it empty, an error when it is mandatory (a fallback: jq's ``//``, ``.id // 0``). Mandatory ones are
 the context of the requirements, recorded and shown with them, like the source's mandatory variables.
+
+Details: calls made for each requirement that is needed in full (one linked by a test definition, at generation; one
+opened in the Requirements tab), never to list or to build the tree. Each gives fields with jq on its answer, added
+to (or replacing) those of the list item; a later call wins. ``id``, ``path`` and ``version`` come from the list
+only, so that a requirement compares the same whether its details were read or not (the version, when not a field:
+a hash of the list's fields; give the list a modification field, ``version: .updated``, to see every change).
+``item_vars`` are variables taken from each list item (jq), for the URLs and bodies of the details calls (``{{ id }}``
+is there too). A 404 leaves the fields of that call out. ``cache``: how long to keep an answer (by request, and by
+the version of the requirement when the list gives one: a changed requirement is read again). At most
+``DETAILS_PARALLEL`` calls at once.
 
 Pagination: ``next`` (a jq expression giving the URL of the next page), else ``{{ page }}`` in the URL (from
 ``first_page``, default 1) or ``{{ offset }}`` (stepping by the number of items received), until a page has no item.
@@ -78,6 +95,8 @@ from testsuit.reqs.model import Node, Requirement
 
 FIELDS = ("id", "path", "title", "description", "rationale", "tags", "comments", "status", "version", "url")
 MAX_PAGES = 1000
+DETAILS_PARALLEL = 8                    # details calls at once
+LIST_ONLY = ("id", "path", "version")   # the fields the details calls cannot give
 TRACE_CALLS = 30                        # the calls a test describes (the others are counted)
 TRACE_ANSWER = 16000                    # the characters of an answer it shows
 MASK = "***"
@@ -156,6 +175,14 @@ class RestBackend(ReqBackend):
                   "`description`, `path` (nodes joined by `/`), `rationale`, `status`, `tags` (a list), `comments`, "
                   "`version`, `url`. Default for a field not given (but `url`): `.<field>`.",
         "url": "A link to each requirement in its tool, `{{ id }}` replaced by its id (when no `url` field)." + _SUBST,
+        "item_vars": "Optional: variables taken from each list item with jq (`{item_id: .id}`), for the URLs and bodies "
+                     "of the details calls (an internal id the tool's API wants, the displayed one being `id`).",
+        "details": "Optional calls made per requirement, each adding fields from its answer: `[{url, fields, cache}]`, "
+                   "with `{{ id }}` and the item variables in the URL. Made only for the requirements needed in full "
+                   "(linked by a test definition, at generation; opened in the Requirements tab), never for listing. "
+                   "`fields`: jq on the answer, as `fields` (not `id`, `path`, `version`: those come from the list); "
+                   "a later call wins. `cache`: how long to keep an answer (`1d`); a requirement whose version "
+                   "changed is read again. A 404 leaves its fields out. Optional `method` and `body`." + _SUBST,
         "first_page": "The first `{{ page }}` (default 1).",
         "timeout": "Seconds to wait for each answer (default 30).",
         "verify": "Check the server's TLS certificate: true (default), false, or the path of a CA bundle.",
@@ -192,6 +219,9 @@ class RestBackend(ReqBackend):
             _jq(expr, f"field '{f}'", known)
         self.list_spec = self._spec(o["list"], "list", known)
         self.get_spec = self._spec(o["get"], "get", known) if o.get("get") else None
+        self.item_vars = self._item_vars(o.get("item_vars"), names, known)
+        self.details = self._details(o.get("details"), known)
+        self.version_given = "version" in fields
         self._check_names(names)
         self.session = self._session()
         self._all: dict[str, Requirement] | None = None
@@ -199,6 +229,8 @@ class RestBackend(ReqBackend):
         self._programs: dict[str, Any] = {}
         self.trace_more = 0                                  # the calls made beyond the TRACE_CALLS described
         self._record: dict | None = None                     # the description of the latest call, when traced
+        self._items: dict[str, dict[str, Any]] = {}          # the item variables of each requirement read
+        self._detailed: dict[str, Requirement] = {}          # the requirements with their details, by id
 
     def _steps(self, steps: Any) -> list[dict]:
         if steps in (None, []):
@@ -232,6 +264,49 @@ class RestBackend(ReqBackend):
             out.append(spec)
         return out
 
+    def _item_vars(self, spec: Any, names: list[str], known: Mapping[str, Any]) -> dict[str, str]:
+        if not spec:
+            return {}
+        if not isinstance(spec, dict):
+            raise ReqError("rest backend: 'item_vars' is a mapping of names to jq expressions on a list item")
+        out = {}
+        for name, expr in spec.items():
+            if not NAME.fullmatch(str(name)) or name in BUILT_IN or name in names:
+                raise ReqError(f"rest backend: item_vars: '{name}' cannot be a variable name"
+                               + (" (a built-in one)" if name in BUILT_IN else " (already a variable)" if name in names
+                                  else " (letters, digits, _)"))
+            _jq(str(expr), f"rest backend: item_vars: '{name}'", known)
+            out[str(name)] = str(expr)
+        return out
+
+    def _details(self, spec: Any, known: Mapping[str, Any]) -> list[dict]:
+        if spec in (None, []):
+            return []
+        if isinstance(spec, dict):
+            spec = [spec]
+        if not isinstance(spec, list):
+            raise ReqError("rest backend: 'details' is a list of calls: [{url, fields}]")
+        out = []
+        for n, call in enumerate(spec, 1):
+            where = f"rest backend: details {n}"
+            if not isinstance(call, dict) or not call.get("url"):
+                raise ReqError(f"{where}: {{url, fields[, cache, method, body]}} expected")
+            fields = call.get("fields") or {}
+            if not isinstance(fields, dict) or not fields:
+                raise ReqError(f"{where}: 'fields' gives fields of the requirement: {{description: <jq>}}")
+            bad = sorted(set(fields) - set(FIELDS))
+            if bad:
+                raise ReqError(f"{where}: unknown field(s) {', '.join(bad)} (fields: {', '.join(FIELDS)})")
+            only = sorted(set(fields) & set(LIST_ONLY))
+            if only:
+                raise ReqError(f"{where}: {', '.join(only)} come(s) from the list only (fields of the list)")
+            for f, expr in fields.items():
+                _jq(str(expr), f"{where}: field '{f}'", known)
+            out.append({**call, "fields": {str(f): str(e) for f, e in fields.items()},
+                        "cache": duration(call["cache"], f"{where}: cache") if call.get("cache") else 0,
+                        "name": f"details {n}"})
+        return out
+
     def _check_names(self, names: list[str]) -> None:
         """Each {{ name }} of the URLs, headers and bodies is a variable."""
         def texts(value: Any, where: str) -> Iterable[tuple[str, str]]:
@@ -251,6 +326,9 @@ class RestBackend(ReqBackend):
         for key in ("list", "get"):
             for text, where in texts({k: (o.get(key) or {}).get(k) for k in ("url", "body")}, key):
                 self._names(text, where, [*names, *BUILT_IN])
+        for call in self.details:
+            for text, where in texts({k: call.get(k) for k in ("url", "body")}, call["name"]):
+                self._names(text, where, [*names, *self.item_vars, "id"])
         for text, where in texts({"headers": o.get("headers"), "url": o.get("url")}, "options"):
             self._names(text, where, [*names, *BUILT_IN])
 
@@ -488,22 +566,24 @@ class RestBackend(ReqBackend):
                 record["error"] = error
             raise ReqError(f"{where}: {error}") from e
 
-    def _step_answer(self, step: dict, variables: Mapping[str, Any], label: str = "step") -> Any:
-        """The answer of a step's call, from the cache when it has one (keyed by the request, credentials included).
-        A traced call (a test) does not use the cache: it shows what the server answers now."""
+    def _step_answer(self, step: dict, variables: Mapping[str, Any], label: str = "step", missing_ok: bool = False,
+                     version: str | None = None) -> Any:
+        """The answer of a step's (or details) call, from the cache when it has one (keyed by the request, credentials
+        included, and the version of the requirement it is about). A traced call (a test) does not use the cache: it
+        shows what the server answers now."""
         url = self._url(self._fill(str(step["url"]), encode=True, variables=variables), variables)
         if not step["cache"] or self.trace is not None:
-            return self._call(step, url, variables=variables, label=label)
+            return self._call(step, url, variables=variables, label=label, missing_ok=missing_ok)
         key = hashlib.sha256(json.dumps([str(step.get("method") or "GET").upper(), url,
                                          self._fill_data(step.get("body"), variables),
                                          sorted(self.session.headers.items()), sorted(self.params.items()),
-                                         repr(self.session.auth)], default=str).encode()).hexdigest()
+                                         repr(self.session.auth), version], default=str).encode()).hexdigest()
         now = time.monotonic()
         with _cache_lock:
             hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
-        answer = self._call(step, url, variables=variables, label=label)
+        answer = self._call(step, url, variables=variables, label=label, missing_ok=missing_ok)
         with _cache_lock:
             _cache[key] = (now + step["cache"], answer)
         return answer
@@ -559,6 +639,12 @@ class RestBackend(ReqBackend):
                 values[name] = value
         if not values.get("id"):
             return None
+        if self.item_vars:
+            item_values = {}
+            for name, expr in self.item_vars.items():
+                found = _all(self._program(expr, f"item_vars '{name}'"), item, f"item_vars '{name}'")
+                item_values[name] = found[0] if found and found[0] is not None else ""
+            self._items[str(values["id"])] = item_values
         req = Requirement.from_dict(values)
         req.path = req.path.strip("/")
         if not req.url and self.options.get("url"):
@@ -591,8 +677,28 @@ class RestBackend(ReqBackend):
             if not 1 <= count <= len(self.steps):
                 raise ReqError(f"rest backend: no step {count} (steps: {len(self.steps)})")
             return {"vars": self._run_steps(count)}
+        m = re.fullmatch(r"details:(\d+)", upto)
+        if m:                                              # the list's first page, then the details of its first one
+            count = int(m.group(1))
+            if not 1 <= count <= len(self.details):
+                raise ReqError(f"rest backend: no details call {count} (details calls: {len(self.details)})")
+            self._variables()
+            first = None
+            for item in next(iter(self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"]))), []):
+                first = self.requirement(item)
+                if first is not None:
+                    break
+            if first is None:
+                raise ReqError("rest backend: the list's first page has no requirement to read the details of")
+            calls, self.details = self.details, self.details[count - 1:count]
+            try:
+                self._with_details([first])
+            finally:
+                self.details = calls
+            return {"vars": dict(self._found or {}), "item_vars": self._items.get(first.id, {}),
+                    "requirement": self._detailed[first.id].as_dict()}
         if upto != "list":
-            raise ReqError(f"rest backend: '{upto}': step:<N> or list expected")
+            raise ReqError(f"rest backend: '{upto}': step:<N>, list or details:<N> expected")
         self._variables()
         items = next(iter(self._pages({**self.list_spec, "name": "list"}, str(self.list_spec["url"]))), [])
         sample = []
@@ -625,6 +731,58 @@ class RestBackend(ReqBackend):
         return [r for r in self._everything().values() if under(r.path, path, children)]
 
     def get(self, ids: Iterable[str]) -> dict[str, Requirement | None]:
+        """The requirements of these ids, with their details (the details calls, when there are some)."""
+        found = self._get(ids)
+        missing = [r for r in found.values() if r is not None and r.id not in self._detailed]
+        if self.details and missing:
+            self._with_details(missing)
+        return {i: (self._detailed.get(i, r) if r is not None else None) for i, r in found.items()}
+
+    def brief(self, ids: Iterable[str]) -> dict[str, Requirement | None]:
+        """Without the details calls (the version comes from the list)."""
+        return self._get(ids)
+
+    def _with_details(self, reqs: list[Requirement]) -> None:
+        """Each requirement with the fields of the details calls (several at once, but in order when traced)."""
+        variables = self._variables()
+        for call in self.details:                          # compiled once, before the threads
+            for f, expr in call["fields"].items():
+                self._program(expr, f"{call['name']}: field '{f}'")
+
+        def one(req: Requirement) -> Requirement:
+            values = {k: v for k, v in req.as_dict().items() if v not in (None, "", [])}
+            local = {**variables, **self._items.get(req.id, {}), "id": req.id}
+            for call in self.details:
+                answer = self._step_answer(call, local, f"{call['name']} of {req.id}", missing_ok=True,
+                                           version=req.version if self.version_given else None)
+                if answer is None:
+                    continue
+                for f, expr in call["fields"].items():
+                    where = f"rest backend: {call['name']} of {req.id}: field '{f}'"
+                    got = _all(self._program(expr, where), answer, where)
+                    value = got[0] if got else None
+                    if f == "tags":
+                        value = [str(t) for t in (value if isinstance(value, list) else [value] if value not in (None, "") else [])]
+                    elif isinstance(value, list):
+                        value = ", ".join(str(v) for v in value if v is not None)
+                    elif value is not None:
+                        value = str(value)
+                    if value not in (None, "", []):
+                        values[f] = value
+            out = Requirement.from_dict(values)
+            out.version = req.version                      # from the list: compares the same with or without details
+            return out
+
+        if self.trace is not None or len(reqs) == 1:
+            done = [one(r) for r in reqs]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=DETAILS_PARALLEL) as pool:
+                done = list(pool.map(one, reqs))
+        for r in done:
+            self._detailed[r.id] = r
+
+    def _get(self, ids: Iterable[str]) -> dict[str, Requirement | None]:
         ids = list(ids)
         spec = self.get_spec
         if spec is None or self._all is not None or not ids:

@@ -93,6 +93,11 @@ class ReqBackend:
         """The requirements of these ids; None for an id the tool does not know."""
         raise NotImplementedError
 
+    def brief(self, ids: Iterable[str]) -> dict[str, Requirement | None]:
+        """The requirements of these ids, possibly without the fields that cost more calls, but with their version:
+        the coverage's check of the current versions. Default: get()."""
+        return self.get(ids)
+
     def revision(self) -> str | None:
         """A revision of the whole source, recorded in the baseline (None: none)."""
         return None
