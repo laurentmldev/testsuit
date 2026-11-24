@@ -14,10 +14,10 @@
 // Requirements form (sequencer README, section 10.3): the sources file (`requirements.yml`: its sources, each with its
 // backend, options and credentials, and the default one) and the requirements of the built-in YAML backend (the
 // labels of the nodes, and each requirement with its path in the tree).
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Combo, Field, helpText, IdText, KeyValues, scalar, Section, Tags, Text, type Choice } from "../fields";
 import { send } from "../api";
-import { classes, joinPath } from "../util";
+import { classes, joinPath, useRoute } from "../util";
 import { clone, useSession, type Doc } from "./state";
 
 const SOURCES_FILE = "requirements.yml";
@@ -160,6 +160,12 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
     }
   };
   const backend = backends.find((b) => b.name === String(spec.backend || "").toLowerCase());
+  // the source the page was opened on (#/edit/<sid>?file=requirements.yml&source=<name>), from the Requirements view
+  const target = useRoute().query.get("source") === name;
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (target) card.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [target]);
   const options: Data = spec.options || {};
   const credentials: Data = spec.credentials || {};
   const set = (k: string, v: any) => onChange({ ...spec, [k]: v });
@@ -169,7 +175,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   const yamlFound = yamlFile && files.some((f) => f.path === yamlFile);
   const credRows = [...new Set([...Object.keys(credentials), ...knownCredentials])];
   return (
-    <div className={classes("req-source", isDefault && "default")}>
+    <div ref={card} className={classes("req-source", isDefault && "default", target && "target")}>
       <div className="req-source-head">
         <IdText value={name} taken={taken} onChange={onRename} />
         <label className="toggle" title="The source of the references without a prefix">
@@ -634,18 +640,18 @@ function Credentials({ value, rows, help, onChange, unused }: {
 
 const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** A variable as written: a value, or {value | jq, mandatory, default}. */
-function varParts(spec: any, key: "value" | "jq"): { value: any; mandatory: boolean; dflt: any } {
-  if (spec && typeof spec === "object" && !Array.isArray(spec)) return { value: spec[key], mandatory: !!spec.mandatory, dflt: spec.default };
-  return { value: spec, mandatory: false, dflt: undefined };
+/** A variable as written: a value, or {value | jq, mandatory}. A fallback is written in the value itself (Jinja2's
+ *  default filter, jq's //). */
+function varParts(spec: any, key: "value" | "jq"): { value: any; mandatory: boolean } {
+  if (spec && typeof spec === "object" && !Array.isArray(spec)) return { value: spec[key], mandatory: !!spec.mandatory };
+  return { value: spec, mandatory: false };
 }
 
-function varSpec(key: "value" | "jq", value: any, mandatory: boolean, dflt: any): any {
-  if (!mandatory && (dflt === undefined || dflt === "")) return value ?? "";
-  return { [key]: value ?? "", ...(mandatory ? { mandatory: true } : {}), ...(dflt !== undefined && dflt !== "" ? { default: dflt } : {}) };
+function varSpec(key: "value" | "jq", value: any, mandatory: boolean): any {
+  return mandatory ? { [key]: value ?? "", mandatory: true } : value ?? "";
 }
 
-/** Rows of variables: name, value (or jq), mandatory, default. Mandatory ones are the context of the requirements. */
+/** Rows of variables: name, value (or jq), mandatory. Mandatory ones are the context of the requirements. */
 function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
   value?: Data | null; onChange: (v: Data) => void; keyName: "value" | "jq"; placeholder: string; namePlaceholder: string;
 }) {
@@ -657,16 +663,14 @@ function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
   return (
     <div className="kv req-vars-rows">
       {Object.entries(data).map(([k, spec]) => {
-        const { value: v, mandatory, dflt } = varParts(spec, keyName);
+        const { value: v, mandatory } = varParts(spec, keyName);
         return (
           <div key={k} className="kv-row">
             <span className={classes("mono req-var-name", mandatory && "strong")}>{k}</span>
             <input className="mono kv-value" placeholder={placeholder} value={v === null || v === undefined ? "" : String(v)}
-              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory, dflt))} />
-            <input className="mono req-var-default" placeholder="default" value={dflt === null || dflt === undefined ? "" : String(dflt)}
-              title="Its value when it has none" onChange={(e) => put(k, varSpec(keyName, v, mandatory, e.target.value === "" ? undefined : scalar(e.target.value)))} />
+              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory))} />
             <label className="toggle small" title="It must have a value, and is the context of the requirements: shown with them and recorded in the datapack">
-              <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked, dflt))} /> mandatory
+              <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked))} /> mandatory
             </label>
             <button className="icon" title="Remove" onClick={() => { const next = { ...data }; delete next[k]; onChange(next); }}>×</button>
           </div>
@@ -689,7 +693,8 @@ function Variables({ value, onChange }: { value?: Data | null; onChange: (v: Dat
       <VarRows value={value} onChange={onChange} keyName="value" namePlaceholder="new variable (branch, version…)"
         placeholder="value, or {{ sut.version | default('3.2') }}" />
       {value && Object.keys(value).length > 0 && (
-        <div className="hint">{"{{ name }}"} in the options, <code>$name</code> in jq expressions</div>
+        <div className="hint">{"{{ name }}"} in the options, <code>$name</code> in jq expressions. A value can use the datapack keys,
+          with a fallback where there are none: <code>{"{{ sut.branch | default('main') }}"}</code></div>
       )}
     </>
   );
@@ -712,7 +717,7 @@ function Steps({ value, onChange }: { value?: any[] | null; onChange: (v: any[])
           <Field label="URL suffix"><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
           <Field label="Variables (jq)">
             <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
-              namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id" />
+              namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id   (fallback: // 0)" />
           </Field>
           <Field label="Cache"><Text mono value={step.cache} placeholder="none: once per generation; or 10m, 1h, 1d" onChange={(v) => setIn(i, "cache", scalar(v.trim()))} /></Field>
           <Field label="Method">

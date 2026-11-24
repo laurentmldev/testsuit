@@ -265,6 +265,21 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const res = useResource<any>(path, ["run"]);
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
+  // the source shown, and a button to edit it in the Editor (its YAML requirements, or its entry in the sources file)
+  const picker = d && (
+    <div className="req-source-pick">
+      {d.sources.length > 1 && (
+        <select value={d.source} onChange={(e) => { setSource(e.target.value); setNode(""); }} title="The source of the requirements">
+          {d.sources.map((s: string) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      )}
+      {d.edit && (
+        <button className="small" onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.edit.file, ...(d.edit.source ? { source: d.edit.source } : {}) } })}
+          title={d.edit.source ? `Edit the source '${d.edit.source}' (its backend, options, credentials) in the Editor, in a new browser tab`
+            : `Edit the requirements of '${d.source}' (${d.edit.file}) in the Editor, in a new browser tab`}>✎ Edit</button>
+      )}
+    </div>
+  );
   const rows: any[] = d?.coverage?.requirements || [];
   return (
     <div className="requirements-tab">
@@ -280,15 +295,11 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
           }}>Create requirements.yml…</button>
         </div>
       )}
-      {d?.error && <div className="error-box">{d.error}</div>}
+      {d?.error && <>{d.sources?.length > 0 && <div className="req-tree">{picker}</div>}<div className="error-box">{d.error}</div></>}
       {d?.coverage && (
         <div className="requirements-layout">
           <nav className="req-tree">
-            {d.sources.length > 1 && (
-              <select value={d.source} onChange={(e) => { setSource(e.target.value); setNode(""); }} title="The source of the requirements">
-                {d.sources.map((s: string) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            )}
+            {picker}
             <button className={classes("req-tree-item", node === "" && "active")} onClick={() => setNode("")}>
               <span>All requirements</span><span className="muted small">{rows.length}</span>
             </button>

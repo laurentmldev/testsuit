@@ -318,6 +318,16 @@ def test_editor_requirements_page(tmp_path):
     rows = {r["key"]: r["coverage"] for r in data["coverage"]["requirements"]}
     assert rows == {"REQ-1": "not run", "REQ-2": "uncovered", "REQ-3": "uncovered", "REQ-5": "uncovered"}
     assert data["coverage"]["tests"][0]["origin"] == "testdef/count/testdef.yml"
+    assert data["edit"] == {"file": "requirements.yml", "source": None}       # a yaml source: its requirements file
+    # a source of another backend: the sources file, at that source, even when the source does not read
+    editor.write(session, "reqs/system.yml", content=yaml.safe_dump(REQS))
+    editor.write(session, "requirements.yml", content=yaml.safe_dump({"sources": {
+        "reqs": {"backend": "yaml", "options": {"file": "reqs/system.yml"}},
+        "alm": {"backend": "rest", "options": {"base": "http://127.0.0.1:9", "list": {"url": "x"}}}}}, sort_keys=False))
+    assert editor.requirements(session)["edit"] == {"file": "reqs/system.yml", "source": None}
+    data = editor.requirements(session, "alm")
+    assert data["edit"] == {"file": "requirements.yml", "source": "alm"} and data["error"] and data["sources"] == ["reqs", "alm"]
+    editor.write(session, "requirements.yml", content=yaml.safe_dump(REQS))
     # the overview of the test definition (Datapacks) lists the requirements it covers
     covered = editor.synthesis(session, "testdef/count/testdef.yml", versions=False, run_checks=False)["requirements"]
     assert [(i["key"], i["title"], i["by"], i["found"]) for i in covered["items"]] == [
@@ -688,11 +698,13 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
         # unknown variables: in a URL, in jq
         fails("unknown variable 'nope'", options={**options, "list": {"url": "sub/{{ nope }}/items"}})
         fails(r"\$nope is not defined", options={**options, "list": {**options["list"], "items": ".data[] | $nope"}})
-        # a default: no value is not an error
+        # a fallback in the jq expression (no 'default' key: refused)
+        fails("variable 'sub_id': {jq, mandatory} expected", options={**options, "steps": [{**options["steps"][0], "extract": {
+            "sub_id": {"jq": ".id", "default": 7}}}]})
         file.write_text(yaml.safe_dump({"sources": {"alm": {**spec, "vars": {**spec["vars"], "subsystem": "Nope"},
                                          "options": {**options, "steps": [{**options["steps"][0], "extract": {
-                                             "sub_id": {"jq": options["steps"][0]["extract"]["sub_id"]["jq"],
-                                                        "default": 7}}}]}}}}), encoding="utf-8")
+                                             "sub_id": {"jq": "(.items[] | select(.name == $subsystem) | .id) // 7",
+                                                        "mandatory": True}}}]}}}}), encoding="utf-8")
         assert list(Sources(file).list("", True)) == ["ALM-1", "ALM-2"]
     finally:
         os.environ.pop("ALM_TOKEN", None)
