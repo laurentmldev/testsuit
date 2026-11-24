@@ -18,14 +18,17 @@ import { RunsCoverage } from "./Requirements";
 import { useEffect, useRef, useState } from "react";
 import { get, post, put, url, useResource } from "../api";
 import { Dialog, Field, IdText, Section, Text, Toggle } from "../fields";
-import { LiveLog, logWarnings } from "../editor/Generate";
+import { LiveLog, logWarnings, USER_KEYS, UserKeyInputs } from "../editor/Generate";
+import { rememberedKeys, rememberKeys } from "../keysbyhand";
 import { ago, attempt, Badge, classes, duration, Markdown, navigate, openInNewTab, setQuery, Spinner, time, type Route } from "../util";
 import { NavIcon } from "../navicons";
 import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 import { Named } from "../kinds";
 
-const CAMPAIGNS_INTRO = `A **campaign** is a list of test definitions generated and run together: one datapack each, all with the **same version of every dataset** they import (the campaign lists each one, no test definition chooses on its own), queued under one campaign run with their **priority** and the **tags** the lab resources must carry. Its runs are grouped under it in **All runs**, with a synthetic report.`;
+const CAMPAIGN_KEYS = "tsq.campaignKeys";              // the values given at generation to the keys of each campaign
+
+const CAMPAIGNS_INTRO = `A **campaign** is a list of test definitions generated and run together: one datapack each, all with the **same version of every dataset** they import (the campaign lists each one, no test definition chooses on its own) and **one value of each key** they ask at each generation, queued under one campaign run with their **priority** and the **tags** the lab resources must carry. Its runs are grouped under it in **All runs**, with a synthetic report.`;
 
 /** The Campaigns subtab: the campaign files of the repository, and the one picked. */
 export function CampaignsTab({ sid, ctx, route, reread }: { sid: string; ctx: any; route: Route; reread: () => void }) {
@@ -47,7 +50,7 @@ export function CampaignsTab({ sid, ctx, route, reread }: { sid: string; ctx: an
           ))}
           <button className="small" onClick={() => setCreating(true)} title="Write a new campaign file in this repository, with the test definitions you pick">New campaign…</button>
         </nav>
-        {selected && <CampaignSynthesis key={`${sid}:${selected}`} sid={sid} campaign={selected} />}
+        {selected && <CampaignSynthesis key={`${sid}:${selected}`} sid={sid} campaign={selected} repository={ctx?.repository?.id || ""} />}
       </div>
       {creating && <NewCampaignDialog sid={sid} ctx={ctx} onClose={() => setCreating(false)}
         onCreated={(path) => { setCreating(false); reread(); setQuery("campaign", path); }} />}
@@ -91,6 +94,7 @@ function NewCampaignDialog({ sid, ctx, onClose, onCreated }: { sid: string; ctx:
         datasets.length ? `datasets:                          # the version of every dataset its test definitions import`
           : `datasets: {}                       # the version of every dataset its test definitions import`,
         ...datasets.map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`),
+        `keys: {}                           # keys pinned for every test definition (else, those they ask are given at generation)`,
       ];
       await put(`edit/sessions/${sid}/files/${path}`, { content: lines.join("\n") + "\n" });
       onCreated(path);
@@ -127,7 +131,7 @@ function NewCampaignDialog({ sid, ctx, onClose, onCreated }: { sid: string; ctx:
 }
 
 /** A campaign at a glance: what it runs, the versions it pins against those its test definitions write, its routing. */
-function CampaignSynthesis({ sid, campaign }: { sid: string; campaign: string }) {
+function CampaignSynthesis({ sid, campaign, repository }: { sid: string; campaign: string; repository: string }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -220,6 +224,7 @@ function CampaignSynthesis({ sid, campaign }: { sid: string; campaign: string })
             )}
             <p className="muted small">The pinned version replaces the one each test definition writes, for this campaign only; the datapacks record it (<code>versions_pinned_by_campaign</code>) and stay conform when it is a tag of its source and the campaign file is on a clean tag. Change them in the campaign file.</p>
           </Section>
+          <CampaignKeys keys={data.keys || []} />
           <Section title={<>Routing <span className="muted small">tags the lab resources of its runs must carry</span></>}>
             <dl className="facts small">
               <dt>Stages</dt>
@@ -234,13 +239,70 @@ function CampaignSynthesis({ sid, campaign }: { sid: string; campaign: string })
           </Section>
         </>
       )}
-      {running && data && <RunCampaignDialog sid={sid} campaign={campaign} data={data} onClose={() => setRunning(false)} />}
+      {running && data && <RunCampaignDialog sid={sid} campaign={campaign} repository={repository} data={data} onClose={() => setRunning(false)} />}
     </div>
   );
 }
 
+const show = (v: any) => (typeof v === "string" ? v : JSON.stringify(v));
+
+/** The keys its test definitions ask at each generation, one value each for the whole campaign, and those it pins. */
+function CampaignKeys({ keys }: { keys: any[] }) {
+  return (
+    <Section title={<>Keys <span className="muted small">one value of each key for the whole campaign</span></>} collapsed={!keys.length}>
+      {keys.length === 0 && <p className="muted small">Its test definitions ask no key at each generation, and the campaign pins none.</p>}
+      {keys.length > 0 && (
+        <table className="grid compact">
+          <thead><tr><th>Key</th><th>Value</th><th>Asked by</th></tr></thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k.key}>
+                <td><code>{k.key}</code>{k.description && <div className="muted small">{k.description}</div>}</td>
+                <td className="small">
+                  {k.is_pinned ? <>pinned <code>{show(k.pinned)}</code></>
+                    : k.given_at_generation ? <span className="badge" title={k.choices ? `one of ${k.choices.map(String).join(", ")}` : "free text"}>given at generation</span>
+                    : null}
+                  {k.choices && k.given_at_generation && <div className="muted small">one of {k.choices.map((c: any) => <code key={String(c)}>{String(c)} </code>)}</div>}
+                  {k.pinned_for.map((p: any) => <div key={p.testdef} className="small">for <span className="mono">{p.testdef}</span>: <code>{show(p.value)}</code></div>)}
+                </td>
+                <td className="small">{k.asked_by.length ? k.asked_by.map((a: any) => <div key={a.testdef} className="mono">{a.testdef}</div>)
+                  : <span className="muted" title="No test definition asks it (user_keys): it is set like a key set by hand">none</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="muted small">A key its test definitions ask at each generation (their <code>user_keys</code>) has one value for every test definition that asks it, given in <strong>Generate and run…</strong> (remembered in this browser for the campaign), unless the campaign file pins it: <code>keys:</code> for every test definition, or the <code>keys:</code> of an entry for that one only. A pinned key is recorded in each datapack (<code>keys_set_by_hand</code>, <code>pinned_by_campaign</code>) and cannot be given at generation. Change them in the campaign file.</p>
+    </Section>
+  );
+}
+
 /** Generate every datapack of the campaign (all of them or none), then post them as one campaign run. */
-function RunCampaignDialog({ sid, campaign, data, onClose }: { sid: string; campaign: string; data: any; onClose: () => void }) {
+function RunCampaignDialog({ sid, campaign, repository, data, onClose }: { sid: string; campaign: string; repository: string; data: any; onClose: () => void }) {
+  // the keys given at generation: one value each for every test definition that asks it, remembered for the campaign
+  // (none remembered: the value last given to it for one of the test definitions that ask it, in their Generate form)
+  const asked: any[] = (data.keys || []).filter((k: any) => k.given_at_generation);
+  const memory = `${repository}:${campaign}`;
+  const [given, setGiven] = useState<Record<string, string>>(() => {
+    const own = Object.fromEntries(rememberedKeys(CAMPAIGN_KEYS, memory).map((r) => [r.key, r.value]));
+    const values: Record<string, string> = {};
+    for (const k of asked) {
+      if (own[k.key] !== undefined) values[k.key] = own[k.key];
+      else for (const a of k.shared_by || []) {
+        const found = rememberedKeys(USER_KEYS, `${repository}:${a.path}`).find((r) => r.key === k.key && r.value !== "");
+        if (found) { values[k.key] = found.value; break; }
+      }
+      if (k.choices && values[k.key] !== undefined && !k.choices.map(String).includes(values[k.key])) delete values[k.key];
+    }
+    return values;
+  });
+  const give = (name: string, value: string) => {
+    const next = { ...given, [name]: value };
+    setGiven(next);
+    rememberKeys(CAMPAIGN_KEYS, memory, Object.entries(next).map(([key, v]) => ({ key, value: v })));
+  };
+  const ungiven = asked.filter((k) => !String(given[k.key] ?? "").trim()).map((k) => k.key);
+  const keys = Object.fromEntries(asked.filter((k) => String(given[k.key] ?? "").trim()).map((k) => [k.key, given[k.key]]));
   const [check, setCheck] = useState(false);
   const [priority, setPriority] = useState("");
   const [busy, setBusy] = useState(false);
@@ -254,7 +316,7 @@ function RunCampaignDialog({ sid, campaign, data, onClose }: { sid: string; camp
     setResult(null);
     setLines([]);
     try {
-      const { job } = await post(`edit/sessions/${sid}/campaign/jobs`, { campaign, nocheck: !check });
+      const { job } = await post(`edit/sessions/${sid}/campaign/jobs`, { campaign, nocheck: !check, keys });
       setJob(job);
       let since = 0;
       for (;;) {
@@ -295,7 +357,8 @@ function RunCampaignDialog({ sid, campaign, data, onClose }: { sid: string; camp
   ) : (
     <>
       {busy && <button onClick={stop}>Stop</button>}
-      <button className="primary" disabled={busy} onClick={generate}>{busy ? "Generating…" : "Generate"}</button>
+      {!busy && ungiven.length > 0 && <span className="muted small">give {ungiven.join(", ")} first</span>}
+      <button className="primary" disabled={busy || ungiven.length > 0} onClick={generate}>{busy ? "Generating…" : "Generate"}</button>
     </>
   );
   return (
@@ -306,6 +369,14 @@ function RunCampaignDialog({ sid, campaign, data, onClose }: { sid: string; camp
           <Field label="Check against the lab" help="Without it (draft), the datapacks are generated even from files that are not on a clean git tag: they are non-conform.">
             <Toggle value={check} onChange={setCheck} label="clean git tags required (conform datapacks)" />
           </Field>
+          {asked.length > 0 && (
+            <Field label="Keys to give" help="Keys its test definitions ask at each generation (their `user_keys`) and the campaign file does not pin: one value for every test definition that asks it (a list holds the choices they have in common). The values are remembered in this browser for the campaign; with none remembered, a key starts from the value last given to it in the Generate form of one of its test definitions.">
+              <UserKeyInputs given={given} onGive={give} keys={Object.fromEntries(asked.map((k) => [k.key, {
+                description: k.description, choices: k.choices,
+                note: <span title={k.shared_by.map((a: any) => a.testdef).join("\n")}>for {k.shared_by.length} test definition{k.shared_by.length === 1 ? "" : "s"}</span>,
+              }]))} />
+            </Field>
+          )}
         </>
       )}
       {(busy || (result && !result.ok)) && <LiveLog lines={busy ? lines : (result.log || "").split("\n")} />}
@@ -317,12 +388,14 @@ function RunCampaignDialog({ sid, campaign, data, onClose }: { sid: string; camp
             {manifest.conform ? <span className="badge ok">conform</span> : <span className="badge warn">non-conform</span>}
           </p>
           <table className="grid compact">
-            <thead><tr><th>Test definition</th><th>Datapack</th><th>Priority</th><th>Conform</th><th></th></tr></thead>
+            <thead><tr><th>Test definition</th><th>Datapack</th><th>Keys</th><th>Priority</th><th>Conform</th><th></th></tr></thead>
             <tbody>
               {manifest.datapacks.map((d: any) => (
                 <tr key={d.zip}>
                   <td className="small mono">{d.testdef}{d.setup_config && <span className="muted"> · {d.setup_config}</span>}</td>
                   <td className="small"><code>{d.name}</code></td>
+                  <td className="small">{Object.keys(d.keys || {}).length === 0 ? <span className="muted">—</span>
+                    : Object.entries(d.keys).map(([k, v]: any) => <div key={k} style={{ whiteSpace: "nowrap" }}><code>{k}</code>: <code>{show(v)}</code></div>)}</td>
                   <td className="small">{d.priority ?? <span className="muted">default</span>}</td>
                   <td><Badge value={d.conform ? "conform" : "non-conform"} /></td>
                   <td><a className="small" href={url(`edit/sessions/${sid}/campaign/${result.name}/files/${d.zip}`)} download>download</a></td>

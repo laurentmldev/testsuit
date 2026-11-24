@@ -13,7 +13,7 @@
 
 // Generate a datapack from the session's files (sequencer README, sections 9 and 13.2), look into it, then
 // download it or post it to the queue: a way to try a change before pushing it.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { get, post, url } from "../api";
 import { Choices, Dialog, Field, Toggle } from "../fields";
 import { FileBrowser } from "../files";
@@ -34,7 +34,7 @@ export function GenerateDialog({ onClose }: { onClose: () => void }) {
 }
 
 const GENERATE_KEYS = "tsq.generateKeys";
-const USER_KEYS = "tsq.userKeys";                       // the values given to the user_keys of each test definition
+export const USER_KEYS = "tsq.userKeys";                     // the values given to the user_keys of each test definition
 const USER_KEY_ORIGIN = "<user key>";                   // the placeholder of such a key, before it is given
 
 /** Generate a datapack of a session's test definitions; testdef and config preselect one (Datapacks page). */
@@ -311,21 +311,7 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
           )}
           {Object.keys(userKeys).length > 0 && (
             <Field label="Keys to give" help="Keys this test definition asks at each generation (its `user_keys`): no dictionary defines them. The values are remembered in this browser for the test definition.">
-              <div className="user-keys">
-                {Object.entries(userKeys).map(([name, spec]) => (
-                  <div key={name} className="user-key">
-                    <code>{name}</code>
-                    {spec.choices?.length
-                      ? <select value={given[name] ?? ""} onChange={(e) => give(name, e.target.value)}>
-                          <option value="">choose…</option>
-                          {spec.choices.map((c) => <option key={String(c)} value={String(c)}>{String(c)}</option>)}
-                        </select>
-                      : <input className="mono" value={given[name] ?? ""} placeholder="value" onChange={(e) => give(name, e.target.value)} />}
-                    {spec.description && <span className="muted small">{spec.description}</span>}
-                    {!String(given[name] ?? "").trim() && <span className="warn-text small">to give</span>}
-                  </div>
-                ))}
-              </div>
+              <UserKeyInputs keys={userKeys} given={given} onGive={give} />
             </Field>
           )}
           {testdef && <BaselineVersions sid={sid} testdef={testdef} config={config} versions={versions} onChange={setVersions} datasets={datasets} setDatasets={setDatasets} />}
@@ -406,6 +392,31 @@ export function GenerateDatapack({ sid, workspace, repository, testdef: initial,
 
 /** The versions of the baseline of a test definition, to change for one generation (datapack --dataset-version):
  *  nothing is written to the files (that is done in the Editor). */
+export interface UserKeySpec { description?: string; choices?: any[] | null; note?: ReactNode }
+
+/** A field for each key asked at each generation (user_keys): a list to pick from for its choices, else free text. */
+export function UserKeyInputs({ keys, given, onGive }: {
+  keys: Record<string, UserKeySpec>; given: Record<string, string>; onGive: (name: string, value: string) => void;
+}) {
+  return (
+    <div className="user-keys">
+      {Object.entries(keys).map(([name, spec]) => (
+        <div key={name} className="user-key">
+          <code>{name}</code>
+          {spec.choices?.length
+            ? <select value={given[name] ?? ""} onChange={(e) => onGive(name, e.target.value)}>
+                <option value="">choose…</option>
+                {spec.choices.map((c) => <option key={String(c)} value={String(c)}>{String(c)}</option>)}
+              </select>
+            : <input className="mono" value={given[name] ?? ""} placeholder="value" onChange={(e) => onGive(name, e.target.value)} />}
+          <span className="muted small">{spec.description}{spec.description && spec.note ? " · " : ""}{spec.note}</span>
+          {!String(given[name] ?? "").trim() && <span className="warn-text small">to give</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BaselineVersions({ sid, testdef, config, versions, onChange, datasets, setDatasets }: {
   sid: string; testdef: string; config: string | null; versions: Record<string, string>; onChange: (v: Record<string, string>) => void;
   datasets: any[] | null; setDatasets: (f: any[] | null | ((cur: any[] | null) => any[] | null)) => void;

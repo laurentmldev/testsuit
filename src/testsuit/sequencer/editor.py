@@ -2868,6 +2868,7 @@ class Editor:
         routing = campaign.routing.model_dump() if campaign else {}
         base = path.parent
         testdefs, datasets = [], {}
+        user_keys: dict[str, dict] = {}                  # the keys its test definitions ask at each generation, by name
         lab = self.seq.lab
         for entry in entries:
             file = (base / entry.testdef).resolve()
@@ -2895,6 +2896,14 @@ class Editor:
                                                     "source": d.get("source"), "pinned": pinned.get(d["id"]), "used_by": []})
                 row["used_by"].append({"testdef": entry.testdef, "written": d.get("version") or d.get("written"),
                                        "defined_in": d.get("defined_in")})
+            try:
+                asked = self._builder_testdef(session, rel, entry.setup_config).user_keys
+            except Exception:                            # its problems are reported by the synthesis above
+                asked = {}
+            for name, spec in asked.items():
+                row = user_keys.setdefault(name, {"key": name, "asked_by": []})
+                row["asked_by"].append({"testdef": entry.testdef, "path": rel, "description": spec.description,
+                                        "choices": spec.choices})
             item["routing_problems"] = self._routing_problems(lab, found, routing)
             problems += [f"{entry.testdef}: {p}" for p in item["routing_problems"]]
         for row in datasets.values():
@@ -2904,6 +2913,7 @@ class Editor:
                                 "(datasets:)")
             written = {u["written"] for u in row["used_by"]}
             row["differs"] = len(written) > 1
+        keys = self._campaign_keys(campaign, entries, user_keys, problems, warnings) if campaign else []
         for name, version in pinned.items():
             if name not in datasets:
                 warnings.append(f"dataset '{name}' is pinned to {version} but no test definition of the campaign imports it")
@@ -2911,8 +2921,63 @@ class Editor:
         return {"path": campaign_rel, "raw": raw,
                 "campaign": {"id": raw.get("id"), "name": raw.get("name"), "description": raw.get("description") or "",
                              "priority": raw.get("priority"), "baseline": raw.get("baseline")},
-                "testdefs": testdefs, "datasets": list(datasets.values()), "routing": routing,
+                "testdefs": testdefs, "datasets": list(datasets.values()), "routing": routing, "keys": keys,
                 "problems": problems, "warnings": warnings, "git": git_state(path.parent)}
+
+    def _builder_testdef(self, session: EditSession, testdef_rel: str, setup_config: str | None):
+        """The test definition as the datapack tool reads it (its user_keys)."""
+        from testsuit.datatools.datapack.datapack_tools import _Builder
+        with self._quiet():
+            return _Builder(self.path(session, testdef_rel), nocheck=True, setup_config=setup_config).load_testdef()
+
+    @staticmethod
+    def _campaign_keys(campaign, entries, user_keys: dict[str, dict], problems: list[str], warnings: list[str]) -> list[dict]:
+        """The keys of a campaign, one row per name (shared by its test definitions): those its test definitions ask
+        at each generation (``asked_by``); what the campaign pins (``pinned``: its value for every test definition,
+        ``pinned_for``: an entry's own); the test definitions that share one value (``shared_by``: those it is not
+        pinned for, by entry), with the choices they have in common (None: free text); whether it is given at
+        generation."""
+        rows: dict[str, dict] = {}
+
+        def row(name: str) -> dict:
+            return rows.setdefault(name, {"key": name, "asked_by": [], "description": "", "choices": None,
+                                          "pinned": campaign.keys.get(name), "is_pinned": name in campaign.keys,
+                                          "pinned_for": [], "shared_by": []})
+        for name, asked in user_keys.items():
+            r = row(name)
+            r["asked_by"] = asked["asked_by"]
+            r["description"] = next((a["description"] for a in asked["asked_by"] if a.get("description")), "")
+        for entry in entries:
+            for name, value in entry.keys.items():
+                row(name)["pinned_for"].append({"testdef": entry.testdef, "value": value})
+        for name in campaign.keys:
+            row(name)
+        for r in rows.values():
+            name = r["key"]
+            if not r["asked_by"]:
+                warnings.append(f"key '{name}' is pinned by the campaign but no test definition asks it "
+                                "(user_keys): it is set like a key set by hand")
+            own = {p["testdef"]: p["value"] for p in r["pinned_for"]}
+            for asked in r["asked_by"]:               # an entry's own value: one of its own choices
+                choices = [str(c) for c in asked.get("choices") or []]
+                if asked["testdef"] in own and choices and str(own[asked["testdef"]]) not in choices:
+                    problems.append(f"key '{name}' pinned for {asked['testdef']}: '{own[asked['testdef']]}' is not "
+                                    f"one of its choices ({', '.join(choices)})")
+            r["shared_by"] = [a for a in r["asked_by"] if a["testdef"] not in own]
+            lists = [[str(c) for c in a["choices"]] for a in r["shared_by"] if a.get("choices")]
+            if lists:
+                first = next(a["choices"] for a in r["shared_by"] if a.get("choices"))
+                r["choices"] = [c for c in first if all(str(c) in other for other in lists)]
+                if not r["choices"]:
+                    problems.append(f"key '{name}': its test definitions have no choice in common ("
+                                    + "; ".join(f"{a['testdef']}: {', '.join(str(c) for c in a['choices'])}"
+                                                for a in r["shared_by"] if a.get("choices"))
+                                    + "): pin it for each one in the campaign file (keys: of its entry)")
+                elif r["is_pinned"] and str(r["pinned"]) not in [str(c) for c in r["choices"]]:
+                    problems.append(f"key '{name}': '{r['pinned']}' is not one of its choices "
+                                    f"({', '.join(str(c) for c in r['choices'])})")
+            r["given_at_generation"] = not r["is_pinned"] and bool(r["shared_by"])
+        return list(rows.values())
 
     @staticmethod
     def _routing_problems(lab, found: dict, routing: dict) -> list[str]:

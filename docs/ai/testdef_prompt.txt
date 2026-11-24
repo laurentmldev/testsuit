@@ -51,6 +51,8 @@ setup_config: <name>         REQUIRED. A key of the setup's `configurations`.
 dictionaries: [<path>...]    Relative to testdef.yml.
 user_keys: {<dotted.key>: {description: <str>, choices: [<v>...]}}   given by the user at each generation
                              (`datapack --set k=v`); no choices = free text. Must NOT be defined in any dictionary.
+                             In a campaign, one value per key name for every testdef that asks it (pinned in the
+                             campaign's `keys:`, or given at generation): reuse a name only for the same meaning.
 reqs: ["[<source>:]<id>[@<version>]"...]   requirements verified by the verdict (prefer `reqs` on the checks).
 pipeline: {...}              see PIPELINE.
 All fields except `pipeline` are Jinja-rendered at generation with the dictionary keys. `pipeline` is kept as written and

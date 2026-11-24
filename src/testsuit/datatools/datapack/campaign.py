@@ -21,7 +21,8 @@ A campaign file (``<name>.campaign.yml``, in the tests repository)::
     priority: 60                          # default priority of its runs (else the sequencer's default)
     testdefs:                             # relative to this file
       - testdef/max_speed/testdef.yml
-      - {testdef: testdef/front_contact/testdef.yml, setup_config: emulated, priority: 70}
+      - {testdef: testdef/front_contact/testdef.yml, setup_config: emulated, priority: 70,
+         keys: {bench_mode: quick}}         # keys pinned for this test definition only (over the campaign's)
     routing:                              # tags the lab resources of its runs must carry, over the slots' own
       stage_tags: [bench_2]               # every stage slot; or {<stage type>: [tags]}
       component_tags: {pilot: [hw_rev_b]} # the slots of that role
@@ -29,6 +30,8 @@ A campaign file (``<name>.campaign.yml``, in the tests repository)::
       toytrain_sw: v0.3.0
       toytrain_sim: v1.1.0
     baseline: baseline_expected.yml       # expected baseline checked on every run (instead of the test definitions')
+    keys:                                 # keys pinned for every test definition, by dotted name
+      bench_mode: full                    # (typically the user_keys its test definitions ask at each generation)
 
 The campaign is not templated: what it pins is written as is. Every dataset a test definition of the campaign
 imports MUST be listed under ``datasets``: the campaign's version replaces the one the setup writes, for every test
@@ -36,6 +39,16 @@ definition, so a dataset has one version in the whole campaign. Each datapack re
 (``versions_pinned_by_campaign``) and the git state of the campaign file (a source of role ``campaign``): a datapack
 stays conform when the campaign file is a clean git tag and each pinned version that differs from the written one is
 a tag of its source.
+
+**Keys.** The keys its test definitions ask at each generation (their ``user_keys``) are **shared by name** in a
+campaign: one value for every test definition that asks it. The campaign file can pin a key (``keys``, for every
+test definition; an entry's ``keys`` over them, for that one only); a pinned key is set like a key set by hand
+(recorded under ``keys_set_by_hand`` with ``pinned_by_campaign: true``: one that sets a key no dictionary defines keeps
+the datapack conform, one that overrides a defined key makes it non-conform), and cannot be given again at
+generation for every test definition (an entry's own ``keys`` are kept over the keys given at generation, for that
+one). The keys that are not pinned are given at generation (``datapack <file>.campaign.yml --set name=value``,
+the **Generate and run** dialog), for every test definition. A value outside the ``choices`` of a test definition
+that asks the key is refused.
 
 Generating a campaign (``datapack <file>.campaign.yml``) builds every datapack into one folder, with a
 ``campaign.yml`` manifest that ``tsq submit-campaign`` reads: all of them, or none when one fails.
@@ -63,6 +76,19 @@ class CampaignEntry(_Model):
     testdef: str
     setup_config: str | None = None
     priority: int | None = Field(default=None, ge=0, le=100)
+    keys: dict[str, Any] = Field(default_factory=dict)        # pinned for this test definition, over the campaign's
+
+    @field_validator("keys")
+    @classmethod
+    def _key_names(cls, value: dict) -> dict:
+        return _check_key_names(value)
+
+
+def _check_key_names(keys: dict) -> dict:
+    for name in keys:
+        if not str(name).strip() or any(not part.strip() for part in str(name).split(".")) or "=" in str(name):
+            raise ValueError(f"'{name}' is not a key name (name, or name.sub for a nested key)")
+    return {str(k).strip(): v for k, v in keys.items()}
 
 
 class Routing(_Model):
@@ -83,6 +109,16 @@ class Campaign(_Model):
     routing: Routing = Field(default_factory=Routing)
     datasets: dict[str, str] = Field(default_factory=dict)
     baseline: str | None = None
+    keys: dict[str, Any] = Field(default_factory=dict)        # pinned for every test definition, by dotted name
+
+    @field_validator("keys")
+    @classmethod
+    def _key_names(cls, value: dict) -> dict:
+        return _check_key_names(value)
+
+    def pinned_keys(self, entry: CampaignEntry) -> dict[str, Any]:
+        """The keys the campaign pins for one of its test definitions: its own over the campaign's."""
+        return {**self.keys, **entry.keys}
 
     @field_validator("testdefs", mode="before")
     @classmethod
@@ -181,6 +217,11 @@ def build_campaign(campaign_file: str | Path, nocheck: bool = False, output_dir:
         expected = yaml.safe_load((campaign_file.parent / campaign.baseline).read_text(encoding="utf-8")) or {}
     info = {"id": campaign.id, "name": campaign.name, "file": campaign_file.as_posix(), "git": git,
             "datasets": dict(campaign.datasets)}
+    given = {str(k): v for k, v in (manual_keys or {}).items()}
+    clash = sorted(set(given) & set(campaign.keys))
+    if clash:
+        raise CampaignError(f"campaign '{campaign.id}': key(s) pinned by the campaign cannot be given at generation "
+                            f"({', '.join(clash)}); change them in the campaign file")
 
     folder: Path | None = Path(output_dir).expanduser().resolve() / name if output_dir else None
     entries, used = [], set()
@@ -189,8 +230,9 @@ def build_campaign(campaign_file: str | Path, nocheck: bool = False, output_dir:
             testdef = (campaign_file.parent / entry.testdef).resolve()
             _info(f"\n===== campaign {campaign.id}: test definition {number}/{len(campaign.testdefs)}: {entry.testdef}"
                   + (f" (configuration {entry.setup_config})" if entry.setup_config else "") + " =====")
+            pinned = campaign.pinned_keys(entry)
             zip_path = datapack(testdef, nocheck, folder, entry.setup_config, expected, lenient=lenient,
-                                manual_keys=manual_keys, campaign=info)
+                                manual_keys={**given, **pinned} or None, campaign={**info, "keys": pinned})
             if folder is None:                       # the first one says where the campaign goes
                 folder = zip_path.parent / name
                 folder.mkdir(parents=True, exist_ok=True)
@@ -200,6 +242,7 @@ def build_campaign(campaign_file: str | Path, nocheck: bool = False, output_dir:
             entries.append({"testdef": entry.testdef, "setup_config": entry.setup_config,
                             "priority": entry.priority if entry.priority is not None else campaign.priority,
                             "zip": zip_path.name, "name": zip_path.stem,
+                            "keys": {k["key"]: k["value"] for k in baseline.get("keys_set_by_hand") or []},
                             "conform": bool((baseline.get("datapack") or {}).get("conform"))})
     except (DatapackError, CampaignError) as e:
         if folder is not None:
@@ -219,7 +262,8 @@ def build_campaign(campaign_file: str | Path, nocheck: bool = False, output_dir:
         "description": campaign.description, "file": campaign_file.as_posix(), "git": git,
         "created": now.strftime("%Y-%m-%d %H:%M:%S"), "user": getpass.getuser(), "nocheck": nocheck,
         "conform": conform, "priority": campaign.priority, "routing": campaign.routing.model_dump(),
-        "datasets": dict(campaign.datasets), "unused_datasets": unused,
+        "datasets": dict(campaign.datasets), "unused_datasets": unused, "keys": dict(campaign.keys),
+        "given_keys": given,
         "expected_baseline": expected, "datapacks": entries,
     }
     with open(folder / MANIFEST, "w", encoding="utf-8") as f:

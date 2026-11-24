@@ -165,6 +165,48 @@ def test_untagged_campaign_needs_nocheck(tmp_path, dir_importer, monkeypatch):
     assert read_manifest(build_campaign(_campaign(root), output_dir=tmp_path / "out", nocheck=True))["name"].endswith("_DRAFT")
 
 
+def _ask(root: Path, name: str, user_keys: dict) -> None:
+    path = root / "testdef" / name / "testdef.yml"
+    data = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump({**data, "user_keys": user_keys}))
+
+
+def test_campaign_keys(tmp_path, tagged, dir_importer):
+    """the keys its test definitions ask are shared by name: pinned by the campaign (its own, an entry's over
+    them), or given at generation for every test definition; a pinned key cannot be given again"""
+    root = _repo(tmp_path)
+    _ask(root, "one", {"mode": {"choices": ["quick", "full"]}, "operator": {}})
+    _ask(root, "two", {"mode": {"choices": ["full", "quick", "slow"]}, "operator": {}})
+    with pytest.raises(CampaignError, match="key 'operator' is to be given at each generation.*pinned in the campaign file"):
+        build_campaign(_campaign(root, keys={"mode": "full"}), output_dir=tmp_path / "out")
+    assert not list((tmp_path / "out").glob("*"))
+    file = _campaign(root, keys={"mode": "full"},
+                     testdefs=["testdef/one/testdef.yml",
+                               {"testdef": "testdef/two/testdef.yml", "setup_config": "d", "keys": {"mode": "slow"}}])
+    with pytest.raises(CampaignError, match="pinned by the campaign cannot be given at generation \\(mode\\)"):
+        build_campaign(file, output_dir=tmp_path / "out", manual_keys={"mode": "quick", "operator": "jd"})
+    folder = build_campaign(file, output_dir=tmp_path / "out", manual_keys={"operator": "jd"})
+    manifest = read_manifest(folder)
+    assert manifest["conform"] is True and manifest["keys"] == {"mode": "full"} and manifest["given_keys"] == {"operator": "jd"}
+    assert [d["keys"] for d in manifest["datapacks"]] == [{"mode": "full", "operator": "jd"}, {"mode": "slow", "operator": "jd"}]
+    baseline = read_baseline(folder / manifest["datapacks"][1]["zip"])
+    assert baseline["keys_set_by_hand"] == [
+        {"key": "operator", "value": "jd", "overrides": False},
+        {"key": "mode", "value": "slow", "overrides": False, "pinned_by_campaign": True}]
+    with pytest.raises(CampaignError, match="'fast' is not one of its choices"):
+        build_campaign(_campaign(root, keys={"mode": "quick", "operator": "x"},
+                                 testdefs=[{"testdef": "testdef/two/testdef.yml", "keys": {"mode": "fast"}}]),
+                       output_dir=tmp_path / "out")
+    folder = build_campaign(_campaign(root, keys={"operator": "jd"}, testdefs=[
+        "testdef/one/testdef.yml", {"testdef": "testdef/two/testdef.yml", "setup_config": "d", "keys": {"mode": "slow"}}]),
+        output_dir=tmp_path / "out", manual_keys={"mode": "full"})   # given for every one, but two pins its own
+    assert [d["keys"] for d in read_manifest(folder)["datapacks"]] == [{"mode": "full", "operator": "jd"},
+                                                                     {"mode": "slow", "operator": "jd"}]
+    from testsuit.datatools.datapack.campaign import Campaign
+    with pytest.raises(ValueError, match="not a key name"):
+        Campaign.model_validate({"id": "c", "testdefs": ["a.yml"], "keys": {"a..b": 1}})
+
+
 def test_cli(tmp_path, tagged, dir_importer, monkeypatch, capsys):
     from testsuit.cli import datapack as cli
     root = _repo(tmp_path)
