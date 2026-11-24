@@ -1333,3 +1333,9 @@ textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-sp
 .req-fields-add { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 6px 0 10px; }
 .req-fields-add select { width: auto; }
 .req-field-chip { margin-right: 4px; }
+.req-fields-test { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.req-fields-test .combo { min-width: 260px; }
+.req-field-value { overflow-wrap: anywhere; margin-top: 3px; display: flex; gap: 4px; align-items: baseline; }
+.req-fields-from td, .req-fields-from.grid td { vertical-align: top !important; }
+.req-field-shown { white-space: pre-wrap; display: block; background: var(--ok-soft); padding: 1px 6px; border-radius: 4px; max-height: 9em; overflow: auto; }
+.req-fields-tested { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }

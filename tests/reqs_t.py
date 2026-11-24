@@ -791,6 +791,25 @@ def test_rest_details(tmp_path, alm_server):
         fails("unknown variable 'nope'", details=[{"url": "item/{{ nope }}", "fields": {"title": ".t"}}])
         fails("unknown field", details=[{"url": "item/{{ id }}", "fields": {"colour": ".c"}}])
         fails("a built-in one", item_vars={"id": ".key"})
+        # the Editor's field test: the ids of the list, then each field of one of them, errors per field
+        backend = Sources(file).backend("alm")
+        backend.trace = []
+        ids = backend.probe("ids")
+        assert ids["items"] == 5 and ids["ids"][1] == {"id": "ALM-2", "title": "Item 2"}
+        broken = Sources(file)
+        broken.replace("alm", {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"}, "options": {
+            **options, "fields": {**options["fields"], "status": ".fields.status.name | ascii_downcase | tonumber"}}})
+        backend = broken.backend("alm")
+        backend.trace = []
+        probe = backend.probe("item:ALM-3")
+        rows = {(r["field"], r["from"]): r for r in probe["fields"]}
+        assert rows[("title", "list")]["value"] == "Item 3" and rows[("description", "details:1")]["value"] == "Text 3"
+        assert rows[("comments", "details:2")]["value"] == "c ALM-3" and "error" in rows[("status", "list")]
+        assert ("tags", "list") not in rows and probe["item_vars"] == {"k": "ALM-3"}        # a default giving nothing: not shown
+        assert '"key": "ALM-3"' in probe["first_item"]
+        with pytest.raises(ReqError, match="no requirement 'NOPE'"):
+            backend.probe("item:NOPE")
+
         # a details call no field is read from yet (being written in the Editor): not made
         calls.clear()
         idle = Sources(file)
