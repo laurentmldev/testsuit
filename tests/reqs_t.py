@@ -611,6 +611,12 @@ def test_rest_backend(tmp_path, alm_server, monkeypatch):
         create_req_backend("rest", options, {"token": "wrong"}, tmp_path).list()
     with pytest.raises(ReqError, match="field 'title': jq expression"):
         create_req_backend("rest", {**options, "fields": {**fields, "title": ".fields[["}}, {"token": "x"}, tmp_path)
+    with pytest.raises(ReqError, match=r"field 'title': jq expression 'def f: \.x; \.fields\[\['"):
+        create_req_backend("rest", {**options, "fields": {**fields, "title": "def f: .x;\n.fields[["}}, {"token": "x"}, tmp_path)
+    # an expression written over several lines, as a form writes it
+    multi = {**fields, "path": 'def names:\n  [.folder[]?.name];\nnames | join("/")'}
+    b = create_req_backend("rest", {**options, "fields": multi}, {"token": "s3cret"}, tmp_path)
+    assert {r.id: r.path for r in b.list("", True)}["ALM-1"] == "SYS/BRAKE"
     with pytest.raises(ReqError, match="credential 'token'"):
         create_req_backend("rest", options, None, tmp_path)
     with pytest.raises(ReqError, match="unknown field"):

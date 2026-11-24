@@ -122,7 +122,8 @@ def _jq(expr: str, where: str, args: Mapping[str, Any] | None = None):
         message = str(e).splitlines()[0]
         if "is not defined" in message:
             message += " (variables: those of the source and of earlier steps)"
-        raise ReqError(f"{where}: jq expression '{expr}': {message}") from e
+        shown = " ".join(str(expr).split())     # one line, an expression written over several
+        raise ReqError(f"{where}: jq expression '{shown}': {message}") from e
 
 
 def _all(program, value: Any, where: str) -> list[Any]:

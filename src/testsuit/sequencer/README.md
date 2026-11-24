@@ -1331,6 +1331,8 @@ sources:
       url: https://alm.example/items/{{ id }}
 ```
 
+A long jq expression can be written over several lines (a YAML `|` block, such as a `def` before the expression). In the Editor's form, the jq fields start as one line and grow with what is typed, Enter adding a line; the URL fields grow too, wrapping a long URL (without line breaks). The form writes a value of several lines back as a `|` block.
+
 **Variables** (`vars`, on any source): `{{ name }}` in its options, `$name` in the rest backend's jq expressions. A value can be a Jinja2 expression of the datapack keys, so `datapack --set` and campaign keys set it, with a fallback for where there are none (Jinja2's `default` filter: `{{ sut.branch | default('main') }}`; the Editor's coverage view, `reqs`). A **mandatory** variable must have a value, and is the context of the requirements: shown in the coverage matrices and reports (`alm: branch=main, version=3.2`) and recorded in the datapack, with every variable as resolved. Give one to a branch or a version, when the tool has them.
 
 **Steps** (rest backend): calls made before the others, each extracting variables with jq for the next ones; a variable gives one value at most (several: an error), none gives it empty, or an error when it is mandatory (a fallback: jq's `//`, `.id // 0`). `cache` keeps an answer that long (a call that takes long, such as the whole system):

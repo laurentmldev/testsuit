@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import difflib
 import io
+import re
 from typing import Any
 
 import yaml
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 from testsuit.sequencer.util import SequencerError
 
@@ -96,7 +98,16 @@ def _build(value: Any, siblings: list) -> Any:
         if flow or (flow is None and all(not isinstance(v, (dict, list)) for v in value)):
             node.fa.set_flow_style()            # short lists of scalars: [a, b]
         return node
+    if isinstance(value, str) and _literal_ok(value):
+        return LiteralScalarString(value)       # several lines (a jq expression, a script): a "|" block, as written
     return value
+
+
+def _literal_ok(text: str) -> bool:
+    """A string of several lines that a "|" block keeps exactly: no blank at the start or at an end of line, no
+    control character but new lines (else it stays a quoted string, with its escapes)."""
+    return ("\n" in text.rstrip("\n") and not text[:1].isspace()
+            and not re.search(r"[ \t]\n|[ \t]$|[\x00-\x08\x0b-\x1f\x7f]", text))
 
 
 class _Merger:

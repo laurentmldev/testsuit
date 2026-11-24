@@ -14,7 +14,7 @@
 // Form controls of the Editor. Each field carries its help: it shows in the help panel when the field is
 // focused or hovered, and its choices come with a description (component types with their commands,
 // roles with the components that have them...).
-import { createContext, CSSProperties, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { classes, idInput, idProblem, Markdown, notify } from "./util";
 import { KindIcon, kindName, KINDS, nameClass, type Kind } from "./kinds";
 
@@ -250,11 +250,49 @@ export function IdText({ value, onChange, taken = [], placeholder, className }: 
   );
 }
 
+/** A field that looks like a one-line input and grows with its text: a textarea of one row whose height follows
+ * its contents. lines: Enter (or a paste) writes a new line, for expressions written over several lines (jq);
+ * otherwise a long value only wraps, its line breaks dropped (a URL, a jq-style path). */
+export function GrowText({ value, onChange, lines, className, placeholder, disabled, invalid, onBlur, onKeyDown, title }: {
+  value: string; onChange: (v: string, el: HTMLTextAreaElement) => void; lines?: boolean; className?: string;
+  placeholder?: string; disabled?: boolean; invalid?: boolean; onBlur?: () => void; title?: string;
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const border = el.offsetHeight - el.clientHeight;
+    el.style.height = `${el.scrollHeight + border}px`;
+  };
+  useLayoutEffect(fit, [value]);
+  useEffect(() => {          // the width changes the wrapping: a resized panel or window
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => { if (el.clientWidth !== width) { width = el.clientWidth; fit(); } });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <textarea ref={ref} rows={1} className={classes("grow-text", className, invalid && "invalid")} value={value}
+      placeholder={placeholder} disabled={disabled} title={title} onBlur={onBlur} spellCheck={false}
+      onKeyDown={(e) => {
+        if (!lines && e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+        onKeyDown?.(e);
+      }}
+      onChange={(e) => onChange(lines ? e.target.value : e.target.value.replace(/\s*[\r\n]+\s*/g, ""), e.target)} />
+  );
+}
+
 export function Text({
-  value, onChange, placeholder, mono, multiline, disabled, onBlur, keys, invalid,
+  value, onChange, placeholder, mono, multiline, grow, disabled, onBlur, keys, invalid,
 }: {
   value?: string | number | null; onChange: (v: string) => void; placeholder?: string; mono?: boolean;
   multiline?: boolean; disabled?: boolean; onBlur?: () => void; invalid?: boolean;
+  // one line that grows with its text: "lines" takes new lines (a jq expression), "wrap" only wraps a long value
+  grow?: "lines" | "wrap";
   keys?: boolean;      // the value is rendered with keys: typing {{ proposes them
 }) {
   const v = value === null || value === undefined ? "" : String(value);
@@ -268,6 +306,9 @@ export function Text({
       {multiline ? (
         <textarea className={classes(mono && "mono")} value={v} placeholder={placeholder} disabled={disabled}
           rows={Math.min(8, Math.max(2, v.split("\n").length))} onChange={change} onBlur={onBlur} />
+      ) : grow ? (
+        <GrowText className={classes(mono && "mono")} invalid={invalid} value={v} placeholder={placeholder} disabled={disabled}
+          lines={grow === "lines"} onChange={(x, el) => { onChange(x); picker.watch(el); }} onBlur={onBlur} />
       ) : (
         <input className={classes(mono && "mono", invalid && "invalid")} value={v} placeholder={placeholder} disabled={disabled}
           onChange={change} onBlur={onBlur} />
@@ -486,9 +527,11 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
  *  `nested`: a variable holding keys of its own shows one row per key, named by its dotted path (`custom_grp.keyA`),
  *  and a dotted name typed in the table writes nested keys. `tsq_` variables are kept whole.
  *  `keys`: the values are rendered with keys, typing {{ in one proposes them. */
-export function KeyValues({ value, onChange, known, exclude, valueChoices, nested, keys }: {
+export function KeyValues({ value, onChange, known, exclude, valueChoices, nested, keys, grow, placeholder }: {
   value?: Record<string, any> | null; onChange: (v: Record<string, any>) => void; known?: Choice[]; exclude?: string[];
   valueChoices?: (key: string) => Choice[] | undefined; nested?: boolean; keys?: boolean;
+  grow?: "lines" | "wrap";   // the values grow with their text (Text's grow); "lines": kept as written (jq), not as scalars
+  placeholder?: string;      // of the values
 }) {
   const data = value || {};
   const entries = keyRows(data, nested).filter(([path]) => !(exclude || []).includes(path[0]));
@@ -533,6 +576,9 @@ export function KeyValues({ value, onChange, known, exclude, valueChoices, neste
               <div className="kv-value"><Combo value={v === null ? "" : String(v)} onChange={(x) => set(path, scalar(x))} choices={valueChoices(k)!} mono /></div>
             ) : keys ? (
               <div className="kv-value"><Text keys mono value={v === null ? "" : String(v)} onChange={(x) => set(path, scalar(x))} /></div>
+            ) : grow ? (
+              <GrowText className="mono kv-value" lines={grow === "lines"} value={v === null ? "" : String(v)} placeholder={placeholder}
+                onChange={(x) => set(path, grow === "lines" ? x : scalar(x))} />
             ) : (
               <input className="mono kv-value" value={v === null ? "" : String(v)} onChange={(e) => set(path, scalar(e.target.value))} />
             )}
