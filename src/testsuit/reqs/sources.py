@@ -162,7 +162,8 @@ class Sources:
         if specs is None:
             if "requirements" not in data:
                 raise ReqError(f"'{self.file}': no 'sources', nor 'requirements'")
-            specs = {DEFAULT_SOURCE: {"backend": "yaml", "options": {"file": self.file.name}}}
+            specs = {DEFAULT_SOURCE: {"backend": "yaml", "options": {"file": self.file.name},
+                                      **({"label": str(data["label"])} if data.get("label") else {})}}
         if not isinstance(specs, dict) or not specs:
             raise ReqError(f"'{self.file}': 'sources' is a mapping of sources by name")
         self.specs: dict[str, dict] = {}

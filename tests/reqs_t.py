@@ -70,6 +70,10 @@ def test_yaml_backend_and_sources(tmp_path, monkeypatch):
     found = sources.get([Ref("reqs", "REQ-2"), Ref("reqs", "NOPE")])
     assert found[Ref("reqs", "REQ-2")].version == "2" and found[Ref("reqs", "NOPE")] is None
     assert len(found[Ref("reqs", "REQ-2")].version) and sources.get([Ref("reqs", "REQ-1")])[Ref("reqs", "REQ-1")].version
+    assert "label" not in sources.specs["reqs"]
+    write(tmp_path / "requirements.yml", yaml.safe_dump({**REQS, "label": "Counter requirements"}))    # its label
+    assert Sources(tmp_path / "requirements.yml").specs["reqs"]["label"] == "Counter requirements"
+    write(tmp_path / "requirements.yml", yaml.safe_dump(REQS))
 
     # several sources: credentials from the environment only
     write(tmp_path / "multi.yml", yaml.safe_dump({"sources": {
@@ -107,6 +111,14 @@ def test_yaml_backend_and_sources(tmp_path, monkeypatch):
             Sources(tmp_path / "bad.yml").backend("r")
     finally:
         unregister_req_backend("fake")
+
+
+def test_plain_text_of_html():
+    from testsuit.reqs.render import plain_text
+    assert plain_text("<p>The device <b>counts</b> &amp; stops.</p><p>Then</p>") == "The device counts & stops.\nThen"
+    assert plain_text("a<br/>b") == "a\nb"
+    assert plain_text("x<y and y>z, a < b") == "x<y and y>z, a < b"          # not HTML: as written
+    assert plain_text("**Markdown** &amp;") == "**Markdown** &amp;"
 
 
 def test_rollup():

@@ -15,6 +15,7 @@
 // One view of a coverage (the /requirements endpoints): counts, requirements × tests rolled up per path node, and
 // tests × requirements. Used by the Run page (one run), the campaign run page (its runs) and the Requirements subtab
 // of Datapacks (the test definitions of a tests repository, with the tree of the requirements).
+import { htmlToText, RichText } from "../richtext";
 import { Fragment, useMemo, useState } from "react";
 import { url, useResource } from "../api";
 import { createFile } from "../editor/Session";
@@ -69,9 +70,9 @@ function RequirementDetail({ req }: { req: any }) {
   return (
     <div className="req-detail">
       {req.title && <strong>{req.title}</strong>}
-      <Markdown text={req.description} />
-      {req.rationale && <p className="small"><span className="muted">Rationale:</span> {req.rationale}</p>}
-      {req.comments && <p className="small"><span className="muted">Comments:</span> {req.comments}</p>}
+      <RichText text={req.description} />
+      {req.rationale && <div className="small req-long"><span className="muted">Rationale</span><RichText text={req.rationale} /></div>}
+      {req.comments && <div className="small req-long"><span className="muted">Comments</span><RichText text={req.comments} /></div>}
       <div className="small muted req-facts">
         {req.source && <span>source <code>{req.source}</code></span>}
         {req.version && <span>version <code>{req.version}</code></span>}
@@ -140,7 +141,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                       <Fragment key={r.key}>
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono">{r.key}</td>
-                          <td>{r.title || String(r.description || "").split("\n")[0]}</td>
+                          <td>{r.title || htmlToText(String(r.description || "")).split("\n")[0]}</td>
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>
