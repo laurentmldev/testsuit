@@ -76,6 +76,19 @@ def test_merge_keeps_lists_indented_as_written():
     assert merged.startswith("inputs:\n- source: a.txt   # first\n  target: a\n- source: c.txt\n"), merged
 
 
+def test_merge_writes_several_lines_as_a_block():
+    """A string of several lines from a form (a jq expression with a def) is written as a "|" block, read back the
+    same; one a block cannot keep exactly (blanks at an end of line) stays a quoted string."""
+    text = "options:\n  list: {url: items, items: '.data[]'}\n  fields:\n    id: .id\n"
+    jq = 'def find(f): .. | objects | select(f);\n[find(.type == "folder") | .name] | join("/")'
+    data = {"options": {"list": {"url": "items", "items": jq}, "fields": {"id": ".id", "path": jq, "title": "a \nb"}}}
+    merged = yamledit.merge(text, data)
+    assert yaml.safe_load(merged) == data, merged
+    assert '    path: |-\n      def find(f): .. | objects | select(f);\n      [find(.type' in merged, merged
+    assert 'title: "a \\nb"' in merged, merged
+    assert yamledit.merge(merged, data) == merged
+
+
 def test_merge_empties_a_mapping_or_a_list():
     """Removing the last item of a commented block leaves "key: {}" (or "[]"), not a bare "{}" line (a broken file)."""
     text = ("all:\n  hosts:                 # ad hoc components (no stage)\n    abc:\n      ansible_host: 10.0.1.2\n"

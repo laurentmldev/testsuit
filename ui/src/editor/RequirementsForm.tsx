@@ -15,7 +15,7 @@
 // backend, options and credentials, and the default one) and the requirements of the built-in YAML backend (the
 // labels of the nodes, and each requirement with its path in the tree).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Combo, Field, helpText, IdText, KeyValues, scalar, Section, Tags, Text, type Choice } from "../fields";
+import { Combo, Field, GrowText, helpText, IdText, KeyValues, scalar, Section, Tags, Text, type Choice } from "../fields";
 import { send } from "../api";
 import { classes, joinPath, useRoute } from "../util";
 import { clone, useSession, type Doc } from "./state";
@@ -560,9 +560,9 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
       <Group title="List call" note="reads every requirement" help={help.list}>
         <StageTest upto="list" runTest={runTest} label="Test the first page"
           title="Run the steps, then the list call's first page: its URL, the answer, how many items, and the requirements the fields give" />
-        <Field label="URL suffix" help={urlHelp("The URL of the list call")}><Text mono value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
-        <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
-        <Field label="Next page (jq)" help={`The URL of the next page, from an answer (none: the last page). ${JQ_HELP}`}><Text mono value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
+        <Field label="URL suffix" help={urlHelp("The URL of the list call")}><Text mono grow="wrap" value={list.url} placeholder="items?project=12&page={{ page }}" onChange={(v) => setIn("list", list, "url", v.trim())} /></Field>
+        <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono grow="lines" value={list.items} placeholder=".data[]" onChange={(v) => setIn("list", list, "items", v)} /></Field>
+        <Field label="Next page (jq)" help={`The URL of the next page, from an answer (none: the last page). ${JQ_HELP}`}><Text mono grow="lines" value={list.next} placeholder="optional: .links.next" onChange={(v) => setIn("list", list, "next", v)} /></Field>
         <Field label="First page" help={help.first_page}><Text mono value={options.first_page} placeholder="1" onChange={(v) => set("first_page", scalar(v))} /></Field>
         <Field label="Method">
           <select value={String(list.method || "GET").toUpperCase()} onChange={(e) => setIn("list", list, "method", e.target.value === "GET" ? undefined : e.target.value)}>
@@ -574,26 +574,26 @@ function RestOptions({ options, help, set, credentials: creds, onCredentials, cr
         )}
       </Group>
       <Group title="Get by id call" note="optional: fetches only the requirements needed" help={help.get}>
-        <Field label="URL suffix" help={urlHelp("The URL of the get by id call, with `{{ ids }}` (comma-separated: one call) or `{{ id }}` (one call each)")}><Text mono value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
-        {get.url && <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
+        <Field label="URL suffix" help={urlHelp("The URL of the get by id call, with `{{ ids }}` (comma-separated: one call) or `{{ id }}` (one call each)")}><Text mono grow="wrap" value={get.url} placeholder="items?ids={{ ids }} or items/{{ id }}" onChange={(v) => setIn("get", get, "url", v.trim())} /></Field>
+        {get.url && <Field label="Items (jq)" help={`The requirements of an answer, one item each. ${JQ_HELP}`}><Text mono grow="lines" value={get.items} placeholder=".data[]" onChange={(v) => setIn("get", get, "items", v)} /></Field>}
       </Group>
       <Group title="Fields" note="a jq expression per field of a requirement, applied to each item" help={help.fields}>
         <table className="grid compact req-fields">
           <tbody>{REST_FIELDS.map(([f, what]) => (
             <tr key={f} title={what}>
               <td className="mono">{f}</td>
-              <td><input className="mono" value={fields[f] ?? ""} placeholder={f === "url" ? "(the link template below)" : `.${f}`}
-                onChange={(e) => set("fields", put(fields, f, e.target.value))} /></td>
+              <td><GrowText className="mono" lines value={fields[f] ?? ""} placeholder={f === "url" ? "(the link template below)" : `.${f}`}
+                onChange={(v) => set("fields", put(fields, f, v))} /></td>
             </tr>
           ))}</tbody>
         </table>
         <Field label="Link template" help={help.url}>
-          <Text mono value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
+          <Text mono grow="wrap" value={options.url} placeholder="https://reqs.example.com/items/{{ id }}" onChange={(v) => set("url", v.trim())} />
         </Field>
       </Group>
       <Group title="Details calls" note="optional: one call (or more) per requirement needed in full, adding fields" help={help.details}>
         <Field label="Item variables (jq)" help={help.item_vars}>
-          <KeyValues value={options.item_vars} onChange={(v) => set("item_vars", v)} />
+          <KeyValues grow="lines" placeholder=".id" value={options.item_vars} onChange={(v) => set("item_vars", v)} />
         </Field>
         <Details value={options.details} runTest={runTest} onChange={(v) => set("details", v.length ? v : undefined)} />
       </Group>
@@ -694,8 +694,8 @@ function VarRows({ value, onChange, keyName, placeholder, namePlaceholder }: {
         return (
           <div key={k} className="kv-row">
             <span className={classes("mono req-var-name", mandatory && "strong")}>{k}</span>
-            <input className="mono kv-value" placeholder={placeholder} value={v === null || v === undefined ? "" : String(v)}
-              onChange={(e) => put(k, varSpec(keyName, keyName === "jq" ? e.target.value : scalar(e.target.value), mandatory))} />
+            <GrowText className="mono kv-value" placeholder={placeholder} value={v === null || v === undefined ? "" : String(v)}
+              lines={keyName === "jq"} onChange={(x) => put(k, varSpec(keyName, keyName === "jq" ? x : scalar(x), mandatory))} />
             <label className="toggle small" title="It must have a value, and is the context of the requirements: shown with them and recorded in the datapack">
               <input type="checkbox" checked={mandatory} onChange={(e) => put(k, varSpec(keyName, v, e.target.checked))} /> mandatory
             </label>
@@ -758,14 +758,14 @@ function Details({ value, onChange, runTest }: { value?: any[] | null; onChange:
             <StageTest upto={`details:${i + 1}`} runTest={runTest} label="Test on the first requirement"
               title="Run the steps and the list call's first page, then this call for its first requirement: its URL, the answer, and the fields it gives" />
             <Field label="URL suffix" help={urlHelp("The URL of this call, for one requirement: `{{ id }}` and the item variables")}>
-              <Text mono value={call.url} placeholder="items/{{ item_id }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+              <Text mono grow="wrap" value={call.url} placeholder="items/{{ item_id }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
             <Field label="Fields (jq)" help={`The fields this call gives, from its answer (not id, path, version: those come from the list). A later call wins. ${JQ_HELP}`}>
               <table className="grid compact req-fields">
                 <tbody>{DETAIL_FIELDS.map(([f, what]) => (
                   <tr key={f} title={what}>
                     <td className="mono">{f}</td>
-                    <td><input className="mono" value={fields[f] ?? ""} placeholder="—"
-                      onChange={(e) => setIn(i, "fields", put(fields, f, e.target.value))} /></td>
+                    <td><GrowText className="mono" lines value={fields[f] ?? ""} placeholder="—"
+                      onChange={(v) => setIn(i, "fields", put(fields, f, v))} /></td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -803,7 +803,7 @@ function Steps({ value, onChange, runTest }: { value?: any[] | null; onChange: (
           </div>
           <StageTest upto={`step:${i + 1}`} runTest={runTest} label={i ? `Test steps 1 to ${i + 1}` : "Test this step"}
             title="Call the server for this step (and the earlier ones, whose variables it reads), as in this form: each call's URL, headers, status and answer, and the variables extracted. The cache is not used." />
-          <Field label="URL suffix" help={urlHelp("The URL of this step")}><Text mono value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
+          <Field label="URL suffix" help={urlHelp("The URL of this step")}><Text mono grow="wrap" value={step.url} placeholder="systems?branch={{ branch }}" onChange={(v) => setIn(i, "url", v.trim())} /></Field>
           <Field label="Variables (jq)" help={`Each variable this step extracts from its answer, for the next steps and calls: one value at most (none: no value, an error when mandatory). ${JQ_HELP}`}>
             <VarRows value={step.extract} onChange={(v) => setIn(i, "extract", v)} keyName="jq"
               namePlaceholder="new variable (subsystem_id…)" placeholder=".items[] | select(.name == $subsystem) | .id   (fallback: // 0)" />

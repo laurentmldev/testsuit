@@ -195,7 +195,7 @@ export function HttpEditor({ value, onChange, help, withSave }: {
           choices={["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map((m) => ({ value: m }))} />
       </Field>
       <Field label="URL" help={help("url")}>
-        <Text keys mono value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
+        <Text keys mono grow="wrap" value={v.url} onChange={(x) => set("url", x)} placeholder="{{ component.vars.api }}/status" />
       </Field>
       <Field label="Headers" help={help("headers")}><KeyValues keys value={v.headers} onChange={(x) => set("headers", x)} /></Field>
       <Field label="Query parameters" help={help("params")}><KeyValues keys value={v.params} onChange={(x) => set("params", x)} /></Field>
@@ -210,7 +210,7 @@ export function HttpEditor({ value, onChange, help, withSave }: {
       {bodyKind === "body" && <Field label="Raw body" help={help("body")} wide><Text keys mono multiline value={v.body} onChange={(x) => onChange({ ...v, body: x })} /></Field>}
       {bodyKind === "body_file" && <Field label="File to send" help={help("body_file")} wide><Text keys mono value={v.body_file} onChange={(x) => onChange({ ...v, body_file: x })} placeholder="{{ component.input_dir }}/payload.bin" /></Field>}
       <Field label="Extract (jq path)" help={help("extract")}>
-        <Text keys mono value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
+        <Text keys mono grow="wrap" value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
       </Field>
       <Section title="Expected answer" help={help("expect")}>
         <div className="inline-fields">

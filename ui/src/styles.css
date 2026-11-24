@@ -1323,3 +1323,5 @@ table.grid.req-fields td { vertical-align: middle; }
 .rich-html td, .rich-html th { border: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
 .rich-html img { max-width: 100%; }
 .rich-html pre { overflow-x: auto; }
+/* a field of one line growing with its text (jq expressions, URLs): no resize handle, no scrollbar */
+textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
