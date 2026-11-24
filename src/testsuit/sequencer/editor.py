@@ -61,6 +61,7 @@ from testsuit.sequencer.util import SequencerError, now
 WORK_DIRS = (".current_datapack/", ".work/")     # what the datapack tool writes next to the definitions: never committed
 SKIP_DIRS = {".git", ".work", ".current_datapack", "__pycache__", "node_modules", ".pytest_cache", ".venv"}
 MAX_FILES = 2000
+TEST_LIMIT = 30.0                                  # seconds: a test of a requirements source (Editor) stops calling after it
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -1638,6 +1639,9 @@ class Editor:
                 sources.replace(source, spec)
             backend = sources.backend(source)
             backend.trace = []
+            if hasattr(backend, "deadline"):        # a test answers within about 30 s, whatever the server does
+                backend.test_limit = TEST_LIMIT
+                backend.deadline = start + TEST_LIMIT
             if upto:
                 if not hasattr(backend, "probe"):
                     raise ReqError(f"the {sources.specs[source]['backend']} backend has no stages to test")

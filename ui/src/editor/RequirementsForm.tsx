@@ -169,6 +169,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
   };
   const test = async () => {
     setTesting(true);
+    setResult(null);                                         // the values of the last test go: no mixing them up
     try {
       setResult(await runTest());
     } finally {
@@ -766,11 +767,12 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
   const [busy, setBusy] = useState("");
   const [picked, setPicked] = useState("");
   const [tested, setTested] = useState<any>(null);          // the item test: {ok, fields, item_vars, error, calls}
-  const pick = async () => { setBusy("ids"); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
+  const pick = async () => { setBusy("ids"); setPicking(null); setTested(null); setPicked(""); try { setPicking(await runTest("ids")); } finally { setBusy(""); } };
   const test = async (id: string) => {
     setPicked(id);
     if (!id) return;
     setBusy("item");
+    setTested(null);
     try { setTested(await runTest(`item:${id}`)); } finally { setBusy(""); }
   };
   const results: Record<string, any> = {};
@@ -820,11 +822,11 @@ function RestFields({ options, setOptions, runTest }: { options: Data; setOption
       {shown && (
         <div className="req-fields-tested small">
           {extra.length > 0 && <div>Also read by default (the item's key of the same name): {extra.map((r: any) => (
-            <span key={r.field} className="mono">{r.field}={shownValue(r.value)} </span>))}</div>}
+            <VarValue key={r.field} name={r.field} value={r.value} />))}</div>}
           {Object.keys(tested.vars || {}).length > 0 && <div>Variables (the source's, and those the steps extracted, their calls below): {Object.entries<any>(tested.vars).map(([k, v]) => (
-            <span key={k} className="mono">{k}={shownValue(v).length > 80 ? shownValue(v).slice(0, 80) + "…" : shownValue(v)} </span>))}</div>}
+            <VarValue key={k} name={k} value={v} />))}</div>}
           {Object.keys(tested.item_vars || {}).length > 0 && <div>Item variables: {Object.entries<any>(tested.item_vars).map(([k, v]) => (
-            <span key={k} className="mono">{k}={shownValue(v)} </span>))}</div>}
+            <VarValue key={k} name={k} value={v} />))}</div>}
           {tested.first_item && <details className="req-call-part"><summary>The list item of <code>{picked}</code></summary>
             <pre className="mono small">{tested.first_item}</pre></details>}
         </div>
@@ -932,6 +934,7 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
   const [result, setResult] = useState<any>(null);
   const test = async () => {
     setTesting(true);
+    setResult(null);
     try { setResult(await runTest(upto)); } finally { setTesting(false); }
   };
   return (
@@ -944,7 +947,7 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
               <div>Done in {result.seconds} s{upto === "list" && <>: <strong>{result.items}</strong> item(s) in the first page</>}.</div>
               {result.vars && Object.keys(result.vars).length > 0 && (
                 <div className="req-vars small">Variables: {Object.entries<any>(result.vars).map(([k, v]) => (
-                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                  <VarValue key={k} name={k} value={v} />
                 ))}</div>
               )}
               {result.sample?.length > 0 && (
@@ -957,7 +960,7 @@ function StageTest({ upto, runTest, label, title }: { upto: string; runTest: Run
               )}
               {result.item_vars && Object.keys(result.item_vars).length > 0 && (
                 <div className="req-vars small">Item variables: {Object.entries<any>(result.item_vars).map(([k, v]) => (
-                  <span key={k} className="mono">{k}={shownValue(v)}</span>
+                  <VarValue key={k} name={k} value={v} />
                 ))}</div>
               )}
               {result.requirement && (
@@ -988,6 +991,22 @@ function FieldValue({ r }: { r?: any }) {
   const v = r.value;
   if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return <span className="muted small">empty</span>;
   return <span className="small req-field-shown">{Array.isArray(v) ? v.join(", ") : String(v)}</span>;
+}
+
+/** A variable and its value in a test's result: a long value (a whole structure a step extracted) cut on one line,
+ *  a click showing it whole in a box of limited height, so that what follows stays in view. */
+function VarValue({ name, value }: { name: string; value: any }) {
+  const [open, setOpen] = useState(false);
+  const text = shownValue(value);
+  if (text.length <= 100) return <span className="mono">{name}={text}</span>;
+  const pretty = typeof value === "object" && value !== null ? JSON.stringify(value, null, 1) : text;
+  return (
+    <span className={classes("mono req-var-long", open && "open")}>
+      <button className="link small" onClick={() => setOpen(!open)} title={open ? "Fold it" : `Show it whole (${text.length} characters)`}>
+        {name}={open ? "" : text.slice(0, 100) + "…"}{open ? "▾" : " ▸"}</button>
+      {open && <pre className="mono small req-var-box">{pretty}</pre>}
+    </span>
+  );
 }
 
 const shownValue = (v: any) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "") || "∅");
@@ -1024,7 +1043,7 @@ function Call({ call, open }: { call: any; open: boolean }) {
         </div>
         {call.error && <div className="error-text small">{call.error}</div>}
         {call.extracted && Object.keys(call.extracted).length > 0 && (
-          <div className="req-vars small">Extracted: {Object.entries<any>(call.extracted).map(([k, v]) => <span key={k} className="mono">{k}={shownValue(v)}</span>)}</div>
+          <div className="req-vars small">Extracted: {Object.entries<any>(call.extracted).map(([k, v]) => <VarValue key={k} name={k} value={v} />)}</div>
         )}
         {call.items !== undefined && <div className="small">{call.items} item(s){call.next ? <>; next page: <code>{call.next}</code></> : ""}</div>}
         <details className="req-call-part"><summary className="small">Request headers</summary>

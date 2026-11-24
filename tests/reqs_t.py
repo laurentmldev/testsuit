@@ -952,3 +952,20 @@ def test_input_file_tags(bench, tmp_path, monkeypatch):
     assert (3, "error", "requirement 'REQ-4' is rejected") in found
     assert any(line == 4 and "already defined line 1" in msg for line, _, msg in found)
     assert not any(line == 2 and "REQ-1" in msg for line, _, msg in found)
+
+
+def test_rest_test_limit(tmp_path, alm_server):
+    """A test of the Editor answers within its limit: past it, the next call is not made, and says why."""
+    import time
+
+    from testsuit.reqs.backend import ReqError, create_req_backend
+    base, calls = alm_server
+    options = {"base": base + "/api", "auth": {"bearer": "token"}, "fields": {"id": ".key", "title": ".fields.name"},
+               "list": {"url": "items?page={page}", "items": ".data[]"}}
+    b = create_req_backend("rest", options, {"token": "s3cret"}, tmp_path)
+    b.trace, b.test_limit, b.deadline = [], 30.0, time.monotonic() - 1
+    with pytest.raises(ReqError, match="more than 30 s"):
+        b.probe("list")
+    assert calls == [] and "more than 30 s" in b.trace[0]["error"]
+    b.deadline = time.monotonic() + 30                  # within it: the call is made, waiting at most what is left
+    assert b.probe("list") and len(calls) == 1

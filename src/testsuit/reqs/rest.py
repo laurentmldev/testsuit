@@ -203,6 +203,8 @@ class RestBackend(ReqBackend):
             raise ReqError("the rest backend needs its 'list' option: {url, items[, next]}")
         self.base = str(o.get("base") or "")
         self.timeout = float(o.get("timeout") or 30)
+        self.deadline: float | None = None           # time.monotonic() when a test of the Editor stops calling
+        self.test_limit = 0.0
         verify = o.get("verify", True)
         self.verify = str((base_dir / str(verify)).resolve()) if isinstance(verify, str) else bool(verify)
         self.steps = self._steps(o.get("steps"))
@@ -539,9 +541,18 @@ class RestBackend(ReqBackend):
                 self.trace_more += 1
         self._record = record
         start = time.monotonic()
+        timeout = self.timeout
+        if self.deadline is not None:                # a test of the Editor: the whole of it within a limit
+            left = self.deadline - start
+            if left <= 0:
+                message = f"stopped: the test takes more than {self.test_limit:g} s"
+                if record is not None:
+                    record.update(seconds=0, error=message)
+                raise ReqError(f"{where}: {message}")
+            timeout = min(timeout, left)
         try:
             r = self.session.request(method, url, params=self.params or None,
-                                     json=body, timeout=self.timeout, verify=self.verify, headers=headers or None)
+                                     json=body, timeout=timeout, verify=self.verify, headers=headers or None)
         except requests.RequestException as e:
             message = self._mask(str(e)).replace(_MASKED, MASK)
             if record is not None:
