@@ -325,7 +325,8 @@ def test_editor_requirements_page(tmp_path):
     editor.write(session, "requirements.yml", content=yaml.safe_dump({"sources": {
         "reqs": {"backend": "yaml", "options": {"file": "reqs/system.yml"}},
         "alm": {"backend": "rest", "options": {"base": "http://127.0.0.1:9", "list": {"url": "x"}}}}}, sort_keys=False))
-    assert editor.requirements(session)["edit"] == {"file": "reqs/system.yml", "source": None}
+    assert editor.requirements(session)["edit"] == {"file": "requirements.yml", "source": None}   # every source: the sources file
+    assert editor.requirements(session, "reqs")["edit"] == {"file": "reqs/system.yml", "source": None}
     data = editor.requirements(session, "alm")
     assert data["edit"] == {"file": "requirements.yml", "source": "alm"} and data["error"] and data["sources"] == ["reqs", "alm"]
     editor.write(session, "requirements.yml", content=yaml.safe_dump(REQS))

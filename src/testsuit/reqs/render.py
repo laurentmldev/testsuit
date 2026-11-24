@@ -187,8 +187,23 @@ def matrix_html(cov: Coverage, base: str = "") -> str:
             f'</thead><tbody>{"".join(body)}</tbody></table></div>')
 
 
-def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str = "") -> str:
-    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports."""
+def scope_text(scope: dict | None) -> str:
+    """What a coverage covers, in words (the ``scope`` of the Requirements page of the Editor): its sources, node and
+    test definitions."""
+    if not scope:
+        return ""
+    names = [f"{s['label']} ({s['name']})" if s.get("label") and s["label"] != s["name"] else s["name"]
+             for s in scope.get("sources") or []]
+    parts = [("every source: " if scope.get("all_sources") else "source " if len(names) == 1 else "sources ") + ", ".join(names)]
+    if scope.get("node"):
+        parts.append(f"node {scope['node']}" + (" and its sub-nodes" if scope.get("children", True) else " only"))
+    parts.append(f"the test definitions of campaign {scope['campaign']}" if scope.get("campaign") else "every test definition")
+    return "Covers " + " · ".join(parts)
+
+
+def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str = "", scope: str = "") -> str:
+    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports. scope: what it
+    covers, in words, under the title."""
     e = html.escape
     base = sequencer.rstrip("/") + "/" if sequencer else ""
     by_path = cov.by_path()
@@ -227,6 +242,7 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
 <title>{e(title)}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{e(title)}</h1>
+{f'<p class="scope"><strong>{e(scope)}</strong></p>' if scope else ""}
 <div class="muted">{len(cov.tests)} test(s) · generated {datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
 {tiles_html(cov)}
 {f"<ul>{problems}</ul>" if problems else ""}

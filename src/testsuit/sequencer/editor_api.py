@@ -226,16 +226,17 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.get("/edit/sessions/{sid}/requirements/report")
     async def requirements_report(sid: str, source: str | None = None, campaign: str | None = None,
-                                  download: bool = False):
-        """The same as a self-contained HTML page, with both matrices."""
+                                  node: str = "", children: bool = True, download: bool = False):
+        """The same as a self-contained HTML page, with both matrices: what the page shows (source, campaign, node),
+        said at its top."""
         from fastapi.responses import HTMLResponse
         from testsuit.reqs.coverage import Coverage
-        from testsuit.reqs.render import as_html
-        _, cov = await run(editor.requirements_coverage, session(sid), source, campaign)
+        from testsuit.reqs.render import as_html, scope_text
+        out, cov = await run(editor.requirements_coverage, session(sid), source, campaign, node, children)
         cov = cov or Coverage()
         title = f"{Path(campaign).name if campaign else session(sid).repo}: requirements coverage"
         headers = {"Content-Disposition": 'attachment; filename="requirements_coverage.html"'} if download else {}
-        return HTMLResponse(as_html(cov, title, "../../../../"), headers=headers)
+        return HTMLResponse(as_html(cov, title, "../../../../", scope=scope_text(out.get("scope"))), headers=headers)
 
     @app.get("/edit/sessions/{sid}/schemas")
     async def session_schemas(sid: str):
