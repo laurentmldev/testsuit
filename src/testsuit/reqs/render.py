@@ -133,7 +133,7 @@ h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:28px 0 8px; }
 .error { background:var(--errbg); color:var(--err); } .partial { background:var(--partbg); color:var(--part); }
 .skipped { background:var(--skipbg); color:var(--skip); } .not-run { color:var(--muted); border:1px solid var(--line); }
 .uncovered { color:var(--bad); border:1px dashed var(--bad); }
-.changed { color:var(--err); font-size:11px; }
+.changed { color:var(--err); font-weight:700; cursor:help; }
 .tiles { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
 .tile { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 14px; min-width:80px; }
 .tile b { display:block; font-size:20px; }
@@ -151,7 +151,8 @@ def _badge(status: str | None, stale: bool = False) -> str:
         return '<span class="muted">–</span>'
     cls = status.replace(" ", "-")
     return (f'<span class="badge {cls}" title="{e(status)}">{_MARK[status]} {e(status)}</span>'
-            + ('<div class="changed">changed since</div>' if stale else ""))
+            + (' <span class="changed" title="Changed since: the requirement changed since the version this test '
+               'verified">⟳</span>' if stale else ""))
 
 
 def _req_link(cov: Coverage, key: str) -> str:

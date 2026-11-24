@@ -39,7 +39,7 @@ export function CoverageBadge({ status, changed }: { status?: string | null; cha
   return (
     <span className="cov-cell">
       <span className={classes("cov-badge", status.replace(" ", "-"))} title={HELP[status]}>{MARK[status]} {status}</span>
-      {changed && <span className="cov-changed" title="The requirement changed since the version this test verified">changed since</span>}
+      {changed && <span className="cov-changed" title="Changed since: the requirement changed since the version this test verified">⟳</span>}
     </span>
   );
 }
@@ -140,8 +140,9 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                     {reqs.map((r) => (
                       <Fragment key={r.key}>
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
-                          <td className="mono">{r.key}</td>
-                          <td>{r.title || htmlToText(String(r.description || "")).split("\n")[0]}</td>
+                          <td className="mono nowrap">{r.key}</td>
+                          {(() => { const title = r.title || htmlToText(String(r.description || "")).split("\n")[0];
+                            return <td className="cov-title" title={title}>{title}</td>; })()}
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>
