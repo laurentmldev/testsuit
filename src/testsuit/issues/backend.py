@@ -25,7 +25,7 @@ factory ``factory(options, credentials, base_dir) -> IssueBackend``, as a requir
         markup = "markdown"                                 # how its issue texts are written: markdown, jira, textile
         options_help = {"url": "The server.", "project": "The project short name."}
         credentials_help = {"token": "A permanent token."}
-        def search(self, text="", state="open", labels=(), limit=100) -> list[Issue]: ...
+        def search(self, text="", state="open", labels=(), limit=100, since=None) -> list[Issue]: ...
         def get(self, ids) -> dict[str, Issue | None]: ...
         def create(self, title, body, labels=(), project=None) -> Issue: ...
         def comment(self, id, body) -> None: ...
@@ -34,13 +34,22 @@ factory ``factory(options, credentials, base_dir) -> IssueBackend``, as a requir
 
 Capabilities: ``create`` (new issues), ``comment``, ``remote_link`` (a link shown beside the issue, Jira), ``group``
 (a source over several projects: ids are ``<project>#<n>``, ``create`` takes the project).
+
+Long lists: ``search`` MAY take ``since`` (an ISO time: only the issues updated at or after it, for a refresh that
+reads only what changed) and report each page it reads with ``self.paged(issues, read, total)`` (``total``: how many
+the tool says it holds, when it says; ``exact=False`` for an estimate), so that the first ones are shown at once and
+the reading's progress too.
 """
 from __future__ import annotations
 
+import inspect
+import threading
 import json
+import re
 import time
 import warnings
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -52,6 +61,26 @@ TIMEOUT = 20.0
 TRACE_CALLS = 30
 TRACE_ANSWER = 4000
 MAX_PAGES = 100                              # of 100 issues: 10,000 at most per list
+
+
+_reporting = threading.local()
+Progress = Callable[[list[Issue], int, "int | None", bool], None]
+
+
+@contextmanager
+def reporting(fn: Progress | None):
+    """Within it, in this thread, each page of a list read calls fn(issues of the page, read so far, total or None,
+    whether the total is exact)."""
+    before = getattr(_reporting, "fn", None)
+    _reporting.fn = fn
+    try:
+        yield
+    finally:
+        _reporting.fn = before
+
+
+def current_reporting() -> Progress | None:
+    return getattr(_reporting, "fn", None)
 
 
 class IssueBackend:
@@ -74,10 +103,25 @@ class IssueBackend:
         self.name = ""                       # the source's name, set by IssueSources
 
     # ── what a backend implements ──────────────────────────────────────
-    def search(self, text: str = "", state: str | None = "open", labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
+    def search(self, text: str = "", state: str | None = "open", labels: Iterable[str] = (), limit: int = 100,
+               since: str | None = None) -> list[Issue]:
         """Issues of the project, newest first: those whose title or text has ``text``, in ``state`` (open, closed,
-        None: both), with every label of ``labels``; at most ``limit``."""
+        None: both), with every label of ``labels``, updated at or after ``since`` (an ISO time); at most ``limit``."""
         raise NotImplementedError
+
+    def paged(self, issues: list[Issue], read: int, total: int | None = None, exact: bool = True) -> None:
+        """A page of a list was read (for the progress of a long list)."""
+        fn = getattr(_reporting, "fn", None)
+        if fn is not None:
+            fn(issues, read, total, exact)
+
+    @property
+    def supports_since(self) -> bool:
+        """Whether its search takes ``since`` (a plugin's may not)."""
+        try:
+            return "since" in inspect.signature(type(self).search).parameters      # not a filter's wrapper
+        except (TypeError, ValueError):
+            return False
 
     def get(self, ids: Iterable[str]) -> dict[str, Issue | None]:
         """The issues of these ids (None: no such issue)."""
@@ -203,14 +247,32 @@ class Api:
 
     def pages(self, path: str, params: Mapping[str, Any], limit: int) -> Iterable[Any]:
         """The items of a list, page by page as its Link header gives them (GitHub, GitLab), up to limit."""
-        url, query, count = path, dict(params), 0
-        for _ in range(MAX_PAGES):
-            data, r = self.call("GET", url, query)
-            for item in data or []:
+        count = 0
+        for items, _, _ in self.page_lists(path, params):
+            for item in items:
                 yield item
                 count += 1
                 if count >= limit:
                     return
+
+    def page_lists(self, path: str, params: Mapping[str, Any]) -> Iterable[tuple[list, int | None, bool]]:
+        """(items, total, exact) of each page of a list, as its Link header gives them (GitHub, GitLab): the total
+        from ``X-Total`` (GitLab), else estimated from the last page's number (GitHub)."""
+        url, query = path, dict(params)
+        per_page = int(dict(params).get("per_page") or 100)
+        total: int | None = None
+        exact = True
+        for _ in range(MAX_PAGES):
+            data, r = self.call("GET", url, query)
+            if total is None and r is not None:
+                if str(r.headers.get("X-Total") or "").isdigit():
+                    total = int(r.headers["X-Total"])
+                else:
+                    last = r.links.get("last", {}).get("url") or ""
+                    m = re.search(r"[?&]page=(\d+)", last)
+                    if m:
+                        total, exact = int(m.group(1)) * per_page, False
+            yield list(data or []), total, exact
             nxt = r.links.get("next", {}).get("url") if r is not None else None
             if not nxt or not data:
                 return

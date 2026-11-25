@@ -57,7 +57,7 @@ from typing import Any
 import yaml
 
 from testsuit.credentials import CredentialError, is_reference, resolve_secret
-from testsuit.issues.backend import IssueBackend, create_issue_backend
+from testsuit.issues.backend import IssueBackend, create_issue_backend, current_reporting, reporting
 from testsuit.issues.filter import IssueFilter
 from testsuit.issues.model import IssueError
 
@@ -131,15 +131,23 @@ FILTER_SCAN = 5000                           # issues read at most to find those
 def _filtered(backend: IssueBackend, f: IssueFilter) -> None:
     """Make a backend's search keep only the issues of its source's filter (its state and labels asked of the tool)."""
     inner = backend.search
+    since_ok = backend.supports_since
 
-    def search(text: str = "", state: str | None = "open", labels=(), limit: int = 100):
+    def search(text: str = "", state: str | None = "open", labels=(), limit: int = 100, since: str | None = None):
         state = f.state_for(state)
         if state is False:
             return []
         asked = list(dict.fromkeys([*labels, *f.labels]))
-        found = inner(text=text, state=state, labels=asked, limit=max(limit, FILTER_SCAN) if f.post else limit)
+        outer = current_reporting()
+        keep = None if outer is None else (        # the pages as read: only the issues the filter keeps
+            lambda issues, read, total, exact=True: outer([i for i in issues if f.match(i)], read, total, exact))
+        with reporting(keep):
+            found = inner(text=text, state=state, labels=asked, limit=max(limit, FILTER_SCAN) if f.post else limit,
+                          **({"since": since} if since and since_ok else {}))
         return [i for i in found if f.match(i)][:limit]
     backend.search = search                      # type: ignore[method-assign]
+    backend.raw_search = inner                   # type: ignore[attr-defined]  (a refresh sees what left the filter)
+    backend.filter = f                           # type: ignore[attr-defined]
 
 
 class IssueSources:

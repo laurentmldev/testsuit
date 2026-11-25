@@ -30,6 +30,7 @@ minutes (a cache), and kept in the bindings as last seen.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 import logging
 import threading
 import time
@@ -42,6 +43,8 @@ from testsuit.sequencer import review as rv
 from testsuit.sequencer.util import SequencerError, now
 from testsuit.issues import results as iss
 from testsuit.issues.model import OPEN, Issue, IssueError
+from testsuit.issues.backend import IssueBackend, reporting
+from testsuit.issues.filter import parse_time
 from testsuit.netguard import is_down_error
 from testsuit.issues.sources import SNAPSHOT, IssueSources
 
@@ -51,6 +54,71 @@ BINDINGS = "bindings.yml"
 LIST_LIMIT = 10000                               # issues of a source listed at most
 
 
+FULL_EVERY = 6 * 3600.0                          # seconds: a list read whole again (issues deleted or moved)
+SINCE_MARGIN = 120                               # seconds before the last reading a refresh starts from
+
+
+def _hhmm(iso: str | None) -> str:
+    at = parse_time(iso or "")
+    return at.astimezone().strftime("%H:%M") if at else "?"
+ERROR_RETRY = 30.0                               # seconds before a list that failed is read again (unless asked)
+
+
+class _List:
+    """The issues of a source as read (by id), and how its reading goes; kept on disk for a restart."""
+
+    def __init__(self, key: tuple) -> None:
+        self.key = key
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+        self.done.set()
+        self.issues: dict[str, Issue] = {}
+        self.read_at: str | None = None          # when the last complete reading started (ISO, UTC)
+        self.full_at = 0.0                       # when the last whole reading ended (epoch)
+        self.checked = 0.0                       # when it was last read, or failed (monotonic)
+        self.complete = False
+        self.loading = False
+        self.read, self.total, self.exact = 0, None, True
+        self.mode = ""                           # of the reading going on: first, whole, or since (what changed)
+        self.error = ""
+        self.down = False                        # the error: its server down
+        self.version = 0
+
+    def state(self) -> dict[str, Any]:
+        issues = sorted(self.issues.values(), key=lambda i: str(i.updated or ""), reverse=True)
+        return {"issues": issues, "loading": self.loading, "read": self.read, "total": self.total, "exact": self.exact,
+                "complete": self.complete, "mode": self.mode, "read_at": self.read_at, "error": self.error, "version": self.version}
+
+    @property
+    def store(self) -> Path:
+        from testsuit.netguard import LastKnown
+        return LastKnown("issue-lists", self.key).path
+
+    def load(self) -> None:
+        try:
+            data = json.loads(self.store.read_text())
+            self.issues = {str(d["id"]): Issue.from_dict(d) for d in data.get("issues") or []}
+            self.read_at, self.full_at = data.get("read_at"), float(data.get("full_at") or 0)
+            self.complete = bool(self.read_at)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log.warning("issue list %s not read: %s", self.store, e)
+
+    def save(self) -> None:
+        with self.lock:
+            data = {"read_at": self.read_at, "full_at": self.full_at,
+                    "issues": [i.as_dict(body=True) for i in self.issues.values()]}
+        store = self.store
+        try:
+            store.parent.mkdir(parents=True, exist_ok=True)
+            tmp = store.with_suffix(f".{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(data, default=str))
+            tmp.replace(store)
+        except OSError as e:
+            log.warning("issue list %s not written: %s", store, e)
+
+
 class Issues:
     """The bindings of the sequencer, and the calls to the issue trackers of its runs."""
 
@@ -58,7 +126,7 @@ class Issues:
         self.seq = seq
         self._lock = threading.Lock()
         self._issues: dict[tuple[str, str], tuple[float, Issue | None]] = {}     # (backend identity, id)
-        self._lists: dict[tuple[str, str, str], tuple[float, list[Issue]]] = {}   # (backend identity, state, filter)
+        self._lists: dict[tuple[str, str, str], _List] = {}                     # (backend identity, state, filter)
         self.stale: dict[str, str] = {}          # source -> why its list is the one last read (its server down)
         self._sources: dict[str, IssueSources | None] = {}                     # run id
 
@@ -134,29 +202,113 @@ class Issues:
         self._issues[key] = (time.monotonic(), found)
         return found
 
-    def listed(self, sources: IssueSources, source: str, state: str | None = OPEN, refresh: bool = False,
-               limit: int = LIST_LIMIT) -> list[Issue]:
-        """The issues of a source (open ones: the default), cached."""
+    def _list(self, sources: IssueSources, source: str, state: str | None) -> tuple[_List, IssueBackend]:
         backend = sources.backend(source)
         f = sources.filters.get(source)
         key = (backend.identity, str(state), json.dumps(f.spec if f else {}, sort_keys=True, default=str))
-        hit = self._lists.get(key)
-        if hit and not refresh and time.monotonic() - hit[0] < TTL:
-            return [_renamed(i, source) for i in hit[1]]
+        with self._lock:
+            lst = self._lists.get(key)
+            if lst is None:
+                lst = self._lists[key] = _List(key)
+                lst.load()                           # as last read, before a restart
+        return lst, backend
+
+    def listing(self, sources: IssueSources, source: str, state: str | None = OPEN, refresh: bool = False,
+                limit: int = LIST_LIMIT) -> dict[str, Any]:
+        """The issues of a source as known now, without waiting: read in the background when not read yet, or read
+        more than TTL ago (then only those updated since), or ``refresh``. ``{issues, loading, read, total, exact,
+        complete, read_at, error, version}``; ``issues`` grow while the first reading goes."""
+        lst, backend = self._list(sources, source, state)
+        with lst.lock:
+            due = refresh or not lst.complete or time.monotonic() - lst.checked > TTL
+            if due and not lst.loading and not (lst.error and not refresh and time.monotonic() - lst.checked < ERROR_RETRY):
+                lst.loading = True
+                lst.done.clear()
+                since = lst.read_at if (not refresh and lst.complete and lst.read_at and backend.supports_since
+                                        and time.time() - lst.full_at < FULL_EVERY) else None
+                lst.mode = "first" if not lst.complete else "since" if since else "whole"
+                lst.read, lst.total, lst.exact = 0, None, True
+                if not lst.complete:
+                    lst.issues = {}
+                threading.Thread(target=self._read, args=(lst, backend, source, state, limit, since),
+                                 name=f"issues-{source}", daemon=True).start()
+            out = lst.state()
+        out["issues"] = [_renamed(i, source) for i in out["issues"]]
+        if lst.error and lst.complete and lst.down:
+            self.stale[source] = f"{lst.error} (the list shown was read at {_hhmm(lst.read_at)})"
+        else:
+            self.stale.pop(source, None)
+        return out
+
+    def listed(self, sources: IssueSources, source: str, state: str | None = OPEN, refresh: bool = False,
+               limit: int = LIST_LIMIT) -> list[Issue]:
+        """The issues of a source (open ones: the default), waiting for them when not read yet (or ``refresh``); a list
+        read before is given at once (and read again in the background when older than TTL)."""
+        lst, _ = self._list(sources, source, state)
+        first = self.listing(sources, source, state, refresh, limit)
+        if first["loading"] and (refresh or not first["complete"]):
+            lst.done.wait()
+            first = self.listing(sources, source, state, False, limit)
+        if first["error"] and not first["complete"]:
+            raise IssueError(first["error"])
+        return first["issues"]
+
+    def _read(self, lst: _List, backend: IssueBackend, source: str, state: str | None, limit: int,
+              since: str | None) -> None:
+        """Read a list: whole (the first time, every FULL_EVERY, or asked), else only the issues updated since the last
+        reading (closed, or out of the filter since, they leave the list)."""
+        start = datetime.now(timezone.utc)
+        fill = lst.mode == "first"                    # the first reading: shown as it goes
+
+        def page(issues: list[Issue], read: int, total: int | None, exact: bool = True) -> None:
+            with lst.lock:
+                lst.read, lst.total, lst.exact = read, total, exact
+                if fill:
+                    for i in issues:
+                        lst.issues[i.id] = i
+                    lst.version += 1
+
         try:
-            found = backend.search(state=state, limit=limit)
-        except IssueError as e:
-            if hit and is_down_error(e):            # its server down: the list as last read, said so
-                read = time.strftime("%H:%M", time.localtime(time.time() - (time.monotonic() - hit[0])))
-                self.stale[source] = f"{e} (the list shown was read at {read})"
-                log.warning("issue source '%s': %s", source, self.stale[source])
-                return [_renamed(i, source) for i in hit[1]]
-            raise
-        self.stale.pop(source, None)
-        self._lists[key] = (time.monotonic(), found)
-        for i in found:
-            self._issues[(backend.identity, i.id)] = (time.monotonic(), i)
-        return [_renamed(i, source) for i in found]
+            with reporting(page):
+                if since:
+                    after = (parse_time(since) - timedelta(seconds=SINCE_MARGIN)).isoformat(timespec="seconds")
+                    raw = getattr(backend, "raw_search", backend.search)
+                    f = getattr(backend, "filter", None)
+                    changed = raw(state=None, limit=limit, since=after)
+                else:
+                    found = backend.search(state=state, limit=limit)
+        except Exception as e:                       # noqa: BLE001 - told to whoever looks at the list
+            with lst.lock:
+                lst.error, lst.down = str(e), is_down_error(e)
+                lst.checked = time.monotonic()
+                lst.loading = False
+                lst.version += 1
+            log.warning("issue source '%s': %s", source, e)
+            lst.done.set()
+            return
+        with lst.lock:
+            if since:
+                for i in changed:
+                    if (state and i.state != state) or (f is not None and not f.match(i)):
+                        lst.issues.pop(i.id, None)
+                    else:
+                        lst.issues[i.id] = i
+                lst.read = len(changed)
+            else:
+                lst.issues = {i.id: i for i in found}
+                lst.full_at = time.time()
+                lst.read = lst.total = len(found)
+                lst.exact = True
+            lst.read_at = start.isoformat(timespec="seconds")
+            lst.complete, lst.error, lst.loading = True, "", False
+            lst.checked = time.monotonic()
+            lst.version += 1
+            items = list(lst.issues.values())
+        now_ = time.monotonic()
+        for i in items:
+            self._issues[(backend.identity, i.id)] = (now_, i)
+        lst.save()
+        lst.done.set()
 
     def _refreshed(self, binding: dict, sources: IssueSources | None, refresh: bool = False) -> dict:
         """A binding with its issue as the tool gives it now (as last seen when the tool cannot be reached)."""

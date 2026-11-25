@@ -89,24 +89,33 @@ class RedmineBackend(IssueBackend):
                      updated=str(item.get("updated_on") or ""), body=str(item.get("description") or ""),
                      project=str((item.get("project") or {}).get("name") or self.project), links=links)
 
-    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
+    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100,
+               since: str | None = None) -> list[Issue]:
         params: dict[str, Any] = {"project_id": self.project, "sort": "updated_on:desc",
                                   "status_id": {OPEN: "open", CLOSED: "closed"}.get(state or "", "*")}
         if text:                                 # subject, description and notes (Redmine 5.0+)
             params.update({"f[]": ["status_id", "any_searchable"], "op[status_id]": "o" if state == OPEN else
                            "c" if state == CLOSED else "*", "op[any_searchable]": "~", "v[any_searchable][]": text})
             params.pop("status_id")
+        if since:
+            params["updated_on"] = f">={str(since).replace('+00:00', 'Z')}"
         wanted = {str(x).lower() for x in labels}
         out: list[Issue] = []
         for page in range(MAX_PAGES):
             data = self.api.get("issues.json", {**params, "limit": PAGE, "offset": page * PAGE}) or {}
             items = data.get("issues") or []
+            batch = []
             for item in items:
                 issue = self.issue(item)
                 if wanted <= {x.lower() for x in issue.labels}:
-                    out.append(issue)
-                    if len(out) >= limit:
-                        return out
+                    batch.append(issue)
+                    if len(out) + len(batch) >= limit:
+                        break
+            out += batch
+            total = data.get("total_count")
+            self.paged(batch, len(out), min(int(total), limit) if str(total).isdigit() and not wanted else None)
+            if len(out) >= limit:
+                return out
             if len(items) < PAGE or (page + 1) * PAGE >= int(data.get("total_count") or 0):
                 return out
         return out

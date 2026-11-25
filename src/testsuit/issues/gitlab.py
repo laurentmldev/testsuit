@@ -82,7 +82,8 @@ class GitLabBackend(IssueBackend):
                      author=str((item.get("author") or {}).get("username") or ""), created=str(item.get("created_at") or ""),
                      updated=str(item.get("updated_at") or ""), body=str(item.get("description") or ""), project=project)
 
-    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
+    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100,
+               since: str | None = None) -> list[Issue]:
         params: dict[str, Any] = {"per_page": min(100, max(1, limit)), "order_by": "updated_at", "sort": "desc"}
         if state:
             params["state"] = "opened" if state == OPEN else "closed"
@@ -90,7 +91,16 @@ class GitLabBackend(IssueBackend):
             params["labels"] = ",".join(labels)
         if text:
             params["search"] = text
-        return [self.issue(x) for x in self.api.pages(f"{self._scope()}/issues", params, limit)]
+        if since:
+            params["updated_after"] = since
+        out: list[Issue] = []
+        for items, total, exact in self.api.page_lists(f"{self._scope()}/issues", params):
+            batch = [self.issue(x) for x in items][:limit - len(out)]
+            out += batch
+            self.paged(batch, len(out), min(total, limit) if total is not None else None, exact)
+            if len(out) >= limit:
+                break
+        return out
 
     def _where(self, id: str) -> tuple[str, str]:
         """(project, iid) of an id of this source."""

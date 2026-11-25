@@ -17,6 +17,7 @@ import asyncio
 import json
 import re
 import threading
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ class Tracker:
     def __init__(self):
         self.issues = {"gitlab": [], "github": [], "jira": [], "redmine": []}
         self.calls = []
+        self.delay = 0.0
 
 
 def _handler(tracker: Tracker):
@@ -166,7 +168,11 @@ def _handler(tracker: Tracker):
                         return self._send(204, None) if found else self._send(404, {})
                     return self._send(200, {"issue": found[0]}) if found else self._send(404, {})
                 text = q.get("v[any_searchable][]", [""])[0] if "v[any_searchable][]" in q else ""
-                out = [i for i in issues[::-1] if not text or text in i["subject"] + i["description"]]
+                since = str(q.get("updated_on") or "").lstrip(">=")
+                time.sleep(tracker.delay)
+                out = [i for i in issues[::-1] if (not text or text in i["subject"] + i["description"])
+                       and (not since or str(i.get("updated_on") or "") >= since)
+                       and q.get("status_id", "*") in ("*", "closed" if i["status"]["is_closed"] else "open")]
                 page = out[int(q.get("offset", 0)):int(q.get("offset", 0)) + int(q.get("limit", 25))]
                 return self._send(200, {"issues": page, "total_count": len(out), "offset": 0, "limit": 100})
             return self._send(404, {"message": f"no route {path}"})
@@ -593,6 +599,18 @@ def test_issues_file_former_name(tmp_path):
     assert find_issues_file(tmp_path) == tmp_path / "issues.yml"
 
 
+def _listed(editor, session, **k):
+    """A page of the Editor's issues list once every list is read."""
+    page = editor.issues_list(session, **k)
+    k.pop("refresh", None)
+    for _ in range(400):
+        if not page["loading"]:
+            return page
+        time.sleep(0.02)
+        page = editor.issues_list(session, **k)
+    raise AssertionError(f"still loading: {page['loading']}")
+
+
 def test_issues_list_pages(tmp_path, tracker):
     """The Editor's issues list: pages of a list read once, found by words, by requirements, counted."""
     from editor_t import Repos
@@ -604,16 +622,16 @@ def test_issues_list_pages(tmp_path, tracker):
                                           "updated_on": f"2026-11-{1 + n // 10:02d}T10:00:{n % 60:02d}Z"})
     (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
         "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
-    page = repos.editor.issues_list(session, limit=100)
+    page = _listed(repos.editor, session, limit=100)
     # two sources of the same project, filtered differently: each its own list
     (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {
         n: {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"},
             **({"filter": {"title": "drift"}} if n == "drifts" else {})} for n in ("rm", "drifts")}}))
-    assert repos.editor.issues_list(session, source="drifts")["total"] == 25
-    assert repos.editor.issues_list(session, source="rm")["total"] == 250
+    assert _listed(repos.editor, session, source="drifts")["total"] == 25
+    assert _listed(repos.editor, session, source="rm")["total"] == 250
     (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
         "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
-    page = repos.editor.issues_list(session, limit=100)
+    page = _listed(repos.editor, session, limit=100)
     assert (page["total"], page["listed"], len(page["issues"]), page["offset"], page["errors"]) == (250, 250, 100, 0, {})
     reads = len(tracker.calls)
     last = repos.editor.issues_list(session, offset=200, limit=100)
@@ -624,8 +642,59 @@ def test_issues_list_pages(tmp_path, tracker):
     assert found["total"] == 25 and all("drift" in i["title"] for i in found["issues"])
     assert repos.editor.issues_list(session, only="bound")["total"] == 0
     assert repos.editor.issues_list(session, limit=10000)["limit"] == 500
-    repos.editor.issues_list(session, refresh=True)
+    _listed(repos.editor, session, refresh=True)
     assert len(tracker.calls) > reads
+
+
+def test_issue_list_progress_and_refresh(tmp_path, tracker, monkeypatch):
+    """A long list: its first pages shown while the rest is read, with the total the tool gives; then refreshed with
+    only the issues updated since (changed, closed, new); and kept on disk for a restart."""
+    from editor_t import Repos
+    from testsuit.sequencer import issues as seq_issues
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    rm = tracker.issues["redmine"]
+    for n in range(1, 251):
+        rm.append({"id": n, "subject": f"issue {n}", "description": "", "status": {"is_closed": False},
+                   "updated_on": f"2026-11-{1 + n // 10:02d}T10:00:{n % 60:02d}Z"})
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    tracker.delay = 0.3
+    page = repos.editor.issues_list(session)
+    assert page["loading"]["rm"]["mode"] == "first" and page["listed"] == 0
+    seen = None
+    for _ in range(100):
+        time.sleep(0.02)
+        page = repos.editor.issues_list(session)
+        if page["loading"] and page["listed"]:
+            seen = page
+            break
+    assert seen and seen["loading"]["rm"]["total"] == 250 and seen["loading"]["rm"]["read"] == seen["listed"] < 250
+    assert len(seen["issues"]) == min(100, seen["listed"])                   # the first ones, shown at once
+    tracker.delay = 0
+    page = _listed(repos.editor, session)
+    assert page["total"] == 250 and page["read_at"]["rm"]
+    # a refresh: only what changed since
+    rm[4].update(subject="issue 5 renamed", updated_on="2099-01-01T00:00:00Z")
+    rm[5].update(status={"is_closed": True}, updated_on="2099-01-01T00:00:00Z")
+    rm.append({"id": 251, "subject": "a new one", "description": "", "status": {"is_closed": False},
+               "updated_on": "2099-01-01T00:00:01Z"})
+    monkeypatch.setattr(seq_issues, "TTL", 0.0)                             # read more than TTL ago
+    tracker.calls.clear()
+    repos.editor.issues_list(session)
+    monkeypatch.setattr(seq_issues, "TTL", 300.0)
+    page = _listed(repos.editor, session)
+    titles = {i["key"]: i["title"] for i in repos.editor.issues_list(session, limit=500)["issues"]}
+    assert page["total"] == 250 and titles["rm#5"] == "issue 5 renamed" and "rm#6" not in titles and "rm#251" in titles
+    asked = [c[2] for c in tracker.calls if c[1] == "/issues.json"]
+    assert asked and all(q.get("updated_on", "").startswith(">=") and q["status_id"] == "*" for q in asked)
+    # a restart: the list as last read, at once, while it is read again
+    fresh = seq_issues.Issues(repos.editor.seq)
+    _, sources = repos.editor._issue_sources(session)
+    tracker.delay = 0.3
+    known = fresh.listing(sources, "rm", "open")
+    assert known["complete"] and len(known["issues"]) == 250 and known["loading"]
+    tracker.delay = 0
 
 
 def test_issue_server_down(tmp_path, tracker):
@@ -639,12 +708,12 @@ def test_issue_server_down(tmp_path, tracker):
     tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
     (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
         "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
-    assert repos.editor.issues_list(session)["total"] == 1
+    assert _listed(repos.editor, session)["total"] == 1
     _, sources = repos.editor._issue_sources(session)
     assert repos.editor.seq.issues.issue(sources, "rm", "4").title == "drift"
     tracker.server.shutdown()
     tracker.server.server_close()
-    page = repos.editor.issues_list(session, refresh=True)
+    page = _listed(repos.editor, session, refresh=True)
     assert page["total"] == 1 and "the list shown was read at" in page["errors"]["rm"]
     assert repos.editor.seq.issues.issue(sources, "rm", "4", refresh=True).title == "drift"
     start = time.monotonic()

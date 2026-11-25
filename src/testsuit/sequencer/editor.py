@@ -1488,7 +1488,9 @@ class Editor:
         """A page of the issues of the issue sources (one, or all), newest first, each with the requirements it names
         and the results it is bound to (the sequencer's bindings). ``text``: searched by the tools; ``find``: words
         of the key, title or labels, among those listed; ``only``: ``reqs`` (naming requirements) or ``bound``. The
-        lists are cached a few minutes, so that paging through thousands of issues reads them once."""
+        lists are read in the background (the sequencer's, kept on disk): a page answers at once with the issues read
+        so far, ``loading`` gives each source still read ({read, total, exact, first}), ``read_at`` when each was read;
+        once read, a list is refreshed with the issues updated since."""
         from testsuit.issues.model import IssueError
         file, sources = self._issue_sources(session)
         if file is None:
@@ -1497,9 +1499,19 @@ class Editor:
         for name in names:
             if name not in sources.names:
                 raise SequencerError(f"unknown issue source '{name}' (sources: {', '.join(sources.names)})")
+        lists: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        if not text:                                 # the lists as read so far: their reading goes on in the background
+            for name in names:
+                try:
+                    lists[name] = self.seq.issues.listing(sources, name, state, refresh)
+                except IssueError as e:
+                    errors[name] = str(e)
+        versions = tuple((n, x["version"], x["loading"]) for n, x in lists.items())
         key = (session.id, str(file), tuple(names), str(state), text)
         hit = self._issue_pages.get(key)
-        if hit is None or refresh or time.monotonic() - hit[0] > ISSUE_PAGES_TTL or hit[2] != file.stat().st_mtime:
+        if (hit is None or (text and refresh) or hit[3] != versions or hit[2] != file.stat().st_mtime
+                or (text and time.monotonic() - hit[0] > ISSUE_PAGES_TTL)):
             from testsuit.issues.results import RequirementMatcher
             matcher = RequirementMatcher(self._known_requirements(session))
             bound: dict[str, list[dict]] = {}
@@ -1508,26 +1520,34 @@ class Editor:
                     {"id": b["id"], "testdef": b.get("testdef"), "target": b.get("target"), "run": b.get("run"),
                      "by": b.get("by")})
             rows: list[dict] = []
-            errors: dict[str, str] = {}
             for name in names:
-                try:
-                    found = sources.backend(name).search(text=text, state=state, limit=1000) if text else \
-                        self.seq.issues.listed(sources, name, state, refresh)
-                except IssueError as e:
-                    errors[name] = str(e)
+                if text:
+                    try:
+                        found = sources.backend(name).search(text=text, state=state, limit=1000)
+                    except IssueError as e:
+                        errors[name] = str(e)
+                        continue
+                elif name in lists:
+                    found = lists[name]["issues"]
+                else:
                     continue
-                if not text and name in self.seq.issues.stale:
-                    errors[name] = self.seq.issues.stale[name]
                 rules = sources.req_rules(name)
                 for i in found:
                     rows.append({**i.as_dict(), "source": name, "key": f"{name}#{i.id}",
                                  "requirements": matcher.match(i, rules), "bindings": bound.get(f"{name}#{i.id}", [])})
             rows.sort(key=lambda i: str(i.get("updated") or ""), reverse=True)
-            hit = (time.monotonic(), (rows, errors), file.stat().st_mtime)
+            hit = (time.monotonic(), (rows, dict(errors) if text else {}), file.stat().st_mtime, versions)
             self._issue_pages[key] = hit
             while len(self._issue_pages) > 20:                  # the oldest lists go
                 self._issue_pages.pop(next(iter(self._issue_pages)))
-        rows, errors = hit[1]
+        for name, x in lists.items():
+            if x["error"] and name not in errors:
+                errors[name] = self.seq.issues.stale.get(name) or x["error"]
+        loading = {n: {"read": x["read"], "total": x["total"], "exact": x["exact"], "mode": x["mode"]}
+                   for n, x in lists.items() if x["loading"]}
+        read_at = {n: x["read_at"] for n, x in lists.items() if x["read_at"]}
+        rows = hit[1][0]
+        errors = {**hit[1][1], **errors}
         shown = rows
         words = [w for w in str(find or "").lower().split() if w]
         if words:
@@ -1541,7 +1561,7 @@ class Editor:
         limit = min(500, max(1, int(limit or 100)))
         return {"issues": shown[offset:offset + limit], "total": len(shown), "offset": offset, "limit": limit,
                 "listed": len(rows), "with_requirements": sum(1 for i in rows if i["requirements"]),
-                "bound": sum(1 for i in rows if i["bindings"]), "errors": errors}
+                "bound": sum(1 for i in rows if i["bindings"]), "errors": errors, "loading": loading, "read_at": read_at}
 
     def issues_test(self, session: EditSession, source: str, data: Any = None) -> dict:
         """Read the open issues of one source, as the Issues subtab would: how many, the first ones, how long it took,
@@ -1599,10 +1619,17 @@ class Editor:
             return {"issues": {}, "errors": {}}
         listed, errors = [], {}
         for name in sources.names:
-            try:
-                listed += self.seq.issues.listed(sources, name, "open", refresh)
+            try:                                     # as read so far: a long list is read in the background
+                x = self.seq.issues.listing(sources, name, "open", refresh)
             except IssueError as e:
                 errors[name] = str(e)
+                continue
+            listed += x["issues"]
+            if x["loading"] and not x["complete"]:
+                total = f" of {'' if x['exact'] else 'about '}{x['total']:,}" if x["total"] else ""
+                errors[name] = f"still reading its issues ({x['read']:,}{total} read): refresh to see them all"
+            elif x["error"]:
+                errors[name] = self.seq.issues.stale.get(name) or x["error"]
         index = issues_by_requirement(listed, {n: sources.req_rules(n) for n in sources.names},
                                       list(dict.fromkeys([*cov.rows(), *cov.requirements])),
                                       self.seq.issues.bindings(), cov.tests)

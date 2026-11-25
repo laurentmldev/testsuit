@@ -26,7 +26,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from testsuit.issues.backend import Api, IssueBackend, need, register_issue_backend
+from testsuit.issues.backend import MAX_PAGES, Api, IssueBackend, need, register_issue_backend
 from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
 FIELDS = "summary,status,labels,assignee,reporter,created,updated,description,issuelinks,project"
@@ -96,7 +96,8 @@ class JiraBackend(IssueBackend):
     def _quote(text: str) -> str:
         return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
-    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
+    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100,
+               since: str | None = None) -> list[Issue]:
         jql = [f"project = {self._quote(self.project)}"]
         if self.options.get("jql"):
             jql.append(f"({self.options['jql']})")
@@ -107,24 +108,36 @@ class JiraBackend(IssueBackend):
         jql += [f"labels = {self._quote(x)}" for x in labels]
         if text:
             jql.append(f"text ~ {self._quote(text)}")
+        if since:                                # in the server's time zone: from the day before, to be sure
+            from datetime import timedelta
+
+            from testsuit.issues.filter import parse_time
+            at = parse_time(since)
+            if at is not None:
+                jql.append(f'updated >= "{(at - timedelta(days=1)).strftime("%Y-%m-%d")}"')
         query = " AND ".join(jql) + " ORDER BY updated DESC"
         out: list[Issue] = []
         if self.cloud:                           # Jira Cloud: /search/jql, pages by token
             token = None
-            for _ in range(20):
+            for _ in range(MAX_PAGES):
                 data = self.api.get("search/jql", {"jql": query, "maxResults": min(100, limit), "fields": FIELDS,
                                                    **({"nextPageToken": token} if token else {})}) or {}
-                out += [self.issue(x) for x in data.get("issues") or []]
+                batch = [self.issue(x) for x in data.get("issues") or []]
+                out += batch
+                self.paged(batch, len(out), len(out) if data.get("isLast") else None)
                 token = data.get("nextPageToken")
                 if not token or len(out) >= limit or data.get("isLast"):
                     break
         else:
             start = 0
-            for _ in range(20):
+            for _ in range(MAX_PAGES):
                 data = self.api.get("search", {"jql": query, "startAt": start, "maxResults": min(100, limit),
                                                "fields": FIELDS}) or {}
                 issues = data.get("issues") or []
-                out += [self.issue(x) for x in issues]
+                batch = [self.issue(x) for x in issues]
+                out += batch
+                total = data.get("total")
+                self.paged(batch, len(out), min(int(total), limit) if str(total).isdigit() else None)
                 start += len(issues)
                 if not issues or start >= int(data.get("total") or 0) or len(out) >= limit:
                     break
