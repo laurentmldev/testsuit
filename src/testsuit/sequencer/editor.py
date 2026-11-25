@@ -51,10 +51,10 @@ from pydantic import ValidationError
 from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
                                              is_scenario, is_utests)
 from testsuit.reqs.backend import describe_req_backends
-from testsuit.tickets.backend import describe_ticket_backends
+from testsuit.issues.backend import describe_issue_backends
 from testsuit.reqs.backend import walk as req_paths
 from testsuit.reqs.sources import is_requirements_file
-from testsuit.tickets.sources import is_tickets_file
+from testsuit.issues.sources import is_issues_file
 from testsuit.sequencer import registry, yamledit
 from testsuit.sequencer.lab import Lab, git_state, load_lab
 from testsuit.sequencer.library import without_comments
@@ -933,8 +933,8 @@ class Editor:
             return "inventory"
         if is_requirements_file(path.name, data):
             return "requirements"
-        if is_tickets_file(path.name, data):
-            return "tickets"
+        if is_issues_file(path.name, data):
+            return "issues"
         if "setup_file" in data or "pipeline" in data:
             return "testdef"
         if "configurations" in data and ({"slot_classes", "component_types", "datarepositories"} & set(data)):
@@ -955,7 +955,7 @@ class Editor:
             raise SequencerError(f"'{rel}' is not a text file") from e
         kind = self.kind(session, rel, text)
         result = {"path": rel, "kind": kind, "content": text, "version": file_version(path)}
-        if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary", "requirements", "tickets"):
+        if kind in ("inventory", "library", "setup", "testdef", "subpipelines", "dictionary", "requirements", "issues"):
             try:
                 result["data"] = yaml.safe_load(text)
                 result["aliases"] = "*" in text and bool(re.search(r"(^|\s)\*[A-Za-z_]", text))
@@ -1224,7 +1224,7 @@ class Editor:
         """Test definitions, setups, sub-pipelines, dictionaries and templates of a folder."""
         from testsuit.datatools.datapack.campaign import is_campaign_file, looks_like_campaign
         result = {"testdefs": [], "setups": [], "subpipelines": {}, "subpipeline_files": [], "shared_subpipelines": {},
-                  "dictionaries": [], "templates": [], "campaigns": [], "requirements": [], "tickets": []}
+                  "dictionaries": [], "templates": [], "campaigns": [], "requirements": [], "issues": []}
         if not folder.is_dir():
             return result
         for dirpath, dirnames, filenames in os.walk(folder):
@@ -1246,8 +1246,8 @@ class Editor:
                 if is_requirements_file(name, data):
                     result["requirements"].append(rel)
                     continue
-                if is_tickets_file(name, data):
-                    result["tickets"].append(rel)
+                if is_issues_file(name, data):
+                    result["issues"].append(rel)
                     continue
                 if is_campaign_file(rel) or looks_like_campaign(data):
                     result["campaigns"].append({"path": rel, "id": data.get("id"), "name": data.get("name"),
@@ -1336,7 +1336,7 @@ class Editor:
             "importers": sorted(importers._importers), "generators": sorted(generators._generators),
             "processors": sorted(processors._processors),
             "req_backends": describe_req_backends(),
-            "ticket_backends": describe_ticket_backends(),
+            "issue_backends": describe_issue_backends(),
             "runtime_keys": RUNTIME_KEYS,
             "inventory": self.rel(session, self._inventory(session)) if session.kind == "lab" else None,
         }
@@ -1416,17 +1416,17 @@ class Editor:
                 return self.check_subpipelines(session, rel, text)
             if kind == "requirements":
                 return self.check_requirements(session, rel, text)
-            if kind == "tickets":
-                return self.check_tickets(session, rel, text)
+            if kind == "issues":
+                return self.check_issues(session, rel, text)
         except SequencerError as e:
             line, column = _find_line(text, str(e))
             return [{"file": rel, "line": line, "column": column, "severity": "error", "message": str(e)}]
         return []
 
-    def check_tickets(self, session: EditSession, rel: str, text: str) -> list[dict]:
-        """A tickets file reads (SPEC §11.3); a credential not readable here, or an unknown backend, is a warning."""
-        from testsuit.tickets.model import TicketError
-        from testsuit.tickets.sources import TicketSources
+    def check_issues(self, session: EditSession, rel: str, text: str) -> list[dict]:
+        """A issues file reads (SPEC §11.3); a credential not readable here, or an unknown backend, is a warning."""
+        from testsuit.issues.model import IssueError
+        from testsuit.issues.sources import IssueSources
         path = self.path(session, rel)
         problems = []
 
@@ -1434,8 +1434,8 @@ class Editor:
             line, column = _find_line(text, message)
             problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": message})
         try:
-            sources = TicketSources(yaml.safe_load(text) or {}, path.parent, rel)
-        except (TicketError, yaml.YAMLError) as e:
+            sources = IssueSources(yaml.safe_load(text) or {}, path.parent, rel)
+        except (IssueError, yaml.YAMLError) as e:
             add(str(e))
             return problems
         for name in sources.names:
@@ -1445,32 +1445,32 @@ class Editor:
                 continue
             try:
                 sources.credentials(name)
-            except TicketError as e:
+            except IssueError as e:
                 add(str(e), "warning")
         return problems
 
-    # ── tickets (Datapacks, Tickets; SPEC §11.3) ─────────────────────────
-    def _ticket_sources(self, session: EditSession):
-        """(tickets file, its sources) of the tests repository of a session; (None, None) without one."""
-        from testsuit.tickets.sources import TicketSources, find_tickets_file
+    # ── issues (Datapacks, Issues; SPEC §11.3) ─────────────────────────
+    def _issue_sources(self, session: EditSession):
+        """(issues file, its sources) of the tests repository of a session; (None, None) without one."""
+        from testsuit.issues.sources import IssueSources, find_issues_file
         if session.kind != "workspace":
-            raise SequencerError("tickets are those of a tests repository")
-        file = find_tickets_file(session.folder)
+            raise SequencerError("issues are those of a tests repository")
+        file = find_issues_file(session.folder)
         if file is None:
             return None, None
-        return file, TicketSources.from_file(file)
+        return file, IssueSources.from_file(file)
 
-    def tickets(self, session: EditSession) -> dict:
-        """The tickets sources of a tests repository: their cards, default, routes, the backends registered."""
-        from testsuit.tickets.backend import describe_ticket_backends
-        from testsuit.tickets.model import TicketError
+    def issues(self, session: EditSession) -> dict:
+        """The issue sources of a tests repository: their cards, default, routes, the backends registered."""
+        from testsuit.issues.backend import describe_issue_backends
+        from testsuit.issues.model import IssueError
         out: dict[str, Any] = {"file": None, "sources": [], "default": None, "routes": [],
-                               "backends": describe_ticket_backends()}
+                               "backends": describe_issue_backends()}
         try:
-            file, sources = self._ticket_sources(session)
-        except TicketError as e:
-            from testsuit.tickets.sources import find_tickets_file
-            f = find_tickets_file(session.folder)
+            file, sources = self._issue_sources(session)
+        except IssueError as e:
+            from testsuit.issues.sources import find_issues_file
+            f = find_issues_file(session.folder)
             return {**out, "file": self.rel(session, f) if f else None, "error": str(e)}
         if file is None:
             return out
@@ -1479,29 +1479,29 @@ class Editor:
                    routes=sources.routes, requirements=sources.data.get("requirements") or {})
         return out
 
-    def tickets_issues(self, session: EditSession, source: str | None = None, state: str | None = "open",
+    def issues_list(self, session: EditSession, source: str | None = None, state: str | None = "open",
                        text: str = "", refresh: bool = False) -> dict:
-        """The issues of the tickets sources (one, or all), each with the requirements it names and the results it is
+        """The issues of the issue sources (one, or all), each with the requirements it names and the results it is
         bound to (the sequencer's bindings)."""
-        from testsuit.tickets.issues import RequirementMatcher
-        from testsuit.tickets.model import TicketError
-        file, sources = self._ticket_sources(session)
+        from testsuit.issues.results import RequirementMatcher
+        from testsuit.issues.model import IssueError
+        file, sources = self._issue_sources(session)
         if file is None:
-            raise SequencerError("no tickets.yml in this repository")
+            raise SequencerError("no issues.yml in this repository")
         known = self._known_requirements(session)
         matcher = RequirementMatcher(known)
         bound: dict[str, list[dict]] = {}
-        for b in self.seq.tickets.bindings():
+        for b in self.seq.issues.bindings():
             bound.setdefault(str((b.get("issue") or {}).get("key")), []).append(
                 {"id": b["id"], "testdef": b.get("testdef"), "target": b.get("target"), "run": b.get("run"), "by": b.get("by")})
         out: dict[str, Any] = {"issues": [], "errors": {}}
         for name in [source] if source else sources.names:
             if name not in sources.names:
-                raise SequencerError(f"unknown tickets source '{name}' (sources: {', '.join(sources.names)})")
+                raise SequencerError(f"unknown issue source '{name}' (sources: {', '.join(sources.names)})")
             try:
                 found = sources.backend(name).search(text=text, state=state, limit=200) if text else \
-                    self.seq.tickets.listed(sources, name, state, refresh, limit=500)
-            except TicketError as e:
+                    self.seq.issues.listed(sources, name, state, refresh, limit=500)
+            except IssueError as e:
                 out["errors"][name] = str(e)
                 continue
             rules = sources.req_rules(name)
@@ -1511,32 +1511,32 @@ class Editor:
         out["issues"].sort(key=lambda i: str(i.get("updated") or ""), reverse=True)
         return out
 
-    def tickets_test(self, session: EditSession, source: str, data: Any = None) -> dict:
-        """Read the open issues of one source, as the Tickets tab would: how many, the first ones, how long it took,
-        or what went wrong; and each call to the server (credentials masked). ``data``: the tickets file as being
+    def issues_test(self, session: EditSession, source: str, data: Any = None) -> dict:
+        """Read the open issues of one source, as the Issues subtab would: how many, the first ones, how long it took,
+        or what went wrong; and each call to the server (credentials masked). ``data``: the issues file as being
         edited (the form), else as saved."""
         import time as _time
 
-        from testsuit.tickets.model import TicketError
-        from testsuit.tickets.sources import TICKETS_FILE, TicketSources, find_tickets_file
+        from testsuit.issues.model import IssueError
+        from testsuit.issues.sources import ISSUES_FILE, IssueSources, find_issues_file
         start = _time.monotonic()
         calls: list[dict] = []
         if data is not None:
-            file = find_tickets_file(session.folder) or session.folder / TICKETS_FILE
+            file = find_issues_file(session.folder) or session.folder / ISSUES_FILE
             try:
-                sources = TicketSources(data, file.parent, TICKETS_FILE)
-            except TicketError as e:
+                sources = IssueSources(data, file.parent, ISSUES_FILE)
+            except IssueError as e:
                 return {"source": source, "error": str(e), "calls": calls, "seconds": 0}
         else:
-            file, sources = self._ticket_sources(session)
+            file, sources = self._issue_sources(session)
             if file is None:
-                raise SequencerError("no tickets.yml in this repository")
+                raise SequencerError("no issues.yml in this repository")
         try:
             backend = sources.backend(source)
             backend.trace = calls
             found = backend.search(state="open", limit=20)
             projects = backend.projects() if sources.card(source)["group"] else []
-        except TicketError as e:
+        except IssueError as e:
             return {"source": source, "error": str(e), "calls": calls, "seconds": round(_time.monotonic() - start, 2)}
         return {"source": source, "count": len(found), "issues": [i.as_dict() for i in found[:5]], "projects": projects[:50],
                 "calls": calls, "seconds": round(_time.monotonic() - start, 2)}
@@ -1555,25 +1555,25 @@ class Editor:
         return list(dict.fromkeys(keys))
 
     def requirement_issues(self, session: EditSession, cov, refresh: bool = False) -> dict:
-        """{requirement key: [{issue, via}]}: the open issues of the tickets sources that name a requirement of the
+        """{requirement key: [{issue, via}]}: the open issues of the issue sources that name a requirement of the
         coverage, and the issues bound to a check, step or verdict that verifies it; and the errors of the sources."""
-        from testsuit.tickets.issues import issues_by_requirement
-        from testsuit.tickets.model import TicketError
+        from testsuit.issues.results import issues_by_requirement
+        from testsuit.issues.model import IssueError
         try:
-            file, sources = self._ticket_sources(session)
-        except TicketError as e:
-            return {"issues": {}, "errors": {"tickets.yml": str(e)}}
+            file, sources = self._issue_sources(session)
+        except IssueError as e:
+            return {"issues": {}, "errors": {"issues.yml": str(e)}}
         if file is None or cov is None:
             return {"issues": {}, "errors": {}}
         listed, errors = [], {}
         for name in sources.names:
             try:
-                listed += self.seq.tickets.listed(sources, name, "open", refresh)
-            except TicketError as e:
+                listed += self.seq.issues.listed(sources, name, "open", refresh)
+            except IssueError as e:
                 errors[name] = str(e)
         index = issues_by_requirement(listed, {n: sources.req_rules(n) for n in sources.names},
                                       list(dict.fromkeys([*cov.rows(), *cov.requirements])),
-                                      self.seq.tickets.bindings(), cov.tests)
+                                      self.seq.issues.bindings(), cov.tests)
         return {"issues": index, "errors": errors}
 
     def check_requirements(self, session: EditSession, rel: str, text: str) -> list[dict]:
@@ -1737,9 +1737,9 @@ class Editor:
         self.reqs_progress[session.id] = progress = Progress()
         with reporting(progress), (fresh() if refresh else nullcontext()):
             out, cov = self.requirements_coverage(session, source, campaign)
-        tickets = self.requirement_issues(session, cov, refresh) if cov is not None else {"issues": {}, "errors": {}}
+        found = self.requirement_issues(session, cov, refresh) if cov is not None else {"issues": {}, "errors": {}}
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {}),
-                "issues": tickets["issues"], **({"issues_errors": tickets["errors"]} if tickets["errors"] else {})}
+                "issues": found["issues"], **({"issues_errors": found["errors"]} if found["errors"] else {})}
 
     def requirements_progress(self, session: EditSession) -> dict:
         """How the requirements reading of the Requirements view goes: its steps, its calls to the servers."""

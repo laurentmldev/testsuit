@@ -1420,23 +1420,23 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .issue-badge { display: inline-block; padding: 0 5px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 600; cursor: help; }
 .issue-badge.closed { background: transparent; color: var(--muted, #777); }
 .requirement-issues { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
-.ticket-body { width: 100%; font-size: 12px; }
-.ticket-search { display: flex; gap: 6px; margin: 6px 0; } .ticket-search input { flex: 1; }
-.ticket-sources .testdef-item { cursor: pointer; }
-.ticket-test { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
-.tickets-list .tag { margin-left: 4px; }
+.issue-body { width: 100%; font-size: 12px; }
+.issue-search { display: flex; gap: 6px; margin: 6px 0; } .issue-search input { flex: 1; }
+.issue-sources .testdef-item { cursor: pointer; }
+.issue-test { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.issues-list .tag { margin-left: 4px; }
 .run-issues table { margin-bottom: 12px; }
 @media (prefers-color-scheme: dark) { .issue-badge { background: #78350f; color: #fde68a; } }
 
-/* tickets.yml form */
-.tickets-req-rules { display: flex; flex-direction: column; gap: 4px; }
-.tickets-req-rules .row { display: flex; align-items: center; gap: 8px; }
-.tickets-req-rules .row .text-field { max-width: 220px; }
-.tickets-routes td .text-field, .tickets-routes td input { min-width: 90px; }
-.tickets-routes .nowrap { white-space: nowrap; }
-.tickets-tls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tickets-tls .text-field { min-width: 260px; }
-.tickets-route-hit td { background: var(--ok-soft); }
-.tickets-route-try { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.tickets-route-try input { width: 140px; }
-.tickets-req-rules .hint { margin: -2px 0 4px 24px; }
+/* issues.yml form */
+.issues-req-rules { display: flex; flex-direction: column; gap: 4px; }
+.issues-req-rules .row { display: flex; align-items: center; gap: 8px; }
+.issues-req-rules .row .text-field { max-width: 220px; }
+.issues-routes td .text-field, .issues-routes td input { min-width: 90px; }
+.issues-routes .nowrap { white-space: nowrap; }
+.issues-tls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.issues-tls .text-field { min-width: 260px; }
+.issues-route-hit td { background: var(--ok-soft); }
+.issues-route-try { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.issues-route-try input { width: 140px; }
+.issues-req-rules .hint { margin: -2px 0 4px 24px; }

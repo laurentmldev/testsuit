@@ -26,13 +26,13 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from testsuit.tickets.backend import Api, TicketBackend, need, register_ticket_backend
-from testsuit.tickets.model import CLOSED, OPEN, Issue, TicketError
+from testsuit.issues.backend import Api, IssueBackend, need, register_issue_backend
+from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
 FIELDS = "summary,status,labels,assignee,reporter,created,updated,description,issuelinks,project"
 
 
-class JiraBackend(TicketBackend):
+class JiraBackend(IssueBackend):
     """Jira issues, through its REST API (v2)"""
 
     description = "Jira issues of a project (Cloud, Server or Data Center)"
@@ -140,13 +140,13 @@ class JiraBackend(TicketBackend):
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
         bad = [x for x in labels if " " in x]
         if bad:
-            raise TicketError(f"jira backend: a label has no space: {', '.join(bad)}")
+            raise IssueError(f"jira backend: a label has no space: {', '.join(bad)}")
         made = self.api.post("issue", {"fields": {"project": {"key": project or self.project}, "summary": title,
                                                   "description": body, "labels": list(labels),
                                                   "issuetype": {"name": str(self.options.get("issue_type") or "Bug")}}})
         key = str((made or {}).get("key") or "")
         if not key:
-            raise TicketError("jira backend: the issue was created, but Jira did not give its key")
+            raise IssueError("jira backend: the issue was created, but Jira did not give its key")
         return self.get([key])[key] or Issue(source=self.name, id=key, title=title, url=f"{self.server}/browse/{key}")
 
     def comment(self, id: str, body: str) -> None:
@@ -163,4 +163,4 @@ class JiraBackend(TicketBackend):
         return m.group(1) if m and m.group(1).split("-")[0] == self.project else None
 
 
-register_ticket_backend("jira", JiraBackend)
+register_issue_backend("jira", JiraBackend)

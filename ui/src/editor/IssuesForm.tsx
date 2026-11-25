@@ -11,7 +11,7 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Tickets form (sequencer README, section 10.6): tickets.yml, where the issues of the tests repository go. Its sources
+// Issues form (sequencer README, section 10.6): issues.yml, where the issues of the tests repository go. Its sources
 // (a backend, its options and credentials, labels), the default one, the routes that pick the source of a new issue,
 // and how an issue names the requirements it is about.
 import { useState } from "react";
@@ -29,7 +29,7 @@ const ROUTE_KEYS: (Choice & { example: string })[] = [
   { value: "criteria", description: "the criteria file of an unmet check (only checks have one)", example: "criteria/firmware/*" },
   { value: "check", description: "the name of an unmet check (only checks have one)", example: "speed_*" },
 ];
-const ROUTES_HELP = `Where a new issue goes. When someone reports a failure (🐞 Issue… on the Run page, or tsq ticket --create), the routes are read top to bottom: the first one whose patterns all match the failure picks the source; when none matches, the default source.
+const ROUTES_HELP = `Where a new issue goes. When someone reports a failure (🐞 Issue… on the Run page, or tsq issue --create), the routes are read top to bottom: the first one whose patterns all match the failure picks the source; when none matches, the default source.
 
 A pattern is a glob: * any text, ? one character, [abc] one of them; it must match the whole value, case counts. A pattern left empty (shown *) matches anything.
 
@@ -57,10 +57,10 @@ function pruned(obj: Data): Data {
   return out;
 }
 
-export function TicketsForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void } }) {
+export function IssuesForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => void } }) {
   const { ctx } = useSession();
   const data: Data = doc.data || {};
-  const backends: any[] = ctx.ticket_backends || [];
+  const backends: any[] = ctx.issue_backends || [];
   const sources: Data = data.sources || {};
   const names = Object.keys(sources);
   const defaultName = data.default || names[0];
@@ -86,8 +86,8 @@ export function TicketsForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
     setName("");
   };
   return (
-    <div className="form pad tickets-form">
-      <Section title="Sources" help="Each source is one project of a tickets tool (or a GitLab group, a GitHub organization): where issues are read, and created. References name it: name#42 (#42 alone: the default source).">
+    <div className="form pad issues-form">
+      <Section title="Sources" help="Each source is one project of a issue tracker (or a GitLab group, a GitHub organization): where issues are read, and created. References name it: name#42 (#42 alone: the default source).">
         <div className="req-new">
           <strong>New source</strong>
           <input className="mono" placeholder="its name: the prefix of its references (bench, firmware, jira…)" value={name}
@@ -97,7 +97,7 @@ export function TicketsForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         </div>
         {names.length === 0 && <p className="muted">No source yet: failures cannot be reported nor bound to issues.</p>}
         {names.map((n) => (
-          <TicketSource key={n} name={n} spec={sources[n] || {}} data={data} backends={backends} taken={names}
+          <IssueSource key={n} name={n} spec={sources[n] || {}} data={data} backends={backends} taken={names}
             isDefault={n === defaultName} startOpen={added === n || names.length === 1}
             onChange={(spec) => setSource(n, spec)}
             onRename={(to) => {
@@ -118,7 +118,7 @@ export function TicketsForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
             }} />
         ))}
         <p className="muted small">Backends available here: {backends.map((b) => b.name).join(", ") || "none"} (a plugin adds one
-          with <code>register_ticket_backend</code>). Credentials are read on the sequencer host, from an environment variable or a file.</p>
+          with <code>register_issue_backend</code>). Credentials are read on the sequencer host, from an environment variable or a file.</p>
       </Section>
       <Section title="Routes" help={ROUTES_HELP}>
         <Routes value={data.routes || []} names={names} defaultName={defaultName} onChange={(v) => setTop("routes", v.length ? v : undefined)} />
@@ -130,7 +130,7 @@ export function TicketsForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   );
 }
 
-function TicketSource({ name, spec, data, backends, taken, isDefault, startOpen, onChange, onRename, onDefault, onRemove }: {
+function IssueSource({ name, spec, data, backends, taken, isDefault, startOpen, onChange, onRename, onDefault, onRemove }: {
   name: string; spec: Data; data: Data; backends: any[]; taken: string[]; isDefault: boolean; startOpen?: boolean;
   onChange: (spec: Data) => void; onRename: (to: string) => void; onDefault: () => void; onRemove: () => void;
 }) {
@@ -167,7 +167,7 @@ function TicketSource({ name, spec, data, backends, taken, isDefault, startOpen,
     setTesting(true);
     setResult(null);
     try {
-      setResult(await send("POST", `edit/sessions/${sid}/tickets/test`, { source: name, data }));
+      setResult(await send("POST", `edit/sessions/${sid}/issues/test`, { source: name, data }));
     } catch (e: any) {
       setResult({ error: String(e?.message || e) });
     } finally {
@@ -206,7 +206,7 @@ function TicketSource({ name, spec, data, backends, taken, isDefault, startOpen,
             )}
           </div>
         )}
-        <Field label="Backend" help="The tickets tool: gitlab, github, jira, redmine, or a plugin's."
+        <Field label="Backend" help="The issue tracker: gitlab, github, jira, redmine, or a plugin's."
           error={spec.backend && !backend ? `no backend '${spec.backend}' here: a plugin registers it` : null}>
           <Combo mono value={spec.backend} onChange={(v) => onChange({ ...spec, backend: v })}
             choices={backends.map((b) => ({ value: b.name, description: [b.description, b.capabilities?.length ? `can: ${b.capabilities.join(", ")}` : ""].filter(Boolean).join(" · ") }))} />
@@ -274,11 +274,11 @@ function Routes({ value, names, defaultName, onChange }: { value: Data[]; names:
   return (
     <div>
       {rows.length > 0 && (
-        <table className="grid compact tickets-routes">
+        <table className="grid compact issues-routes">
           <thead><tr><th>#</th><th title="Where a new issue about a failure this route matches goes">Source</th>
             {ROUTE_KEYS.map((k) => <th key={k.value} title={`${k.description}; e.g. ${k.example}`}>{k.value}</th>)}<th /></tr></thead>
           <tbody>{rows.map((r, i) => (
-            <tr key={i} className={classes(tried && hit === i && "tickets-route-hit")}>
+            <tr key={i} className={classes(tried && hit === i && "issues-route-hit")}>
               <td className="muted">{i + 1}</td>
               <td><Combo mono value={r.source} choices={sourceChoices} onChange={(v) => put(i, { ...r, source: v })} /></td>
               {ROUTE_KEYS.map((k) => (
@@ -302,7 +302,7 @@ function Routes({ value, names, defaultName, onChange }: { value: Data[]; names:
         firmware stage to its project; <code>criteria criteria/bench/*</code> the unmet checks of those criteria. A failed verdict has no step,
         criteria nor check: only a <code>testdef</code> pattern takes it. Whoever reports can still pick another source.</div>
       {names.length > 0 && (
-        <div className="tickets-route-try">
+        <div className="issues-route-try">
           <span className="small"><strong>Try:</strong> a failure</span>
           {ROUTE_KEYS.map((k) => (
             <input key={k.value} className="mono small" placeholder={k.value} title={k.description} value={sample[k.value]}
@@ -331,7 +331,7 @@ function ReqRules({ value, onChange, inherit }: { value?: Data | null; onChange:
   const labelsOff = v.labels === false;
   const pattern = labelsOff ? "" : String(v.labels);
   return (
-    <div className="tickets-req-rules">
+    <div className="issues-req-rules">
       <div className="row">
         <Toggle value={!labelsOff} label="Labels:" onChange={(on) => put("labels", on ? REQ_DEFAULTS.labels : false)} />
         {!labelsOff && <Text mono value={pattern} invalid={!pattern.includes("{id}")} onChange={(x) => put("labels", x)} placeholder="req:{id}" />}
@@ -371,7 +371,7 @@ function Tls({ value, onChange }: { value: any; onChange: (v: any) => void }) {
   const [choice, setChoice] = useState<"on" | "bundle" | "off" | null>(null);   // a CA bundle picked, its file not given yet
   const mode = off ? "off" : bundle ? "bundle" : choice === "bundle" ? "bundle" : "on";
   return (
-    <div className="tickets-tls">
+    <div className="issues-tls">
       <select value={mode} onChange={(e) => {
         const m = e.target.value as "on" | "bundle" | "off";
         setChoice(m);

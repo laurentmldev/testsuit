@@ -30,7 +30,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from testsuit.tickets.model import Issue
+from testsuit.issues.model import Issue
 
 MARK = re.compile(r"tsq:fingerprint=([0-9a-f]{12})")
 EXCERPT_LINES = 40

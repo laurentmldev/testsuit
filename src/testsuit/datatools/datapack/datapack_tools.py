@@ -898,26 +898,26 @@ class _Builder:
         n = len(self.requirements.get("requirements") or {})
         _info(Fore.LIGHTBLACK_EX + f"[{n} requirement(s) linked, snapshot in definition/{SNAPSHOT}]")
 
-    def write_tickets(self) -> None:
-        """The tickets sources of the tests repository (tickets.yml, as written: credentials are references), for
-        the sequencer to bind issues to the results (sequencer SPEC section 11.3): definition/tickets.yml. A file
+    def write_issues(self) -> None:
+        """The issue sources of the tests repository (issues.yml, as written: credentials are references), for
+        the sequencer to bind issues to the results (sequencer SPEC section 11.3): definition/issues.yml. A file
         that does not read fails the generation, unless nocheck."""
-        from testsuit.tickets.model import TicketError
-        from testsuit.tickets.sources import SNAPSHOT, TicketSources, find_tickets_file
-        file = find_tickets_file(self.testdef_file)
+        from testsuit.issues.model import IssueError
+        from testsuit.issues.sources import SNAPSHOT, IssueSources, find_issues_file
+        file = find_issues_file(self.testdef_file)
         if file is None:
             return
         try:
-            sources = TicketSources.from_file(file)
-        except TicketError as e:
+            sources = IssueSources.from_file(file)
+        except IssueError as e:
             if not self.nocheck:
-                raise DatapackError(f"tickets: {e}. Try again with option '--nocheck' to leave it out.") from e
-            _warn(f"tickets: {e}, left out (nocheck)")
+                raise DatapackError(f"issues: {e}. Try again with option '--nocheck' to leave it out.") from e
+            _warn(f"issues: {e}, left out (nocheck)")
             return
         _dump_yaml(self.work / "definition" / SNAPSHOT, sources.snapshot(),
-                   f"# the tickets sources of the tests repository ({self._relative(str(file))}), "
+                   f"# the issue sources of the tests repository ({self._relative(str(file))}), "
                    "for issues bound to the results (sequencer SPEC, section 11.3)\n")
-        _info(Fore.LIGHTBLACK_EX + f"[tickets: {', '.join(sources.names)}, in definition/{SNAPSHOT}]")
+        _info(Fore.LIGHTBLACK_EX + f"[issues: {', '.join(sources.names)}, in definition/{SNAPSHOT}]")
 
     def _requirements_record(self) -> dict:
         from testsuit.reqs.sources import find_sources_file
@@ -1030,7 +1030,7 @@ class _Builder:
         from testsuit import __version__
         self.write_definition()
         self.write_requirements(testdef, context)
-        self.write_tickets()
+        self.write_issues()
         _dump_yaml(self.work / "context.yml", context, "# every key of the datapack, resolved\n")
         _dump_yaml(self.work / "datapack.yml", {
             "format": FORMAT_VERSION,

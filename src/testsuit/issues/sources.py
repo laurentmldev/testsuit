@@ -11,9 +11,9 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""The tickets file: where the issues of a tests repository go, and how they name requirements.
+"""The issues file: where the issues of a tests repository go, and how they name requirements.
 
-``tickets.yml``, at the root of the tests repository (the nearest one from a test definition's folder up to the git
+``issues.yml``, at the root of the tests repository (the nearest one from a test definition's folder up to the git
 root, as ``requirements.yml``)::
 
     default: bench                         # where an issue goes, and the source of a reference without prefix
@@ -52,105 +52,107 @@ from typing import Any
 import yaml
 
 from testsuit.credentials import CredentialError, is_reference, resolve_secret
-from testsuit.tickets.backend import TicketBackend, create_ticket_backend
-from testsuit.tickets.model import TicketError
+from testsuit.issues.backend import IssueBackend, create_issue_backend
+from testsuit.issues.model import IssueError
 
-TICKETS_FILE = "tickets.yml"
-SNAPSHOT = "tickets.yml"                     # in a datapack's definition/ folder
+ISSUES_FILE = "issues.yml"
+OLD_FILE = "tickets.yml"                     # its former name, still read
+SNAPSHOT = "issues.yml"                     # in a datapack's definition/ folder
 ROUTE_KEYS = ("testdef", "step", "criteria", "check")
 REQ_DEFAULTS = {"labels": "req:{id}", "text": True, "jira_links": True, "add": True}
 
 
-def find_tickets_file(start: Path) -> Path | None:
-    """The tickets file of the tests repository holding ``start``: the nearest from its folder up to its git root."""
+def find_issues_file(start: Path) -> Path | None:
+    """The issues file of the tests repository holding ``start``: the nearest from its folder up to its git root."""
     from testsuit.reqs.sources import repository_root
     folder = (start if start.is_dir() else start.parent).resolve()
     root = repository_root(folder)
     for parent in [folder, *folder.parents]:
-        if (parent / TICKETS_FILE).is_file():
-            return parent / TICKETS_FILE
+        for name in (ISSUES_FILE, OLD_FILE):
+            if (parent / name).is_file():
+                return parent / name
         if root is not None and parent == root:
             break
     return None
 
 
-def is_tickets_file(name: str, data: Any) -> bool:
-    return name == TICKETS_FILE and isinstance(data, dict) and isinstance(data.get("sources"), dict)
+def is_issues_file(name: str, data: Any) -> bool:
+    return name in (ISSUES_FILE, OLD_FILE) and isinstance(data, dict) and isinstance(data.get("sources"), dict)
 
 
-class TicketSources:
-    """The sources of a tickets file, their backends created on first use."""
+class IssueSources:
+    """The sources of a issues file, their backends created on first use."""
 
-    def __init__(self, data: Any, base_dir: Path | None = None, where: str = TICKETS_FILE) -> None:
+    def __init__(self, data: Any, base_dir: Path | None = None, where: str = ISSUES_FILE) -> None:
         self.where = where
         self.base_dir = base_dir
         if not isinstance(data, dict):
-            raise TicketError(f"{where}: a mapping is expected")
+            raise IssueError(f"{where}: a mapping is expected")
         unknown = sorted(set(data) - {"default", "sources", "routes", "requirements"})
         if unknown:
-            raise TicketError(f"{where}: unknown key(s) {', '.join(unknown)} (default, sources, routes, requirements)")
+            raise IssueError(f"{where}: unknown key(s) {', '.join(unknown)} (default, sources, routes, requirements)")
         specs = data.get("sources")
         if not isinstance(specs, dict) or not specs:
-            raise TicketError(f"{where}: 'sources' is a mapping of sources by name")
+            raise IssueError(f"{where}: 'sources' is a mapping of sources by name")
         self.data = data
         self.specs: dict[str, dict] = {}
         for name, spec in specs.items():
             name = str(name)
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
-                raise TicketError(f"{where}: source '{name}': not a name (letters, digits, _ and -)")
+                raise IssueError(f"{where}: source '{name}': not a name (letters, digits, _ and -)")
             if not isinstance(spec, dict) or not spec.get("backend"):
-                raise TicketError(f"{where}: source '{name}' names its 'backend'")
+                raise IssueError(f"{where}: source '{name}' names its 'backend'")
             bad = sorted(set(spec) - {"backend", "label", "options", "credentials", "labels", "requirements"})
             if bad:
-                raise TicketError(f"{where}: source '{name}': unknown key(s) {', '.join(bad)}")
+                raise IssueError(f"{where}: source '{name}': unknown key(s) {', '.join(bad)}")
             for key, value in (spec.get("credentials") or {}).items():
                 if not is_reference(str(value)):
-                    raise TicketError(f"{where}: source '{name}': credential '{key}' must come from the environment "
+                    raise IssueError(f"{where}: source '{name}': credential '{key}' must come from the environment "
                                       "('env:<VARIABLE>') or a file ('file:<path>'), never be written in the file")
             self._auth(name, spec)
             self._req_spec(spec.get("requirements"), f"source '{name}'")
             self.specs[name] = spec
         self.default = str(data.get("default") or next(iter(self.specs)))
         if self.default not in self.specs:
-            raise TicketError(f"{where}: default source '{self.default}' is not one of its sources")
+            raise IssueError(f"{where}: default source '{self.default}' is not one of its sources")
         self.routes = data.get("routes") or []
         if not isinstance(self.routes, list):
-            raise TicketError(f"{where}: 'routes' is a list of {{source, testdef|step|criteria|check: <glob>}}")
+            raise IssueError(f"{where}: 'routes' is a list of {{source, testdef|step|criteria|check: <glob>}}")
         for i, route in enumerate(self.routes, 1):
             if not isinstance(route, dict) or str(route.get("source")) not in self.specs:
-                raise TicketError(f"{where}: route {i}: 'source' names one of the sources ({', '.join(self.specs)})")
+                raise IssueError(f"{where}: route {i}: 'source' names one of the sources ({', '.join(self.specs)})")
             bad = sorted(set(route) - {"source", *ROUTE_KEYS})
             if bad:
-                raise TicketError(f"{where}: route {i}: unknown key(s) {', '.join(bad)} ({', '.join(ROUTE_KEYS)})")
+                raise IssueError(f"{where}: route {i}: unknown key(s) {', '.join(bad)} ({', '.join(ROUTE_KEYS)})")
         self._req_spec(data.get("requirements"), "requirements")
-        self._backends: dict[str, TicketBackend] = {}
+        self._backends: dict[str, IssueBackend] = {}
 
     def _auth(self, name: str, spec: dict) -> None:
         """A source signs in one way: its credentials are those of one sign-in method of its backend."""
-        from testsuit.tickets.backend import _backends
+        from testsuit.issues.backend import _backends
         given = {str(k) for k, v in (spec.get("credentials") or {}).items() if v}
         methods = getattr(_backends.get(str(spec["backend"]).lower()), "auth_methods", None) or {}
         if not given or not methods or any(given <= set(m.get("credentials") or []) for m in methods.values()):
             return
         ways = "; ".join(f"{m.get('label') or k}: {', '.join(m.get('credentials') or [])}" for k, m in methods.items())
-        raise TicketError(f"{self.where}: source '{name}': credentials {', '.join(sorted(given))} are not one way to sign "
+        raise IssueError(f"{self.where}: source '{name}': credentials {', '.join(sorted(given))} are not one way to sign "
                           f"in ({ways})")
 
     @classmethod
-    def from_file(cls, path: Path) -> "TicketSources":
+    def from_file(cls, path: Path) -> "IssueSources":
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as e:
-            raise TicketError(f"cannot read the tickets file '{path}': {e}") from e
+            raise IssueError(f"cannot read the issues file '{path}': {e}") from e
         return cls(data, path.parent, str(path))
 
     def _req_spec(self, spec: Any, where: str) -> None:
         if spec is None:
             return
         if not isinstance(spec, dict) or set(spec) - set(REQ_DEFAULTS):
-            raise TicketError(f"{self.where}: {where}: 'requirements' takes {', '.join(REQ_DEFAULTS)}")
+            raise IssueError(f"{self.where}: {where}: 'requirements' takes {', '.join(REQ_DEFAULTS)}")
         if spec.get("labels") not in (None, False) and "{id}" not in str(spec["labels"]):
-            raise TicketError(f"{self.where}: {where}: requirements labels: a pattern with {{id}} (req:{{id}}), or false")
+            raise IssueError(f"{self.where}: {where}: requirements labels: a pattern with {{id}} (req:{{id}}), or false")
 
     @property
     def names(self) -> list[str]:
@@ -167,17 +169,17 @@ class TicketSources:
         out = {}
         for key, value in (self.specs[name].get("credentials") or {}).items():
             try:
-                out[str(key)] = resolve_secret(str(value), self.base_dir, f"tickets source '{name}': credential '{key}'")
+                out[str(key)] = resolve_secret(str(value), self.base_dir, f"issue source '{name}': credential '{key}'")
             except CredentialError as e:
-                raise TicketError(str(e)) from e
+                raise IssueError(str(e)) from e
         return out
 
-    def backend(self, name: str) -> TicketBackend:
+    def backend(self, name: str) -> IssueBackend:
         if name not in self.specs:
-            raise TicketError(f"unknown tickets source '{name}' (sources: {', '.join(self.specs)})")
+            raise IssueError(f"unknown issue source '{name}' (sources: {', '.join(self.specs)})")
         if name not in self._backends:
             spec = self.specs[name]
-            backend = create_ticket_backend(str(spec["backend"]), spec.get("options") or {}, self.credentials(name),
+            backend = create_issue_backend(str(spec["backend"]), spec.get("options") or {}, self.credentials(name),
                                             self.base_dir)
             backend.name = name
             self._backends[name] = backend
@@ -188,7 +190,7 @@ class TicketSources:
         spec = self.specs[name]
         options = spec.get("options") or {}
         where = next((str(options[k]) for k in ("project", "repo", "group", "org") if options.get(k)), "")
-        from testsuit.tickets.backend import _backends
+        from testsuit.issues.backend import _backends
         factory = _backends.get(str(spec["backend"]).lower())
         return {"name": name, "backend": str(spec["backend"]), "project": where,
                 **({"label": str(spec["label"])} if spec.get("label") else {}),
@@ -209,16 +211,16 @@ class TicketSources:
         """(source, id) of a reference or a URL."""
         text = str(text or "").strip()
         if not text:
-            raise TicketError("no issue given")
+            raise IssueError("no issue given")
         if re.match(r"https?://", text):
             for name in self.specs:
                 try:
                     found = self.backend(name).id_of_url(text)
-                except TicketError:
+                except IssueError:
                     found = None
                 if found:
                     return name, found
-            raise TicketError(f"{text}: not an issue of a tickets source ({', '.join(self.specs)})")
+            raise IssueError(f"{text}: not an issue of a issue source ({', '.join(self.specs)})")
         prefix, sep, rest = text.partition("#")
         if sep and prefix in self.specs and rest:
             return prefix, rest
@@ -230,9 +232,9 @@ class TicketSources:
                 if str(spec["backend"]).lower() == "jira" and str((spec.get("options") or {}).get("project")) == m.group(1):
                     return name, text
         if sep and prefix not in self.specs and "/" not in prefix:
-            raise TicketError(f"{text}: unknown tickets source '{prefix}' (sources: {', '.join(self.specs)})")
+            raise IssueError(f"{text}: unknown issue source '{prefix}' (sources: {', '.join(self.specs)})")
         return self.default, text
 
     def snapshot(self) -> dict[str, Any]:
-        """What a datapack keeps of the file (definition/tickets.yml): as written, credentials as references."""
+        """What a datapack keeps of the file (definition/issues.yml): as written, credentials as references."""
         return self.data

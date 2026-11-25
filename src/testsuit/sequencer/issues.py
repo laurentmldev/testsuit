@@ -13,17 +13,17 @@
 
 """Issues bound to the results of the sequencer's runs (SPEC section 11.3).
 
-A **binding** ties an issue of a tickets source (testsuit.tickets) to a target of a test definition: a check, a step
-or the verdict, by its fingerprint (testsuit.tickets.issues.fingerprint), so that it is a **known issue** of every
+A **binding** ties an issue of a issue source (testsuit.issues) to a target of a test definition: a check, a step
+or the verdict, by its fingerprint (testsuit.issues.results.fingerprint), so that it is a **known issue** of every
 run of it that fails there, until it is unbound. Bindings are the sequencer's, not the tests repository's: they
-change as issues are opened and closed, without commits. ``storage.results/tickets/bindings.yml``::
+change as issues are opened and closed, without commits. ``storage.results/issues/bindings.yml``::
 
     bindings:
       - {id: 1, fingerprint: 3f2a..., testdef: short, target: {kind: check, step: exploit:criteria, ...},
          issue: {source: bench, id: '42', key: 'bench#42', title, state, url}, run: <run it was bound from>,
          created: true, by, at, removed: {by, at, reason}}
 
-The tickets sources of a run are those of its datapack (``definition/tickets.yml``, written at generation): its
+The issue sources of a run are those of its datapack (``definition/issues.yml``, written at generation): its
 credentials are references, read on the sequencer's host. Issue states are read from the tools at most every few
 minutes (a cache), and kept in the bindings as last seen.
 """
@@ -39,31 +39,35 @@ import yaml
 
 from testsuit.sequencer import review as rv
 from testsuit.sequencer.util import SequencerError, now
-from testsuit.tickets import issues as iss
-from testsuit.tickets.model import OPEN, Issue, TicketError
-from testsuit.tickets.sources import SNAPSHOT, TicketSources
+from testsuit.issues import results as iss
+from testsuit.issues.model import OPEN, Issue, IssueError
+from testsuit.issues.sources import SNAPSHOT, IssueSources
 
 log = logging.getLogger("testsuit.sequencer")
 TTL = 300.0                                  # seconds an issue's state is taken as known
 BINDINGS = "bindings.yml"
 
 
-class Tickets:
-    """The bindings of the sequencer, and the calls to the tickets tools of its runs."""
+class Issues:
+    """The bindings of the sequencer, and the calls to the issue trackers of its runs."""
 
     def __init__(self, seq) -> None:
         self.seq = seq
         self._lock = threading.Lock()
         self._issues: dict[tuple[str, str], tuple[float, Issue | None]] = {}     # (backend identity, id)
         self._lists: dict[tuple[str, str], tuple[float, list[Issue]]] = {}     # (backend identity, state)
-        self._sources: dict[str, TicketSources | None] = {}                     # run id
+        self._sources: dict[str, IssueSources | None] = {}                     # run id
 
     # ── bindings ───────────────────────────────────────────────────────
     @property
     def path(self) -> Path:
-        return self.seq.config.storage_path("results") / "tickets" / BINDINGS
+        return self.seq.config.storage_path("results") / "issues" / BINDINGS
 
     def bindings(self, removed: bool = False) -> list[dict]:
+        old = self.path.parent.parent / "tickets" / BINDINGS          # where they were before the rename
+        if not self.path.exists() and old.exists():
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            old.rename(self.path)
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
         except FileNotFoundError:
@@ -84,30 +88,32 @@ class Tickets:
         return [b for b in self.bindings() if b.get("fingerprint") == fp]
 
     # ── the sources of a run ───────────────────────────────────────────
-    def sources(self, run: dict) -> TicketSources | None:
-        """The tickets sources of a run's datapack (None: it has none)."""
+    def sources(self, run: dict) -> IssueSources | None:
+        """The issue sources of a run's datapack (None: it has none)."""
         if run["id"] not in self._sources:
             data = self.seq.read_run_file(run, f"definition/{SNAPSHOT}")
+            if data is None:                     # a datapack generated before the rename
+                data = self.seq.read_run_file(run, "definition/tickets.yml")
             found = None
             if data is not None:
                 try:
                     # file: credentials relative to tsq.yml's folder (on the sequencer's host)
-                    found = TicketSources(yaml.safe_load(data) or {}, self.seq.config.base_dir,
+                    found = IssueSources(yaml.safe_load(data) or {}, self.seq.config.base_dir,
                                           f"run {run['id']}: definition/{SNAPSHOT}")
-                except (TicketError, yaml.YAMLError) as e:
+                except (IssueError, yaml.YAMLError) as e:
                     raise SequencerError(str(e)) from e
             self._sources[run["id"]] = found
         return self._sources[run["id"]]
 
-    def _require_sources(self, run: dict) -> TicketSources:
+    def _require_sources(self, run: dict) -> IssueSources:
         sources = self.sources(run)
         if sources is None:
-            raise SequencerError(f"run {run['id']}: its datapack names no tickets source (no tickets.yml in its tests "
+            raise SequencerError(f"run {run['id']}: its datapack names no issue source (no issues.yml in its tests "
                                  "repository when it was generated)")
         return sources
 
     # ── issues, cached ─────────────────────────────────────────────────
-    def issue(self, sources: TicketSources, source: str, id: str, refresh: bool = False) -> Issue | None:
+    def issue(self, sources: IssueSources, source: str, id: str, refresh: bool = False) -> Issue | None:
         backend = sources.backend(source)
         key = (backend.identity, str(id))
         hit = self._issues.get(key)
@@ -119,7 +125,7 @@ class Tickets:
         self._issues[key] = (time.monotonic(), found)
         return found
 
-    def listed(self, sources: TicketSources, source: str, state: str | None = OPEN, refresh: bool = False,
+    def listed(self, sources: IssueSources, source: str, state: str | None = OPEN, refresh: bool = False,
                limit: int = 1000) -> list[Issue]:
         """The issues of a source (open ones: the default), cached."""
         backend = sources.backend(source)
@@ -133,14 +139,14 @@ class Tickets:
             self._issues[(backend.identity, i.id)] = (time.monotonic(), i)
         return [_renamed(i, source) for i in found]
 
-    def _refreshed(self, binding: dict, sources: TicketSources | None, refresh: bool = False) -> dict:
+    def _refreshed(self, binding: dict, sources: IssueSources | None, refresh: bool = False) -> dict:
         """A binding with its issue as the tool gives it now (as last seen when the tool cannot be reached)."""
         brief = binding.get("issue") or {}
         if sources is None or brief.get("source") not in sources.names:
             return binding
         try:
             found = self.issue(sources, brief["source"], brief["id"], refresh)
-        except TicketError as e:
+        except IssueError as e:
             return {**binding, "error": str(e)}
         if found is None:
             return {**binding, "issue": {**brief, "state": "missing"}}
@@ -179,7 +185,7 @@ class Tickets:
         return out
 
     def run_view(self, run_id: str, refresh: bool = False) -> dict:
-        """The tickets of a run: its sources, its targets that failed with their known issues (bound to the same
+        """The issues of a run: its sources, its targets that failed with their known issues (bound to the same
         check, step or verdict of its test definition, in this run or another), and every binding of its test
         definition."""
         run = self.seq.reviewed(self.seq.require_run(run_id))
@@ -259,7 +265,7 @@ class Tickets:
         testdef = str(run.get("testdef") or run.get("name") or "")
         source = source or sources.route({"testdef": testdef, **target})
         if source not in sources.names:
-            raise SequencerError(f"unknown tickets source '{source}' (sources: {', '.join(sources.names)})")
+            raise SequencerError(f"unknown issue source '{source}' (sources: {', '.join(sources.names)})")
         rec = rv.find_record(run, target["step"]) if target.get("step") else None
         log_text = ""
         if rec and rec.get("log"):
@@ -268,7 +274,7 @@ class Tickets:
         reqs = self._reqs(run, target)
         try:
             markup = sources.backend(source).markup
-        except TicketError:                      # a missing credential: told when creating
+        except IssueError:                      # a missing credential: told when creating
             markup = "jira" if str(sources.specs[source]["backend"]).lower() == "jira" else "markdown"
         d = iss.draft(run, target, status, self._links(run, target, base), reqs, log_text, markup, by)
         rules = sources.req_rules(source)
@@ -279,14 +285,14 @@ class Tickets:
             for i in sources.backend(source).search(text=d["fingerprint"], state=OPEN, limit=5):
                 if iss.mark_of(i) == d["fingerprint"] and not any(b["issue"].get("key") == f"{source}#{i.id}" for b in known):
                     duplicates.append(_renamed(i, source).brief())
-        except TicketError as e:
-            log.info(f"tickets: looking for an issue of {d['fingerprint']}: {e}")
+        except IssueError as e:
+            log.info(f"issues: looking for an issue of {d['fingerprint']}: {e}")
         projects: list[str] = []
         if sources.card(source)["group"]:
             try:
                 projects = sources.backend(source).projects()
-            except TicketError as e:
-                log.info(f"tickets: projects of '{source}': {e}")
+            except IssueError as e:
+                log.info(f"issues: projects of '{source}': {e}")
         return {"run": run["id"], "target": target, "label": rv.target_label(target), "status": status,
                 "source": source, "sources": [sources.card(n) for n in sources.names], "projects": projects,
                 "title": d["title"], "body": d["body"], "labels": labels, "fingerprint": d["fingerprint"],
@@ -306,7 +312,7 @@ class Tickets:
                        "by": by or "", "at": now()}
             bindings.append(binding)
             self._save(bindings)
-        self.seq.notify("ticket", {"run": run["id"], "campaign_run": run.get("campaign_run"), "action": "bound",
+        self.seq.notify("issue", {"run": run["id"], "campaign_run": run.get("campaign_run"), "action": "bound",
                                    "issue": issue.key, "target": rv.target_label(target), "by": by or ""})
         return binding
 
@@ -322,20 +328,20 @@ class Tickets:
             raise SequencerError("an issue needs a title")
         backend = sources.backend(source)
         if "create" not in backend.capabilities:
-            raise SequencerError(f"tickets source '{source}' cannot create issues")
+            raise SequencerError(f"issue source '{source}' cannot create issues")
         if body.get("token"):
             backend = backend.with_token(str(body["token"]))
         try:
             issue = backend.create(title, text, [str(x) for x in body.get("labels") or []], body.get("project") or None)
-        except TicketError as e:
+        except IssueError as e:
             raise SequencerError(str(e)) from e
         issue.source = source
         links = self._links(run, target, base)
         if links.get("report") and "remote_link" in backend.capabilities:
             try:
                 backend.remote_link(issue.id, links["report"], f"tsq run {run['id']}: {run.get('testdef')}")
-            except TicketError as e:
-                log.info(f"tickets: link of {issue.key} to the run report: {e}")
+            except IssueError as e:
+                log.info(f"issues: link of {issue.key} to the run report: {e}")
         return self._bind(run, target, issue, by, True)
 
     def bind(self, run_id: str, body: dict, by: str = "") -> dict:
@@ -346,7 +352,7 @@ class Tickets:
         try:
             source, id = sources.parse(str(body.get("issue") or ""))
             issue = self.issue(sources, source, id, refresh=True)
-        except TicketError as e:
+        except IssueError as e:
             raise SequencerError(str(e)) from e
         if issue is None:
             raise SequencerError(f"no issue {source}#{id}")
@@ -362,7 +368,7 @@ class Tickets:
                 raise SequencerError(f"no binding {binding_id}")
             found["removed"] = {"by": by or "", "at": now(), "reason": str(reason)}
             self._save(bindings)
-        self.seq.notify("ticket", {"run": found.get("run"), "action": "unbound", "issue": (found.get("issue") or {}).get("key"),
+        self.seq.notify("issue", {"run": found.get("run"), "action": "unbound", "issue": (found.get("issue") or {}).get("key"),
                                    "target": rv.target_label(found.get("target") or {}), "by": by or ""})
         return found
 
@@ -375,7 +381,7 @@ class Tickets:
             try:
                 found = sources.backend(name).search(text=text, state=state, limit=30) if text else \
                     self.listed(sources, name, state)[:30]
-            except TicketError as e:
+            except IssueError as e:
                 raise SequencerError(str(e)) from e
             out += [_renamed(i, name).as_dict() for i in found]
         return out

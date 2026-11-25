@@ -25,11 +25,11 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from testsuit.tickets.backend import Api, TicketBackend, register_ticket_backend
-from testsuit.tickets.model import CLOSED, OPEN, Issue, TicketError
+from testsuit.issues.backend import Api, IssueBackend, register_issue_backend
+from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
 
-class GitHubBackend(TicketBackend):
+class GitHubBackend(IssueBackend):
     """GitHub issues, through its REST API"""
 
     description = "GitHub issues of a repository or of an organization (github.com or Enterprise Server)"
@@ -50,7 +50,7 @@ class GitHubBackend(TicketBackend):
         self.repo = str(self.options.get("repo") or "")
         self.org = str(self.options.get("org") or "")
         if bool(self.repo) == bool(self.org):
-            raise TicketError("github backend: give its 'repo' (owner/name) or its 'org' (one of them)")
+            raise IssueError("github backend: give its 'repo' (owner/name) or its 'org' (one of them)")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if self.credentials.get("token"):
             headers["Authorization"] = f"Bearer {self.credentials['token']}"
@@ -104,7 +104,7 @@ class GitHubBackend(TicketBackend):
             repo, n = str(id).rsplit("#", 1)
             return repo, n
         if not self.repo:
-            raise TicketError(f"github backend: issue '{id}' of '{self.org}': name its repository (<owner/name>#<n>)")
+            raise IssueError(f"github backend: issue '{id}' of '{self.org}': name its repository (<owner/name>#<n>)")
         return self.repo, str(id)
 
     def get(self, ids: Iterable[str]) -> dict[str, Issue | None]:
@@ -118,7 +118,7 @@ class GitHubBackend(TicketBackend):
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
         repo = project or self.repo
         if not repo:
-            raise TicketError(f"github backend: '{self.org}': which repository should the issue go to?")
+            raise IssueError(f"github backend: '{self.org}': which repository should the issue go to?")
         return self.issue(self.api.post(f"repos/{repo}/issues", {"title": title, "body": body, "labels": list(labels)}))
 
     def comment(self, id: str, body: str) -> None:
@@ -139,9 +139,9 @@ class GitHubBackend(TicketBackend):
             return [self.repo]
         try:
             repos = list(self.api.pages(f"orgs/{self.org}/repos", {"per_page": 100}, 500))
-        except TicketError:
+        except IssueError:
             repos = list(self.api.pages(f"users/{self.org}/repos", {"per_page": 100}, 500))
         return [str(r.get("full_name")) for r in repos if not r.get("archived") and r.get("has_issues", True)]
 
 
-register_ticket_backend("github", GitHubBackend)
+register_issue_backend("github", GitHubBackend)

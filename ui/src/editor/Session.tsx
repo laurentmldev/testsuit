@@ -29,7 +29,7 @@ import { TemplateEditor } from "./TemplateEditor";
 import { GenerateDialog } from "./Generate";
 import { PublishDialog } from "./Publish";
 import { RequirementsForm } from "./RequirementsForm";
-import { TicketsForm } from "./TicketsForm";
+import { IssuesForm } from "./IssuesForm";
 import { WorkspaceTag } from "./workspace";
 import { NewFileDialog } from "./wizards";
 
@@ -42,7 +42,7 @@ const KIND_LABELS: [string, string, string][] = [
   ["dictionary", "Key files", "Keys used by the templates (dictionaries)."],
   ["template", "Templates", "Input files rendered with the keys (Jinja2)."],
   ["requirements", "Requirements", "requirements.yml: the requirements of the tests, or the sources they come from (Datapacks, Requirements)."],
-  ["tickets", "Tickets", "tickets.yml: the GitLab, GitHub or Jira projects the issues of the tests go to (Datapacks, Tickets)."],
+  ["issues", "Issues", "issues.yml: the GitLab, GitHub, Jira or Redmine projects the issues of the tests go to (Datapacks, Issues)."],
   ["criteria", "Criteria (mexploit scenarios)", "The checks run on the results of a test: open them in the criteria editor for completion, checks and unit tests."],
   ["utests", "Unit tests of criteria", "Small data cases, each with the status expected of each check (mxp utest)."],
   ["yaml", "Other YAML", ""],
@@ -55,7 +55,7 @@ const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "li
 const KIND_NAME: Record<string, string> = {
   inventory: "Lab inventory", library: "Roles and classes", testdef: "Test definition", setup: "Setup",
   subpipelines: "Sub-pipelines", dictionary: "Key file", template: "Template", yaml: "YAML", other: "File",
-  criteria: "Criteria", utests: "Unit tests of criteria", requirements: "Requirements", tickets: "Tickets",
+  criteria: "Criteria", utests: "Unit tests of criteria", requirements: "Requirements", issues: "Issues",
 };
 
 /** The folder (with its trailing slash) and the name of a path. */
@@ -126,7 +126,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   session: Session; doc: Doc; view: string; setView: (v: string) => void; api: ReturnType<typeof useDoc>; revealLine: number | null;
 }) {
   const schema = SCHEMA_OF[doc.kind] ? session.schemas[SCHEMA_OF[doc.kind]] : undefined;
-  const hasForm = ["inventory", "library", "setup", "testdef", "requirements", "tickets"].includes(doc.kind);
+  const hasForm = ["inventory", "library", "setup", "testdef", "requirements", "issues"].includes(doc.kind);
   const hasPipeline = ["testdef", "subpipelines"].includes(doc.kind);
   const views: [string, string][] = [
     ...(hasForm ? [["form", "Form"] as [string, string]] : []),
@@ -156,7 +156,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   else if (doc.kind === "setup") body = <SetupForm doc={doc} api={api} />;
   else if (doc.kind === "testdef") body = <TestdefForm doc={doc} api={api} />;
   else if (doc.kind === "requirements") body = <RequirementsForm doc={doc} api={api} />;
-  else if (doc.kind === "tickets") body = <TicketsForm doc={doc} api={api} />;
+  else if (doc.kind === "issues") body = <IssuesForm doc={doc} api={api} />;
   return (
     <div className={`doc-view kind-${doc.kind}`}>
       <div className="doc-head">
