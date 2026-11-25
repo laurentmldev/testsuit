@@ -113,10 +113,10 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     async def sequencer_error(request: Request, exc: SequencerError):
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
-    from testsuit.tickets.model import TicketError
+    from testsuit.issues.model import IssueError
 
-    @app.exception_handler(TicketError)
-    async def ticket_error(request: Request, exc: TicketError):
+    @app.exception_handler(IssueError)
+    async def issue_error(request: Request, exc: IssueError):
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     def run_or_404(run_id: str) -> dict:
@@ -305,41 +305,41 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return FileResponse(job["file"], media_type=media, filename=job["name"])
 
     # ── issues bound to results (SPEC §11.3) ─────────────────────────
-    @app.get("/runs/{run_id}/tickets")
-    async def run_tickets(run_id: str, refresh: bool = False):
-        """The tickets of a run: its sources, its failures with their known issues, the bindings of its test
+    @app.get("/runs/{run_id}/issues")
+    async def run_issues(run_id: str, refresh: bool = False):
+        """The issues of a run: its sources, its failures with their known issues, the bindings of its test
         definition (issue states read again with refresh)."""
-        return await asyncio.to_thread(seq.tickets.run_view, run_or_404(run_id)["id"], refresh)
+        return await asyncio.to_thread(seq.issues.run_view, run_or_404(run_id)["id"], refresh)
 
-    @app.post("/runs/{run_id}/tickets/draft")
-    async def ticket_draft(run_id: str, body: dict, request: Request):
+    @app.post("/runs/{run_id}/issues/draft")
+    async def issue_draft(run_id: str, body: dict, request: Request):
         """A new issue about a target of a run, pre-filled ({target, source?}), and the issues already telling of it."""
-        return await asyncio.to_thread(seq.tickets.draft, run_or_404(run_id)["id"], body.get("target"),
+        return await asyncio.to_thread(seq.issues.draft, run_or_404(run_id)["id"], body.get("target"),
                                        str(request.base_url), who(request, body), body.get("source"))
 
-    @app.post("/runs/{run_id}/tickets")
-    async def ticket_bind(run_id: str, body: dict, request: Request):
+    @app.post("/runs/{run_id}/issues")
+    async def issue_bind(run_id: str, body: dict, request: Request):
         """{action: create, target, source, project, title, body, labels, token?}: create an issue and bind it;
         {action: bind, target, issue (a reference or a URL), note?}: bind an existing one. "by": who."""
         rid = run_or_404(run_id)["id"]
         if body.get("action") == "create":
-            return await asyncio.to_thread(seq.tickets.create, rid, body, who(request, body), str(request.base_url))
-        return await asyncio.to_thread(seq.tickets.bind, rid, body, who(request, body))
+            return await asyncio.to_thread(seq.issues.create, rid, body, who(request, body), str(request.base_url))
+        return await asyncio.to_thread(seq.issues.bind, rid, body, who(request, body))
 
-    @app.get("/runs/{run_id}/tickets/search")
-    async def ticket_search(run_id: str, q: str = "", source: str | None = None, state: str | None = "open"):
-        return await asyncio.to_thread(seq.tickets.search, run_or_404(run_id)["id"], source, q,
+    @app.get("/runs/{run_id}/issues/search")
+    async def issue_search(run_id: str, q: str = "", source: str | None = None, state: str | None = "open"):
+        return await asyncio.to_thread(seq.issues.search, run_or_404(run_id)["id"], source, q,
                                        None if state in ("", "all") else state)
 
-    @app.get("/tickets/bindings")
-    async def ticket_bindings(testdef: str | None = None, removed: bool = False):
+    @app.get("/issues/bindings")
+    async def issue_bindings(testdef: str | None = None, removed: bool = False):
         """The issues bound to results, as last seen."""
-        out = seq.tickets.bindings(removed)
+        out = seq.issues.bindings(removed)
         return [b for b in out if not testdef or b.get("testdef") == testdef]
 
-    @app.post("/tickets/bindings/{binding_id}/unbind")
-    async def ticket_unbind(binding_id: int, body: dict, request: Request):
-        return await asyncio.to_thread(seq.tickets.unbind, binding_id, str(body.get("reason") or ""), who(request, body))
+    @app.post("/issues/bindings/{binding_id}/unbind")
+    async def issue_unbind(binding_id: int, body: dict, request: Request):
+        return await asyncio.to_thread(seq.issues.unbind, binding_id, str(body.get("reason") or ""), who(request, body))
 
     @app.get("/runs/{run_id}/exploit/{step}/report")
     async def exploit_report(run_id: str, step: str):

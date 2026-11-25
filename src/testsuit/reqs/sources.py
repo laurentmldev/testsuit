@@ -258,6 +258,7 @@ class Sources:
         for name, spec in classes.items():
             self.classes[str(name)] = self._class_checked(str(name), spec)
         self.raw: dict[str, Any] = {}          # each source as written (a source of a class: its class and values)
+        self.stale_notes: list[str] = []       # sources down, their requirements as last read (warnings)
         self.specs: dict[str, dict] = {}       # each source as used (a source of a class: the class, with its values)
         for name, spec in specs.items():
             self.raw[str(name)] = spec
@@ -431,13 +432,49 @@ class Sources:
             backend = self.backend(source)
             ids = sorted({r.id for r in items})
             progress.step(f"source '{source}': reading {len(ids)} requirement(s)")
-            found = backend.brief(ids) if brief else backend.get(ids)
+            try:
+                found = backend.brief(ids) if brief else backend.get(ids)
+            except Exception as e:
+                found = self._last_known(source, ids, e)
+            else:
+                if not brief and getattr(backend, "remote", True):
+                    self._remember(source, found)
             self.tagged(source, [r for r in found.values() if r is not None])
             for r in items:
                 req = found.get(r.id)
                 if req is not None:
                     req.source = source
                 out[r] = req
+        return out
+
+    def _store(self, source: str):
+        from testsuit.netguard import LastKnown
+        spec = self.specs[source]
+        return LastKnown("requirements", {"backend": spec.get("backend"), "options": spec.get("options"),
+                                          "vars": self.vars(source)})
+
+    def _remember(self, source: str, found: Mapping[str, Requirement | None]) -> None:
+        """Keep what a server answered, for when it is down."""
+        self._store(source).put({i: r.as_dict() for i, r in found.items() if r is not None})
+
+    def _last_known(self, source: str, ids: list[str], error: Exception) -> dict[str, Requirement | None]:
+        """Its server down: the requirements as last read from it (each says when: ``stale``), when every one of them
+        was read before; else the error."""
+        from testsuit.netguard import is_down_error
+        if not is_down_error(error):
+            raise error
+        store = self._store(source)
+        hits = {i: store.get(i) for i in ids}
+        if not hits or any(h is None for h in hits.values()):
+            raise error
+        out: dict[str, Requirement | None] = {}
+        for i, (item, at) in hits.items():
+            req = Requirement.from_dict(item)
+            req.stale = at
+            out[i] = req
+        oldest = min(at for _, at in hits.values())
+        self.stale_notes.append(f"requirements source '{source}' cannot be reached: {len(out)} requirement(s) as last "
+                                f"read (on {oldest[:16].replace('T', ' ')} UTC at the oldest)")
         return out
 
     def tree(self, source: str | None = None) -> list[Node]:

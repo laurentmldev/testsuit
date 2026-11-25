@@ -233,6 +233,8 @@ class YamlBackend(ReqBackend):
 
     Option ``url``: a link to each requirement, ``{id}`` replaced (``https://wiki/reqs#{id}``).
     """
+    remote = False                       # nothing to keep for when a server is down
+
 
     capabilities = frozenset({"children_query", "versions"})
     description = "Built in: requirements written in a YAML file of the tests repository."

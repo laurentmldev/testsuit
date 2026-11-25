@@ -19,7 +19,7 @@ import { htmlToText, RichText } from "../richtext";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { get, url, useResource } from "../api";
 import { createFile } from "../editor/Session";
-import { IssueBadge, RequirementIssues } from "./Tickets";
+import { IssueBadge, RequirementIssues } from "./Issues";
 import { attempt, classes, Markdown, notify, openInNewTab, Spinner } from "../util";
 import { NavIcon } from "../navicons";
 
@@ -159,7 +159,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
           onChange={(e) => setSearch(e.target.value)} title="Only the requirements holding all these words" />
         {search && <span className="muted">{rows.length} of {inNode.length}</span>}
         {withIssues > 0 && <button className={classes("dyn-tag", onlyIssues && "selected")} onClick={() => setOnlyIssues(!onlyIssues)}
-          title="Only the requirements an open issue is about: by the failure it is bound to, or naming them (tickets.yml)">🐞 with open issues {withIssues}</button>}
+          title="Only the requirements an open issue is about: by the failure it is bound to, or naming them (issues.yml)">🐞 with open issues {withIssues}</button>}
       {tagCounts.length > 0 && (<>
           <select value={tag} onChange={(e) => setTag(e.target.value)} title="Only the requirements with this tag (⚑: a dynamic tag, found in their texts)">
             <option value="">All tags</option>

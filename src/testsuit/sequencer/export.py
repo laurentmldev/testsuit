@@ -349,7 +349,7 @@ def _add_run(seq, export: Export, run: dict, folder: str, links: PageLinks, prog
     review = seq.run_review(rid)
     export.pages[me] = run_report_html(seq.reviewed(run), review.get("entries") or [], links.at(me),
                                        seq.run_requirements(rid), inputs, title_suffix,
-                                       issues=seq.tickets.known_brief(seq.reviewed(run)))
+                                       issues=seq.issues.known_brief(seq.reviewed(run)))
     export.files[f"{folder}/review.yml"] = yaml.safe_dump(review, sort_keys=False, allow_unicode=True).encode()
     prog.step("run reports")
 
@@ -405,7 +405,7 @@ def run_export(seq, run_id: str, mode: str = COMPLETE, sequencer_url: str = "", 
         prog = _Progress(progress, cancelled, 1)
         export = Export(title, {"index.html": run_report_html(seq.reviewed(run), seq.run_review(run["id"]).get("entries") or [],
                                                               online, seq.run_requirements(run["id"]),
-                                                              issues=seq.tickets.known_brief(seq.reviewed(run)))})
+                                                              issues=seq.issues.known_brief(seq.reviewed(run)))})
         prog.step("run report")
         return export
     prog = _Progress(progress, cancelled, _units(seq, [run]) - 1)

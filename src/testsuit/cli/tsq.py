@@ -393,25 +393,25 @@ def _issue_line(issue: dict) -> str:
             + (f" ({', '.join(issue['assignees'])})" if issue.get("assignees") else "") + (f" {issue['url']}" if issue.get("url") else ""))
 
 
-def cmd_ticket(args, client: Client) -> int:
+def cmd_issue(args, client: Client) -> int:
     """The issues bound to a run's results: list them, bind one, create one, unbind one (SPEC section 11.3)."""
     by = args.by or os.environ.get("TSQ_USER") or os.environ.get("USER") or ""
     if args.unbind is not None:
         if not args.reason:
             raise CliError("--unbind needs --reason")
-        b = client.post(f"/tickets/bindings/{args.unbind}/unbind", json={"reason": args.reason, "by": by})
+        b = client.post(f"/issues/bindings/{args.unbind}/unbind", json={"reason": args.reason, "by": by})
         print(f"unbound {b['issue'].get('key')} from {b['testdef']}")
         return 0
     if not args.run:
         raise CliError("give the run (or --unbind N --reason R)")
     target = _review_target(args.on or "run", client.get(f"/runs/{args.run}/review")) if (args.link or args.create) else None
     if args.link:
-        b = client.post(f"/runs/{args.run}/tickets", json={"action": "bind", "target": target, "issue": args.link,
+        b = client.post(f"/runs/{args.run}/issues", json={"action": "bind", "target": target, "issue": args.link,
                                                            "note": args.note, "by": by})
         print(f"binding {b['id']}: {_issue_line(b['issue'])} bound to {b['testdef']}")
         return 0
     if args.create:
-        d = client.post(f"/runs/{args.run}/tickets/draft", json={"target": target, "source": args.source, "by": by})
+        d = client.post(f"/runs/{args.run}/issues/draft", json={"target": target, "source": args.source, "by": by})
         for k in d.get("known") or []:
             print(f"already bound: {_issue_line(k['issue'])}")
         for k in d.get("duplicates") or []:
@@ -426,19 +426,19 @@ def cmd_ticket(args, client: Client) -> int:
             if input("create this issue? [y/N] ").strip().lower() not in ("y", "yes"):
                 print("not created")
                 return 1
-        token = os.environ.get("TSQ_TICKETS_TOKEN") if args.my_token else None
+        token = os.environ.get("TSQ_ISSUES_TOKEN") if args.my_token else None
         if args.my_token and not token:
-            raise CliError("--my-token reads your token from $TSQ_TICKETS_TOKEN, which is not set")
-        b = client.post(f"/runs/{args.run}/tickets", json={"action": "create", "target": target, "source": d["source"],
+            raise CliError("--my-token reads your token from $TSQ_ISSUES_TOKEN, which is not set")
+        b = client.post(f"/runs/{args.run}/issues", json={"action": "create", "target": target, "source": d["source"],
                                                            "project": args.project, "title": title, "body": d["body"],
                                                            "labels": labels, "by": by, **({"token": token} if token else {})})
         print(f"created and bound: {_issue_line(b['issue'])}")
         return 0
-    view = client.get(f"/runs/{args.run}/tickets" + ("?refresh=true" if args.refresh else ""))
+    view = client.get(f"/runs/{args.run}/issues" + ("?refresh=true" if args.refresh else ""))
     if view.get("error"):
-        print(f"tickets: {view['error']}")
+        print(f"issues: {view['error']}")
     if not view.get("sources"):
-        print(f"run {view['run']}: its datapack names no tickets source (tickets.yml)")
+        print(f"run {view['run']}: its datapack names no issue source (issues.yml)")
     else:
         print("sources: " + ", ".join(f"{c['name']} ({c['backend']} {c.get('project', '')})" + (" default" if c.get("default") else "")
                                       for c in view["sources"]))
@@ -855,7 +855,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--ref", help="a reference: a ticket, a deviation report...")
     s.add_argument("--by", help="who (default: $TSQ_USER, else $USER; a reverse proxy's user wins)")
     s.set_defaults(fn=cmd_review)
-    s = sub.add_parser("ticket", help="issues bound to a run's results: list its failures and their known issues, bind "
+    s = sub.add_parser("issue", aliases=["ticket"], help="issues bound to a run's results: list its failures and their known issues, bind "
                                       "an issue, create one (pre-filled), unbind one")
     s.add_argument("run", nargs="?")
     g = s.add_mutually_exclusive_group()
@@ -864,17 +864,17 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--unbind", type=int, metavar="BINDING", help="unbind an issue (needs --reason)")
     s.add_argument("--on", metavar="TARGET", help="what the issue is about: run (default), step:<phase>:<step>, "
                                                   "check:<step>::[<scenario>/]<check>")
-    s.add_argument("--source", help="the tickets source of a new issue (default: its route, else the default source)")
+    s.add_argument("--source", help="the issue source of a new issue (default: its route, else the default source)")
     s.add_argument("--project", help="its project, in a group source")
     s.add_argument("--title", help="another title than the one proposed")
     s.add_argument("--label", action="append", help="a label more (repeat)")
     s.add_argument("--note", help="a note on a binding")
     s.add_argument("--reason", help="why (--unbind)")
     s.add_argument("--yes", action="store_true", help="create without showing it first")
-    s.add_argument("--my-token", action="store_true", help="create it in your name: your token from $TSQ_TICKETS_TOKEN")
+    s.add_argument("--my-token", action="store_true", help="create it in your name: your token from $TSQ_ISSUES_TOKEN")
     s.add_argument("--refresh", action="store_true", help="read the issue states again")
     s.add_argument("--by", help="who (default: $TSQ_USER, else $USER; a reverse proxy's user wins)")
-    s.set_defaults(fn=cmd_ticket)
+    s.set_defaults(fn=cmd_issue)
     s = sub.add_parser("export", help="export the report of a run or a campaign run, as reviewed: one HTML file "
                                       "(or a zip when too large), downloaded")
     s.add_argument("id", help="run (or campaign run, with --campaign)")

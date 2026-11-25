@@ -26,7 +26,7 @@ import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 import { Named } from "../kinds";
 import { CampaignReview, ExportButton, ReviewedVerdict, ReviewNotes, ReviewStateBadge } from "./Review";
-import { IssueChip } from "./Tickets";
+import { IssueChip } from "./Issues";
 
 const CAMPAIGN_KEYS = "tsq.campaignKeys";              // the values given at generation to the keys of each campaign
 
@@ -438,7 +438,7 @@ export function CampaignProgress({ counts }: { counts: any }) {
 
 /** The page of a campaign run (#/campaigns/<id>): its runs at a glance, with links to go deeper, and its report. */
 export function CampaignRunPage({ id }: { id: string }) {
-  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause", "review", "ticket"]);
+  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause", "review", "issue"]);
   const v = view.data;
   if (view.error) return <div className="page"><div className="error-box">{view.error}</div></div>;
   if (!v) return <div className="page"><Spinner className="block" text="Reading the campaign run…" /></div>;

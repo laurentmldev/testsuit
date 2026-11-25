@@ -25,11 +25,11 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import quote
 
-from testsuit.tickets.backend import Api, TicketBackend, register_ticket_backend
-from testsuit.tickets.model import CLOSED, OPEN, Issue, TicketError
+from testsuit.issues.backend import Api, IssueBackend, register_issue_backend
+from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
 
-class GitLabBackend(TicketBackend):
+class GitLabBackend(IssueBackend):
     """GitLab issues, through its REST API (v4)"""
 
     description = "GitLab issues of a project or of a group (gitlab.com or self-hosted)"
@@ -50,7 +50,7 @@ class GitLabBackend(TicketBackend):
         self.project = str(self.options.get("project") or "")
         self.group = str(self.options.get("group") or "")
         if bool(self.project) == bool(self.group):
-            raise TicketError("gitlab backend: give its 'project' or its 'group' (one of them)")
+            raise IssueError("gitlab backend: give its 'project' or its 'group' (one of them)")
         headers = {}
         if self.credentials.get("token"):
             headers["PRIVATE-TOKEN"] = self.credentials["token"]
@@ -98,7 +98,7 @@ class GitLabBackend(TicketBackend):
             project, iid = str(id).rsplit("#", 1)
             return project, iid
         if not self.project:
-            raise TicketError(f"gitlab backend: issue '{id}' of group '{self.group}': name its project (<project>#<iid>)")
+            raise IssueError(f"gitlab backend: issue '{id}' of group '{self.group}': name its project (<project>#<iid>)")
         return self.project, str(id)
 
     def get(self, ids: Iterable[str]) -> dict[str, Issue | None]:
@@ -112,7 +112,7 @@ class GitLabBackend(TicketBackend):
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
         project = project or self.project
         if not project:
-            raise TicketError(f"gitlab backend: group '{self.group}': which project should the issue go to?")
+            raise IssueError(f"gitlab backend: group '{self.group}': which project should the issue go to?")
         item = self.api.post(f"projects/{self._p(project)}/issues",
                              {"title": title, "description": body, **({"labels": ",".join(labels)} if labels else {})})
         return self.issue(item)
@@ -138,4 +138,4 @@ class GitLabBackend(TicketBackend):
                                                                          "archived": "false"}, 500)]
 
 
-register_ticket_backend("gitlab", GitLabBackend)
+register_issue_backend("gitlab", GitLabBackend)

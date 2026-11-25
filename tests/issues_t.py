@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""Issues bound to test results (sequencer SPEC section 11.3): the tickets file, the GitLab, GitHub and Jira backends
+"""Issues bound to test results (sequencer SPEC section 11.3): the issues file, the GitLab, GitHub and Jira backends
 (against a fake server, Redmine too), issues pre-filled from failures, known issues across runs, and requirements named by issues."""
 import asyncio
 import json
@@ -27,9 +27,9 @@ import yaml
 
 from sequencer_t import Bench, exploit_bench, run_until_done
 from testsuit.datatools.datapack import datapack_tools
-from testsuit.tickets import issues as iss
-from testsuit.tickets.model import Issue, TicketError
-from testsuit.tickets.sources import TicketSources
+from testsuit.issues import results as iss
+from testsuit.issues.model import Issue, IssueError
+from testsuit.issues.sources import IssueSources
 
 TOKEN = "s3cr3t-token"
 
@@ -177,68 +177,69 @@ def _handler(tracker: Tracker):
 def tracker(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-    monkeypatch.setenv("TICKETS_TOKEN", TOKEN)
+    monkeypatch.setenv("ISSUES_TOKEN", TOKEN)
     t = Tracker()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(t))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     t.url = f"http://127.0.0.1:{server.server_port}"
+    t.server = server
     yield t
     server.shutdown()
 
 
-def _tickets(url: str) -> dict:
+def _issues_cfg(url: str) -> dict:
     return {"default": "bench", "sources": {
         "bench": {"backend": "gitlab", "label": "Bench", "options": {"url": url, "project": "test/bench"},
-                  "credentials": {"token": "env:TICKETS_TOKEN"}, "labels": ["tsq"]},
-        "gh": {"backend": "github", "options": {"url": url, "repo": "acme/fw", "web": "https://github.com"}, "credentials": {"token": "env:TICKETS_TOKEN"}},
+                  "credentials": {"token": "env:ISSUES_TOKEN"}, "labels": ["tsq"]},
+        "gh": {"backend": "github", "options": {"url": url, "repo": "acme/fw", "web": "https://github.com"}, "credentials": {"token": "env:ISSUES_TOKEN"}},
         "jira": {"backend": "jira", "options": {"url": url, "project": "BENCH", "cloud": False},
-                 "credentials": {"email": "env:TICKETS_TOKEN", "token": "env:TICKETS_TOKEN"}}},
+                 "credentials": {"email": "env:ISSUES_TOKEN", "token": "env:ISSUES_TOKEN"}}},
         "routes": [{"source": "gh", "step": "exploit:*", "check": "never*"}]}
 
 
-# ── the tickets file ───────────────────────────────────────────────────────
+# ── the issues file ───────────────────────────────────────────────────────
 
-def test_tickets_file(tracker):
-    s = TicketSources(_tickets(tracker.url))
+def test_issues_file(tracker):
+    s = IssueSources(_issues_cfg(tracker.url))
     assert s.names == ["bench", "gh", "jira"] and s.default == "bench"
     assert s.parse("bench#42") == ("bench", "42") and s.parse("#7") == ("bench", "7") and s.parse("12") == ("bench", "12")
     assert s.parse("BENCH-3") == ("jira", "BENCH-3") and s.parse("jira#BENCH-3") == ("jira", "BENCH-3")
     assert s.parse(f"{tracker.url}/test/bench/-/issues/5") == ("bench", "5")
     assert s.parse("https://github.com/acme/fw/issues/9") == ("gh", "9")
-    with pytest.raises(TicketError, match="unknown tickets source 'nope'"):
+    with pytest.raises(IssueError, match="unknown issue source 'nope'"):
         s.parse("nope#1")
     assert s.route({"step": "exploit:criteria", "check": "never_over"}) == "gh"
     assert s.route({"step": "main:run"}) == "bench"
     assert s.card("bench") == {"name": "bench", "backend": "gitlab", "project": "test/bench", "label": "Bench",
                                "url": tracker.url, "default": True, "group": False,
                                "capabilities": ["comment", "create", "group"]}
-    with pytest.raises(TicketError, match="never be written in the file"):
-        TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"}, "credentials": {"token": "abc"}}}})
-    with pytest.raises(TicketError, match="unknown key"):
-        TicketSources({"sources": {"x": {"backend": "gitlab"}}, "colour": 1})
+    with pytest.raises(IssueError, match="never be written in the file"):
+        IssueSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"}, "credentials": {"token": "abc"}}}})
+    with pytest.raises(IssueError, match="unknown key"):
+        IssueSources({"sources": {"x": {"backend": "gitlab"}}, "colour": 1})
     # one way to sign in: the credentials of one method of the backend
-    with pytest.raises(TicketError, match=r"credentials oauth_token, token are not one way to sign in \(Access token"):
-        TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"},
+    with pytest.raises(IssueError, match=r"credentials oauth_token, token are not one way to sign in \(Access token"):
+        IssueSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"},
                                          "credentials": {"token": "env:A", "oauth_token": "env:B"}}}})
-    with pytest.raises(TicketError, match="credentials token, user are not one way"):
-        TicketSources({"sources": {"x": {"backend": "jira", "credentials": {"token": "env:A", "user": "env:B"}}}})
-    TicketSources({"sources": {"x": {"backend": "jira", "credentials": {"email": "env:A", "token": "env:B"}}}})
-    from testsuit.tickets import describe_ticket_backends
-    auth = {b["name"]: [m["name"] for m in b["auth"]] for b in describe_ticket_backends()}
+    with pytest.raises(IssueError, match="credentials token, user are not one way"):
+        IssueSources({"sources": {"x": {"backend": "jira", "credentials": {"token": "env:A", "user": "env:B"}}}})
+    IssueSources({"sources": {"x": {"backend": "jira", "credentials": {"email": "env:A", "token": "env:B"}}}})
+    from testsuit.issues import describe_issue_backends
+    auth = {b["name"]: [m["name"] for m in b["auth"]] for b in describe_issue_backends()}
     assert auth["gitlab"] == ["access_token", "oauth"] and auth["jira"] == ["cloud", "pat", "basic"]
     # the TLS check: false, written as a string too, or a CA bundle relative to the file's folder
     for verify, expected in ((False, False), ("false", False), ("no", False), (True, True), ("certs/ca.pem", "/base/certs/ca.pem")):
-        b = TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b", "verify": verify}}}},
+        b = IssueSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b", "verify": verify}}}},
                           Path("/base")).backend("x")
         assert b.api.verify == expected, verify
-    with pytest.raises(TicketError, match="a pattern with"):
-        TicketSources({"sources": {"x": {"backend": "gitlab"}}, "requirements": {"labels": "req"}})
+    with pytest.raises(IssueError, match="a pattern with"):
+        IssueSources({"sources": {"x": {"backend": "gitlab"}}, "requirements": {"labels": "req"}})
 
 
 # ── the backends ───────────────────────────────────────────────────────────
 
 def test_backends(tracker):
-    s = TicketSources(_tickets(tracker.url))
+    s = IssueSources(_issues_cfg(tracker.url))
     for name in ("bench", "gh", "jira"):
         b = s.backend(name)
         made = b.create("speed over limit", "REQ-1 is not met", ["tsq"])
@@ -253,7 +254,7 @@ def test_backends(tracker):
     assert s.backend("bench").get(["404"])["404"] is None
     # a wrong token: the error says so, and never shows the token
     bad = s.backend("bench").with_token("wrong-token-123")
-    with pytest.raises(TicketError, match=r"HTTP 401.*token is wrong") as e:
+    with pytest.raises(IssueError, match=r"HTTP 401.*token is wrong") as e:
         bad.search()
     assert "wrong-token-123" not in str(e.value)
     trace = []
@@ -264,11 +265,11 @@ def test_backends(tracker):
 
 
 def test_redmine_backend(tracker):
-    s = TicketSources({"sources": {
+    s = IssueSources({"sources": {
         "rm": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench", "tracker": "Bug"},
-               "credentials": {"api_key": "env:TICKETS_TOKEN"}},
+               "credentials": {"api_key": "env:ISSUES_TOKEN"}},
         "rm2": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench", "markup": "markdown"},
-                "credentials": {"user": "env:TICKETS_TOKEN", "password": "env:TICKETS_TOKEN"}}}})
+                "credentials": {"user": "env:ISSUES_TOKEN", "password": "env:ISSUES_TOKEN"}}}})
     assert s.card("rm")["capabilities"] == ["comment", "create"] and s.card("rm")["project"] == "bench"
     assert s.backend("rm").markup == "textile" and s.backend("rm2").markup == "markdown"
     b = s.backend("rm2")
@@ -286,12 +287,12 @@ def test_redmine_backend(tracker):
     # a tracker by name (the API key in its header)
     bug = s.backend("rm").create("x", "y")
     assert bug.labels == ["Bug"] and bug.id == "2"
-    with pytest.raises(TicketError, match="no tracker 'Nope'"):
-        TicketSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url, "project": "p", "tracker": "Nope"},
-                                         "credentials": {"api_key": "env:TICKETS_TOKEN"}}}}).backend("x").create("x", "y")
-    with pytest.raises(TicketError, match="option 'project' is missing"):
-        TicketSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url}}}}).backend("x")
-    with pytest.raises(TicketError, match=r"HTTP 401.*token is wrong") as e:
+    with pytest.raises(IssueError, match="no tracker 'Nope'"):
+        IssueSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url, "project": "p", "tracker": "Nope"},
+                                         "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}).backend("x").create("x", "y")
+    with pytest.raises(IssueError, match="option 'project' is missing"):
+        IssueSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url}}}}).backend("x")
+    with pytest.raises(IssueError, match=r"HTTP 401.*token is wrong") as e:
         s.backend("rm2").with_token("wrong-key-123").search()
     assert "wrong-key-123" not in str(e.value)
 
@@ -351,10 +352,10 @@ CHECK = {"kind": "check", "step": "exploit:criteria", "criteria": "criteria/coun
 
 @pytest.fixture
 def failed_run(tmp_path, monkeypatch, tracker):
-    """A run whose exploit check is not met, of a datapack generated with the tickets file of its repository."""
+    """A run whose exploit check is not met, of a datapack generated with the issues file of its repository."""
     monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": None, "clean": False})
     bench = Bench(tmp_path, stages=1)
-    (bench.dp / "tickets.yml").write_text(yaml.safe_dump(_tickets(tracker.url)))
+    (bench.dp / "issues.yml").write_text(yaml.safe_dump(_issues_cfg(tracker.url)))
     zip_path = exploit_bench(bench, "short", {"criteria": ["criteria/count"], "data": ["test_run:dut/output/*.csv"]},
                              min_count=100000)
 
@@ -368,44 +369,44 @@ def failed_run(tmp_path, monkeypatch, tracker):
     asyncio.run(seq.close())
 
 
-def test_tickets_on_the_sequencer(failed_run, tracker):
+def test_issues_on_the_sequencer(failed_run, tracker):
     bench, seq, run_id = failed_run
-    view = seq.tickets.run_view(run_id)
+    view = seq.issues.run_view(run_id)
     assert [c["name"] for c in view["sources"]] == ["bench", "gh", "jira"] and view["default"] == "bench"
     labels = {t["label"]: t for t in view["targets"]}
     check = next(t for t in view["targets"] if t["target"].get("check") == "counted_enough")
     assert check["status"] == "failed" and check["issues"] == [] and check["route"] == "bench"
     assert set(labels) == {"run", "step exploit:criteria", "check exploit:criteria: criteria/count::counted_enough"}
     # a new issue, pre-filled, created and bound
-    d = seq.tickets.draft(run_id, CHECK, "http://tsq:8640/", "dana")
+    d = seq.issues.draft(run_id, CHECK, "http://tsq:8640/", "dana")
     assert d["source"] == "bench" and d["title"] == "[tsq] short: check counted_enough failed"
     assert "http://tsq:8640/#/runs/" in d["body"] and f"tsq:fingerprint={d['fingerprint']}" in d["body"]
     assert d["labels"][0] == "tsq" and d["duplicates"] == [] and d["known"] == []
-    b = seq.tickets.create(run_id, {"target": CHECK, "source": "bench", "title": d["title"], "body": d["body"],
+    b = seq.issues.create(run_id, {"target": CHECK, "source": "bench", "title": d["title"], "body": d["body"],
                                     "labels": d["labels"]}, "dana", "http://tsq:8640/")
     assert b["issue"]["key"] == "bench#1" and b["created"] and b["by"] == "dana"
     with pytest.raises(Exception, match="already bound"):
-        seq.tickets.bind(run_id, {"target": CHECK, "issue": "bench#1"}, "dana")
-    view = seq.tickets.run_view(run_id)
+        seq.issues.bind(run_id, {"target": CHECK, "issue": "bench#1"}, "dana")
+    view = seq.issues.run_view(run_id)
     check = next(t for t in view["targets"] if t["target"].get("check") == "counted_enough")
     assert [x["issue"]["key"] for x in check["issues"]] == ["bench#1"]
     # an issue opened by hand, with the fingerprint: found before creating another (a duplicate)
-    d2 = seq.tickets.draft(run_id, CHECK, "", "dana")
+    d2 = seq.issues.draft(run_id, CHECK, "", "dana")
     assert [k["issue"]["key"] for k in d2["known"]] == ["bench#1"]
     # an issue of another tool, bound by its URL; its state comes back from the tool
-    gh = TicketSources(_tickets(tracker.url)).backend("gh").create("bench too slow", "", [])
-    b2 = seq.tickets.bind(run_id, {"target": {"kind": "run"}, "issue": gh.url}, "lee")
+    gh = IssueSources(_issues_cfg(tracker.url)).backend("gh").create("bench too slow", "", [])
+    b2 = seq.issues.bind(run_id, {"target": {"kind": "run"}, "issue": gh.url}, "lee")
     assert b2["issue"]["key"] == "gh#1"
     tracker.issues["github"][0]["state"] = "closed"
-    view = seq.tickets.run_view(run_id, refresh=True)
+    view = seq.issues.run_view(run_id, refresh=True)
     run_t = next(t for t in view["targets"] if t["target"]["kind"] == "run")
     assert run_t["issues"][0]["issue"]["state"] == "closed"
-    assert next(b for b in seq.tickets.bindings() if b["id"] == b2["id"])["issue"]["state"] == "closed"   # as last seen
+    assert next(b for b in seq.issues.bindings() if b["id"] == b2["id"])["issue"]["state"] == "closed"   # as last seen
     # unbound with a reason
     with pytest.raises(Exception, match="say why"):
-        seq.tickets.unbind(b2["id"], "", "lee")
-    seq.tickets.unbind(b2["id"], "not the cause", "lee")
-    assert [b["issue"]["key"] for b in seq.tickets.bindings()] == ["bench#1"]
+        seq.issues.unbind(b2["id"], "", "lee")
+    seq.issues.unbind(b2["id"], "not the cause", "lee")
+    assert [b["issue"]["key"] for b in seq.issues.bindings()] == ["bench#1"]
     # another run of the test definition that fails the same way: the issue is a known issue of its failure
     zip_path = seq.store.get_run(run_id)["zip"] if seq.store.get_run(run_id).get("zip") else None
 
@@ -414,14 +415,14 @@ def test_tickets_on_the_sequencer(failed_run, tracker):
         await run_until_done(seq, [new["id"]], timeout=120)
         return new["id"]
     new_id = asyncio.run(again())
-    check = next(t for t in seq.tickets.run_view(new_id)["targets"] if t["target"].get("check") == "counted_enough")
+    check = next(t for t in seq.issues.run_view(new_id)["targets"] if t["target"].get("check") == "counted_enough")
     assert [x["issue"]["key"] for x in check["issues"]] == ["bench#1"]
-    assert [(k["key"], k["target"]) for k in seq.tickets.known_brief(seq.reviewed(seq.store.get_run(new_id)))] == [
+    assert [(k["key"], k["target"]) for k in seq.issues.known_brief(seq.reviewed(seq.store.get_run(new_id)))] == [
         ("bench#1", "check exploit:criteria: criteria/count::counted_enough")]
 
 
-def test_ticket_cli(failed_run, tracker, capsys):
-    """tsq ticket, its client mapped straight onto the API endpoints."""
+def test_issue_cli(failed_run, tracker, capsys):
+    """tsq issue, its client mapped straight onto the API endpoints."""
     from testsuit.cli import tsq
     from testsuit.sequencer.api import create_app
     bench, seq, run_id = failed_run
@@ -440,48 +441,213 @@ def test_ticket_cli(failed_run, tracker, capsys):
                 parts = url.path.strip("/").split("/")
                 if parts[2] == "review":
                     return call(routes[("/runs/{run_id}/review", "GET")](parts[1]))
-                return call(routes[("/runs/{run_id}/tickets", "GET")](parts[1], "refresh" in url.query))
+                return call(routes[("/runs/{run_id}/issues", "GET")](parts[1], "refresh" in url.query))
 
             def post(self, path, json=None, **kw):
                 parts = path.strip("/").split("/")
-                if parts[0] == "tickets":
-                    return call(routes[("/tickets/bindings/{binding_id}/unbind", "POST")](int(parts[2]), json, request))
+                if parts[0] == "issues":
+                    return call(routes[("/issues/bindings/{binding_id}/unbind", "POST")](int(parts[2]), json, request))
                 if parts[-1] == "draft":
-                    return call(routes[("/runs/{run_id}/tickets/draft", "POST")](parts[1], json, request))
-                return call(routes[("/runs/{run_id}/tickets", "POST")](parts[1], json, request))
+                    return call(routes[("/runs/{run_id}/issues/draft", "POST")](parts[1], json, request))
+                return call(routes[("/runs/{run_id}/issues", "POST")](parts[1], json, request))
 
         def args(**kw):
             base = dict(run=run_id, link=None, create=False, unbind=None, on=None, source=None, project=None, title=None,
                         label=None, note=None, reason=None, yes=False, my_token=False, refresh=False, by="dana")
             return SimpleNamespace(**{**base, **kw})
         on = "check:criteria::counted_enough"
-        assert await asyncio.to_thread(tsq.cmd_ticket, args(create=True, on=on, yes=True, label=["bench-1"]), Http()) == 0
+        assert await asyncio.to_thread(tsq.cmd_issue, args(create=True, on=on, yes=True, label=["bench-1"]), Http()) == 0
         assert "created and bound: bench#1 [open] [tsq] short: check counted_enough failed" in capsys.readouterr().out
         assert tracker.issues["gitlab"][0]["labels"] == ["tsq", "bench-1"]
-        assert await asyncio.to_thread(tsq.cmd_ticket, args(), Http()) == 0
+        assert await asyncio.to_thread(tsq.cmd_issue, args(), Http()) == 0
         out = capsys.readouterr().out
         assert "known issue bench#1 [open]" in out and "sources: bench (gitlab test/bench) default" in out
-        assert await asyncio.to_thread(tsq.cmd_ticket, args(run=None, unbind=1, reason="wrong"), Http()) == 0
+        assert await asyncio.to_thread(tsq.cmd_issue, args(run=None, unbind=1, reason="wrong"), Http()) == 0
         assert "unbound bench#1" in capsys.readouterr().out
     asyncio.run(main())
 
 
-def test_tickets_in_the_editor(tmp_path, tracker):
-    """The Editor's tickets form: the backends it offers, and a source tested as being edited (not saved)."""
+def test_issues_in_the_editor(tmp_path, tracker):
+    """The Editor's issues form: the backends it offers, and a source tested as being edited (not saved)."""
     from editor_t import Repos
     repos = Repos(tmp_path)
     session = repos.editor.open("workspace0")
     ctx = repos.editor.context(session)
-    assert {"gitlab", "github", "jira", "redmine"} <= {b["name"] for b in ctx["ticket_backends"]}
-    redmine = next(b for b in ctx["ticket_backends"] if b["name"] == "redmine")
+    assert {"gitlab", "github", "jira", "redmine"} <= {b["name"] for b in ctx["issue_backends"]}
+    redmine = next(b for b in ctx["issue_backends"] if b["name"] == "redmine")
     assert "api_key" in redmine["credentials"] and "tracker" in redmine["options"]
     data = {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"},
-                               "credentials": {"api_key": "env:TICKETS_TOKEN"}}}}
+                               "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}
     tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
-    out = repos.editor.tickets_test(session, "rm", data)
+    out = repos.editor.issues_test(session, "rm", data)
     assert out.get("error") is None and out["count"] == 1 and out["issues"][0]["title"] == "drift"
     assert out["calls"] and TOKEN not in json.dumps(out)
-    bad = repos.editor.tickets_test(session, "rm", {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url}}}})
+    bad = repos.editor.issues_test(session, "rm", {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url}}}})
     assert "option 'project' is missing" in bad["error"]
-    with pytest.raises(Exception, match="no tickets.yml"):
-        repos.editor.tickets_test(session, "rm")
+    with pytest.raises(Exception, match="no issues.yml"):
+        repos.editor.issues_test(session, "rm")
+
+
+# ── classes, variables, filters ───────────────────────────────────────────────
+
+def _issue(**k) -> Issue:
+    return Issue(**{"source": "x", "id": "1", **k})
+
+
+def test_issue_filter():
+    from datetime import datetime, timezone
+
+    from testsuit.issues.filter import IssueFilter
+    now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+    f = IssueFilter({"state": "open", "labels": ["Bench"], "any_labels": ["bug", "drift"], "not_labels": ["wontfix"],
+                     "text": "speed|counter", "not_text": "duplicate of", "title": r"^\[tsq\]", "projects": ["fw/*"],
+                     "authors": ["Alice"], "assignees": ["carol"], "created_after": "2026-01-01", "updated_after": "90d"})
+    ok = dict(title="[tsq] speed over limit", state="open", labels=["bench", "Bug"], project="fw/core", author="alice",
+              assignees=["carol"], created="2026-03-01T10:00:00Z", updated="2026-11-01T10:00:00Z")
+    assert f and f.post and f.match(_issue(**ok), now)
+    for change in ({"state": "closed"}, {"labels": ["Bug"]}, {"labels": ["bench"]}, {"labels": ["bench", "bug", "wontfix"]},
+                   {"title": "[tsq] noise"}, {"body": "duplicate of #3"}, {"title": "speed over limit"}, {"project": "hw/core"},
+                   {"author": "bob"}, {"assignees": []}, {"created": "2025-12-31"}, {"updated": "2026-05-01T00:00:00Z"},
+                   {"updated": ""}):
+        assert not f.match(_issue(**{**ok, **change}), now), change
+    assert f.match(_issue(**{**ok, "title": "[TSQ] Counter wraps"}), now)        # case independent
+    # state and labels alone: asked of the tool, nothing applied after
+    g = IssueFilter({"state": "closed", "labels": ["x"]})
+    assert g and not g.post and g.state_for("open") is False and g.state_for(None) == "closed" and g.state_for("closed") == "closed"
+    assert not IssueFilter(None) and IssueFilter({"state": "all"}).state_for("open") == "open"
+    for spec, message in (({"text": "("}, "not a regular expression"), ({"updated_after": "soon"}, "a time ago"),
+                          ({"colour": 1}, "unknown key"), ({"state": "done"}, "open, closed or all"), ([], "a mapping")):
+        with pytest.raises(IssueError, match=message):
+            IssueFilter(spec)
+    h = IssueFilter({"created_before": "2w", "updated_before": "2026-06-01 12:00"})
+    assert h.match(_issue(created="2026-11-01", updated="2026-06-01T11:00:00Z"), now)
+    assert not h.match(_issue(created="2026-11-20", updated="2026-06-01T11:00:00Z"), now)
+
+
+def test_issue_classes():
+    data = {"classes": {"corp": {"backend": "gitlab", "description": "the company GitLab",
+                                 "options": {"url": "https://gitlab.corp", "project": "{{ team }}/bench"},
+                                 "credentials": {"token": "env:GITLAB_TOKEN_{{ team | upper }}"}, "labels": ["tsq", "{{ team }}"],
+                                 "filter": {"labels": ["{{ team }}"], "updated_after": "{{ since }}"},
+                                 "vars": {"team": {"mandatory": True, "help": "its team"}, "since": {"value": "1y"}}}},
+            "sources": {"fw": {"class": "corp", "label": "Firmware {{ team }}", "vars": {"team": "fw"}},
+                        "hw": {"class": "corp", "vars": {"team": "hw", "since": "90d"}},
+                        "own": {"backend": "github", "options": {"repo": "{{ org }}/x"}, "vars": {"org": "acme"},
+                                "filter": {"not_labels": ["{{ org }}-noise"]}}}}
+    s = IssueSources(data)
+    assert s.specs["fw"]["options"] == {"url": "https://gitlab.corp", "project": "fw/bench"}
+    assert s.specs["fw"]["credentials"] == {"token": "env:GITLAB_TOKEN_FW"} and s.specs["fw"]["labels"] == ["tsq", "fw"]
+    assert s.label("fw") == "Firmware fw" and s.filters["fw"].spec == {"labels": ["fw"], "updated_after": "1y"}
+    assert s.filters["hw"].spec["updated_after"] == "90d" and s.specs["own"]["options"]["repo"] == "acme/x"
+    assert s.filters["own"].not_labels == {"acme-noise"} and s.vars("hw") == {"team": "hw", "since": "90d"}
+    card = s.card("fw")
+    assert card["class"] == "corp" and card["vars"] == {"team": "fw", "since": "1y"} and card["filter"]["labels"] == ["fw"]
+    assert s.raw["fw"] == data["sources"]["fw"]
+    bad = [({"x": {"class": "corp"}}, "mandatory variable 'team' has no value"),
+           ({"x": {"class": "nope"}}, "unknown class 'nope'"),
+           ({"x": {"class": "corp", "vars": {"team": "a", "colour": 1}}}, "colour: not a variable of class 'corp'"),
+           ({"x": {"class": "corp", "vars": {"team": "a"}, "options": {}}}, "a source of a class sets only its label"),
+           ({"x": {"backend": "gitlab", "options": {"project": "{{ nope }}"}}}, "nope"),
+           ({"x": {"backend": "gitlab", "options": {"project": "a/b"}, "filter": {"text": "("}}}, "not a regular expression")]
+    for sources, message in bad:
+        with pytest.raises(IssueError, match=message):
+            IssueSources({"classes": data["classes"], "sources": sources})
+    with pytest.raises(IssueError, match="names its 'backend'"):
+        IssueSources({"classes": {"c": {"vars": {}}}, "sources": {"x": {"class": "c"}}})
+
+
+def test_filtered_search(tracker):
+    issues = tracker.issues["gitlab"]
+    for n, (title, labels, state, updated) in enumerate([
+            ("speed over limit", ["bench"], "opened", "2026-11-20T10:00:00Z"),
+            ("counter wraps", ["bench", "wontfix"], "opened", "2026-11-21T10:00:00Z"),
+            ("old speed issue", ["bench"], "opened", "2024-01-01T10:00:00Z"),
+            ("speed when closed", ["bench"], "closed", "2026-11-22T10:00:00Z"),
+            ("docs typo", ["docs"], "opened", "2026-11-23T10:00:00Z")], start=1):
+        issues.append({"iid": n, "title": title, "description": "", "state": state, "labels": labels,
+                       "web_url": f"{tracker.url}/test/bench/-/issues/{n}", "assignees": [], "author": {"username": "bot"},
+                       "references": {"full": f"test/bench#{n}"}, "updated_at": updated, "created_at": updated})
+    cfg = _issues_cfg(tracker.url)
+    cfg["sources"]["bench"]["filter"] = {"labels": ["bench"], "not_labels": ["wontfix"], "updated_after": "180d"}
+    s = IssueSources(cfg)
+    tracker.calls.clear()
+    assert [i.id for i in s.backend("bench").search(state=None)] == ["4", "1"]
+    assert [i.id for i in s.backend("bench").search(state="open")] == ["1"]
+    assert [i.id for i in s.backend("bench").search("speed", state=None, limit=1)] == ["4"]
+    asked = [c[2] for c in tracker.calls if c[1].endswith("/issues")]
+    assert asked[0]["labels"] == "bench" and asked[1]["state"] == "opened"
+    cfg["sources"]["bench"]["filter"] = {"state": "closed"}
+    s = IssueSources(cfg)
+    assert s.backend("bench").search(state="open") == [] and [i.id for i in s.backend("bench").search(state=None)] == ["4"]
+    assert s.backend("bench").get(["5"])["5"].title == "docs typo"          # by its reference: whatever the filter
+
+
+def test_issues_file_former_name(tmp_path):
+    """tickets.yml (the former name) still reads, and the bindings of results/tickets move to results/issues."""
+    from testsuit.issues.sources import find_issues_file, is_issues_file
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "tickets.yml").write_text("sources: {}\n")
+    assert find_issues_file(tmp_path) == tmp_path / "tickets.yml"
+    assert is_issues_file("tickets.yml", {"sources": {}}) and is_issues_file("issues.yml", {"sources": {}})
+    (tmp_path / "issues.yml").write_text("sources: {}\n")
+    assert find_issues_file(tmp_path) == tmp_path / "issues.yml"
+
+
+def test_issues_list_pages(tmp_path, tracker):
+    """The Editor's issues list: pages of a list read once, found by words, by requirements, counted."""
+    from editor_t import Repos
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    for n in range(1, 251):
+        tracker.issues["redmine"].append({"id": n, "subject": f"issue {n}" + (" drift" if n % 10 == 0 else ""),
+                                          "description": "", "status": {"is_closed": False},
+                                          "updated_on": f"2026-11-{1 + n // 10:02d}T10:00:{n % 60:02d}Z"})
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    page = repos.editor.issues_list(session, limit=100)
+    # two sources of the same project, filtered differently: each its own list
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {
+        n: {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"},
+            **({"filter": {"title": "drift"}} if n == "drifts" else {})} for n in ("rm", "drifts")}}))
+    assert repos.editor.issues_list(session, source="drifts")["total"] == 25
+    assert repos.editor.issues_list(session, source="rm")["total"] == 250
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    page = repos.editor.issues_list(session, limit=100)
+    assert (page["total"], page["listed"], len(page["issues"]), page["offset"], page["errors"]) == (250, 250, 100, 0, {})
+    reads = len(tracker.calls)
+    last = repos.editor.issues_list(session, offset=200, limit=100)
+    assert len(last["issues"]) == 50 and len(tracker.calls) == reads            # the list is read once
+    keys = [i["key"] for i in page["issues"] + repos.editor.issues_list(session, offset=100)["issues"] + last["issues"]]
+    assert len(set(keys)) == 250
+    found = repos.editor.issues_list(session, find="DRIFT")
+    assert found["total"] == 25 and all("drift" in i["title"] for i in found["issues"])
+    assert repos.editor.issues_list(session, only="bound")["total"] == 0
+    assert repos.editor.issues_list(session, limit=10000)["limit"] == 500
+    repos.editor.issues_list(session, refresh=True)
+    assert len(tracker.calls) > reads
+
+
+def test_issue_server_down(tmp_path, tracker):
+    """An issue server down: the lists and issues as last read (said so), one wait and not one per call."""
+    import time
+
+    from editor_t import Repos
+    from testsuit import netguard
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    assert repos.editor.issues_list(session)["total"] == 1
+    _, sources = repos.editor._issue_sources(session)
+    assert repos.editor.seq.issues.issue(sources, "rm", "4").title == "drift"
+    tracker.server.shutdown()
+    tracker.server.server_close()
+    page = repos.editor.issues_list(session, refresh=True)
+    assert page["total"] == 1 and "the list shown was read at" in page["errors"]["rm"]
+    assert repos.editor.seq.issues.issue(sources, "rm", "4", refresh=True).title == "drift"
+    start = time.monotonic()
+    with pytest.raises(IssueError, match="cannot be reached since"):
+        sources.backend("rm").search("x")
+    assert time.monotonic() - start < 1 and tracker.url in netguard.down_hosts()

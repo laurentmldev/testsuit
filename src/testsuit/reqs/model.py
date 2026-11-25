@@ -42,6 +42,7 @@ class Requirement:
     url: str = ""                        # where to read it in its tool
     source: str = ""                     # name of its source in the sources file (set when fetched)
     dynamic_tags: list[str] = field(default_factory=list)   # the source's dynamic tags its texts match (not in its version)
+    stale: str = ""                      # its server down: when this copy of it was read (the last known one)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Requirement:

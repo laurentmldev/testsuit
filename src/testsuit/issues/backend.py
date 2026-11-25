@@ -11,15 +11,15 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""The plugin API of tickets tools (issue trackers), and what the built-in backends share.
+"""The plugin API of issue trackers (issue trackers), and what the built-in backends share.
 
 A backend gives access to the issues of one project of one tool (or of a group of projects). It is created by a
-factory ``factory(options, credentials, base_dir) -> TicketBackend``, as a requirements backend is
+factory ``factory(options, credentials, base_dir) -> IssueBackend``, as a requirements backend is
 (testsuit.reqs.backend)::
 
-    from testsuit.tickets import TicketBackend, Issue, register_ticket_backend
+    from testsuit.issues import IssueBackend, Issue, register_issue_backend
 
-    class YouTrackBackend(TicketBackend):
+    class YouTrackBackend(IssueBackend):
         description = "YouTrack, through its REST API"
         capabilities = frozenset({"create", "comment"})
         markup = "markdown"                                 # how its issue texts are written: markdown, jira, textile
@@ -30,7 +30,7 @@ factory ``factory(options, credentials, base_dir) -> TicketBackend``, as a requi
         def create(self, title, body, labels=(), project=None) -> Issue: ...
         def comment(self, id, body) -> None: ...
 
-    register_ticket_backend("youtrack", YouTrackBackend)    # tickets.yml: {sources: {x: {backend: youtrack, ...}}}
+    register_issue_backend("youtrack", YouTrackBackend)    # issues.yml: {sources: {x: {backend: youtrack, ...}}}
 
 Capabilities: ``create`` (new issues), ``comment``, ``remote_link`` (a link shown beside the issue, Jira), ``group``
 (a source over several projects: ids are ``<project>#<n>``, ``create`` takes the project).
@@ -45,17 +45,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from testsuit.tickets.model import Issue, TicketError
+from testsuit.issues.model import Issue, IssueError
 
 MASK = "***"
 TIMEOUT = 20.0
 TRACE_CALLS = 30
 TRACE_ANSWER = 4000
-MAX_PAGES = 20
+MAX_PAGES = 100                              # of 100 issues: 10,000 at most per list
 
 
-class TicketBackend:
-    """Access to the issues of one project of a tickets tool (read-only unless it has the create capability)."""
+class IssueBackend:
+    """Access to the issues of one project of an issue tracker (read-only unless it has the create capability)."""
 
     capabilities: frozenset[str] = frozenset()
     description: str = ""
@@ -71,7 +71,7 @@ class TicketBackend:
         self.options = dict(options or {})
         self.credentials = dict(credentials or {})
         self.base_dir = base_dir
-        self.name = ""                       # the source's name, set by TicketSources
+        self.name = ""                       # the source's name, set by IssueSources
 
     # ── what a backend implements ──────────────────────────────────────
     def search(self, text: str = "", state: str | None = "open", labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
@@ -84,10 +84,10 @@ class TicketBackend:
         raise NotImplementedError
 
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
-        raise TicketError(f"{type(self).__name__} cannot create issues")
+        raise IssueError(f"{type(self).__name__} cannot create issues")
 
     def comment(self, id: str, body: str) -> None:
-        raise TicketError(f"{type(self).__name__} cannot comment issues")
+        raise IssueError(f"{type(self).__name__} cannot comment issues")
 
     def remote_link(self, id: str, url: str, title: str) -> bool:
         """Link a page to an issue where the tool shows such links (Jira): whether it did."""
@@ -107,7 +107,7 @@ class TicketBackend:
         return json.dumps([type(self).__name__, {k: v for k, v in sorted(self.options.items()) if k != "labels"}],
                           default=str)
 
-    def with_token(self, token: str) -> "TicketBackend":
+    def with_token(self, token: str) -> "IssueBackend":
         """The same source, calling with another user's token (the person who creates an issue)."""
         clone = type(self)(self.options, {**self.credentials, "token": token}, self.base_dir)
         clone.name = self.name
@@ -117,7 +117,7 @@ class TicketBackend:
 class Api:
     """JSON over HTTP for the built-in backends: credentials masked in errors and traces, pages followed."""
 
-    def __init__(self, backend: TicketBackend, base: str, headers: Mapping[str, str] | None = None,
+    def __init__(self, backend: IssueBackend, base: str, headers: Mapping[str, str] | None = None,
                  auth: tuple[str, str] | None = None) -> None:
         import requests
         self.backend = backend
@@ -154,6 +154,12 @@ class Api:
             record = {"method": method, "url": self._mask(url), **({"params": dict(params)} if params else {}),
                       **({"body": json.loads(self._mask(json.dumps(body)))} if body is not None else {})}
             trace.append(record)
+        from testsuit import netguard
+        if trace is None:                        # a server down is not called again for a while (a test tries)
+            try:
+                netguard.check(url)
+            except netguard.ServerDown as e:
+                raise IssueError(f"{where}: {e}") from e
         start = time.monotonic()
         try:
             with warnings.catch_warnings():      # not checking was asked for: no warning at each call
@@ -163,7 +169,13 @@ class Api:
         except requests.RequestException as e:
             if record is not None:
                 record["error"] = self._mask(str(e))
-            raise TicketError(f"{where}: {self._mask(str(e))}") from e
+            if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                netguard.failed(url, self._mask(str(e)))
+            raise IssueError(f"{where}: {self._mask(str(e))}") from e
+        if r.status_code in netguard.DOWN_STATUSES:
+            netguard.failed(url, f"HTTP {r.status_code}")
+        else:
+            netguard.answered(url)
         if record is not None:
             record.update(status=r.status_code, seconds=round(time.monotonic() - start, 3),
                           answer=self._mask(r.text[:TRACE_ANSWER]))
@@ -175,13 +187,13 @@ class Api:
             error = f"HTTP {r.status_code} {r.reason}{hint}: {self._mask(r.text[:300])}"
             if record is not None:
                 record["error"] = error
-            raise TicketError(f"{where}: {error}")
+            raise IssueError(f"{where}: {error}")
         if not r.content:
             return None, r
         try:
             return r.json(), r
         except ValueError as e:
-            raise TicketError(f"{where}: the answer is not JSON ({self._mask(r.text[:100])!r})") from e
+            raise IssueError(f"{where}: the answer is not JSON ({self._mask(r.text[:100])!r})") from e
 
     def get(self, path: str, params: Mapping[str, Any] | None = None, missing_ok: bool = False):
         return self.call("GET", path, params, missing_ok=missing_ok)[0]
@@ -205,25 +217,25 @@ class Api:
             url, query = nxt, None
 
 
-BackendFactory = Callable[[dict, "dict | None", "Path | None"], TicketBackend]
+BackendFactory = Callable[[dict, "dict | None", "Path | None"], IssueBackend]
 _backends: dict[str, BackendFactory] = {}
 
 
-def register_ticket_backend(name: str, factory: BackendFactory) -> None:
-    """Declare a tickets backend, usable as ``backend: <name>`` in tickets.yml (case-insensitive; a name registered
+def register_issue_backend(name: str, factory: BackendFactory) -> None:
+    """Declare an issues backend, usable as ``backend: <name>`` in issues.yml (case-insensitive; a name registered
     again replaces it, the built-in ones included)."""
     _backends[name.lower()] = factory
 
 
-def unregister_ticket_backend(name: str) -> None:
+def unregister_issue_backend(name: str) -> None:
     _backends.pop(name.lower(), None)
 
 
-def get_ticket_backends() -> list[str]:
+def get_issue_backends() -> list[str]:
     return list(_backends)
 
 
-def describe_ticket_backends() -> list[dict[str, Any]]:
+def describe_issue_backends() -> list[dict[str, Any]]:
     out = []
     for name, factory in sorted(_backends.items()):
         doc = (factory.__doc__ or "").strip().split("\n\n")[0] if isinstance(factory, type) else ""
@@ -235,15 +247,15 @@ def describe_ticket_backends() -> list[dict[str, Any]]:
     return out
 
 
-def create_ticket_backend(name: str, options: dict, credentials: dict | None, base_dir: Path | None) -> TicketBackend:
+def create_issue_backend(name: str, options: dict, credentials: dict | None, base_dir: Path | None) -> IssueBackend:
     factory = _backends.get(str(name).lower())
     if factory is None:
-        raise TicketError(f"unknown tickets backend '{name}' (backends: {', '.join(sorted(_backends)) or 'none'})")
+        raise IssueError(f"unknown issues backend '{name}' (backends: {', '.join(sorted(_backends)) or 'none'})")
     return factory(options or {}, credentials, base_dir)
 
 
 def need(options: Mapping[str, Any], key: str, backend: str) -> str:
     value = options.get(key)
     if not value:
-        raise TicketError(f"{backend} backend: option '{key}' is missing")
+        raise IssueError(f"{backend} backend: option '{key}' is missing")
     return str(value)

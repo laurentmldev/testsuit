@@ -226,22 +226,25 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         a requirement opened in the Requirements tab."""
         return await run(editor.requirement_item, session(sid), source, id)
 
-    @app.get("/edit/sessions/{sid}/tickets")
-    async def tickets(sid: str):
-        """The tickets sources of a tests repository (tickets.yml, SPEC §11.3), and the backends registered."""
-        return await run(editor.tickets, session(sid))
+    @app.get("/edit/sessions/{sid}/issues")
+    async def issues(sid: str):
+        """The issue sources of a tests repository (issues.yml, SPEC §11.3), and the backends registered."""
+        return await run(editor.issues, session(sid))
 
-    @app.get("/edit/sessions/{sid}/tickets/issues")
-    async def tickets_issues(sid: str, source: str | None = None, state: str = "open", q: str = "", refresh: bool = False):
-        """The issues of its sources (state open, closed or all), each with the requirements it names and the results
-        it is bound to."""
-        return await run(editor.tickets_issues, session(sid), source, None if state == "all" else state, q, refresh)
+    @app.get("/edit/sessions/{sid}/issues/list")
+    async def issues_list(sid: str, source: str | None = None, state: str = "open", q: str = "", refresh: bool = False,
+                          find: str = "", only: str = "", offset: int = 0, limit: int = 100):
+        """A page of the issues of its sources (state open, closed or all; q: searched by the tools; find: words of
+        their key, title or labels; only: reqs or bound), each with the requirements it names and the results it is
+        bound to; the total, and how many name requirements or are bound."""
+        return await run(editor.issues_list, session(sid), source, None if state == "all" else state, q, refresh, find,
+                         only, offset, limit)
 
-    @app.post("/edit/sessions/{sid}/tickets/test")
-    async def tickets_test(sid: str, body: dict):
-        """Read the open issues of one source (`data`: tickets.yml as being edited, else as saved): count, first ones,
+    @app.post("/edit/sessions/{sid}/issues/test")
+    async def issues_test(sid: str, body: dict):
+        """Read the open issues of one source (`data`: issues.yml as being edited, else as saved): count, first ones,
         time, or the error; each call (credentials masked)."""
-        return await run(editor.tickets_test, session(sid), str(body.get("source") or ""), body.get("data"))
+        return await run(editor.issues_test, session(sid), str(body.get("source") or ""), body.get("data"))
 
     @app.post("/edit/sessions/{sid}/requirements/test")
     async def requirements_test(sid: str, body: dict):

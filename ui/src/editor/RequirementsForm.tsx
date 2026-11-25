@@ -367,7 +367,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
 
 /** A source of a class: its label and the values of the class variables, nothing else; Detach makes it a source of
  * its own, a copy of the class. */
-function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
+export function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
   name: string; cls: string; def?: Data; spec: Data; help: (p: (string | number)[]) => string | undefined; onChange: (spec: Data) => void;
 }) {
   const decls: Data = def?.vars || {};
@@ -381,8 +381,9 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
       const v = given[k] !== undefined ? given[k] : value;
       vars[k] = mandatory ? { value: v ?? "", mandatory: true } : v ?? "";
     }
-    onChange(pruned({ backend: def?.backend, label: spec.label || def?.label, options: clone(def?.options || {}),
-      credentials: clone(def?.credentials || {}), dynamic_tags: clone(def?.dynamic_tags || {}), vars }));
+    // a full copy of the class (all but its description and declarations), with the values of its variables
+    const copy: Data = Object.fromEntries(Object.entries<any>(def || {}).filter(([k]) => !["vars", "description", "label"].includes(k)).map(([k, v]) => [k, clone(v)]));
+    onChange(pruned({ ...copy, label: spec.label || def?.label, vars }));
   };
   const unknown = Object.keys(given).filter((k) => !(k in decls));
   // a variable the class makes optional (not mandatory, with a default) is listed only when given or picked
@@ -491,7 +492,7 @@ function DynamicTags({ value, onChange }: { value?: Data | null; onChange: (v: D
 }
 
 /** A class variable as declared: a default value, or {mandatory, value, help}. */
-function declOf(d: any): { value: any; mandatory: boolean; help?: string } {
+export function declOf(d: any): { value: any; mandatory: boolean; help?: string } {
   if (d && typeof d === "object" && !Array.isArray(d)) return { value: d.value, mandatory: !!d.mandatory, help: d.help };
   return { value: d, mandatory: false };
 }
@@ -644,7 +645,7 @@ function ClassCard({ name, def, doc, taken, users, backends, backendChoices, hel
 }
 
 /** The class variables: name, mandatory, default, help. */
-function ClassVars({ value, onChange }: { value: Data; onChange: (v: Data) => void }) {
+export function ClassVars({ value, onChange, hint }: { value: Data; onChange: (v: Data) => void; hint?: string }) {
   const [name, setName] = useState("");
   const names = Object.keys(value);
   const write = (k: string, d: { value?: any; mandatory?: boolean; help?: string }) => {
@@ -679,8 +680,7 @@ function ClassVars({ value, onChange }: { value: Data; onChange: (v: Data) => vo
         <button className="small" disabled={!name || !!bad} onClick={add}>Add</button>
         {bad && <span className="bad-text small">{bad}</span>}
       </div>
-      <div className="hint">Declared here, given by each source of the class. A test of the class asks for their values each time
-        (remembered in this browser, never saved in the file).</div>
+      <div className="hint">{hint ?? "Declared here, given by each source of the class. A test of the class asks for their values each time (remembered in this browser, never saved in the file)."}</div>
     </div>
   );
 }

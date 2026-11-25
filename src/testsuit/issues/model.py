@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""An issue of a tickets tool, and the references to it: ``<source>#<id>`` (``bench#42``, ``jira#BENCH-12``, a group
+"""An issue of an issue tracker, and the references to it: ``<source>#<id>`` (``bench#42``, ``jira#BENCH-12``, a group
 source ``infra#lab/power#3``), or its URL."""
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from typing import Any
 OPEN, CLOSED = "open", "closed"
 
 
-class TicketError(Exception):
-    """A tickets source cannot be read or written, or is not configured right."""
+class IssueError(Exception):
+    """An issue source cannot be read or written, or is not configured right."""
 
 
 @dataclass

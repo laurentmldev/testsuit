@@ -29,13 +29,13 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from testsuit.tickets.backend import MAX_PAGES, Api, TicketBackend, need, register_ticket_backend
-from testsuit.tickets.model import CLOSED, OPEN, Issue, TicketError
+from testsuit.issues.backend import MAX_PAGES, Api, IssueBackend, need, register_issue_backend
+from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
 PAGE = 100
 
 
-class RedmineBackend(TicketBackend):
+class RedmineBackend(IssueBackend):
     """Redmine issues, through its REST API"""
 
     description = "Redmine issues of a project and its subprojects"
@@ -57,7 +57,7 @@ class RedmineBackend(TicketBackend):
         self.project = need(self.options, "project", "redmine")
         markup = str(self.options.get("markup") or "textile").lower()
         if markup not in ("textile", "markdown", "common_mark", "commonmark"):
-            raise TicketError(f"redmine backend: markup '{markup}': textile or markdown")
+            raise IssueError(f"redmine backend: markup '{markup}': textile or markdown")
         self.markup = "textile" if markup == "textile" else "markdown"
         headers, auth = {}, None
         key = self.credentials.get("api_key") or self.credentials.get("token")
@@ -116,7 +116,7 @@ class RedmineBackend(TicketBackend):
         for id in ids:
             n = str(id).lstrip("#")
             if not n.isdigit():
-                raise TicketError(f"redmine backend: '{id}' is not an issue number")
+                raise IssueError(f"redmine backend: '{id}' is not an issue number")
             data = self.api.get(f"issues/{n}.json", {"include": "relations"}, missing_ok=True)
             out[str(id)] = self.issue(data["issue"]) if data and data.get("issue") else None
         return out
@@ -132,7 +132,7 @@ class RedmineBackend(TicketBackend):
             trackers = (self.api.get("trackers.json") or {}).get("trackers") or []
             match = [t for t in trackers if str(t.get("name")).lower() == str(wanted).lower()]
             if not match:
-                raise TicketError(f"redmine backend: no tracker '{wanted}' (trackers: "
+                raise IssueError(f"redmine backend: no tracker '{wanted}' (trackers: "
                                   f"{', '.join(str(t.get('name')) for t in trackers) or 'none'})")
             self._tracker = int(match[0]["id"])
         return self._tracker
@@ -144,7 +144,7 @@ class RedmineBackend(TicketBackend):
             fields["tracker_id"] = tracker
         data = self.api.post("issues.json", {"issue": fields}) or {}
         if not data.get("issue"):
-            raise TicketError("redmine backend: the server did not return the new issue")
+            raise IssueError("redmine backend: the server did not return the new issue")
         return self.issue(data["issue"])
 
     def comment(self, id: str, body: str) -> None:
@@ -155,4 +155,4 @@ class RedmineBackend(TicketBackend):
         return m.group(1) if m else None
 
 
-register_ticket_backend("redmine", RedmineBackend)
+register_issue_backend("redmine", RedmineBackend)
