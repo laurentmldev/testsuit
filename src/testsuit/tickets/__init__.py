@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""Issues of tickets tools (GitLab, GitHub, Jira, or a plugin's) bound to test results and requirements.
+"""Issues of tickets tools (GitLab, GitHub, Jira, Redmine, or a plugin's) bound to test results and requirements.
 
 - ``model``: an issue, the errors;
 - ``backend``: the plugin API (``TicketBackend``, ``register_ticket_backend()``) and the HTTP shared by the built-ins;
@@ -25,6 +25,7 @@ from testsuit.tickets.model import CLOSED, OPEN, Issue, TicketError
 from testsuit.tickets import github as _github  # noqa: F401,E402  (registers the built-in backends)
 from testsuit.tickets import gitlab as _gitlab  # noqa: F401,E402
 from testsuit.tickets import jira as _jira  # noqa: F401,E402
+from testsuit.tickets import redmine as _redmine  # noqa: F401,E402
 
 __all__ = ["CLOSED", "OPEN", "Issue", "TicketBackend", "TicketError", "describe_ticket_backends", "get_ticket_backends",
            "register_ticket_backend", "unregister_ticket_backend"]

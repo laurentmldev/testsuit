@@ -1099,7 +1099,7 @@ function JsonText({ value, onChange }: { value: any; onChange: (v: any) => void 
 }
 
 /** Where each credential is read: an environment variable (env:NAME) or a file (file:/run/secrets/name). */
-function Credentials({ value, rows, help, onChange, unused }: {
+export function Credentials({ value, rows, help, onChange, unused }: {
   value: Data; rows: string[]; help?: Record<string, string>; onChange: (v: Data) => void; unused?: (k: string) => boolean;
 }) {
   const [credName, setCredName] = useState("");

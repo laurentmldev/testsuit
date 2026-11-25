@@ -11,7 +11,7 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Issues of tickets tools (GitLab, GitHub, Jira) bound to test results (sequencer SPEC section 11.3): the known
+// Issues of tickets tools (GitLab, GitHub, Jira, Redmine) bound to test results (sequencer SPEC section 11.3): the known
 // issues of a run's failures, reporting a new issue pre-filled from a failure or binding an existing one, the
 // Tickets subtab of Datapacks (the sources of tickets.yml and their issues), and the issues of each requirement.
 import { useEffect, useMemo, useState } from "react";
@@ -187,9 +187,9 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
         <Field label="Text" help="Pre-filled from the failure: the run and where it ran, links to its report, exploit report and log, the requirements, the lines of its log that look like errors. Check that nothing secret is in it before creating the issue.">
           <textarea className="mono ticket-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
         </Field>
-        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in tickets.yml)."><Text value={labels} onChange={setLabels} /></Field>
+        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in tickets.yml). Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
         {draft.requirements?.length > 0 && <div className="muted small">Requirements of this failure: {draft.requirements.join(", ")}</div>}
-        <Field label="Your token" help="Optional: create the issue in your own name with your token for this tool (never kept; Jira Cloud: email:token). Without it, the sequencer's token creates it, and the text says who reported it.">
+        <Field label="Your token" help="Optional: create the issue in your own name with your token for this tool (never kept; Jira Cloud: email:token; Redmine: your API key). Without it, the sequencer's token creates it, and the text says who reported it.">
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="optional" autoComplete="off" />
         </Field>
       </>)}
@@ -267,18 +267,20 @@ export function RunIssuesTab({ runId, tickets, onChanged }: { runId: string; tic
 
 // ── Datapacks, Tickets ──────────────────────────────────────────────────────
 
-const INTRO = `Where the issues of this tests repository go (**tickets.yml**): GitLab, GitHub or Jira projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (🐞 **Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
+const INTRO = `Where the issues of this tests repository go (**tickets.yml**): GitLab, GitHub, Jira or Redmine projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (🐞 **Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
 
 const STARTER = `# Where the issues of these tests go (sequencer SPEC, section 11.3)
 default: bench
 sources:
   bench:
-    backend: gitlab                      # gitlab, github or jira
+    backend: gitlab                      # gitlab, github, jira or redmine
     options: {url: https://gitlab.com, project: my-group/bench}
     credentials: {token: env:GITLAB_TOKEN}    # env:<VARIABLE> or file:<path> on the sequencer's host
     labels: [tsq]
 #  jira: {backend: jira, options: {url: https://acme.atlassian.net, project: BENCH},
 #         credentials: {email: env:JIRA_EMAIL, token: env:JIRA_TOKEN}}
+#  lab: {backend: redmine, options: {url: https://redmine.example.com, project: lab, tracker: Bug},
+#        credentials: {api_key: env:REDMINE_KEY}}    # markup: markdown if the server formats in Markdown
 #routes:                                 # where a new issue goes: the first that matches, else default
 #  - {source: jira, step: "firmware:*"}
 requirements:
@@ -311,7 +313,7 @@ export function TicketsTab({ sid }: { sid: string }) {
       {!d && !res.error && <Spinner className="block" text="Reading tickets.yml…" />}
       {d && !d.file && (
         <div className="muted">
-          <p>No <code>tickets.yml</code> in this repository: write one at its root with the GitLab, GitHub or Jira projects its issues go to.</p>
+          <p>No <code>tickets.yml</code> in this repository: write one at its root with the GitLab, GitHub, Jira or Redmine projects its issues go to.</p>
           <button className="primary" onClick={async () => {
             const ok = await attempt(() => createFile(sid, "tickets.yml", undefined, STARTER), "tickets.yml created");
             if (ok !== undefined) { res.refresh(); openInNewTab({ path: `edit/${sid}`, query: { file: "tickets.yml" } }); }

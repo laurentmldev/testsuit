@@ -29,6 +29,7 @@ import { TemplateEditor } from "./TemplateEditor";
 import { GenerateDialog } from "./Generate";
 import { PublishDialog } from "./Publish";
 import { RequirementsForm } from "./RequirementsForm";
+import { TicketsForm } from "./TicketsForm";
 import { WorkspaceTag } from "./workspace";
 import { NewFileDialog } from "./wizards";
 
@@ -125,7 +126,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   session: Session; doc: Doc; view: string; setView: (v: string) => void; api: ReturnType<typeof useDoc>; revealLine: number | null;
 }) {
   const schema = SCHEMA_OF[doc.kind] ? session.schemas[SCHEMA_OF[doc.kind]] : undefined;
-  const hasForm = ["inventory", "library", "setup", "testdef", "requirements"].includes(doc.kind);
+  const hasForm = ["inventory", "library", "setup", "testdef", "requirements", "tickets"].includes(doc.kind);
   const hasPipeline = ["testdef", "subpipelines"].includes(doc.kind);
   const views: [string, string][] = [
     ...(hasForm ? [["form", "Form"] as [string, string]] : []),
@@ -155,6 +156,7 @@ function DocView({ session, doc, view, setView, api, revealLine }: {
   else if (doc.kind === "setup") body = <SetupForm doc={doc} api={api} />;
   else if (doc.kind === "testdef") body = <TestdefForm doc={doc} api={api} />;
   else if (doc.kind === "requirements") body = <RequirementsForm doc={doc} api={api} />;
+  else if (doc.kind === "tickets") body = <TicketsForm doc={doc} api={api} />;
   return (
     <div className={`doc-view kind-${doc.kind}`}>
       <div className="doc-head">

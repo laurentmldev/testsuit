@@ -12,7 +12,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 """Issues bound to test results (sequencer SPEC section 11.3): the tickets file, the GitLab, GitHub and Jira backends
-(against a fake server), issues pre-filled from failures, known issues across runs, and requirements named by issues."""
+(against a fake server, Redmine too), issues pre-filled from failures, known issues across runs, and requirements named by issues."""
 import asyncio
 import json
 import re
@@ -33,11 +33,11 @@ from testsuit.tickets.sources import TicketSources
 TOKEN = "s3cr3t-token"
 
 
-# ── a fake GitLab, GitHub and Jira ─────────────────────────────────────────
+# ── a fake GitLab, GitHub, Jira and Redmine ─────────────────────────────────────────
 
 class Tracker:
     def __init__(self):
-        self.issues = {"gitlab": [], "github": [], "jira": []}
+        self.issues = {"gitlab": [], "github": [], "jira": [], "redmine": []}
         self.calls = []
 
 
@@ -59,7 +59,7 @@ def _handler(tracker: Tracker):
         def _authorized(self):
             h = self.headers
             return (h.get("PRIVATE-TOKEN") == TOKEN or h.get("Authorization") == f"Bearer {TOKEN}"
-                    or (h.get("Authorization") or "").startswith("Basic "))
+                    or h.get("X-Redmine-API-Key") == TOKEN or (h.get("Authorization") or "").startswith("Basic "))
 
         def _body(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -71,9 +71,13 @@ def _handler(tracker: Tracker):
         def do_POST(self):
             self._route("POST")
 
+        def do_PUT(self):
+            self._route("PUT")
+
         def _route(self, method):
             url = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
+            q.update({k: v for k, v in parse_qs(url.query).items() if k.endswith("[]")})
             path = unquote(url.path)
             tracker.calls.append((method, path, q))
             if not self._authorized():
@@ -138,6 +142,32 @@ def _handler(tracker: Tracker):
                         return self._send(201, {})
                     found = [i for i in issues if i["key"] == m.group(1)]
                     return self._send(200, found[0]) if found else self._send(404, {})
+            # Redmine
+            if path == "/trackers.json":
+                return self._send(200, {"trackers": [{"id": 1, "name": "Feature"}, {"id": 3, "name": "Bug"}]})
+            m = re.fullmatch(r"/issues(?:/(\d+))?\.json", path)
+            if m:
+                issues = tracker.issues["redmine"]
+                if method == "POST":
+                    b = self._body()["issue"]
+                    n = len(issues) + 1
+                    tracker_ = {1: "Feature", 3: "Bug"}[b.get("tracker_id", 1)]
+                    item = {"id": n, "subject": b["subject"], "description": b["description"],
+                            "project": {"id": 7, "name": b["project_id"]}, "tracker": {"id": 1, "name": tracker_},
+                            "status": {"id": 1, "name": "New", "is_closed": False}, "author": {"name": "Bot"},
+                            "updated_on": f"2026-11-25T10:0{n}:00Z", "relations": [{"issue_id": n, "issue_to_id": 40}]}
+                    issues.append(item)
+                    return self._send(201, {"issue": item})
+                if m.group(1):
+                    found = [i for i in issues if str(i["id"]) == m.group(1)]
+                    if method == "PUT":
+                        tracker.calls.append(("NOTE", m.group(1), self._body()))
+                        return self._send(204, None) if found else self._send(404, {})
+                    return self._send(200, {"issue": found[0]}) if found else self._send(404, {})
+                text = q.get("v[any_searchable][]", [""])[0] if "v[any_searchable][]" in q else ""
+                out = [i for i in issues[::-1] if not text or text in i["subject"] + i["description"]]
+                page = out[int(q.get("offset", 0)):int(q.get("offset", 0)) + int(q.get("limit", 25))]
+                return self._send(200, {"issues": page, "total_count": len(out), "offset": 0, "limit": 100})
             return self._send(404, {"message": f"no route {path}"})
     return H
 
@@ -217,6 +247,39 @@ def test_backends(tracker):
     assert trace and TOKEN not in json.dumps(trace)
 
 
+def test_redmine_backend(tracker):
+    s = TicketSources({"sources": {
+        "rm": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench", "tracker": "Bug"},
+               "credentials": {"api_key": "env:TICKETS_TOKEN"}},
+        "rm2": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench", "markup": "markdown"},
+                "credentials": {"user": "env:TICKETS_TOKEN", "password": "env:TICKETS_TOKEN"}}}})
+    assert s.card("rm")["capabilities"] == ["comment", "create"] and s.card("rm")["project"] == "bench"
+    assert s.backend("rm").markup == "textile" and s.backend("rm2").markup == "markdown"
+    b = s.backend("rm2")
+    made = b.create("speed over limit", "REQ-1 is not met (tsq:fingerprint=abc)", ["tsq"])
+    assert (made.source, made.id, made.state, made.labels) == ("rm2", "1", "open", ["Feature"])
+    assert made.url == f"{tracker.url}/issues/1" and s.parse(made.url) == ("rm", "1") and s.parse("rm2#1") == ("rm2", "1")
+    found = b.get(["1", "#1", "9"])
+    assert found["1"].title == "speed over limit" and found["1"].links == ["40"] and found["#1"] and found["9"] is None
+    assert [i.id for i in b.search("fingerprint=abc", state=None)] == ["1"] and b.search("nothing such") == []
+    assert [i.id for i in b.search(labels=["feature"])] == ["1"] and b.search(labels=["Bug"]) == []
+    b.comment("1", "still failing")
+    assert ("NOTE", "1", {"issue": {"notes": "still failing"}}) in tracker.calls
+    q = next(c[2] for c in tracker.calls if c[0] == "GET" and "v[any_searchable][]" in c[2])
+    assert q["op[any_searchable]"] == "~" and q["project_id"] == "bench"
+    # a tracker by name (the API key in its header)
+    bug = s.backend("rm").create("x", "y")
+    assert bug.labels == ["Bug"] and bug.id == "2"
+    with pytest.raises(TicketError, match="no tracker 'Nope'"):
+        TicketSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url, "project": "p", "tracker": "Nope"},
+                                         "credentials": {"api_key": "env:TICKETS_TOKEN"}}}}).backend("x").create("x", "y")
+    with pytest.raises(TicketError, match="option 'project' is missing"):
+        TicketSources({"sources": {"x": {"backend": "redmine", "options": {"url": tracker.url}}}}).backend("x")
+    with pytest.raises(TicketError, match=r"HTTP 401.*token is wrong") as e:
+        s.backend("rm2").with_token("wrong-key-123").search()
+    assert "wrong-key-123" not in str(e.value)
+
+
 # ── issues about results, requirements named by issues ─────────────────────
 
 def test_issues_and_requirements():
@@ -231,8 +294,12 @@ def test_issues_and_requirements():
     assert f"<!-- tsq:fingerprint={fp} -->" in d["body"] and "[r1](http://tsq/#/runs/r1)" in d["body"]
     assert "(raw failed)" in d["body"] and "ERROR: boom" in d["body"] and "stage=bench_1" in d["body"]
     assert iss.mark_of(Issue("b", "1", body=d["body"])) == fp
-    jira = iss.draft(run, target, "FAILED", {"run": "http://tsq/#/runs/r1"}, [], markdown=False)
+    jira = iss.draft(run, target, "FAILED", {"run": "http://tsq/#/runs/r1"}, [], markup="jira")
     assert "[r1|http://tsq/#/runs/r1]" in jira["body"] and f"tsq:fingerprint={fp}" in jira["body"]
+    assert iss.draft(run, target, "FAILED", {}, [], markup=False)["body"] == iss.draft(run, target, "FAILED", {}, [], markup="jira")["body"]
+    textile = iss.draft(run, target, "FAILED", {"run": "http://tsq/#/runs/r1"}, ["REQ-1"], "ERROR: boom", markup="textile")
+    assert '"r1":http://tsq/#/runs/r1' in textile["body"] and "<pre>" in textile["body"] and "* Requirements: REQ-1" in textile["body"]
+    assert iss.mark_of(Issue("b", "1", body=textile["body"])) == fp
     assert iss.req_labels({"labels": "req:{id}", "add": True}, ["REQ-1", "jama:SYS 4"]) == ["req:REQ-1", "req:jama:SYS_4"]
     assert "ERROR: x" in iss.excerpt("ok\nERROR: x\nok\n")
 
@@ -381,3 +448,24 @@ def test_ticket_cli(failed_run, tracker, capsys):
         assert await asyncio.to_thread(tsq.cmd_ticket, args(run=None, unbind=1, reason="wrong"), Http()) == 0
         assert "unbound bench#1" in capsys.readouterr().out
     asyncio.run(main())
+
+
+def test_tickets_in_the_editor(tmp_path, tracker):
+    """The Editor's tickets form: the backends it offers, and a source tested as being edited (not saved)."""
+    from editor_t import Repos
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    ctx = repos.editor.context(session)
+    assert {"gitlab", "github", "jira", "redmine"} <= {b["name"] for b in ctx["ticket_backends"]}
+    redmine = next(b for b in ctx["ticket_backends"] if b["name"] == "redmine")
+    assert "api_key" in redmine["credentials"] and "tracker" in redmine["options"]
+    data = {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"},
+                               "credentials": {"api_key": "env:TICKETS_TOKEN"}}}}
+    tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
+    out = repos.editor.tickets_test(session, "rm", data)
+    assert out.get("error") is None and out["count"] == 1 and out["issues"][0]["title"] == "drift"
+    assert out["calls"] and TOKEN not in json.dumps(out)
+    bad = repos.editor.tickets_test(session, "rm", {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url}}}})
+    assert "option 'project' is missing" in bad["error"]
+    with pytest.raises(Exception, match="no tickets.yml"):
+        repos.editor.tickets_test(session, "rm")

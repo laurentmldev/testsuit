@@ -108,7 +108,7 @@ export function DatapacksPage({ route }: { route: Route }) {
             title="The requirements of this repository (requirements.yml) and how its test definitions cover them">
             <NavIcon name="requirements" size={18} />Requirements</button>
           <button className={classes(view === "tickets" && "selected")} onClick={() => setQuery("view", "tickets")}
-            title="Where the issues of this repository go (tickets.yml: GitLab, GitHub, Jira), their issues and the requirements they are about">
+            title="Where the issues of this repository go (tickets.yml: GitLab, GitHub, Jira, Redmine), their issues and the requirements they are about">
             <NavIcon name="tickets" size={18} />Tickets</button>
         </div>
       )}

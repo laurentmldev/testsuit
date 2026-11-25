@@ -75,9 +75,11 @@ def req_labels(rules: Mapping[str, Any], reqs: Iterable[str]) -> list[str]:
 
 
 def draft(run: Mapping[str, Any], target: Mapping[str, Any], status: str, links: Mapping[str, str | None],
-          reqs: list[str], excerpt: str = "", markdown: bool = True, by: str = "") -> dict[str, Any]:
+          reqs: list[str], excerpt: str = "", markup: str | bool = "markdown", by: str = "") -> dict[str, Any]:
     """The title and body of a new issue about a target of a run (as reviewed): its status, the run, where it ran,
-    links to its reports and log, the requirements, the end of its log, and the fingerprint."""
+    links to its reports and log, the requirements, the end of its log, and the fingerprint. ``markup``: markdown,
+    jira (wiki markup) or textile (Redmine); True and False stand for markdown and jira."""
+    markup = {True: "markdown", False: "jira"}.get(markup, markup) if isinstance(markup, bool) else str(markup)
     testdef = str(run.get("testdef") or run.get("name") or run.get("id"))
     fp = fingerprint(testdef, target)
     title = f"[tsq] {testdef}: {what(target)} {str(status).lower()}"
@@ -88,7 +90,7 @@ def draft(run: Mapping[str, Any], target: Mapping[str, Any], status: str, links:
     def link(text: str, url: str | None) -> str:
         if not url:
             return text
-        return f"[{text}]({url})" if markdown else f"[{text}|{url}]"
+        return {"jira": f"[{text}|{url}]", "textile": f'"{text}":{url}'}.get(markup, f"[{text}]({url})")
     detail = ""
     if target.get("kind") == "check":
         detail = f" (criteria {target.get('criteria')}, scenario {target.get('scenario')}, step {target.get('step')})"
@@ -109,12 +111,18 @@ def draft(run: Mapping[str, Any], target: Mapping[str, Any], status: str, links:
         rows.append(("Run report", link("report", links["report"])))
     if reqs:
         rows.append(("Requirements", ", ".join(reqs)))
-    if markdown:
+    if markup == "markdown":
         lines = [f"**{testdef}**: {what(target)}{detail} is **{str(status).lower()}**.", "", "| | |", "|---|---|"]
         lines += [f"| {k} | {v.replace('|', '/')} |" for k, v in rows]
         if excerpt:
             lines += ["", "<details><summary>Log excerpt</summary>", "", "```", excerpt.rstrip(), "```", "", "</details>"]
         lines += ["", f"Reported{' by ' + by if by else ''} with tsq.", f"<!-- tsq:fingerprint={fp} -->"]
+    elif markup == "textile":                    # Redmine
+        lines = [f"*{testdef}*: {what(target)}{detail} is *{str(status).lower()}*.", ""]
+        lines += [f"* {k}: {v}" for k, v in rows]
+        if excerpt:
+            lines += ["", "Log excerpt:", "", "<pre>", excerpt.rstrip().replace("</pre>", "< /pre>"), "</pre>"]
+        lines += ["", f"Reported{' by ' + by if by else ''} with tsq. tsq:fingerprint={fp}"]
     else:                                        # Jira (wiki markup)
         lines = [f"*{testdef}*: {what(target)}{detail} is *{str(status).lower()}*.", ""]
         lines += [f"* {k}: {v}" for k, v in rows]
