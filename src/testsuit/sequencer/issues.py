@@ -75,7 +75,7 @@ class _List:
         self.issues: dict[str, Issue] = {}
         self.read_at: str | None = None          # when the last complete reading started (ISO, UTC)
         self.full_at = 0.0                       # when the last whole reading ended (epoch)
-        self.checked = 0.0                       # when it was last read, or failed (monotonic)
+        self.checked = float("-inf")             # when it was last read, or failed (monotonic; never: -inf)
         self.complete = False
         self.loading = False
         self.read, self.total, self.exact = 0, None, True
