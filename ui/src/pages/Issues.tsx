@@ -60,9 +60,10 @@ export function useRunIssues(runId: string | null, ended: boolean) {
   return useResource<any>(ended && runId ? `runs/${runId}/issues` : null, ["issue", "review"]);
 }
 
-/** The known issues of a target of a run, and Issue… (report a new one, or bind one). */
-export function TargetIssues({ runId, known, target, label, onChanged }: {
-  runId: string; known: any; target: any; label: string; onChanged: () => void;
+/** The known issues of a target of a run, and Issue… (report a new one, or bind one) unless ``report`` is false:
+ *  where its log cannot be read (the run's header), an issue is not reported. */
+export function TargetIssues({ runId, known, target, label, onChanged, report = true }: {
+  runId: string; known: any; target: any; label: string; onChanged: () => void; report?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [unbind, setUnbind] = useState<any>(null);
@@ -73,7 +74,7 @@ export function TargetIssues({ runId, known, target, label, onChanged }: {
   return (
     <span className="target-issues">
       {issues.map((b) => <IssueChip key={b.id} issue={b.issue} onUnbind={() => setUnbind(b)} />)}
-      {(known.sources || []).length > 0 && (
+      {report && (known.sources || []).length > 0 && (
         <button className="small" title="Report this failure as a new issue (pre-filled), or bind an existing issue to it: it is then a known issue of every run of this test definition that fails here"
           onClick={() => setOpen(true)}><IssueIcon /> Issue…</button>
       )}
