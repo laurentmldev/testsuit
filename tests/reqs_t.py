@@ -657,6 +657,43 @@ def test_rest_backend(tmp_path, alm_server, monkeypatch):
         Sources(tmp_path / "repos" / "x" / "requirements.yml").backend("alm")
 
 
+
+def test_requirements_server_down(tmp_path, alm_server, monkeypatch):
+    """A requirements server down: its requirements as last read (each saying when), a warning, not a problem; one
+    wait, not one per call; a requirement never read before is a problem."""
+    import requests
+
+    from testsuit import netguard
+    from testsuit.reqs.snapshot import resolve
+    base, calls = alm_server
+    fields = {"id": ".key", "title": ".fields.name", "status": ".fields.status.name"}
+    options = {"base": base + "/api", "auth": {"bearer": "token"}, "fields": fields,
+               "list": {"url": "items?page={page}", "items": ".data[]"}, "get": {"url": "byids?ids={ids}", "items": ".data[]"}}
+    monkeypatch.setenv("ALM_TOKEN", "s3cret")
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"sources": {"alm": {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN"},
+                                                        "options": options}}}))
+    reqs, _, problems, warnings = resolve(Sources(file), ["ALM-1", "ALM-2"])
+    assert problems == [] and warnings == [] and "stale" not in reqs["ALM-1"]
+    tried, real = [], requests.Session.request
+
+    def down(self, method, url, **k):
+        tried.append(url)
+        raise requests.ConnectionError("connection refused")
+    monkeypatch.setattr(requests.Session, "request", down)
+    reqs, _, problems, warnings = resolve(Sources(file), ["ALM-1", "ALM-2"])
+    assert problems == [] and reqs["ALM-1"]["title"] == "Item 1" and reqs["ALM-2"]["stale"]
+    assert "cannot be reached: 2 requirement(s) as last read" in warnings[0]
+    reqs, _, problems, _ = resolve(Sources(file), ["ALM-1", "ALM-3"])           # ALM-3 never read: a problem
+    assert "ALM-3" not in reqs and "cannot be reached since" in problems[0]
+    assert len(tried) == 1 and base in netguard.down_hosts()                  # the server called once
+    monkeypatch.setattr(requests.Session, "request", real)
+    for d in netguard._down.values():                                          # its pause over
+        d["until"] = 0
+    reqs, _, problems, warnings = resolve(Sources(file), ["ALM-1"])          # back: read again
+    assert problems == [] and warnings == [] and "stale" not in reqs["ALM-1"] and netguard.down_hosts() == {}
+
+
 def test_rest_variables_and_steps(tmp_path, alm_server):
     """Variables of a source in URLs ({{ name }}) and jq ($name); steps extracting variables, mandatory or not, their
     answers cached; the context recorded with the requirements."""

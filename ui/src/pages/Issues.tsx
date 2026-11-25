@@ -11,10 +11,10 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Issues of tickets tools (GitLab, GitHub, Jira, Redmine) bound to test results (sequencer SPEC section 11.3): the known
+// Issues of issue trackers (GitLab, GitHub, Jira, Redmine) bound to test results (sequencer SPEC section 11.3): the known
 // issues of a run's failures, reporting a new issue pre-filled from a failure or binding an existing one, the
-// Tickets subtab of Datapacks (the sources of tickets.yml and their issues), and the issues of each requirement.
-import { useEffect, useMemo, useState } from "react";
+// Issues subtab of Datapacks (the sources of issues.yml and their issues), and the issues of each requirement.
+import { useEffect, useState, type ReactNode } from "react";
 import { get, post, useResource } from "../api";
 import { createFile } from "../editor/Session";
 import { Dialog, Field, Text } from "../fields";
@@ -45,29 +45,29 @@ export function IssueChip({ issue, via, onUnbind }: { issue: any; via?: string[]
   );
 }
 
-/** The tickets of a run: its sources, its failures with their known issues, the bindings of its test definition. */
-export function useRunTickets(runId: string | null, ended: boolean) {
-  return useResource<any>(ended && runId ? `runs/${runId}/tickets` : null, ["ticket", "review"]);
+/** The known issues of a run: its sources, its failures with their known issues, the bindings of its test definition. */
+export function useRunIssues(runId: string | null, ended: boolean) {
+  return useResource<any>(ended && runId ? `runs/${runId}/issues` : null, ["issue", "review"]);
 }
 
 /** The known issues of a target of a run, and Issue… (report a new one, or bind one). */
-export function TargetIssues({ runId, tickets, target, label, onChanged }: {
-  runId: string; tickets: any; target: any; label: string; onChanged: () => void;
+export function TargetIssues({ runId, known, target, label, onChanged }: {
+  runId: string; known: any; target: any; label: string; onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [unbind, setUnbind] = useState<any>(null);
-  if (!tickets) return null;
-  const t = (tickets.targets || []).find((x: any) => x.key === targetKey(target));
+  if (!known) return null;
+  const t = (known.targets || []).find((x: any) => x.key === targetKey(target));
   const issues: any[] = t?.issues || [];
   if (!t && !issues.length) return null;
   return (
     <span className="target-issues">
       {issues.map((b) => <IssueChip key={b.id} issue={b.issue} onUnbind={() => setUnbind(b)} />)}
-      {(tickets.sources || []).length > 0 && (
+      {(known.sources || []).length > 0 && (
         <button className="small" title="Report this failure as a new issue (pre-filled), or bind an existing issue to it: it is then a known issue of every run of this test definition that fails here"
           onClick={() => setOpen(true)}>🐞 Issue…</button>
       )}
-      {open && <TicketDialog runId={runId} target={target} label={label} onClose={() => setOpen(false)} onDone={() => { setOpen(false); onChanged(); }} />}
+      {open && <IssueDialog runId={runId} target={target} label={label} onClose={() => setOpen(false)} onDone={() => { setOpen(false); onChanged(); }} />}
       {unbind && <UnbindDialog binding={unbind} onClose={() => setUnbind(null)} onDone={() => { setUnbind(null); onChanged(); }} />}
     </span>
   );
@@ -81,7 +81,7 @@ function UnbindDialog({ binding, onClose, onDone }: { binding: any; onClose: () 
     <Dialog title={`Unbind ${binding.issue?.key}`} onClose={onClose}
       footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={!ok} onClick={async () => {
         remember(by.trim());
-        if (await attempt(() => post(`tickets/bindings/${binding.id}/unbind`, { by: by.trim(), reason }), "Issue unbound")) onDone();
+        if (await attempt(() => post(`issues/bindings/${binding.id}/unbind`, { by: by.trim(), reason }), "Issue unbound")) onDone();
       }}>Unbind</button></>}>
       <p className="muted small">The issue stays in its tool; it is no longer a known issue of this failure. The binding is kept in the history.</p>
       <Field label="Who"><Text value={by} onChange={setBy} invalid={!by.trim()} /></Field>
@@ -92,7 +92,7 @@ function UnbindDialog({ binding, onClose, onDone }: { binding: any; onClose: () 
 
 /** Report a failure as a new issue, pre-filled (its source, project, title, body, labels: all editable), or bind an
  *  existing issue (searched, or its reference or URL). */
-export function TicketDialog({ runId, target, label, onClose, onDone }: {
+export function IssueDialog({ runId, target, label, onClose, onDone }: {
   runId: string; target: any; label: string; onClose: () => void; onDone: () => void;
 }) {
   const [mode, setMode] = useState<"new" | "bind">("new");
@@ -114,7 +114,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
   useEffect(() => {
     let live = true;
     setError(null);
-    post(`runs/${runId}/tickets/draft`, { target, source, by: who() })
+    post(`runs/${runId}/issues/draft`, { target, source, by: who() })
       .then((d: any) => {
         if (!live) return;
         setDraft(d); setTitle(d.title); setBody(d.body); setLabels((d.labels || []).join(", "));
@@ -127,7 +127,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
   const create = async () => {
     setBusy(true);
     remember(by.trim());
-    const done = await attempt(() => post(`runs/${runId}/tickets`, {
+    const done = await attempt(() => post(`runs/${runId}/issues`, {
       action: "create", target, source: draft.source, project: project || undefined, title, body, by: by.trim(),
       labels: labels.split(",").map((x) => x.trim()).filter(Boolean), ...(token.trim() ? { token: token.trim() } : {}),
     }), "Issue created and bound");
@@ -137,7 +137,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
   const bind = async (issue: string) => {
     setBusy(true);
     remember(by.trim());
-    const done = await attempt(() => post(`runs/${runId}/tickets`, { action: "bind", target, issue, note, by: by.trim() }), "Issue bound");
+    const done = await attempt(() => post(`runs/${runId}/issues`, { action: "bind", target, issue, note, by: by.trim() }), "Issue bound");
     setBusy(false);
     if (done) onDone();
   };
@@ -145,7 +145,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
     setFound(null);
     const qs = new URLSearchParams({ q, state: "all" });
     if (searchIn) qs.set("source", searchIn);
-    const r = await attempt(() => get<any[]>(`runs/${runId}/tickets/search?${qs}`));
+    const r = await attempt(() => get<any[]>(`runs/${runId}/issues/search?${qs}`));
     setFound(r || []);
   };
   const already = [...(draft?.known || []).map((b: any) => b.issue), ...(draft?.duplicates || [])];
@@ -171,7 +171,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
       )}
       <Field label="Who" help="Your name, kept with the binding (an authenticating reverse proxy's user wins over it)."><Text value={by} onChange={setBy} invalid={!by.trim()} /></Field>
       {mode === "new" && draft && (<>
-        <Field label="Where" help="The tickets source (tickets.yml): proposed by its routes, else the default one.">
+        <Field label="Where" help="The issue source (issues.yml): proposed by its routes, else the default one.">
           <select value={draft.source} onChange={(e) => setSource(e.target.value)}>
             {(draft.sources || []).map((c: any) => <option key={c.name} value={c.name} disabled={!c.capabilities?.includes("create")}>{c.label || c.name} ({c.backend} {c.project})</option>)}
           </select>
@@ -185,9 +185,9 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
         )}
         <Field label="Title"><Text value={title} onChange={setTitle} invalid={!title.trim()} /></Field>
         <Field label="Text" help="Pre-filled from the failure: the run and where it ran, links to its report, exploit report and log, the requirements, the lines of its log that look like errors. Check that nothing secret is in it before creating the issue.">
-          <textarea className="mono ticket-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
+          <textarea className="mono issue-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
         </Field>
-        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in tickets.yml). Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
+        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in issues.yml). Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
         {draft.requirements?.length > 0 && <div className="muted small">Requirements of this failure: {draft.requirements.join(", ")}</div>}
         <Field label="Your token" help="Optional: create the issue in your own name with your token for this tool (never kept; Jira Cloud: email:token; Redmine: your API key). Without it, the sequencer's token creates it, and the text says who reported it.">
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="optional" autoComplete="off" />
@@ -198,7 +198,7 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
           <Text value={ref} onChange={setRef} placeholder="bench#42, or its URL" invalid={!ref.trim()} />
         </Field>
         <Field label="Note" help="Optional: why it is bound."><Text value={note} onChange={setNote} placeholder="optional" /></Field>
-        <div className="ticket-search">
+        <div className="issue-search">
           <select value={searchIn} onChange={(e) => setSearchIn(e.target.value)} title="Where to search">
             <option value="">every source</option>
             {(draft?.sources || []).map((c: any) => <option key={c.name} value={c.name}>{c.label || c.name}</option>)}
@@ -220,39 +220,39 @@ export function TicketDialog({ runId, target, label, onClose, onDone }: {
   );
 }
 
-/** A run's tickets (its Issues tab): its failures with their known issues, the other issues bound to its test
+/** A run's known issues (its Issues tab): its failures with their known issues, the other issues bound to its test
  *  definition. */
-export function RunIssuesTab({ runId, tickets, onChanged }: { runId: string; tickets: any; onChanged: () => void }) {
+export function RunIssuesTab({ runId, known, onChanged }: { runId: string; known: any; onChanged: () => void }) {
   const [unbind, setUnbind] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
-  if (!tickets) return <Spinner className="block" text="Reading the issues…" />;
-  const others = (tickets.bindings || []).filter((b: any) => !b.failed_here);
+  if (!known) return <Spinner className="block" text="Reading the issues…" />;
+  const others = (known.bindings || []).filter((b: any) => !b.failed_here);
   return (
     <div className="run-issues">
       <div className="synthesis-head">
         <div className="muted small">
-          {(tickets.sources || []).length
-            ? <>Sources: {tickets.sources.map((c: any) => <code key={c.name} title={`${c.backend} ${c.url || ""}`}>{c.label || c.name} ({c.project}){c.default ? " default" : ""}</code>)}</>
-            : <>This run's datapack names no tickets source: add a <code>tickets.yml</code> to its tests repository (Datapacks, Tickets) and generate it again.</>}
+          {(known.sources || []).length
+            ? <>Sources: {known.sources.map((c: any) => <code key={c.name} title={`${c.backend} ${c.url || ""}`}>{c.label || c.name} ({c.project}){c.default ? " default" : ""}</code>)}</>
+            : <>This run's datapack names no issue source: add a <code>issues.yml</code> to its tests repository (Datapacks, Issues) and generate it again.</>}
         </div>
         <span className="spacer" />
-        <button className="small" disabled={refreshing} onClick={async () => { setRefreshing(true); await attempt(() => get(`runs/${runId}/tickets?refresh=true`)); setRefreshing(false); onChanged(); }}
+        <button className="small" disabled={refreshing} onClick={async () => { setRefreshing(true); await attempt(() => get(`runs/${runId}/issues?refresh=true`)); setRefreshing(false); onChanged(); }}
           title="Read the state of the issues again from their tools">{refreshing ? "Refreshing…" : "↻ Refresh"}</button>
       </div>
-      {tickets.error && <div className="error-box">{tickets.error}</div>}
-      {(tickets.targets || []).length === 0 ? <p className="muted">Nothing failed in this run.</p> : (
+      {known.error && <div className="error-box">{known.error}</div>}
+      {(known.targets || []).length === 0 ? <p className="muted">Nothing failed in this run.</p> : (
         <table className="grid compact">
           <thead><tr><th>What failed</th><th>Status</th><th>Known issues</th></tr></thead>
-          <tbody>{tickets.targets.map((t: any) => (
+          <tbody>{known.targets.map((t: any) => (
             <tr key={t.key}>
               <td><code>{t.label}</code>{t.route && <div className="muted small">new issues go to {t.route}</div>}</td>
               <td><span className="badge bad">{t.status}</span></td>
-              <td><TargetIssues runId={runId} tickets={tickets} target={t.target} label={t.label} onChanged={onChanged} /></td>
+              <td><TargetIssues runId={runId} known={known} target={t.target} label={t.label} onChanged={onChanged} /></td>
             </tr>))}</tbody>
         </table>
       )}
       {others.length > 0 && (<>
-        <h4>Other issues bound to {tickets.testdef}</h4>
+        <h4>Other issues bound to {known.testdef}</h4>
         <p className="muted small">Bound to what did not fail in this run.</p>
         <table className="grid compact">
           <tbody>{others.map((b: any) => (
@@ -265,9 +265,9 @@ export function RunIssuesTab({ runId, tickets, onChanged }: { runId: string; tic
   );
 }
 
-// ── Datapacks, Tickets ──────────────────────────────────────────────────────
+// ── Datapacks, Issues ──────────────────────────────────────────────────────
 
-const INTRO = `Where the issues of this tests repository go (**tickets.yml**): GitLab, GitHub, Jira or Redmine projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (🐞 **Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
+const INTRO = `Where the issues of this tests repository go (**issues.yml**): GitLab, GitHub, Jira or Redmine projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (🐞 **Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
 
 const STARTER = `# Where the issues of these tests go (sequencer SPEC, section 11.3)
 default: bench
@@ -288,41 +288,48 @@ requirements:
   text: true                             # the ids of the requirements named in its title or text
 `;
 
-export function TicketsTab({ sid }: { sid: string }) {
-  const res = useResource<any>(`edit/sessions/${sid}/tickets`);
+export function IssuesTab({ sid }: { sid: string }) {
+  const res = useResource<any>(`edit/sessions/${sid}/issues`);
   const [source, setSource] = useState<string>("");
   const [state, setState] = useState("open");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  const [find, setFind] = useState("");          // words among the issues listed (the server filters, a page at a time)
+  const [found, setFound] = useState("");
+  const [only, setOnly] = useState("");
+  const [offset, setOffset] = useState(0);
   const [tests, setTests] = useState<Record<string, any>>({});
+  useEffect(() => { const t = setTimeout(() => setFound(find.trim()), 300); return () => clearTimeout(t); }, [find]);
+  useEffect(() => setOffset(0), [source, state, query, found, only]);
   const d = res.data;
-  const qs = new URLSearchParams({ state, ...(source ? { source } : {}), ...(query ? { q: query } : {}) });
-  const issues = useResource<any>(d?.sources?.length ? `edit/sessions/${sid}/tickets/issues?${qs}` : null, ["ticket"]);
+  const qs = new URLSearchParams({ state, ...(source ? { source } : {}), ...(query ? { q: query } : {}), ...(found ? { find: found } : {}),
+    ...(only ? { only } : {}), offset: String(offset), limit: String(PAGE) });
+  const issues = useResource<any>(d?.sources?.length ? `edit/sessions/${sid}/issues/list?${qs}` : null, ["issue"]);
   const edit = () => d?.file && openInNewTab({ path: `edit/${sid}`, query: { file: d.file } });
   const test = async (name: string) => {
     setTests((t) => ({ ...t, [name]: { running: true } }));
-    const r = await attempt(() => post(`edit/sessions/${sid}/tickets/test`, { source: name }));
+    const r = await attempt(() => post(`edit/sessions/${sid}/issues/test`, { source: name }));
     setTests((t) => ({ ...t, [name]: r || { error: "the test failed" } }));
   };
   const list: any[] = issues.data?.issues || [];
-  const withReqs = useMemo(() => list.filter((i) => Object.keys(i.requirements || {}).length).length, [list]);
+  const total: number = issues.data?.total ?? 0;
   return (
-    <div className="tickets-tab">
+    <div className="issues-tab">
       <Markdown text={INTRO} className="intro" />
       {res.error && <div className="error-box">{res.error}</div>}
-      {!d && !res.error && <Spinner className="block" text="Reading tickets.yml…" />}
+      {!d && !res.error && <Spinner className="block" text="Reading issues.yml…" />}
       {d && !d.file && (
         <div className="muted">
-          <p>No <code>tickets.yml</code> in this repository: write one at its root with the GitLab, GitHub, Jira or Redmine projects its issues go to.</p>
+          <p>No <code>issues.yml</code> in this repository: write one at its root with the GitLab, GitHub, Jira or Redmine projects its issues go to.</p>
           <button className="primary" onClick={async () => {
-            const ok = await attempt(() => createFile(sid, "tickets.yml", undefined, STARTER), "tickets.yml created");
-            if (ok !== undefined) { res.refresh(); openInNewTab({ path: `edit/${sid}`, query: { file: "tickets.yml" } }); }
-          }}>Create tickets.yml…</button>
+            const ok = await attempt(() => createFile(sid, "issues.yml", undefined, STARTER), "issues.yml created");
+            if (ok !== undefined) { res.refresh(); openInNewTab({ path: `edit/${sid}`, query: { file: "issues.yml" } }); }
+          }}>Create issues.yml…</button>
         </div>
       )}
-      {d?.error && <div className="error-box">{d.error} <button className="small" onClick={edit}>Edit tickets.yml…</button></div>}
+      {d?.error && <div className="error-box">{d.error} <button className="small" onClick={edit}>Edit issues.yml…</button></div>}
       {d?.sources?.length > 0 && (<>
-        <div className="req-sources ticket-sources">
+        <div className="req-sources issue-sources">
           {d.sources.map((c: any) => {
             const t = tests[c.name];
             return (
@@ -332,7 +339,7 @@ export function TicketsTab({ sid }: { sid: string }) {
                 <span className="muted small mono">{c.backend} · {c.project}{c.group ? " (group)" : ""}</span>
                 {c.default && <span className="muted small">default source</span>}
                 {c.error && <span className="warn small">{c.error}</span>}
-                <span className="ticket-test">
+                <span className="issue-test">
                   <button className="small" onClick={(e) => { e.stopPropagation(); test(c.name); }} disabled={t?.running}
                     title="Read its open issues now: whether the server answers and the token works">{t?.running ? "Testing…" : "Test connection"}</button>
                   {t && !t.running && (t.error ? <span className="warn small" title={t.error}>✗ {t.error.slice(0, 120)}</span>
@@ -349,22 +356,31 @@ export function TicketsTab({ sid }: { sid: string }) {
           })}
         </div>
         <div className="cov-actions">
-          <select value={state} onChange={(e) => setState(e.target.value)}>
+          <select style={{ flex: "none" }} value={state} onChange={(e) => setState(e.target.value)}>
             <option value="open">open</option><option value="closed">closed</option><option value="all">all</option>
           </select>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setQuery(q)}
-            placeholder="Search the issues (Enter)…" />
+            placeholder="Search the tools (Enter)…" title="Searched by the tools themselves: words of the title or the text of every issue, listed or not" />
+          <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Filter: key, title, label, assignee…"
+            title="Among the issues listed (fast, as you type): every word must be in the key, the title, a label or an assignee" />
+          <select style={{ flex: "none" }} value={only} onChange={(e) => setOnly(e.target.value)} title="Only some of the issues listed">
+            <option value="">every issue</option><option value="reqs">naming requirements</option><option value="bound">bound to results</option>
+          </select>
           <span className="spacer" />
-          <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/tickets/issues?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
+          <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/issues/list?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
             title="Read the issues again from the tools, not from the cache (a few minutes)">↻ Refresh</button>
-          <button className="edit-testdef" onClick={edit} title="Edit tickets.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
+          <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
         </div>
         {Object.entries(issues.data?.errors || {}).map(([name, e]: any) => <div key={name} className="error-box">{name}: {e}</div>)}
         {!issues.data && !issues.error && <Spinner className="block" text="Reading the issues…" />}
         {issues.error && <div className="error-box">{issues.error}</div>}
         {issues.data && (<>
-          <div className="muted small">{list.length} issue(s){withReqs ? `, ${withReqs} naming requirements` : ""}</div>
-          <table className="grid compact tickets-list">
+          <Pager offset={offset} total={total} page={PAGE} onOffset={setOffset}>
+            {total.toLocaleString()} issue(s){issues.data.listed !== total ? ` of ${issues.data.listed.toLocaleString()} listed` : ""}
+            {issues.data.with_requirements ? `, ${issues.data.with_requirements.toLocaleString()} naming requirements` : ""}
+            {issues.data.bound ? `, ${issues.data.bound.toLocaleString()} bound` : ""}
+          </Pager>
+          <table className="grid compact issues-list">
             <thead><tr><th>Issue</th><th>Title</th><th>Requirements</th><th>Bound to</th><th>Assignees</th><th>Updated</th></tr></thead>
             <tbody>{list.map((i) => (
               <tr key={i.key}>
@@ -376,8 +392,30 @@ export function TicketsTab({ sid }: { sid: string }) {
                 <td className="muted small nowrap">{time(i.updated)}</td>
               </tr>))}</tbody>
           </table>
+          {total > PAGE && <Pager offset={offset} total={total} page={PAGE} onOffset={setOffset} />}
         </>)}
       </>)}
+    </div>
+  );
+}
+
+const PAGE = 100;
+
+/** Pages of a long list: where it is, first, previous, next and last. */
+function Pager({ offset, total, page, onOffset, children }: { offset: number; total: number; page: number; onOffset: (n: number) => void; children?: ReactNode }) {
+  const last = Math.max(0, Math.floor((total - 1) / page) * page);
+  return (
+    <div className="pager muted small">
+      <span>{children}</span>
+      {total > page && (
+        <span className="pager-nav">
+          <button className="icon" disabled={offset === 0} onClick={() => onOffset(0)} title="First page">«</button>
+          <button className="icon" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - page))} title="Previous page">‹</button>
+          <span>{(offset + 1).toLocaleString()}–{Math.min(total, offset + page).toLocaleString()} of {total.toLocaleString()}</span>
+          <button className="icon" disabled={offset >= last} onClick={() => onOffset(offset + page)} title="Next page">›</button>
+          <button className="icon" disabled={offset >= last} onClick={() => onOffset(last)} title="Last page">»</button>
+        </span>
+      )}
     </div>
   );
 }

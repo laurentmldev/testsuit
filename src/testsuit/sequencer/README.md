@@ -1337,6 +1337,8 @@ A long jq expression can be written over several lines (a YAML `|` block, such a
 
 **Dynamic tags** (`dynamic_tags`, on a source or a class): tags given to the requirements whose title, description, rationale or comments hold one of their words or phrases (`Maturity Warning: [TBC, TBD, to be defined, to be completed]`). Matching is on whole words and case independent; a space in a phrase matches any white space, and HTML tags are ignored. A word written `/.../` is a regular expression (Python `re` syntax), searched anywhere in the texts (no whole-word rule: add `\b` where needed), case independent: `Draft: ["/TBD_\\w+/"]` finds `TBD_Blablabla`. In the list form, write regular expressions holding a comma as list items, not in a comma-separated string. They are found when the requirements are read: with a rest source, texts read by a details call only where a requirement is read in full (generation, a requirement opened). They are not part of a requirement's version, so a rule changed marks nothing "changed since". The Requirements view shows them with ⚑ and can show only the requirements with one; the coverage reports show them too (CSV: a last column), and the datapack records them with the requirements. A tag can have a color: `Open question: {words: [TBC, open point], color: "#c0392b"}` (`#rgb` or `#rrggbb`), used by the Requirements view and the HTML report.
 
+**Servers down**: when a requirements server cannot be reached (refused, timed out, 502/503/504), tsq waits for it once, then does not call it again for 30 s (doubling up to 5 min), so pages and reports stay fast. The requirements a server answered are kept on the machine (`~/.cache/testsuit`, or `$TSQ_CACHE`): a datapack generated while it is down uses them, each marked `stale` with the time it was read, and warns; only a requirement never read before fails the generation. The same goes for issue servers: the Issues subtab shows the list last read and says since when, the run pages show bound issues as last seen.
+
 In the Editor, source and class panels start folded, showing their backend or class, label and values; a click, a Test or a link to one opens it, and past 6 sources a filter box finds them. In its matrix, a path of more than 5 requirements starts folded (a click on the path unfolds it), unless a search or a tag filter is on. Its **↻ Refresh** button reads the sources again at once, the rest sources without their cache (`cache:` of a step or of the details), even for answers still within their time. While the requirements are read, the Requirements view shows the progress (the sources read, the calls to their servers) and a datapack generation logs it (`[REQS]` lines, the calls at most every 2 s). The Requirements view has a quick search (id, title, texts, path, tags: every word must match), a Tags column, and a tree folded at first ("unfold all" opens it).
 
 **Classes** (`classes`): a source written once and used by several sources, such as the same requirements tool for different subsystems. A class has a backend, options, credentials and a label, like a source, plus **class variables** (`vars`, each `{mandatory, value: a default, help}`) that each source of the class gives a value to. `{{ name }}` uses them in the options and credentials (`credentials: {token: "env:ALM_TOKEN_{{ subsystem }}"}`), and `$name` in jq. A source of a class sets only its `label` and those values (`brakes: {class: alm, vars: {subsystem: BRAKE}}`). Nothing else of the class can be overridden; the Editor's **Detach** turns such a source into a source of its own, a full copy of the class that no longer follows it. The reverse, **Make a class…** on a source, moves its backend, options, credentials and label to a new class (its variables become the class variables) and leaves the source as a source of that class with the same values. In the Editor, a source picks a class in its Backend list (`class:alm`). A test of a class asks for test values of its variables each time; they are remembered in the browser and never written in the file. The datapack records the class each source used and its version (a hash of the class).
@@ -1446,10 +1448,10 @@ The same results and reviews give the same export, kept and not built again.
 
 ### 10.6 Issues: failures bound to GitLab, GitHub, Jira or Redmine
 
-A failure often has a cause known elsewhere: a bug of the firmware, of the bench, a requirement still open. The sequencer binds such failures to the **issues** of the project's tickets tool, so that they are reported once, found again on the next run, and seen from the requirements they affect.
+A failure often has a cause known elsewhere: a bug of the firmware, of the bench, a requirement still open. The sequencer binds such failures to the **issues** of the project's issue tracker, so that they are reported once, found again on the next run, and seen from the requirements they affect.
 
 ```yaml
-# tickets.yml, at the root of the tests repository (as requirements.yml)
+# issues.yml, at the root of the tests repository (as requirements.yml; tickets.yml, its former name, is still read)
 default: bench
 sources:
   bench:    {backend: gitlab, options: {url: https://gitlab.example.com, project: test/bench},
@@ -1472,13 +1474,51 @@ requirements:                          # how an issue names the requirements it 
   jira_links: true                     # Jira: a link to the requirement's own issue
 ```
 
+- **Only some issues**: `filter` keeps, of what a source's tool holds, the issues tsq lists, searches and matches to requirements; every condition given must hold:
+
+  ```yaml
+  sources:
+    bench:
+      backend: gitlab
+      options: {url: https://gitlab.example.com, project: test/bench}
+      credentials: {token: env:GITLAB_TOKEN}
+      filter:
+        state: open                     # open, closed or all
+        labels: [bench]                 # all of them; any_labels: one of them; not_labels: none of them
+        not_labels: [wontfix]
+        text: "speed|counter"           # a regular expression in the title or text (not_text: not in it; title: in the title)
+        updated_after: 90d              # a date (2026-01-31) or a time ago (d, w, m, y); created_after, created_before, updated_before
+        assignees: [carol]              # authors too; projects: [fw/*] for a group source
+  ```
+
+  State and labels are asked of the tool; the rest is applied to what it returns (at most 5,000 issues read for one search). An issue named by its reference is read whatever the filter.
+- **Classes**: as for requirements, what several sources share is written once, with variables each source gives:
+
+  ```yaml
+  classes:
+    corp:
+      backend: gitlab
+      description: the company GitLab, one project per team
+      options: {url: https://gitlab.example.com, project: "{{ team }}/bench", verify: certs/corp-ca.pem}
+      credentials: {token: "env:GITLAB_TOKEN_{{ team | upper }}"}
+      filter: {labels: ["{{ team }}"], updated_after: "{{ since }}"}
+      vars:
+        team: {mandatory: true, help: the team's GitLab group}
+        since: {value: 1y}
+  sources:
+    firmware: {class: corp, label: Firmware, vars: {team: fw}}
+    hardware: {class: corp, vars: {team: hw, since: 90d}}
+  ```
+
+  A source of a class gives only its label and the values of the variables (a mandatory one without a value, or a variable the class does not declare, is refused); `{{ name }}` works in the label, options, credentials, labels and filter. A direct source may have its own `vars` too.
+- **Many issues**: the Issues subtab and the Editor's list show pages of 100 of a list read once (kept 5 minutes, **Refresh** reads it again), up to 10,000 issues a source, found by words of their key, title, labels or assignees, or only those naming requirements or bound to results.
 - **Several projects, several tools**: each source is one project (or a GitLab group, a GitHub organization: its projects together); references name it: `firmware#42`, `jira#BENCH-12` (or `BENCH-12`), `#42` for the default source, or the issue's URL.
-- **Credentials**: as for requirements, `env:` or `file:` only, read on the sequencer host, and those of **one** way to sign in (the Editor's form asks which: **Sign in with**; a file mixing two is refused). **TLS**: `verify: false` for a server with a self-signed certificate (not checked: a network you trust only), or `verify: <CA bundle file>` (relative to `tsq.yml`'s folder on the sequencer) for one signed by your company's CA. GitLab: a personal, project or group access token (`api` scope; `read_api` to read only). GitHub: a fine-grained token (Issues: read and write), a classic one (`repo`), or an App installation token. Jira Cloud: the account's email and an API token; Server and Data Center: a personal access token. Redmine: the API access key of an account (My account; the REST API enabled in Administration > Settings > API), or its user and password; Redmine has no labels (an issue's tracker and category stand for them), so its issues name their requirements in their text, which tsq's issues do. The datapack carries `tickets.yml` (`definition/tickets.yml`), so the sequencer knows the sources of each run.
-- **Report a failure**: 🐞 **Issue…** beside a check not met, a failed step or the verdict, on the Run page (`tsq ticket <run> --on <target> --create`): the issue is pre-filled (where it goes by the routes, the title, a text with the run, where it ran, links to its report, exploit report and log, the requirements of the failure, the lines of its log that look like errors, labels), every field editable before it is created, since a log can hold a secret. The issue is created with the sequencer's token, the text saying who reported it, or in your own name with your token (never kept). Issues already about the failure are shown first: one bound to it, or one with its fingerprint (a hidden mark in the text) opened earlier.
-- **Bind an existing issue**: its reference or URL, or one searched (`tsq ticket <run> --on <target> --link firmware#42`).
+- **Credentials**: as for requirements, `env:` or `file:` only, read on the sequencer host, and those of **one** way to sign in (the Editor's form asks which: **Sign in with**; a file mixing two is refused). **TLS**: `verify: false` for a server with a self-signed certificate (not checked: a network you trust only), or `verify: <CA bundle file>` (relative to `tsq.yml`'s folder on the sequencer) for one signed by your company's CA. GitLab: a personal, project or group access token (`api` scope; `read_api` to read only). GitHub: a fine-grained token (Issues: read and write), a classic one (`repo`), or an App installation token. Jira Cloud: the account's email and an API token; Server and Data Center: a personal access token. Redmine: the API access key of an account (My account; the REST API enabled in Administration > Settings > API), or its user and password; Redmine has no labels (an issue's tracker and category stand for them), so its issues name their requirements in their text, which tsq's issues do. The datapack carries `issues.yml` (`definition/issues.yml`), so the sequencer knows the sources of each run.
+- **Report a failure**: 🐞 **Issue…** beside a check not met, a failed step or the verdict, on the Run page (`tsq issue <run> --on <target> --create`): the issue is pre-filled (where it goes by the routes, the title, a text with the run, where it ran, links to its report, exploit report and log, the requirements of the failure, the lines of its log that look like errors, labels), every field editable before it is created, since a log can hold a secret. The issue is created with the sequencer's token, the text saying who reported it, or in your own name with your token (never kept). Issues already about the failure are shown first: one bound to it, or one with its fingerprint (a hidden mark in the text) opened earlier.
+- **Bind an existing issue**: its reference or URL, or one searched (`tsq issue <run> --on <target> --link firmware#42`).
 - **Known issues**: a binding is to the check, step or verdict of the **test definition**, not to one run: the next run that fails there shows the issue beside the failure (its state read again from the tool every few minutes), on the Run page, its Issues tab, the campaign page and report, and the run reports. **Unbind** (with a reason) ends it. Accepting a known failure stays a review (section 10.5): the issue's reference is a good reason.
 - **Requirements**: an issue is about the requirements its failure verifies (the links of the check, of the step's checks, of the test definition for the verdict), and those it names itself (a label `req:REQ-12`, `REQ-12` in its title or text, a Jira link). The Requirements subtab marks each requirement with its open issues (🐞 2) and filters on them; a requirement opened lists them, with why each is about it.
-- **Datapacks, Tickets** (a subtab next to Requirements): the sources as cards, each with **Test connection** (the calls made, credentials masked); the issues of one source or all (open, closed, all; searched), each with the requirements it names and the results it is bound to; **Edit** opens `tickets.yml` in the Editor, whose **Form** edits it: each source (backend, label, the options its backend takes, TLS check (the usual authorities, a CA bundle, or none), how it signs in and those credentials only, labels, its own requirement rules) with **Test connection** as in the form, saved or not; the default source; the routes, in order, with a **Try** line that shows the source a failure would go to; the requirement rules (the context gives the backends: `ticket_backends`), **Create tickets.yml…** when there is none.
+- **Datapacks, Issues** (a subtab next to Requirements): the sources as cards, each with **Test connection** (the calls made, credentials masked); the issues of one source or all (open, closed, all; searched by the tool, or found among those listed; pages of 100), each with the requirements it names and the results it is bound to; **Edit** opens `issues.yml` in the Editor, whose **Form** edits it: the classes (their variables, and the sources that use them), each source (backend or `class:<name>`, label, the options its backend takes, TLS check (the usual authorities, a CA bundle, or none), how it signs in and those credentials only, labels, its filter (a condition per row: **Add a condition**, regular expressions and dates checked as typed), its variables, its own requirement rules) with **Test connection** as in the form, saved or not; the default source; the routes, in order, with a **Try** line that shows the source a failure would go to; the requirement rules (the context gives the backends: `issue_backends`), **Create issues.yml…** when there is none.
 
 ## 11. Abort and kill
 
@@ -1505,7 +1545,7 @@ Through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`), next to the exi
 | `register_step_type(name, cls)` | new step kinds | `run`, `push`, `pull`, `delay`, `wait_for` |
 | `register_ready_check(name, fn)` | new `wait_for` kinds | `state`, `tcp`, `http`, `file`, `log`, `cmd` |
 | `register_generator(name, fn)` | datapack `method: generate` (section 5.1) | none |
-| `register_ticket_backend(name, factory)` | tickets sources (section 10.6): a factory `(options, credentials, base_dir)` returning a `TicketBackend` with `search`, `get`, and per its capabilities `create`, `comment`, `remote_link`, `projects` | `gitlab`, `github`, `jira` |
+| `register_issue_backend(name, factory)` | issue sources (section 10.6): a factory `(options, credentials, base_dir)` returning a `IssueBackend` with `search`, `get`, and per its capabilities `create`, `comment`, `remote_link`, `projects` | `gitlab`, `github`, `jira` |
 | `register_req_backend(name, factory)` | requirements sources (section 10.3): a factory `(options, credentials, base_dir)` returning a `ReqBackend` with `tree()`, `list(path, children)`, `get(ids)`; read-only unless it declares the `write` capability | `yaml`, `reqif`, `rest` |
 
 Components of any type are handled this way. A managed switch is driven through an SSH, REST or SNMP transport and its own component, the actuator controller through its UDP protocol, a board through a `labgrid` transport, and a component managed by playbooks through an `ansible` step type. A package such as `examples/toytrain` ships, in its `plugin.py`, its file formats, criteria and importers, and would add its transports, roles and components the same way.
@@ -1535,8 +1575,8 @@ tsq files <run | datapack.zip> [<path>] [--get]             # browse or download
 tsq review <run> [--accept | --reject <target> --reason R | --comment C [--on <target>] | --revoke N --reason R
                  | --sign-off | --reopen --reason R | --reapply]   # review a run (section 10.5); target: run, step:<phase>:<step>, check:<step>::<check>
 tsq review --campaign <id> [--comment C | --sign-off | --reopen --reason R]
-tsq ticket <run> [--on <target>] [--create [--source S] [--yes] | --link <issue>]   # its failures and known issues; report or bind one (section 10.6)
-tsq ticket --unbind N --reason R
+tsq issue <run> [--on <target>] [--create [--source S] [--yes] | --link <issue>]   # its failures and known issues; report or bind one (section 10.6)
+tsq issue --unbind N --reason R
 tsq export <run | --campaign id> [--synthetic] [--with-results] [-o F]   # export its report, with a progress bar
 tsq view <report.zip>                                       # open an exported report zip without unpacking it
 tsq lab status | reload [--pull [<rev>]]                   # inventory git state; reload on demand (section 6.1)
@@ -1557,7 +1597,7 @@ tsq config                                                  # settings in use, a
 - `POST /campaigns` (multipart: the `campaign.yml` manifest and its datapacks, priority), `GET /campaigns`, `GET /campaigns/{id}` (the campaign run, its runs at a glance), `GET /campaigns/{id}/report[?download=true]` (the synthetic report, HTML), `POST /campaigns/{id}/cancel|kill` (section 10.2); a run of a campaign carries `campaign_run` and `routing`;
 - `GET /runs/{id}/requirements[/report]`, `GET /campaigns/{id}/requirements[/report]` (requirements coverage, JSON or HTML, section 10.3);
 - `GET|POST /runs/{id}/review`, `GET|POST /campaigns/{id}/review` (reviews, section 10.5), `GET /runs/{id}/report` (the run report, as reviewed), `GET /runs/{id}/exploit/{step}/report` (an exploit report, its checks as reviewed);
-- `GET /runs/{id}/tickets` (its failures and their known issues), `POST /runs/{id}/tickets/draft` (a new issue, pre-filled), `POST /runs/{id}/tickets` (`{action: create|bind}`), `GET /runs/{id}/tickets/search`, `GET /tickets/bindings`, `POST /tickets/bindings/{id}/unbind` (issues, section 10.6);
+- `GET /runs/{id}/issues` (its failures and their known issues), `POST /runs/{id}/issues/draft` (a new issue, pre-filled), `POST /runs/{id}/issues` (`{action: create|bind}`), `GET /runs/{id}/issues/search`, `GET /issues/bindings`, `POST /issues/bindings/{id}/unbind` (issues, section 10.6);
 - `POST /runs/{id}/export`, `POST /campaigns/{id}/export` (`{mode: synthetic|complete, include_results}`), `GET /exports/{id}` (its progress), `POST /exports/{id}/cancel`, `GET /exports/{id}/download`;
 - `GET /events` (Server-Sent Events: run, campaign and component state changes, log lines, reviews, issues bound, exports and their progress);
 - `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`, and the comment cards of each phase and of the sub-pipelines it uses, each with `text`, `step`, `color`, `group` (the `uses` step id, empty for the phase's own) and `part` (`steps` or `finally`): the run graph of the UI);
@@ -1568,7 +1608,7 @@ tsq config                                                  # settings in use, a
   - `GET /edit/sessions/{id}/files`, `GET|PUT|DELETE /edit/sessions/{id}/files/{path}` (a `GET` gives the file's `version`, a hash of its content; a `PUT` of `data` merges it into the file, keeping its comments; a `PUT` with `base: <version>` is refused, 409 with the file as it is now in `current`, when the file is another version), `GET .../version/{path}`, `POST .../rename`, `POST .../upload/{path}` (an image, multipart: a component's `tsq_icon`), `GET .../raw/{path}` (a file as it is);
   - helpers: `GET .../context` (lab roles and components, stage types, workspace contents), `GET .../schemas` (JSON Schemas with help and the lab's choices), `POST .../validate`, `.../flatten`, `.../palette`, `.../keys`, `.../preview`, `.../exploit_keys` (the keys the criteria of an exploit step read that nothing defines), `POST /edit/reachability`;
   - `POST .../synthesis` (a test definition's stage slots and slots, inputs, dictionaries and baseline datasets with the versions their importer lists), `POST .../baseline` (set a dataset's version where it is written);
-  - `GET .../tickets` (the sources of `tickets.yml`, section 10.6), `GET .../tickets/issues?source=&state=&q=` (their issues, with the requirements each names and the results it is bound to), `POST .../tickets/test` (`source`, and `data`: the file as in the form, else as saved: its open issues read, or the error, and each call, credentials masked);
+  - `GET .../issues` (the sources of `issues.yml`, section 10.6), `GET .../issues/list?source=&state=&q=&find=&only=&offset=&limit=` (a page of their issues, `total` found, with the requirements each names and the results it is bound to), `POST .../issues/test` (`source`, and `data`: the file as in the form, else as saved: its open issues read, or the error, and each call, credentials masked);
   - `GET .../requirements[/report]?source=&campaign=` (the requirements tree and coverage of the Requirements subtab, section 10.3, with `issues`: the open issues of each requirement, section 10.6; `source_cards` lists each source: `name`, `backend`, `label`, `default`; no `source`, with several: every source, each a top node; the report also takes `node` and `children`, and says what it covers), `POST .../requirements/test` (`path`, `source`, optional `spec`: the source as being edited, `upto`: `step:<N>` or `list`; `expr` (and `on`): Debug, any jq expression on that stage's answer, its values or error, the rest backend's calls up to that stage: read one source, its count, nodes and first requirements, or the error, and `calls`: each call to the server, credentials masked; at most 30 s of calls, then it stops with that error);
   - `POST .../datapack` (generate), `GET .../datapack/{name}[/files/{path}]`, `POST .../datapack/{name}/submit`;
   - campaigns: `POST .../campaign/synthesis` (its test definitions, the datasets they import against the versions it pins, its routing against the lab, its problems), `POST .../campaign/jobs` (generate it in the background; followed as a datapack generation, `GET .../datapack/jobs/{job}`), `GET .../campaign/{name}/files/{zip}`, `POST .../campaign/{name}/submit`;
@@ -1591,7 +1631,7 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 | Take a run step by step | the **Step mode** of the Run page pauses after each step or at breakpoints: a banner per paused step with **Next**, **Run again** and **Continue anyway**; the same actions on the selected step of the running phase; **⏸ paused** in All runs and on the campaign page; the **Operator actions** list on the Run page |
 | Follow requirements coverage | the **Requirements** tab of a run, the **Requirements** section of a campaign run and its report, and the **Requirements** subtab of Datapacks (section 10.3): statuses per requirement and per test, matrices both ways, links to the requirements, runs and exploit reports |
 | Review results | **Accept**, **Reject** or **Comment** a check, a step or the verdict on the Run page; its **Review** tab: the journal, Revoke, Reapply from the earlier attempt, Sign off, Reopen; the campaign page's Review section; the verdict as reviewed (✎) and the raw one everywhere (section 10.5) |
-| Bind failures to issues | 🐞 **Issue…** beside each failure of a run: a new issue pre-filled (GitLab, GitHub, Jira, Redmine) or an existing one; its known issues beside it, an **Issues** tab; the **Tickets** subtab of Datapacks; 🐞 per requirement (section 10.6) |
+| Bind failures to issues | 🐞 **Issue…** beside each failure of a run: a new issue pre-filled (GitLab, GitHub, Jira, Redmine) or an existing one; its known issues beside it, an **Issues** tab; the **Issues** subtab of Datapacks; 🐞 per requirement (section 10.6) |
 | Export a report | **Export** on the campaign and Run pages: synthetic or complete, with or without the results zips, a progress bar and Cancel, then the download; a top-bar badge while exports run |
 | Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
 | Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs, each phase's finally steps in a lane of their own after its steps, and the comment cards of each phase (read-only, in their color, under its frame, a pinned one naming its step and linked to it by a dashed line) and of each sub-pipeline (at the bottom of its frame); cancel and kill, re-post an ended run, or run an ended run of a campaign again (its earlier attempt kept) |
@@ -1712,7 +1752,7 @@ src/testsuit/sequencer/
   intake.py           # verify zip, unzip, load the embedded definition and context, check against the lab
   store.py            # SQLite: runs, campaign runs, locks, resources (state, maintenance, hold), usage, events
   campaigns.py        # campaign runs: their runs at a glance (earlier attempts of re-runs), verdict, synthetic report
-  tickets.py          # issues bound to results (10.6): bindings, known issues, drafts, the tools' issues cached
+  issues.py          # issues bound to results (10.6): bindings, known issues, drafts, the tools' issues cached
   review.py           # reviews of results (10.5): the journal, its rules, the run as reviewed, the exploit report overlay
   runreport.py        # the report of one run, as reviewed
   reportlinks.py      # where report links lead: the sequencer, or the pages of an exported report
@@ -1734,7 +1774,7 @@ src/testsuit/sequencer/
   daemon.py           # tsqd entry point
   gitlab/             # Custom executor scripts (config, prepare, run, cleanup)
 src/testsuit/cli/tsq.py
-src/testsuit/tickets/   # tickets tools: tickets.yml, the gitlab, github, jira and redmine backends, issues about results (10.6)
+src/testsuit/issues/   # issue trackers: issues.yml, the gitlab, github, jira and redmine backends, issues about results (10.6)
 src/testsuit/datatools/datapack/   # + generators.py (5.1), component needs (5.2), baseline.py (5.3)
 ui/                    # web UI sources (React, TypeScript): npm run build writes src/testsuit/sequencer/ui
   src/pages/           # queue, runs, run (pipeline graph, logs, files), lab, configuration
@@ -1747,7 +1787,7 @@ Tests (`tests/sequencer_t.py`):
 - end-to-end runs on a bench of local processes: verdicts, queue and parallel stages, backfilling, cancel, kill, self-test failure and requeue, maintenance, restart recovery, shared locks between `tsqd` and `tsq run --local`;
 - `tsqd` on a free port, driven by `tsq` (`submit --follow`, files with range requests, stages, self-test);
 - the ssh transport against an in-process AsyncSSH server (commands, SFTP, killing a process tree);
-- issues (`tests/tickets_t.py`): `tickets.yml`, the GitLab, GitHub, Jira and Redmine backends against a fake server (tokens masked), drafts and fingerprints, requirements named by issues, bindings and known issues on the sequencer, `tsq ticket`;
+- issues (`tests/issues_t.py`): `issues.yml` (its classes, variables and filters; `tickets.yml` still read), the GitLab, GitHub, Jira and Redmine backends against a fake server (tokens masked), drafts and fingerprints, requirements named by issues, bindings and known issues on the sequencer, `tsq issue`, the Editor's pages of issues;
 - reviews and exports (`tests/review_t.py`): the review rules and their effect on steps, verdicts, campaign runs, reports and coverage, sign-off, reapply on a re-run, the synthetic and complete exports, export jobs and their progress events, log trimming, `tsq review` and `tsq export`;
 - the Editor (`tests/editor_t.py`): comment-keeping YAML edits, sessions on clones of a bench repository with a bare upstream (checks, palette, flattened pipeline, keys, template preview, generate, push with a tag, a rejected push then rebase, an invalid lab refused), and its REST routes;
 - the web UI (`ui/e2e/smoke.mjs`, CI job `ui`): typecheck, build, and every page and editor view rendered without error against `tsqd` on the emulated toy train;

@@ -146,8 +146,8 @@ class Sequencer:
         self._review_lock = threading.Lock()             # review journals: one writer at a time
         self.exports: dict[str, dict] = {}               # export jobs (SPEC §11.2), by id
         self._export_cancel: dict[str, threading.Event] = {}
-        from testsuit.sequencer.tickets import Tickets
-        self.tickets = Tickets(self)                     # issues bound to results (SPEC §11.3)
+        from testsuit.sequencer.issues import Issues
+        self.issues = Issues(self)                     # issues bound to results (SPEC §11.3)
         self.subscribers: set[asyncio.Queue] = set()
         self._wake: asyncio.Event | None = None
         self.scheduled_at: str | None = None         # the last walk of the queue
@@ -377,7 +377,7 @@ class Sequencer:
             run = by_id.get(entry.get("run"))
             if run is not None and run.get("verdict") not in (None, "succeeded"):
                 try:
-                    issues = self.tickets.known_brief(run)
+                    issues = self.issues.known_brief(run)
                 except SequencerError:
                     issues = []
                 if issues:
@@ -545,7 +545,7 @@ class Sequencer:
         from testsuit.sequencer.runreport import run_report_html
         run = self.reviewed(self.live_run(run_id))
         return run_report_html(run, self.run_review(run["id"]).get("entries") or [], links,
-                               self.run_requirements(run["id"]), issues=self.tickets.known_brief(run))
+                               self.run_requirements(run["id"]), issues=self.issues.known_brief(run))
 
     # ── exported reports (SPEC §11.2) ──────────────────────────────────
     def _export_stamp(self, kind: str, target: str) -> str:
