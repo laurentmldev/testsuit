@@ -559,7 +559,7 @@ export function RunPage({ id, tab: asked, editor, file, line }: { id: string; ta
         <RunStateBadge run={r} />
         <ReviewedVerdict verdict={r.review?.verdict ?? r.verdict} raw={r.review?.raw_verdict} />
         <ReviewStateBadge review={r.review} />
-        {ended && r.verdict !== "succeeded" && <TargetIssues runId={r.id} known={known.data} target={{ kind: "run" }} label="the verdict" onChanged={known.refresh} report={false} />}
+        {ended && r.verdict !== "succeeded" && <TargetIssues runId={r.id} known={known.data} target={{ kind: "run" }} label="the verdict" onChanged={known.refresh} />}
         <span className="spacer" />
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
         {live && <StepModeControl run={r} onChanged={run.refresh} />}
