@@ -56,6 +56,7 @@ space)::
     dynamic_tags:
       Maturity Warning: [TBC, TBD, to be defined, to be completed]
       Open question: {words: [TBC, open point], color: "#c0392b"}     # with the color it is shown in
+      Draft: ["/TBD_\\w+/"]                  # /.../: a regular expression (Python re), found anywhere
 
 They are found when the requirements are read, after their version (a rule changed does not change the versions).
 
@@ -180,7 +181,8 @@ def _render_var(value: Any, keys: Mapping[str, Any] | None, where: str) -> Any:
 
 def _tag_rules(spec: Any, where: str) -> list[tuple[str, re.Pattern]]:
     """The dynamic tags of a source: (tag, the pattern of its words), each word or phrase whole, case independent,
-    a space matching any white space."""
+    a space matching any white space; a word written /.../ is a regular expression (Python re), found anywhere in the
+    texts, case independent too."""
     if spec is None:
         return []
     if not isinstance(spec, dict):
@@ -202,9 +204,25 @@ def _tag_rules(spec: Any, where: str) -> list[tuple[str, re.Pattern]]:
         words = [str(w).strip() for w in words if str(w or "").strip()]
         if not words:
             continue
-        alternatives = "|".join(r"\s+".join(re.escape(part) for part in w.split()) for w in words)
-        rules.append((str(tag), re.compile(rf"(?<!\w)(?:{alternatives})(?!\w)", re.IGNORECASE)))
+        plain = [w for w in words if not _is_regex(w)]
+        alternatives = "|".join(r"\s+".join(re.escape(part) for part in w.split()) for w in plain)
+        parts = [rf"(?<!\w)(?:{alternatives})(?!\w)"] if plain else []
+        for w in words:
+            if _is_regex(w):                          # /a regex/: Python re, found anywhere, case independent
+                try:
+                    re.compile(w[1:-1])
+                except re.error as e:
+                    raise ReqError(f"{where}: dynamic tag '{tag}': {w} is not a regular expression ({e})") from e
+                parts.append(f"(?:{w[1:-1]})")
+        try:
+            rules.append((str(tag), re.compile("|".join(parts), re.IGNORECASE)))
+        except re.error as e:
+            raise ReqError(f"{where}: dynamic tag '{tag}': {e}") from e
     return rules
+
+
+def _is_regex(word: str) -> bool:
+    return len(word) > 2 and word.startswith("/") and word.endswith("/")
 
 
 def _plain(text: str) -> str:

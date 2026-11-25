@@ -862,7 +862,8 @@ REQUIREMENT = h(
 
 DYNAMIC_TAGS = h(
     "Dynamic tags: each tag given to the requirements whose title, description, rationale or comments hold one of its "
-    "words or phrases (whole words, case independent): `Maturity Warning: [TBC, TBD, to be defined]`. Found when the "
+    "words or phrases (whole words, case independent): `Maturity Warning: [TBC, TBD, to be defined]`; a word written "
+    "`/.../` is a regular expression (Python re), found anywhere: `/TBD_\\w+/`. Found when the "
     "requirements are read; not part of their version. A source of a class has those of its class.",
     type="object", additionalProperties={"anyOf": [{"type": "array", "items": {"type": "string"}},
                                                    h("Words separated by commas.", type="string"),
