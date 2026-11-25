@@ -182,6 +182,7 @@ def tracker(monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(t))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     t.url = f"http://127.0.0.1:{server.server_port}"
+    t.server = server
     yield t
     server.shutdown()
 
@@ -625,3 +626,28 @@ def test_issues_list_pages(tmp_path, tracker):
     assert repos.editor.issues_list(session, limit=10000)["limit"] == 500
     repos.editor.issues_list(session, refresh=True)
     assert len(tracker.calls) > reads
+
+
+def test_issue_server_down(tmp_path, tracker):
+    """An issue server down: the lists and issues as last read (said so), one wait and not one per call."""
+    import time
+
+    from editor_t import Repos
+    from testsuit import netguard
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    assert repos.editor.issues_list(session)["total"] == 1
+    _, sources = repos.editor._issue_sources(session)
+    assert repos.editor.seq.issues.issue(sources, "rm", "4").title == "drift"
+    tracker.server.shutdown()
+    tracker.server.server_close()
+    page = repos.editor.issues_list(session, refresh=True)
+    assert page["total"] == 1 and "the list shown was read at" in page["errors"]["rm"]
+    assert repos.editor.seq.issues.issue(sources, "rm", "4", refresh=True).title == "drift"
+    start = time.monotonic()
+    with pytest.raises(IssueError, match="cannot be reached since"):
+        sources.backend("rm").search("x")
+    assert time.monotonic() - start < 1 and tracker.url in netguard.down_hosts()

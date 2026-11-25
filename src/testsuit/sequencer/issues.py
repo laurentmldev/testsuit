@@ -42,6 +42,7 @@ from testsuit.sequencer import review as rv
 from testsuit.sequencer.util import SequencerError, now
 from testsuit.issues import results as iss
 from testsuit.issues.model import OPEN, Issue, IssueError
+from testsuit.netguard import is_down_error
 from testsuit.issues.sources import SNAPSHOT, IssueSources
 
 log = logging.getLogger("testsuit.sequencer")
@@ -58,6 +59,7 @@ class Issues:
         self._lock = threading.Lock()
         self._issues: dict[tuple[str, str], tuple[float, Issue | None]] = {}     # (backend identity, id)
         self._lists: dict[tuple[str, str, str], tuple[float, list[Issue]]] = {}   # (backend identity, state, filter)
+        self.stale: dict[str, str] = {}          # source -> why its list is the one last read (its server down)
         self._sources: dict[str, IssueSources | None] = {}                     # run id
 
     # ── bindings ───────────────────────────────────────────────────────
@@ -121,7 +123,12 @@ class Issues:
         hit = self._issues.get(key)
         if hit and not refresh and time.monotonic() - hit[0] < TTL:
             return hit[1]
-        found = backend.get([str(id)]).get(str(id))
+        try:
+            found = backend.get([str(id)]).get(str(id))
+        except IssueError as e:
+            if hit and is_down_error(e):            # its server down: as last read
+                return hit[1]
+            raise
         if found is not None:
             found.source = source
         self._issues[key] = (time.monotonic(), found)
@@ -136,7 +143,16 @@ class Issues:
         hit = self._lists.get(key)
         if hit and not refresh and time.monotonic() - hit[0] < TTL:
             return [_renamed(i, source) for i in hit[1]]
-        found = backend.search(state=state, limit=limit)
+        try:
+            found = backend.search(state=state, limit=limit)
+        except IssueError as e:
+            if hit and is_down_error(e):            # its server down: the list as last read, said so
+                read = time.strftime("%H:%M", time.localtime(time.time() - (time.monotonic() - hit[0])))
+                self.stale[source] = f"{e} (the list shown was read at {read})"
+                log.warning("issue source '%s': %s", source, self.stale[source])
+                return [_renamed(i, source) for i in hit[1]]
+            raise
+        self.stale.pop(source, None)
         self._lists[key] = (time.monotonic(), found)
         for i in found:
             self._issues[(backend.identity, i.id)] = (time.monotonic(), i)

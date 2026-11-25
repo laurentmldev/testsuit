@@ -154,6 +154,12 @@ class Api:
             record = {"method": method, "url": self._mask(url), **({"params": dict(params)} if params else {}),
                       **({"body": json.loads(self._mask(json.dumps(body)))} if body is not None else {})}
             trace.append(record)
+        from testsuit import netguard
+        if trace is None:                        # a server down is not called again for a while (a test tries)
+            try:
+                netguard.check(url)
+            except netguard.ServerDown as e:
+                raise IssueError(f"{where}: {e}") from e
         start = time.monotonic()
         try:
             with warnings.catch_warnings():      # not checking was asked for: no warning at each call
@@ -163,7 +169,13 @@ class Api:
         except requests.RequestException as e:
             if record is not None:
                 record["error"] = self._mask(str(e))
+            if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                netguard.failed(url, self._mask(str(e)))
             raise IssueError(f"{where}: {self._mask(str(e))}") from e
+        if r.status_code in netguard.DOWN_STATUSES:
+            netguard.failed(url, f"HTTP {r.status_code}")
+        else:
+            netguard.answered(url)
         if record is not None:
             record.update(status=r.status_code, seconds=round(time.monotonic() - start, 3),
                           answer=self._mask(r.text[:TRACE_ANSWER]))

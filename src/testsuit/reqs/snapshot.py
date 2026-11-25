@@ -63,7 +63,7 @@ def resolve(sources: Sources, refs: list[str]) -> tuple[dict[str, dict], dict[st
         except Exception as e:            # a backend that cannot be reached: each of its references is a problem
             problems.append(f"requirements source '{source}': {e}")
     requirements: dict[str, dict] = {}
-    warnings: list[str] = []
+    warnings: list[str] = list(dict.fromkeys(sources.stale_notes))
     for text, ref in parsed.items():
         key = keys[text]
         bare = Ref(ref.source, ref.id)

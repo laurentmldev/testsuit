@@ -1516,6 +1516,8 @@ class Editor:
                 except IssueError as e:
                     errors[name] = str(e)
                     continue
+                if not text and name in self.seq.issues.stale:
+                    errors[name] = self.seq.issues.stale[name]
                 rules = sources.req_rules(name)
                 for i in found:
                     rows.append({**i.as_dict(), "source": name, "key": f"{name}#{i.id}",

@@ -568,6 +568,12 @@ class RestBackend(ReqBackend):
                     record.update(seconds=0, error=message)
                 raise ReqError(f"{where}: {message}")
             timeout = min(timeout, left)
+        from testsuit import netguard
+        if self.trace is None:                       # a server down is not called again for a while (a test tries)
+            try:
+                netguard.check(url)
+            except netguard.ServerDown as e:
+                raise ReqError(f"{where}: {e}") from e
         try:
             r = self.session.request(method, url, params=self.params or None,
                                      json=body, timeout=timeout, verify=self.verify, headers=headers or None)
@@ -575,7 +581,13 @@ class RestBackend(ReqBackend):
             message = self._mask(str(e)).replace(_MASKED, MASK)
             if record is not None:
                 record.update(seconds=round(time.monotonic() - start, 3), error=message)
+            if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                netguard.failed(url, message)
             raise ReqError(f"{where}: {message}") from e
+        if r.status_code in netguard.DOWN_STATUSES:
+            netguard.failed(url, f"HTTP {r.status_code}")
+        else:
+            netguard.answered(url)
         if record is not None:
             answer, cut = self._answer(r)
             record.update(seconds=round(time.monotonic() - start, 3), status=r.status_code, reason=r.reason,
