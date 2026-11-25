@@ -37,9 +37,12 @@ class GitLabBackend(TicketBackend):
     options_help = {"url": "The GitLab server (default https://gitlab.com).",
                     "project": "The project: its path (group/project) or its id.",
                     "group": "A group instead: the issues of all its projects (ids <project>#<iid>).",
-                    "verify": "TLS check: false, or the file of a CA bundle.", "timeout": "Seconds per call (20)."}
+                    "verify": "TLS check of the server: false (a self-signed certificate: not checked), or the file of the CA bundle that signs it.", "timeout": "Seconds per call (20)."}
     credentials_help = {"token": "A personal, project or group access token (scope api; read_api to read only).",
                         "oauth_token": "An OAuth access token instead."}
+
+    auth_methods = {"access_token": {"label": "Access token (personal, project or group)", "credentials": ["token"]},
+                    "oauth": {"label": "OAuth2 access token", "credentials": ["oauth_token"]}}
 
     def __init__(self, options, credentials, base_dir) -> None:
         super().__init__(options, credentials, base_dir)

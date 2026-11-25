@@ -38,9 +38,11 @@ class GitHubBackend(TicketBackend):
                     "org": "An organization (or user) instead: the issues of all its repositories (ids <owner/name>#<n>).",
                     "url": "The API (default https://api.github.com; Enterprise: https://<host>/api/v3).",
                     "web": "Where its pages are, when not the API's host (https://github.com for github.com).",
-                    "verify": "TLS check: false, or the file of a CA bundle.", "timeout": "Seconds per call (20)."}
+                    "verify": "TLS check of the server: false (a self-signed certificate: not checked), or the file of the CA bundle that signs it.", "timeout": "Seconds per call (20)."}
     credentials_help = {"token": "A fine-grained token (Issues: read and write), a classic one (scope repo), or an "
                                  "App installation token."}
+
+    auth_methods = {"token": {"label": "Token (fine-grained, classic, or App installation)", "credentials": ["token"]}}
 
     def __init__(self, options, credentials, base_dir) -> None:
         super().__init__(options, credentials, base_dir)

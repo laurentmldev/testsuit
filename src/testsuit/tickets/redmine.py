@@ -43,10 +43,13 @@ class RedmineBackend(TicketBackend):
     options_help = {"url": "The Redmine server.", "project": "The project: its identifier or its id.",
                     "tracker": "The tracker of new issues: its name or id (default: the project's first).",
                     "markup": "The server's text formatting: textile (default) or markdown.",
-                    "verify": "TLS check: false, or the file of a CA bundle.", "timeout": "Seconds per call (20)."}
+                    "verify": "TLS check of the server: false (a self-signed certificate: not checked), or the file of the CA bundle that signs it.", "timeout": "Seconds per call (20)."}
     credentials_help = {"api_key": "Your API access key (My account); the server must enable its REST API.",
                         "user": "A user, with password (basic authentication) instead of a key.",
                         "password": "That user's password."}
+
+    auth_methods = {"api_key": {"label": "API access key", "credentials": ["api_key"]},
+                    "basic": {"label": "User and password", "credentials": ["user", "password"]}}
 
     def __init__(self, options, credentials, base_dir) -> None:
         super().__init__(options, credentials, base_dir)

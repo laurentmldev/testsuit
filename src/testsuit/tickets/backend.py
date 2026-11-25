@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,9 @@ class TicketBackend:
     markup: str = "markdown"                 # the markup of issue texts: markdown, jira (wiki markup) or textile
     options_help: dict[str, str] = {}
     credentials_help: dict[str, str] = {}
+    # the ways to sign in, each with the credentials it takes (one is used: the Editor's form asks which):
+    # {method: {"label": ..., "credentials": [names]}}; empty: every credential of credentials_help together
+    auth_methods: dict[str, dict[str, Any]] = {}
     trace: list[dict] | None = None          # set to a list by the Editor's test: each call, credentials masked
 
     def __init__(self, options: dict[str, Any], credentials: dict[str, str] | None, base_dir: Path | None) -> None:
@@ -123,6 +127,9 @@ class Api:
         self.session.headers.update(dict(headers or {}))
         self.session.auth = auth
         verify = backend.options.get("verify", True)
+        if isinstance(verify, str) and verify.strip().lower() in ("false", "no", "off", "0", "true", "yes", "on", "1", ""):
+            verify = verify.strip().lower() in ("true", "yes", "on", "1", "")
+        # false: the server's certificate is not checked (a self-signed one); a file: the CA bundle that signs it
         self.verify = str(Path(backend.base_dir or ".") / verify) if isinstance(verify, str) else bool(verify)
         self.timeout = float(backend.options.get("timeout") or TIMEOUT)
 
@@ -149,7 +156,10 @@ class Api:
             trace.append(record)
         start = time.monotonic()
         try:
-            r = self.session.request(method, url, params=params, json=body, timeout=self.timeout, verify=self.verify)
+            with warnings.catch_warnings():      # not checking was asked for: no warning at each call
+                if self.verify is False:
+                    warnings.simplefilter("ignore")
+                r = self.session.request(method, url, params=params, json=body, timeout=self.timeout, verify=self.verify)
         except requests.RequestException as e:
             if record is not None:
                 record["error"] = self._mask(str(e))
@@ -220,7 +230,8 @@ def describe_ticket_backends() -> list[dict[str, Any]]:
         out.append({"name": name, "description": str(getattr(factory, "description", "") or " ".join(doc.split())),
                     "capabilities": sorted(getattr(factory, "capabilities", ()) or ()),
                     "options": dict(getattr(factory, "options_help", {}) or {}),
-                    "credentials": dict(getattr(factory, "credentials_help", {}) or {})})
+                    "credentials": dict(getattr(factory, "credentials_help", {}) or {}),
+                    "auth": [{"name": k, **v} for k, v in (getattr(factory, "auth_methods", {}) or {}).items()]})
     return out
 
 

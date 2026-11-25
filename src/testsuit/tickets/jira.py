@@ -41,10 +41,14 @@ class JiraBackend(TicketBackend):
     options_help = {"url": "The site: https://<site>.atlassian.net, or the server.", "project": "The project key.",
                     "issue_type": "The type of the issues created (Bug).", "jql": "More conditions on the issues listed.",
                     "cloud": "Jira Cloud (default: for an atlassian.net site).",
-                    "verify": "TLS check: false, or the file of a CA bundle.", "timeout": "Seconds per call (20)."}
+                    "verify": "TLS check of the server: false (a self-signed certificate: not checked), or the file of the CA bundle that signs it.", "timeout": "Seconds per call (20)."}
     credentials_help = {"email": "Jira Cloud: the account's email, with its API token.",
                         "token": "Jira Cloud: an API token (with email); Server, Data Center: a personal access token.",
                         "user": "Server, Data Center: a user, with its password.", "password": "Its password."}
+
+    auth_methods = {"cloud": {"label": "Jira Cloud: email and API token", "credentials": ["email", "token"]},
+                    "pat": {"label": "Server, Data Center: personal access token", "credentials": ["token"]},
+                    "basic": {"label": "Server, Data Center: user and password", "credentials": ["user", "password"]}}
 
     def __init__(self, options, credentials, base_dir) -> None:
         super().__init__(options, credentials, base_dir)
