@@ -335,13 +335,18 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
       credentials: clone(def?.credentials || {}), vars }));
   };
   const unknown = Object.keys(given).filter((k) => !(k in decls));
+  // a variable the class makes optional (not mandatory, with a default) is listed only when given or picked
+  const [picked, setPicked] = useState<string[]>([]);
+  const optional = (k: string) => { const d = declOf(decls[k]); return !d.mandatory && d.value !== undefined && d.value !== null && d.value !== ""; };
+  const listed = Object.keys(decls).filter((k) => !optional(k) || given[k] !== undefined || picked.includes(k));
+  const hidden = Object.keys(decls).filter((k) => !listed.includes(k));
   return (
     <>
       <Field label="Label" help={help(["sources", name, "label"])}><Text value={spec.label} onChange={(v) => onChange(pruned({ ...spec, label: v }))} placeholder={def?.label || name} /></Field>
       <Field label="Class variables" help={`The values of the variables of class '${cls}' for this source. ${help(["sources", name, "vars"]) || ""}`} wide>
-        {Object.keys(decls).length === 0 ? <span className="muted small">Class '{cls}' has no variables: this source is the class as it is.</span> : (
+        {Object.keys(decls).length === 0 ? <span className="muted small">Class '{cls}' has no variables: this source is the class as it is.</span> : listed.length > 0 && (
           <table className="grid compact req-class-values">
-            <tbody>{Object.entries<any>(decls).map(([k, d]) => {
+            <tbody>{listed.map((k) => [k, decls[k]] as [string, any]).map(([k, d]) => {
               const { value, mandatory, help: what } = declOf(d);
               const missing = mandatory && (given[k] === undefined || given[k] === "") && (value === undefined || value === "");
               return (
@@ -351,10 +356,21 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
                   <td><Text mono value={given[k] === undefined ? "" : String(given[k])}
                     placeholder={value !== undefined && value !== null && value !== "" ? `optional: ${value} (the class's default)` : mandatory ? "required" : "optional: empty if not given"}
                     onChange={(v) => setVar(k, v)} />{missing && <div className="bad-text small">a value is required</div>}</td>
+                <td>{optional(k) && <button className="icon" title="Use the class's default"
+                  onClick={() => { setPicked(picked.filter((x) => x !== k)); onChange(pruned({ ...spec, vars: put(given, k, undefined) })); }}>×</button>}</td>
                 </tr>
               );
             })}</tbody>
           </table>
+        )}
+        {hidden.length > 0 && (
+          <div className="small">
+            <select value="" onChange={(e) => e.target.value && setPicked([...picked, e.target.value])}
+              title="Variables with a default in the class: this source uses the defaults unless you give a value">
+              <option value="">Set another variable ({hidden.length} with a default)…</option>
+              {hidden.map((k) => { const d = declOf(decls[k]); return <option key={k} value={k}>{k} = {String(d.value)}{d.help ? `: ${d.help}` : ""}</option>; })}
+            </select>
+          </div>
         )}
         {unknown.length > 0 && <div className="bad-text small">Not variables of class '{cls}': {unknown.join(", ")}
           {" "}<button className="link small" onClick={() => onChange(pruned({ ...spec, vars: Object.fromEntries(Object.entries(given).filter(([k]) => k in decls)) }))}>remove them</button></div>}

@@ -32,8 +32,15 @@ export function isHtml(text: string): boolean {
     || /<(p|div|br|ul|ol|li|table|tr|td|strong|em|b|i|span|a\s+href)\b[^>]*>/i.test(t) && /<\/(p|div|ul|ol|li|table|strong|em|b|i|span|a)>/i.test(t);
 }
 
+/** Line breaks written as the two characters \n (or \r\n), as some tools send them (a JSON string escaped twice):
+ * real line breaks. */
+export function unescapeBreaks(text: string): string {
+  return text.includes("\\n") ? text.replace(/\\r\\n|\\n/g, "\n") : text;
+}
+
 /** The text of HTML, without its tags (a one-line summary). */
-export function htmlToText(text: string): string {
+export function htmlToText(raw: string): string {
+  const text = unescapeBreaks(raw);
   if (!isHtml(text)) return text;
   const doc = new DOMParser().parseFromString(text, "text/html");
   doc.querySelectorAll("br, p, div, li, tr, h1, h2, h3, h4, h5, h6").forEach((el) => el.append("\n"));
@@ -64,9 +71,10 @@ function convert(node: Node, key: number): ReactNode {
 }
 
 /** A long text, as HTML when it is (safe tags only), else as Markdown. */
-export function RichText({ text, className }: { text?: string | null; className?: string }) {
-  if (!text) return null;
-  if (!isHtml(text)) return <Markdown text={text} className={className} />;
+export function RichText({ text: raw, className }: { text?: string | null; className?: string }) {
+  if (!raw) return null;
+  if (!isHtml(raw)) return <Markdown text={unescapeBreaks(raw)} className={className} />;
+  const text = raw.replace(/\\r\\n|\\n/g, "<br>");          // in HTML, an escaped line break is a <br>
   const doc = new DOMParser().parseFromString(text, "text/html");
   return <div className={["rich-html", className].filter(Boolean).join(" ")}>{Array.from(doc.body.childNodes).map((c, i) => convert(c, i))}</div>;
 }
