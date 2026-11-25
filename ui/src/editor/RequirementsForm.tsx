@@ -139,6 +139,22 @@ function Sources({ data, doc, setTop, setAll, help }: {
             setAll(next);
           }}
           onDefault={() => setTop("default", n === names[0] ? undefined : n)}
+          onMakeClass={(c) => {                          // the source's definition becomes the class; it keeps its values
+            const spec: Data = sources[n] || {};
+            const decls: Data = {};
+            const values: Data = {};
+            for (const [k, v] of Object.entries<any>(spec.vars || {})) {
+              const obj = v && typeof v === "object" && !Array.isArray(v);
+              decls[k] = obj && v.mandatory ? { mandatory: true } : {};
+              const value = obj ? v.value : v;
+              if (value !== undefined && value !== null && value !== "") values[k] = value;
+            }
+            const all = clone(data);
+            all.classes = { ...(data.classes || {}), [c]: pruned({ backend: spec.backend, label: spec.label, options: spec.options,
+              credentials: spec.credentials, vars: Object.fromEntries(Object.entries(decls).map(([k, d]) => [k, Object.keys(d).length ? d : { mandatory: false }])) }) };
+            all.sources = { ...all.sources, [n]: pruned({ class: c, label: spec.label, vars: values }) };
+            setAll(all);
+          }}
           onRemove={() => {
             const next = clone(sources);
             delete next[n];
@@ -160,12 +176,16 @@ function Sources({ data, doc, setTop, setAll, help }: {
   );
 }
 
-function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoices, help, classDefs, onChange, onRename, onDefault, onRemove }: {
+function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoices, help, classDefs, onChange, onRename, onDefault, onRemove, onMakeClass }: {
   name: string; spec: Data; doc: Doc; isDefault: boolean; taken: string[]; backends: any[]; backendChoices: Choice[];
   help: (p: (string | number)[]) => string | undefined; classDefs: Data;
   onChange: (spec: Data) => void; onRename: (to: string) => void; onDefault: () => void; onRemove: () => void;
+  onMakeClass: (cls: string) => void;
 }) {
   const { sid, files, open } = useSession();
+  const [making, setMaking] = useState<string | null>(null);   // the name of the class being made from this source
+  const makeBad = making === null ? null : !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(making) ? "letters, digits, _ and -"
+    : making in classDefs ? "already a class" : null;
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
   // a test of the source as in the form (saved or not): every call, or those up to a stage (step:N, list)
@@ -218,11 +238,30 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <input type="radio" checked={isDefault} onChange={onDefault} /> default
         </label>
         <span className="grow" />
+        {!ofClass && making === null && (
+          <button className="small" onClick={() => setMaking(classDefs[name] ? `${name}_class` : name)}
+            title="Turn this source's definition into a class, to use it for other subsystems too">Make a class…</button>
+        )}
         <button className="small" disabled={testing} onClick={test}
           title="Read this source as datapack generation does, as in this form (saved or not): its credentials are read from the environment of the sequencer host">
           {testing ? "Testing…" : "Test connection"}</button>
         <button className="icon" title="Remove this source" onClick={onRemove}>×</button>
       </div>
+      {making !== null && (
+        <div className="req-detach-confirm small">
+          <p><strong>Make a class of this source?</strong> Its backend, options, credentials and label move to a new class; its variables
+            become the class variables (mandatory ones stay mandatory), and this source becomes a source of that class, keeping its
+            label and its variable values. It reads the same requirements as before. Other sources can then pick the class in their
+            Backend list and give their own values (another subsystem). To make a value differ per source, turn it into a variable
+            first (<code>{"{{ name }}"}</code> in the options). (Undo brings it back.)</p>
+          <label>Class name <input className={classes("mono", makeBad && "invalid")} value={making} autoFocus
+            onChange={(e) => setMaking(e.target.value.trim())}
+            onKeyDown={(e) => { if (e.key === "Enter" && !makeBad && making) { onMakeClass(making); setMaking(null); } if (e.key === "Escape") setMaking(null); }} /></label>
+          {makeBad && <span className="bad-text"> {makeBad}</span>}{" "}
+          <button className="small" disabled={!making || !!makeBad} onClick={() => { onMakeClass(making!); setMaking(null); }}>Make the class</button>{" "}
+          <button className="link small" onClick={() => setMaking(null)}>cancel</button>
+        </div>
+      )}
       {result && (
         <div className={classes("req-test", result.ok ? "ok" : "bad")}>
           {result.ok ? (
