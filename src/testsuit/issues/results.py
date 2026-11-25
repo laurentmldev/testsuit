@@ -82,7 +82,8 @@ def draft(run: Mapping[str, Any], target: Mapping[str, Any], status: str, links:
     markup = {True: "markdown", False: "jira"}.get(markup, markup) if isinstance(markup, bool) else str(markup)
     testdef = str(run.get("testdef") or run.get("name") or run.get("id"))
     fp = fingerprint(testdef, target)
-    title = f"[tsq] {testdef}: {what(target)} {str(status).lower()}"
+    title = (f"[tsq] {testdef}: " if str(status).lower() == "succeeded"       # an improvement: its title to write
+             else f"[tsq] {testdef}: {what(target)} {str(status).lower()}")
     binding = run.get("binding") or {}
     bound = ", ".join(f"{k}={v}" for k, v in {**(binding.get("stage_slots") or {}), **(binding.get("slots") or {})}.items())
     rows: list[tuple[str, str]] = []

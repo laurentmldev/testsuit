@@ -29,7 +29,7 @@ const ROUTE_KEYS: (Choice & { example: string })[] = [
   { value: "criteria", description: "the criteria file of an unmet check (only checks have one)", example: "criteria/firmware/*" },
   { value: "check", description: "the name of an unmet check (only checks have one)", example: "speed_*" },
 ];
-const ROUTES_HELP = `Where a new issue goes. When someone reports a failure (🐞 Issue… on the Run page, or tsq issue --create), the routes are read top to bottom: the first one whose patterns all match the failure picks the source; when none matches, the default source.
+const ROUTES_HELP = `Where a new issue goes. When someone reports a failure (Issue… on the Run page, or tsq issue --create), the routes are read top to bottom: the first one whose patterns all match the failure picks the source; when none matches, the default source.
 
 A pattern is a glob: * any text, ? one character, [abc] one of them; it must match the whole value, case counts. A pattern left empty (shown *) matches anything.
 
