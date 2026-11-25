@@ -24,6 +24,8 @@ export interface Entry {
   path: string;
   dir: boolean;
   size: number | null;
+  /** a file its results zip leaves out (large_files.mode: external): next to the zip, in <name>_results.data/ */
+  external?: boolean;
 }
 
 const TEXT = /\.(ya?ml|json|txt|log|csv|tsv|md|ini|cfg|conf|sh|py|xml|html?|j2|toml|propj)$/i;
@@ -141,6 +143,7 @@ export function FileBrowser({ base, query, initial, line, plot }: { base: string
           <span className="tree-icon">{e.dir ? (expanded.has(e.path) ? "▾" : "▸") : "·"}</span>
           {e.name}
           {!e.dir && <span className="muted small"> {size(e.size)}</span>}
+          {e.external && <> <span className="chip small" title="Not in the results zip (large_files.mode: external): it is kept next to it, in <datapack>_results.data/, and linked here">🔗 external</span></>}
         </div>
         {e.dir && expanded.has(e.path) && render(e.path, depth + 1)}
       </div>

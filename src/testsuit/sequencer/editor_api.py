@@ -484,8 +484,9 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.get("/plot/runs/{run_id}/{path:path}")
     async def run_data_file(run_id: str, path: str):
-        """A file of a run (its Files or Results tab) the Plot page can open: {path (on this host), format,
-        fields}; 404 when no data loader reads it, or the run's folder is gone (only its results zip left)."""
+        """A file of a run (its Files tab) the Plot page can open: {path (on this host), format, fields}; 404
+        when no data loader reads it, or the run's folder is gone (only its results zip left: the Files tab
+        unpacks it again)."""
         run = seq.store.get_run(run_id)
         if run is None:
             raise HTTPException(404, f"no run '{run_id}'")

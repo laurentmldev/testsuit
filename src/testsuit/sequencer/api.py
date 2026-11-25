@@ -13,8 +13,9 @@
 
 """REST API of the sequencer (README section 13), FastAPI. ``tsq`` and the UI are its clients.
 
-Files are served from the run folder while it exists (queued, running, and done until the
-retention period), from the results zip after that. ``FileResponse`` answers HTTP range requests.
+Files are served from the run folder (queued, running, and done until the retention period). Once
+retention removed it, browsing its files unpacks it again from the results zip, kept another retention
+period; the zip is read when it cannot be unpacked. ``FileResponse`` answers HTTP range requests.
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 from testsuit.sequencer.logbuffer import install as install_log_buffer
 from testsuit.sequencer.manualstep import awaiting
 from testsuit.sequencer.model import comment_cards
+from testsuit.sequencer.results import external_files
 from testsuit.sequencer.sequencer import Sequencer
 from testsuit.sequencer.util import SequencerError, now, parse_duration
 
@@ -509,17 +511,28 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     @app.get("/runs/{run_id}/files/{path:path}")
     async def files(run_id: str, path: str = "", results: bool = False, list: bool = False,  # noqa: A002
                     range_header: Annotated[str | None, Header(alias="range")] = None):
-        """List a folder or download a file of the run: run folder, or results zip (results=true, or once
-        the run folder is gone). With results=true, the bare path downloads the zip, unless list=true."""
+        """List a folder or download a file of the run folder. Once retention removed it, it is unpacked again
+        from the results zip (kept another retention period); the zip is read when that cannot be done. A
+        listing marks the files the zip leaves out (large_files.mode: external) as external. results=true reads
+        the zip itself: the bare path downloads it, unless list=true."""
         run = run_or_404(run_id)
         folder = Path(run["dir"])
+        if not results and not folder.is_dir():
+            await asyncio.to_thread(seq.restore_run_folder, run)
         if folder.is_dir() and not results:
-            target = (folder / path).resolve()
-            if not target.is_relative_to(folder.resolve()) or not target.exists():
+            target = folder / path
+            resolved = target.resolve()
+            # an external file unpacked again may be a symbolic link to <name>.data/, next to the zip
+            data = Path(run["results"]).with_suffix(".data").resolve() if run.get("results") else None
+            if ".." in Path(path).parts or not resolved.exists() or not (
+                    resolved.is_relative_to(folder.resolve()) or (data and resolved.is_relative_to(data))):
                 raise HTTPException(404, f"no '{path}' in run {run['id']}")
             if target.is_dir():
+                external = external_files(folder)
                 return [{"name": p.name, "path": p.relative_to(folder).as_posix(), "dir": p.is_dir(),
-                         "size": p.stat().st_size if p.is_file() else None} for p in sorted(target.iterdir())]
+                         "size": p.stat().st_size if p.is_file() else None,
+                         **({"external": True} if p.relative_to(folder).as_posix() in external else {})}
+                        for p in sorted(target.iterdir())]
             return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         if not run.get("results") or not Path(run["results"]).is_file():
             raise HTTPException(404, f"run {run['id']} has no files")

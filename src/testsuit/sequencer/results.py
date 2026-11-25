@@ -20,6 +20,9 @@ The BagIt manifests are recomputed over everything. Files over ``large_files.thr
 already compressed formats are stored without compression; zip64 is used as needed. With
 ``large_files.mode: external``, files over the threshold stay next to the zip, in
 ``<name>_results.data/``, listed in BagIt's ``fetch.txt``.
+
+Once the run folder is gone (``retention.runs``), ``unpack_results`` brings it back from the zip when its
+files are browsed; it is kept another retention period from then.
 """
 from __future__ import annotations
 
@@ -78,3 +81,61 @@ def pack_results(bag: Path, output_dir: Path, name: str, threshold: int, mode: s
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
     return zip_path
+
+
+RESTORED = ".restored"          # in storage.runs/<run>/: when the run folder was unpacked again from its results zip
+
+
+def external_files(folder: Path) -> set[str]:
+    """The files of a run folder its results zip leaves out (``large_files.mode: external``): the paths
+    BagIt's ``fetch.txt`` lists, relative to the folder."""
+    try:
+        lines = (folder / "fetch.txt").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    return {parts[2] for parts in (line.split(" ", 2) for line in lines) if len(parts) == 3}
+
+
+def unpack_results(zip_path: Path, folder: Path, min_free: int = 0) -> Path:
+    """Unpack a results zip into the run folder it was packed from, gone (retention): its top folder left out.
+    The files it left out (``large_files.mode: external``) are linked from ``<name>.data/`` next to it: a hard
+    link (no copy) where the file system allows it, else a symbolic one. Raise OSError when less than min_free
+    bytes would be left free."""
+    work = folder.parent / f".restoring-{folder.name}"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            need = sum(i.file_size for i in archive.infolist())
+            free = shutil.disk_usage(work).free
+            if free - need < min_free:
+                raise OSError(f"unpacking {zip_path.name} needs {need} bytes, {free} are free"
+                              f" ({min_free} kept free: storage.min_free_space)")
+            root = archive.namelist()[0].split("/")[0]
+            for info in archive.infolist():
+                rel = info.filename[len(root) + 1:]
+                target = (work / rel).resolve()
+                if not rel or not target.is_relative_to(work.resolve()):
+                    continue
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+        for rel in sorted(external_files(work)):
+            source = zip_path.parent / f"{zip_path.stem}.data" / rel
+            target = (work / rel).resolve()
+            if not source.is_file() or not target.is_relative_to(work.resolve()) or target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(source, target)
+            except OSError:
+                target.symlink_to(source.resolve())
+        os.replace(work, folder)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    (folder.parent / RESTORED).touch()
+    return folder
