@@ -1113,6 +1113,18 @@ def test_dynamic_tags(tmp_path):
                     encoding="utf-8")
     with pytest.raises(ReqError, match="is not #rgb"):
         Sources(file)
+    # a /regex/ word: Python re, found anywhere (TBD_x is not the whole word TBD), case independent
+    (tmp_path / "r.yml").write_text(yaml.safe_dump({"requirements": {
+        "R1": {"title": "See TBD_Blablabla"}, "R2": {"title": "tbd_other"}, "R3": {"title": "TBD"}, "R4": {"title": "Fine"}}}),
+        encoding="utf-8")
+    rules = {"Draft": [r"/TBD_\w+/"], "Plain": ["TBD"]}
+    file.write_text(yaml.safe_dump({"sources": {"a": {"backend": "yaml", "options": {"file": "r.yml"}, "dynamic_tags": rules}}}),
+                    encoding="utf-8")
+    assert {r.id: r.dynamic_tags for r in Sources(file).list(source="a").values()} == {
+        "R1": ["Draft"], "R2": ["Draft"], "R3": ["Plain"], "R4": []}
+    file.write_text(yaml.safe_dump({"sources": {"a": {"backend": "yaml", "dynamic_tags": {"x": ["/TBD(/"]}}}}), encoding="utf-8")
+    with pytest.raises(ReqError, match=r"/TBD\(/ is not a regular expression"):
+        Sources(file)
 
 
 def test_reading_progress(tmp_path, alm_server, monkeypatch):
