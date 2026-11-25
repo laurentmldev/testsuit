@@ -18,6 +18,7 @@ import { useState } from "react";
 import { Combo, Field, IdText, KeyValues, Section, Tags, Text, Toggle, type Choice } from "../fields";
 import { send } from "../api";
 import { classes } from "../util";
+import { IssueTypes } from "../pages/Issues";
 import { ClassSourceForm, ClassVars, Credentials } from "./RequirementsForm";
 import { clone, useSession, type Doc } from "./state";
 
@@ -219,6 +220,7 @@ function IssueSource({ name, spec, data, backends, taken, isDefault, startOpen, 
               <div>✓ {result.count} open issue(s) read in {result.seconds} s{result.issues?.length ? ":" : ""}
                 {result.issues?.length > 0 && <ul className="small">{result.issues.map((i: any) => <li key={i.id}><code>{name}#{i.id}</code> {i.title}</li>)}</ul>}
                 {result.projects?.length > 0 && <div className="small muted">Projects: {result.projects.join(", ")}</div>}
+                <IssueTypes types={result.types} />
               </div>
             )}
             {result.calls?.length > 0 && (

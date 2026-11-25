@@ -136,6 +136,10 @@ class IssueBackend:
         """The types a new issue can have: ``[{name, default?}]`` (empty: no choice)."""
         return []
 
+    def types_origin(self, types: list[dict[str, Any]]) -> str:
+        """Where the types listed come from, in words (shown when testing the source)."""
+        return ""
+
     @property
     def supports_types(self) -> bool:
         """Whether its create takes ``issue_type`` (a plugin's may not)."""

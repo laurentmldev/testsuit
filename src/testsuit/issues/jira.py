@@ -165,6 +165,9 @@ class JiraBackend(IssueBackend):
                  **({"icon": str(t["iconUrl"])} if t.get("iconUrl") else {})}
                 for t in found if isinstance(t, dict) and not t.get("subtask")]
 
+    def types_origin(self, types: list[dict[str, Any]]) -> str:
+        return f"the issue types of the project {self.project} without sub-tasks; default: option issue_type, else Bug"
+
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
                issue_type: str | None = None) -> Issue:
         bad = [x for x in labels if " " in x]

@@ -138,7 +138,7 @@ def _handler(tracker: Tracker):
                 issues = tracker.issues["jira"]
                 rest = path[len("/rest/api/2/"):]
                 if re.fullmatch(r"issue/createmeta/[A-Z]+/issuetypes", rest):
-                    return self._send(200, {"values": [{"name": "Bug", "iconUrl": f"{tracker.url}/bug.svg"}, {"name": "Improvement"}, {"name": "Story"},
+                    return self._send(200, {"values": [{"name": "Bug", "iconUrl": f"{getattr(tracker, 'url', '')}/bug.svg"}, {"name": "Improvement"}, {"name": "Story"},
                                                        {"name": "Sub-task", "subtask": True}]})
                 if rest == "search":
                     return self._send(200, {"issues": issues, "total": len(issues), "startAt": 0})
@@ -501,9 +501,17 @@ def test_issues_in_the_editor(tmp_path, tracker):
     assert "api_key" in redmine["credentials"] and "tracker" in redmine["options"]
     data = {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"},
                                "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}
-    tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False}})
+    tracker.issues["redmine"].append({"id": 4, "subject": "drift", "description": "", "status": {"is_closed": False},
+                                      "tracker": {"id": 3, "name": "Bug"}})
     out = repos.editor.issues_test(session, "rm", data)
     assert out.get("error") is None and out["count"] == 1 and out["issues"][0]["title"] == "drift"
+    types = out["types"]                         # the types of a new issue, where from, proposed; those of the issues read
+    assert [t["name"] for t in types["list"]] == ["Feature", "Bug"] and "trackers of the project bench" in types["origin"]
+    assert (types["failure"], types["improvement"], types["seen"]) == ("Bug", "Feature", {"Bug": 1})
+    tracker.gitlab_labels = ["type::bug", "type::feature"]
+    gl = repos.editor.issues_test(session, "bench", _issues_cfg(tracker.url))["types"]
+    assert [t["name"] for t in gl["list"]] == ["bug", "feature"] and "scoped labels type::<name>" in gl["origin"]
+    assert (gl["failure"], gl["improvement"]) == ("bug", "feature")
     assert out["calls"] and TOKEN not in json.dumps(out)
     bad = repos.editor.issues_test(session, "rm", {"sources": {"rm": {"backend": "redmine", "options": {"url": tracker.url}}}})
     assert "option 'project' is missing" in bad["error"]

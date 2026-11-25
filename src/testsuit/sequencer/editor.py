@@ -1569,6 +1569,7 @@ class Editor:
         edited (the form), else as saved."""
         import time as _time
 
+        from testsuit.issues.backend import default_type
         from testsuit.issues.model import IssueError
         from testsuit.issues.sources import ISSUES_FILE, IssueSources, find_issues_file
         start = _time.monotonic()
@@ -1590,8 +1591,21 @@ class Editor:
             projects = backend.projects() if sources.card(source)["group"] else []
         except IssueError as e:
             return {"source": source, "error": str(e), "calls": calls, "seconds": round(_time.monotonic() - start, 2)}
-        return {"source": source, "count": len(found), "issues": [i.as_dict() for i in found[:5]], "projects": projects[:50],
-                "calls": calls, "seconds": round(_time.monotonic() - start, 2)}
+        out = {"source": source, "count": len(found), "issues": [i.as_dict() for i in found[:5]], "projects": projects[:50],
+               "calls": calls}
+        if backend.supports_types:                 # the types of a new issue, and those of the issues read
+            seen: dict[str, int] = {}
+            for i in found:
+                seen[i.type or ""] = seen.get(i.type or "", 0) + 1
+            try:
+                types = backend.issue_types()
+                out["types"] = {"list": [{k: v for k, v in t.items() if k in ("name", "label", "default", "color", "icon")}
+                                         for t in types], "origin": backend.types_origin(types),
+                                "failure": default_type(types, True), "improvement": default_type(types, False),
+                                "seen": seen}
+            except IssueError as e:
+                out["types"] = {"error": str(e), "seen": seen}
+        return out | {"seconds": round(_time.monotonic() - start, 2)}
 
     def _known_requirements(self, session: EditSession) -> list[str]:
         """The keys of the requirements the test definitions of the repository link (what issues can name)."""

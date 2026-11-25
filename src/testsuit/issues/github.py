@@ -136,6 +136,11 @@ class GitHubBackend(IssueBackend):
             return []
         return [{"name": str(t.get("name"))} | ({"color": str(t["color"])} if t.get("color") else {}) for t in found if isinstance(t, dict) and t.get("is_enabled", True)]
 
+    def types_origin(self, types: list[dict[str, Any]]) -> str:
+        owner = str(self.repo or self.org).split("/")[0]
+        return (f"the issue types of the organization {owner}" if types
+                else f"none: {owner} has no issue types (a user, or an organization without them)")
+
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
                issue_type: str | None = None) -> Issue:
         repo = project or self.repo
