@@ -62,6 +62,11 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
   const showRequirements = !hasSources || data.requirements !== undefined || !sourcesFile;
   return (
     <div className="form pad">
+      {sourcesFile && hasSources && (
+        <Section title={`Classes (${Object.keys(data.classes || {}).length})`} help={help(["classes"])} collapsed={!Object.keys(data.classes || {}).length}>
+          <Classes data={data} doc={doc} setAll={api.setData} help={help} />
+        </Section>
+      )}
       {sourcesFile && (
         <Section title="Sources" help={help(["sources"])}
           actions={!hasSources && (
@@ -106,6 +111,10 @@ function Sources({ data, doc, setTop, setAll, help }: {
   const backendChoices: Choice[] = backends.map((b) => ({
     value: b.name, description: [b.description, b.capabilities?.length ? `capabilities: ${b.capabilities.join(", ")}` : ""].filter(Boolean).join(" · "),
   }));
+  const classDefs: Data = data.classes || {};
+  const classChoices: Choice[] = Object.entries<any>(classDefs).map(([c, d]) => ({
+    value: `class:${c}`, description: [`class (backend ${d?.backend || "?"})`, d?.description || d?.label].filter(Boolean).join(": "),
+  }));
   const defaultName = data.default || names[0];
   const [name, setName] = useState("");
   const setSource = (n: string, spec: Data | undefined) => {
@@ -121,7 +130,7 @@ function Sources({ data, doc, setTop, setAll, help }: {
       {names.length === 0 && <p className="muted">No source yet: the test definitions cannot name any requirement.</p>}
       {names.map((n) => (
         <SourceCard key={n} name={n} spec={sources[n] || {}} doc={doc} isDefault={n === defaultName} taken={names}
-          backends={backends} backendChoices={backendChoices} help={help}
+          backends={backends} backendChoices={[...classChoices, ...backendChoices]} help={help} classDefs={classDefs}
           onChange={(spec) => setSource(n, spec)}
           onRename={(to) => {
             const next = clone(data);
@@ -130,6 +139,22 @@ function Sources({ data, doc, setTop, setAll, help }: {
             setAll(next);
           }}
           onDefault={() => setTop("default", n === names[0] ? undefined : n)}
+          onMakeClass={(c) => {                          // the source's definition becomes the class; it keeps its values
+            const spec: Data = sources[n] || {};
+            const decls: Data = {};
+            const values: Data = {};
+            for (const [k, v] of Object.entries<any>(spec.vars || {})) {
+              const obj = v && typeof v === "object" && !Array.isArray(v);
+              decls[k] = obj && v.mandatory ? { mandatory: true } : {};
+              const value = obj ? v.value : v;
+              if (value !== undefined && value !== null && value !== "") values[k] = value;
+            }
+            const all = clone(data);
+            all.classes = { ...(data.classes || {}), [c]: pruned({ backend: spec.backend, label: spec.label, options: spec.options,
+              credentials: spec.credentials, vars: Object.fromEntries(Object.entries(decls).map(([k, d]) => [k, Object.keys(d).length ? d : { mandatory: false }])) }) };
+            all.sources = { ...all.sources, [n]: pruned({ class: c, label: spec.label, vars: values }) };
+            setAll(all);
+          }}
           onRemove={() => {
             const next = clone(sources);
             delete next[n];
@@ -151,18 +176,24 @@ function Sources({ data, doc, setTop, setAll, help }: {
   );
 }
 
-function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoices, help, onChange, onRename, onDefault, onRemove }: {
+function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoices, help, classDefs, onChange, onRename, onDefault, onRemove, onMakeClass }: {
   name: string; spec: Data; doc: Doc; isDefault: boolean; taken: string[]; backends: any[]; backendChoices: Choice[];
-  help: (p: (string | number)[]) => string | undefined;
+  help: (p: (string | number)[]) => string | undefined; classDefs: Data;
   onChange: (spec: Data) => void; onRename: (to: string) => void; onDefault: () => void; onRemove: () => void;
+  onMakeClass: (cls: string) => void;
 }) {
   const { sid, files, open } = useSession();
+  const [making, setMaking] = useState<string | null>(null);   // the name of the class being made from this source
+  const makeBad = making === null ? null : !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(making) ? "letters, digits, _ and -"
+    : making in classDefs ? "already a class" : null;
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<any>(null);
   // a test of the source as in the form (saved or not): every call, or those up to a stage (step:N, list)
   const runTest: RunTest = async (upto, debug) => {
     try {
-      return await send("POST", `edit/sessions/${sid}/requirements/test`, { path: doc.path, source: name, spec, ...(upto ? { upto } : {}), ...(debug || {}) });
+      return await send("POST", `edit/sessions/${sid}/requirements/test`, {
+        path: doc.path, source: name, spec, ...(Object.keys(classDefs).length ? { classes: classDefs } : {}), ...(upto ? { upto } : {}), ...(debug || {}),
+      });
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e) };
     }
@@ -176,7 +207,15 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
       setTesting(false);
     }
   };
-  const backend = backends.find((b) => b.name === String(spec.backend || "").toLowerCase());
+  const ofClass = spec.class ? String(spec.class) : null;
+  const backend = backends.find((b) => b.name === String((ofClass ? classDefs[ofClass]?.backend : spec.backend) || "").toLowerCase());
+  const pickBackend = (v: string) => {
+    if (v.startsWith("class:")) {                       // a class: the source keeps only its label and the values
+      const c = v.slice(6);
+      const kept: Data = ofClass === c ? spec.vars || {} : {};
+      onChange(pruned({ class: c, label: spec.label, vars: kept }));
+    } else onChange(ofClass ? pruned({ backend: v, label: spec.label }) : { ...spec, backend: v });
+  };
   // the source the page was opened on (#/edit/<sid>?file=requirements.yml&source=<name>), from the Requirements view
   const target = useRoute().query.get("source") === name;
   const card = useRef<HTMLDivElement>(null);
@@ -199,11 +238,30 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <input type="radio" checked={isDefault} onChange={onDefault} /> default
         </label>
         <span className="grow" />
+        {!ofClass && making === null && (
+          <button className="small" onClick={() => setMaking(classDefs[name] ? `${name}_class` : name)}
+            title="Turn this source's definition into a class, to use it for other subsystems too">Make a class…</button>
+        )}
         <button className="small" disabled={testing} onClick={test}
           title="Read this source as datapack generation does, as in this form (saved or not): its credentials are read from the environment of the sequencer host">
           {testing ? "Testing…" : "Test connection"}</button>
         <button className="icon" title="Remove this source" onClick={onRemove}>×</button>
       </div>
+      {making !== null && (
+        <div className="req-detach-confirm small">
+          <p><strong>Make a class of this source?</strong> Its backend, options, credentials and label move to a new class; its variables
+            become the class variables (mandatory ones stay mandatory), and this source becomes a source of that class, keeping its
+            label and its variable values. It reads the same requirements as before. Other sources can then pick the class in their
+            Backend list and give their own values (another subsystem). To make a value differ per source, turn it into a variable
+            first (<code>{"{{ name }}"}</code> in the options). (Undo brings it back.)</p>
+          <label>Class name <input className={classes("mono", makeBad && "invalid")} value={making} autoFocus
+            onChange={(e) => setMaking(e.target.value.trim())}
+            onKeyDown={(e) => { if (e.key === "Enter" && !makeBad && making) { onMakeClass(making); setMaking(null); } if (e.key === "Escape") setMaking(null); }} /></label>
+          {makeBad && <span className="bad-text"> {makeBad}</span>}{" "}
+          <button className="small" disabled={!making || !!makeBad} onClick={() => { onMakeClass(making!); setMaking(null); }}>Make the class</button>{" "}
+          <button className="link small" onClick={() => setMaking(null)}>cancel</button>
+        </div>
+      )}
       {result && (
         <div className={classes("req-test", result.ok ? "ok" : "bad")}>
           {result.ok ? (
@@ -229,10 +287,13 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <button className="link small" onClick={() => setResult(null)}>hide</button>
         </div>
       )}
-      <Field label="Backend" help={help(["sources", name, "backend"])}
-        error={spec.backend && !backend ? `no backend '${spec.backend}' here: a plugin registers it` : null}>
-        <Combo mono value={spec.backend} onChange={(v) => set("backend", v)} choices={backendChoices} />
+      <Field label="Backend" help={ofClass ? help(["sources", name, "class"]) : help(["sources", name, "backend"])}
+        error={ofClass ? (classDefs[ofClass] ? null : `no class '${ofClass}' in this file (Classes, above)`)
+          : spec.backend && !backend ? `no backend '${spec.backend}' here: a plugin registers it` : null}>
+        <Combo mono value={ofClass ? `class:${ofClass}` : spec.backend} onChange={pickBackend} choices={backendChoices} />
       </Field>
+      {ofClass && <ClassSourceForm name={name} cls={ofClass} def={classDefs[ofClass]} spec={spec} help={help} onChange={onChange} />}
+      {!ofClass && <>
       <Field label="Label" help={help(["sources", name, "label"])}><Text value={spec.label} onChange={(v) => set("label", v)} placeholder={name} /></Field>
       <Field label="Variables" help={help(["sources", name, "vars"])}>
         <Variables value={spec.vars} onChange={(v) => set("vars", Object.keys(v).length ? v : undefined)} />
@@ -249,8 +310,294 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
           <Credentials value={credentials} rows={credRows} help={backend?.credentials} onChange={(v) => set("credentials", v)} />
         </Field>
       )}
+      </>}
     </div>
   );
+}
+
+/** A source of a class: its label and the values of the class variables, nothing else; Detach makes it a source of
+ * its own, a copy of the class. */
+function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
+  name: string; cls: string; def?: Data; spec: Data; help: (p: (string | number)[]) => string | undefined; onChange: (spec: Data) => void;
+}) {
+  const decls: Data = def?.vars || {};
+  const given: Data = spec.vars || {};
+  const setVar = (k: string, v: string) => onChange(pruned({ ...spec, vars: put(given, k, scalar(v)) }));
+  const [confirm, setConfirm] = useState(false);
+  const detach = () => {
+    const vars: Data = {};
+    for (const [k, d] of Object.entries<any>(decls)) {
+      const { value, mandatory } = declOf(d);
+      const v = given[k] !== undefined ? given[k] : value;
+      vars[k] = mandatory ? { value: v ?? "", mandatory: true } : v ?? "";
+    }
+    onChange(pruned({ backend: def?.backend, label: spec.label || def?.label, options: clone(def?.options || {}),
+      credentials: clone(def?.credentials || {}), vars }));
+  };
+  const unknown = Object.keys(given).filter((k) => !(k in decls));
+  return (
+    <>
+      <Field label="Label" help={help(["sources", name, "label"])}><Text value={spec.label} onChange={(v) => onChange(pruned({ ...spec, label: v }))} placeholder={def?.label || name} /></Field>
+      <Field label="Class variables" help={`The values of the variables of class '${cls}' for this source. ${help(["sources", name, "vars"]) || ""}`} wide>
+        {Object.keys(decls).length === 0 ? <span className="muted small">Class '{cls}' has no variables: this source is the class as it is.</span> : (
+          <table className="grid compact req-class-values">
+            <tbody>{Object.entries<any>(decls).map(([k, d]) => {
+              const { value, mandatory, help: what } = declOf(d);
+              const missing = mandatory && (given[k] === undefined || given[k] === "") && (value === undefined || value === "");
+              return (
+                <tr key={k}>
+                  <td><span className="mono">{k}</span>{mandatory && <span className="bad-text" title="mandatory: the context of the requirements"> *</span>}
+                    {what && <div className="muted small">{what}</div>}</td>
+                  <td><Text mono value={given[k] === undefined ? "" : String(given[k])} placeholder={value !== undefined && value !== "" ? String(value) : mandatory ? "required" : ""}
+                    onChange={(v) => setVar(k, v)} />{missing && <div className="bad-text small">a value is required</div>}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        )}
+        {unknown.length > 0 && <div className="bad-text small">Not variables of class '{cls}': {unknown.join(", ")}
+          {" "}<button className="link small" onClick={() => onChange(pruned({ ...spec, vars: Object.fromEntries(Object.entries(given).filter(([k]) => k in decls)) }))}>remove them</button></div>}
+      </Field>
+      <div className="req-detach small">
+        <span className="muted">Backend, options and credentials come from class <code>{cls}</code>{def?.backend ? <> (backend <code>{def.backend}</code>)</> : null}: a change to the class reaches every source of it.</span>{" "}
+        {!confirm ? <button className="link small" onClick={() => setConfirm(true)}>Detach…</button> : (
+          <div className="req-detach-confirm">
+            <p><strong>Detach from class {cls}?</strong> This source becomes a full copy of the class (backend, options, credentials), with
+              its variables set to the values above. You can then change anything in it, but it no longer follows the class: a later fix
+              to class <code>{cls}</code> will not reach it. The class and its other sources are not changed. (Undo brings it back.)</p>
+            <button className="small" onClick={() => { setConfirm(false); detach(); }}>Detach</button>{" "}
+            <button className="link small" onClick={() => setConfirm(false)}>cancel</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** A class variable as declared: a default value, or {mandatory, value, help}. */
+function declOf(d: any): { value: any; mandatory: boolean; help?: string } {
+  if (d && typeof d === "object" && !Array.isArray(d)) return { value: d.value, mandatory: !!d.mandatory, help: d.help };
+  return { value: d, mandatory: false };
+}
+
+// ── classes ────────────────────────────────────────────────────────────
+
+function Classes({ data, doc, setAll, help }: {
+  data: Data; doc: Doc; setAll: (d: Data) => void; help: (p: (string | number)[]) => string | undefined;
+}) {
+  const { ctx } = useSession();
+  const defs: Data = data.classes || {};
+  const names = Object.keys(defs);
+  const backends: any[] = ctx.req_backends || [];
+  const backendChoices: Choice[] = backends.map((b) => ({ value: b.name, description: b.description }));
+  const [name, setName] = useState("");
+  const users = (c: string) => Object.entries<any>(data.sources || {}).filter(([, s]) => s?.class === c).map(([n]) => n);
+  const setClasses = (next: Data) => {
+    const all = clone(data);
+    if (Object.keys(next).length) all.classes = next; else delete all.classes;
+    setAll(all);
+  };
+  const bad = name && !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name) ? "letters, digits, _ and -" : name in defs ? "already a class" : null;
+  const add = () => { if (!name || bad) return; setClasses({ ...defs, [name]: { backend: backends.find((b) => b.name === "rest") ? "rest" : backends[0]?.name || "" } }); setName(""); };
+  return (
+    <div className="req-sources">
+      <p className="muted small">
+        A class is a source written once (backend, options, credentials) with <em>class variables</em>: each source of it only gives their
+        values (the same tool, for another subsystem). Use <code>{"{{ name }}"}</code> in the options and credentials, <code>$name</code> in jq.
+        A source picks a class in its Backend list.
+      </p>
+      {names.map((c) => (
+        <ClassCard key={c} name={c} def={defs[c] || {}} doc={doc} taken={names} users={users(c)} backends={backends} backendChoices={backendChoices}
+          help={help}
+          onChange={(d) => setClasses({ ...defs, [c]: pruned(d) })}
+          onRename={(to) => {
+            const all = clone(data);
+            all.classes = renamed(defs, c, to);
+            for (const s of Object.values<any>(all.sources || {})) if (s?.class === c) s.class = to;
+            setAll(all);
+          }}
+          onRemove={() => { const next = clone(defs); delete next[c]; setClasses(next); }} />
+      ))}
+      <div className="req-toolbar">
+        <input className="mono" placeholder="new class (alm, jama…)" value={name} onChange={(e) => setName(e.target.value.trim())}
+          onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button className="small" disabled={!name || !!bad} onClick={add}>Add class</button>
+        {bad && <span className="bad-text small">{bad}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ClassCard({ name, def, doc, taken, users, backends, backendChoices, help, onChange, onRename, onRemove }: {
+  name: string; def: Data; doc: Doc; taken: string[]; users: string[]; backends: any[]; backendChoices: Choice[];
+  help: (p: (string | number)[]) => string | undefined; onChange: (d: Data) => void; onRename: (to: string) => void; onRemove: () => void;
+}) {
+  const { sid } = useSession();
+  const decls: Data = def.vars || {};
+  const ask = useTestValues(doc.path, name, decls);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  // a test of the class as in the form: with values for its variables, asked at each test (remembered in this browser)
+  const runTest: RunTest = async (upto, debug) => {
+    const values = await ask.ask();
+    if (values === null) return { ok: false, error: "Test cancelled: no values given for the class variables." };
+    try {
+      return await send("POST", `edit/sessions/${sid}/requirements/test`, {
+        path: doc.path, source: "", class: name, spec: def, values, ...(upto ? { upto } : {}), ...(debug || {}),
+      });
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  };
+  const test = async () => {
+    setTesting(true);
+    setResult(null);
+    try { setResult(await runTest()); } finally { setTesting(false); }
+  };
+  const backend = backends.find((b) => b.name === String(def.backend || "").toLowerCase());
+  const options: Data = def.options || {};
+  const credentials: Data = def.credentials || {};
+  const set = (k: string, v: any) => onChange({ ...def, [k]: v });
+  const credRows = [...new Set([...Object.keys(credentials), ...Object.keys(backend?.credentials || {})])];
+  return (
+    <div className="req-source req-class">
+      <div className="req-source-head">
+        <span className="req-class-tag">class</span>
+        <IdText value={name} taken={taken} onChange={onRename} />
+        <span className="muted small">{users.length ? `used by ${users.join(", ")}` : "used by no source yet"}</span>
+        <span className="grow" />
+        <button className="small" disabled={testing} onClick={test}
+          title="Read the class as a source would, with values for its variables (asked now): the credentials are read from the environment of the sequencer host">
+          {testing ? "Testing…" : "Test connection"}</button>
+        <button className="icon" title={users.length ? `Used by ${users.join(", ")}: detach or remove them first` : "Remove this class"}
+          disabled={users.length > 0} onClick={onRemove}>×</button>
+      </div>
+      {ask.element}
+      {users.length > 1 && <div className="hint small">A change here reaches {users.length} sources ({users.join(", ")}).</div>}
+      {result && (
+        <div className={classes("req-test", result.ok ? "ok" : "bad")}>
+          {result.ok ? (
+            <>
+              <div><strong>{result.count}</strong> requirement(s), {result.nodes} node(s), read in {result.seconds} s</div>
+              {result.vars && Object.keys(result.vars).length > 0 && (
+                <div className="req-vars small">Variables: {Object.entries<any>(result.vars).map(([k, v]) => <VarValue key={k} name={k} value={v} />)}</div>
+              )}
+              {result.sample?.length > 0 && (
+                <table className="grid compact">
+                  <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th></tr></thead>
+                  <tbody>{result.sample.map((r: any) => (
+                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{r.title}</td><td>{r.status}</td></tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </>
+          ) : <div className="error-text">{result.error}</div>}
+          <Calls result={result} />
+          <button className="link small" onClick={() => setResult(null)}>hide</button>
+        </div>
+      )}
+      <Field label="Backend" help={help(["classes", name, "backend"])}
+        error={def.backend && !backend ? `no backend '${def.backend}' here: a plugin registers it` : null}>
+        <Combo mono value={def.backend} onChange={(v) => set("backend", v)} choices={backendChoices} />
+      </Field>
+      <Field label="Label" help={help(["classes", name, "label"])}><Text value={def.label} onChange={(v) => set("label", v)} placeholder="the source's name" /></Field>
+      <Field label="Description" help={help(["classes", name, "description"])}><Text value={def.description} onChange={(v) => set("description", v)} placeholder="what it reads" /></Field>
+      <Field label="Class variables" help={help(["classes", name, "vars"])} wide>
+        <ClassVars value={decls} onChange={(v) => set("vars", Object.keys(v).length ? v : undefined)} />
+      </Field>
+      <Field label="Options" help={help(["classes", name, "options"])} wide>
+        <BackendOptions backend={backend} options={options} onChange={(v) => set("options", v)}
+          credentials={credentials} onCredentials={(v) => set("credentials", v)} runTest={runTest} />
+      </Field>
+      {backend?.name !== "rest" && (credRows.length > 0 || backend?.name !== "yaml") && (
+        <Field label="Credentials" help={help(["classes", name, "credentials"])} wide>
+          <Credentials value={credentials} rows={credRows} help={backend?.credentials} onChange={(v) => set("credentials", v)} />
+        </Field>
+      )}
+    </div>
+  );
+}
+
+/** The class variables: name, mandatory, default, help. */
+function ClassVars({ value, onChange }: { value: Data; onChange: (v: Data) => void }) {
+  const [name, setName] = useState("");
+  const names = Object.keys(value);
+  const write = (k: string, d: { value?: any; mandatory?: boolean; help?: string }) => {
+    const decl = pruned({ value: d.value, mandatory: d.mandatory || undefined, help: d.help });
+    onChange({ ...value, [k]: Object.keys(decl).length === 1 && "value" in decl ? decl.value : Object.keys(decl).length ? decl : { mandatory: false } });
+  };
+  const bad = name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? "letters, digits and _" : name in value ? "already a variable" : null;
+  const add = () => { if (!name || bad) return; onChange({ ...value, [name]: { mandatory: true } }); setName(""); };
+  return (
+    <div>
+      {names.length > 0 && (
+        <table className="grid compact req-class-vars">
+          <thead><tr><th>Name</th><th title="Each source must give it a value; it is the context of its requirements">Mandatory</th><th>Default</th><th>Help</th><th /></tr></thead>
+          <tbody>{names.map((k) => {
+            const d = declOf(value[k]);
+            return (
+              <tr key={k}>
+                <td><IdText value={k} taken={names} onChange={(to) => onChange(renamed(value, k, to))} /></td>
+                <td><input type="checkbox" checked={d.mandatory} onChange={(e) => write(k, { ...d, mandatory: e.target.checked })} /></td>
+                <td><Text mono value={d.value === undefined || d.value === null ? "" : String(d.value)} placeholder="none"
+                  onChange={(v) => write(k, { ...d, value: v === "" ? undefined : scalar(v) })} /></td>
+                <td><Text value={d.help} placeholder="what it is" onChange={(v) => write(k, { ...d, help: v || undefined })} /></td>
+                <td><button className="icon" title="Remove this variable" onClick={() => { const next = { ...value }; delete next[k]; onChange(next); }}>×</button></td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      )}
+      <div className="req-toolbar">
+        <input className="mono small" placeholder="new class variable (subsystem…)" value={name} onChange={(e) => setName(e.target.value.trim())}
+          onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button className="small" disabled={!name || !!bad} onClick={add}>Add</button>
+        {bad && <span className="bad-text small">{bad}</span>}
+      </div>
+      <div className="hint">Declared here, given by each source of the class. A test of the class asks for their values each time
+        (remembered in this browser, never saved in the file).</div>
+    </div>
+  );
+}
+
+/** The values of the class variables for a test, asked at each test in a small form (the last ones remembered in
+ * this browser). ask(): the values, or null when cancelled; element: the form, while asking. */
+function useTestValues(path: string, cls: string, decls: Data) {
+  const key = `tsq.req-class-test:${path}:${cls}`;
+  const [asking, setAsking] = useState<{ resolve: (v: Data | null) => void } | null>(null);
+  const [values, setValues] = useState<Data>(() => {
+    try { return JSON.parse(localStorage.getItem(key) || "{}") || {}; } catch { return {}; }
+  });
+  const names = Object.keys(decls);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (asking) box.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [asking]);
+  const ask = (): Promise<Data | null> => names.length === 0 ? Promise.resolve({})
+    : new Promise((resolve) => setAsking({ resolve }));
+  const done = (ok: boolean) => {
+    if (!asking) return;
+    if (ok) try { localStorage.setItem(key, JSON.stringify(values)); } catch { /* not kept: fine */ }
+    asking.resolve(ok ? Object.fromEntries(names.map((k) => [k, values[k] ?? ""])) : null);
+    setAsking(null);
+  };
+  const element = asking && (
+    <div ref={box} className="req-test-values" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(true); } if (e.key === "Escape") done(false); }}>
+      <div className="small"><strong>Test values</strong> <span className="muted">for the class variables, for this test only (not saved in the file)</span></div>
+      <table className="grid compact"><tbody>{names.map((k, i) => {
+        const d = declOf(decls[k]);
+        return (
+          <tr key={k}>
+            <td className="small"><span className="mono">{k}</span>{d.mandatory && <span className="bad-text"> *</span>}{d.help && <div className="muted small">{d.help}</div>}</td>
+            <td><input className="mono" autoFocus={i === 0} value={values[k] === undefined ? "" : String(values[k])}
+              placeholder={d.value !== undefined && d.value !== null && d.value !== "" ? `${d.value} (default)` : d.mandatory ? "required" : ""}
+              onChange={(e) => setValues({ ...values, [k]: e.target.value })} /></td>
+          </tr>
+        );
+      })}</tbody></table>
+      <button className="small primary" onClick={() => done(true)}>Run the test</button>{" "}
+      <button className="link small" onClick={() => done(false)}>cancel</button>
+    </div>
+  );
+  return { ask, element };
 }
 
 // ── requirements of the YAML backend ───────────────────────────────────
