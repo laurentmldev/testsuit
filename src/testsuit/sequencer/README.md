@@ -1389,7 +1389,7 @@ To debug a rest source, each call to the server is listed under the result: the 
 
 Links use the same key at both levels, `reqs`: on the test definition (`reqs: [REQ-12, jama:SYS-4@3]`), verified by the run verdict, and on any check of the criteria (`reqs: [REQ-12]` beside its `description`), verified by that check. `@3` pins the version the test was written against.
 
-**In input files**, links are tags in comments, the way Doxygen and [Spexygen](https://github.com/QuantumLeaps/Spexygen) write them: `@uid{TC-12}` names a test case, and each `@tr{REQ-12, jama:SYS-4@3}` after it (up to the next `@uid` of the file) lists requirements it verifies; a `@tr` before any `@uid` is the file's. Any text file works, whatever its language:
+**In input files**, links are tags in comments, the way Doxygen and [Spexygen](https://github.com/QuantumLeaps/Spexygen) write them: `@uid{TC-12}` names a test case, and each `@tr{REQ-12, jama:SYS-4@3}` after it (up to the next `@uid` of the file, or an `@enduid`) lists requirements it verifies; a `@tr` outside any `@uid` is the file's. `@uid{TC-12, its title}` gives the test case a title, and other Spexygen tags (`@uid_bw_trace{...}`, `@uid_fw_trace{...}`) are left alone. Any text file works, whatever its language:
 
 ```python
 # @uid{TC-12}

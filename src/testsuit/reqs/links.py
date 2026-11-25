@@ -18,8 +18,12 @@ A link on the test definition is verified by the run verdict; a link on a check 
 
 The input files of a datapack can hold links too, in comments, the way Doxygen and Spexygen write them::
 
-    # @uid{TC-12}                   a test case of this file, until the next @uid
-    # @tr{REQ-12, jama:SYS-4@3}     requirements it verifies (before any @uid: the file's)
+    # @uid{TC-12}                   a test case of this file, until the next @uid or an @enduid
+    # @uid{TC-12, its title}        the same, with a title
+    # @tr{REQ-12, jama:SYS-4@3}     requirements it verifies (outside any @uid: the file's)
+    # @enduid                       the end of the test case
+
+Other Spexygen tags (``@uid_bw_trace{...}``, ``@uid_fw_trace{...}``...) are left alone.
 
 They are verified by the run verdict (the scripts report no result per test case).
 """
@@ -33,7 +37,7 @@ from typing import Any
 import yaml
 
 SCENARIO = re.compile(r".*\.mexploit\.ya?ml$")
-TAG = re.compile(r"@(uid|tr)\{([^}\n]*)\}")
+TAG = re.compile(r"@(uid|tr)\{([^}\n]*)\}|@(enduid)\b")
 UID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/]*$")
 MAX_SCANNED = 10 * 1024 * 1024           # bytes: a bigger input file is data, not a script
 
@@ -145,13 +149,18 @@ def scan_text(text: str, file: str) -> tuple[list[dict], list[dict], list[str]]:
     uid = None
     for number, line in enumerate(text.splitlines(), 1):
         for m in TAG.finditer(line):
+            if m.group(3):                                     # @enduid: what follows is the file's again
+                uid = None
+                continue
             kind, body = m.group(1), m.group(2).strip()
             if kind == "uid":
-                if not UID.match(body):
+                ident, _, title = body.partition(",")          # @uid{TC-12, its title}
+                ident, title = ident.strip(), title.strip()
+                if not UID.match(ident):
                     problems.append(f"{file}:{number}: @uid{{{body}}} is not a test case id (letters, digits, _ . - /)")
                     continue
-                uid = body
-                cases.append({"uid": uid, "file": file, "line": number})
+                uid = ident
+                cases.append({"uid": uid, "file": file, "line": number, **({"title": title} if title else {})})
                 continue
             reqs = [r.strip() for r in body.split(",") if r.strip()]
             if not reqs:

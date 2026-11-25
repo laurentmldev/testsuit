@@ -928,6 +928,13 @@ def test_input_file_tags(bench, tmp_path, monkeypatch):
     assert links == [{"file": "f.py", "line": 1, "reqs": ["REQ-3"]},
                      {"file": "f.py", "line": 3, "uid": "TC-1", "reqs": ["REQ-2", "jama:X@2"]}]
     assert len(problems) == 2 and "f.py:4" in problems[0] and "f.py:5" in problems[1]
+    # Spexygen: a title after the id, other @uid_... tags left alone, @enduid ends the test case
+    cases, links, problems = scan_text("## \n# @uid{TC-FEEDODIDO-10, test case 1}\n# @uid_bw_trace{brief}\n# - @tr{requirement-uid-1}\n"
+                                       "# - @tr{requirement-uid-2}\n# @uid_fw_trace{1}\n# @enduid\n# @tr{REQ-9}\n", "g.py")
+    assert cases == [{"uid": "TC-FEEDODIDO-10", "file": "g.py", "line": 2, "title": "test case 1"}] and problems == []
+    assert links == [{"file": "g.py", "line": 4, "uid": "TC-FEEDODIDO-10", "reqs": ["requirement-uid-1"]},
+                     {"file": "g.py", "line": 5, "uid": "TC-FEEDODIDO-10", "reqs": ["requirement-uid-2"]},
+                     {"file": "g.py", "line": 8, "reqs": ["REQ-9"]}]
 
     monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
     write(bench.dp / "setup" / "files" / "conf.txt", "{{ testdef.id }}\n# @tr{REQ-3}\n# @uid{TC-1}\n# @tr{REQ-2, REQ-5}\n")
