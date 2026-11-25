@@ -51,6 +51,7 @@ from pydantic import ValidationError
 from testsuit.exploit.editor.service import (CriteriaFolder, KeySource, criteria_folder, forget_criteria_folder,
                                              is_scenario, is_utests)
 from testsuit.reqs.backend import describe_req_backends
+from testsuit.tickets.backend import describe_ticket_backends
 from testsuit.reqs.backend import walk as req_paths
 from testsuit.reqs.sources import is_requirements_file
 from testsuit.tickets.sources import is_tickets_file
@@ -1335,6 +1336,7 @@ class Editor:
             "importers": sorted(importers._importers), "generators": sorted(generators._generators),
             "processors": sorted(processors._processors),
             "req_backends": describe_req_backends(),
+            "ticket_backends": describe_ticket_backends(),
             "runtime_keys": RUNTIME_KEYS,
             "inventory": self.rel(session, self._inventory(session)) if session.kind == "lab" else None,
         }
@@ -1509,17 +1511,26 @@ class Editor:
         out["issues"].sort(key=lambda i: str(i.get("updated") or ""), reverse=True)
         return out
 
-    def tickets_test(self, session: EditSession, source: str) -> dict:
+    def tickets_test(self, session: EditSession, source: str, data: Any = None) -> dict:
         """Read the open issues of one source, as the Tickets tab would: how many, the first ones, how long it took,
-        or what went wrong; and each call to the server (credentials masked)."""
+        or what went wrong; and each call to the server (credentials masked). ``data``: the tickets file as being
+        edited (the form), else as saved."""
         import time as _time
 
         from testsuit.tickets.model import TicketError
-        file, sources = self._ticket_sources(session)
-        if file is None:
-            raise SequencerError("no tickets.yml in this repository")
+        from testsuit.tickets.sources import TICKETS_FILE, TicketSources, find_tickets_file
         start = _time.monotonic()
         calls: list[dict] = []
+        if data is not None:
+            file = find_tickets_file(session.folder) or session.folder / TICKETS_FILE
+            try:
+                sources = TicketSources(data, file.parent, TICKETS_FILE)
+            except TicketError as e:
+                return {"source": source, "error": str(e), "calls": calls, "seconds": 0}
+        else:
+            file, sources = self._ticket_sources(session)
+            if file is None:
+                raise SequencerError("no tickets.yml in this repository")
         try:
             backend = sources.backend(source)
             backend.trace = calls

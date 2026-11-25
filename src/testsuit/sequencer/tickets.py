@@ -266,8 +266,11 @@ class Tickets:
             data = self.seq.read_run_file(run, rec["log"])
             log_text = iss.excerpt(data.decode("utf-8", "replace")) if data else ""
         reqs = self._reqs(run, target)
-        markdown = str(sources.specs[source]["backend"]).lower() != "jira"
-        d = iss.draft(run, target, status, self._links(run, target, base), reqs, log_text, markdown, by)
+        try:
+            markup = sources.backend(source).markup
+        except TicketError:                      # a missing credential: told when creating
+            markup = "jira" if str(sources.specs[source]["backend"]).lower() == "jira" else "markdown"
+        d = iss.draft(run, target, status, self._links(run, target, base), reqs, log_text, markup, by)
         rules = sources.req_rules(source)
         labels = [str(x) for x in sources.specs[source].get("labels") or []] + iss.req_labels(rules, reqs)
         known = [self._refreshed(b, sources) for b in self.known(testdef, target)]

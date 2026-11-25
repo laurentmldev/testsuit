@@ -19,17 +19,18 @@ factory ``factory(options, credentials, base_dir) -> TicketBackend``, as a requi
 
     from testsuit.tickets import TicketBackend, Issue, register_ticket_backend
 
-    class RedmineBackend(TicketBackend):
-        description = "Redmine, through its REST API"
+    class YouTrackBackend(TicketBackend):
+        description = "YouTrack, through its REST API"
         capabilities = frozenset({"create", "comment"})
-        options_help = {"url": "The server.", "project": "The project identifier."}
-        credentials_help = {"token": "An API key."}
+        markup = "markdown"                                 # how its issue texts are written: markdown, jira, textile
+        options_help = {"url": "The server.", "project": "The project short name."}
+        credentials_help = {"token": "A permanent token."}
         def search(self, text="", state="open", labels=(), limit=100) -> list[Issue]: ...
         def get(self, ids) -> dict[str, Issue | None]: ...
         def create(self, title, body, labels=(), project=None) -> Issue: ...
         def comment(self, id, body) -> None: ...
 
-    register_ticket_backend("redmine", RedmineBackend)      # tickets.yml: {sources: {x: {backend: redmine, ...}}}
+    register_ticket_backend("youtrack", YouTrackBackend)    # tickets.yml: {sources: {x: {backend: youtrack, ...}}}
 
 Capabilities: ``create`` (new issues), ``comment``, ``remote_link`` (a link shown beside the issue, Jira), ``group``
 (a source over several projects: ids are ``<project>#<n>``, ``create`` takes the project).
@@ -57,6 +58,7 @@ class TicketBackend:
 
     capabilities: frozenset[str] = frozenset()
     description: str = ""
+    markup: str = "markdown"                 # the markup of issue texts: markdown, jira (wiki markup) or textile
     options_help: dict[str, str] = {}
     credentials_help: dict[str, str] = {}
     trace: list[dict] | None = None          # set to a list by the Editor's test: each call, credentials masked

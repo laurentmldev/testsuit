@@ -527,11 +527,12 @@ export function Tags({ value, onChange, choices, placeholder, keys, onOpen, open
  *  `nested`: a variable holding keys of its own shows one row per key, named by its dotted path (`custom_grp.keyA`),
  *  and a dotted name typed in the table writes nested keys. `tsq_` variables are kept whole.
  *  `keys`: the values are rendered with keys, typing {{ in one proposes them. */
-export function KeyValues({ value, onChange, known, exclude, valueChoices, nested, keys, grow, placeholder }: {
+export function KeyValues({ value, onChange, known, exclude, valueChoices, nested, keys, grow, placeholder, keyPlaceholder }: {
   value?: Record<string, any> | null; onChange: (v: Record<string, any>) => void; known?: Choice[]; exclude?: string[];
   valueChoices?: (key: string) => Choice[] | undefined; nested?: boolean; keys?: boolean;
   grow?: "lines" | "wrap";   // the values grow with their text (Text's grow); "lines": kept as written (jq), not as scalars
   placeholder?: string;      // of the values
+  keyPlaceholder?: string;   // of a new key
 }) {
   const data = value || {};
   const entries = keyRows(data, nested).filter(([path]) => !(exclude || []).includes(path[0]));
@@ -589,7 +590,7 @@ export function KeyValues({ value, onChange, known, exclude, valueChoices, neste
       <div className="kv-row">
         <div className="kv-key">
           <Combo value={newKey} onChange={setNewKey} choices={(known || []).filter((c) => !(c.value in data) && !(exclude || []).includes(c.value))}
-            placeholder={nested ? "new variable, group.key…" : "new variable…"} mono onPick={add} />
+            placeholder={keyPlaceholder || (nested ? "new variable, group.key…" : "new variable…")} mono onPick={add} />
         </div>
         {newKey && <button type="button" className="small" onClick={() => add(newKey)}>add</button>}
       </div>

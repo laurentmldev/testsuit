@@ -37,6 +37,7 @@ class JiraBackend(TicketBackend):
 
     description = "Jira issues of a project (Cloud, Server or Data Center)"
     capabilities = frozenset({"create", "comment", "remote_link"})
+    markup = "jira"
     options_help = {"url": "The site: https://<site>.atlassian.net, or the server.", "project": "The project key.",
                     "issue_type": "The type of the issues created (Bug).", "jql": "More conditions on the issues listed.",
                     "cloud": "Jira Cloud (default: for an atlassian.net site).",

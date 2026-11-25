@@ -239,8 +239,9 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     @app.post("/edit/sessions/{sid}/tickets/test")
     async def tickets_test(sid: str, body: dict):
-        """Read the open issues of one source: count, first ones, time, or the error; each call (credentials masked)."""
-        return await run(editor.tickets_test, session(sid), str(body.get("source") or ""))
+        """Read the open issues of one source (`data`: tickets.yml as being edited, else as saved): count, first ones,
+        time, or the error; each call (credentials masked)."""
+        return await run(editor.tickets_test, session(sid), str(body.get("source") or ""), body.get("data"))
 
     @app.post("/edit/sessions/{sid}/requirements/test")
     async def requirements_test(sid: str, body: dict):

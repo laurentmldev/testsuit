@@ -1427,3 +1427,10 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .tickets-list .tag { margin-left: 4px; }
 .run-issues table { margin-bottom: 12px; }
 @media (prefers-color-scheme: dark) { .issue-badge { background: #78350f; color: #fde68a; } }
+
+/* tickets.yml form */
+.tickets-req-rules { display: flex; flex-direction: column; gap: 4px; }
+.tickets-req-rules .row { display: flex; align-items: center; gap: 8px; }
+.tickets-req-rules .row .text-field { max-width: 220px; }
+.tickets-routes td .text-field, .tickets-routes td input { min-width: 90px; }
+.tickets-routes .nowrap { white-space: nowrap; }
