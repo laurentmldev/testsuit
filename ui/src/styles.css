@@ -1362,3 +1362,7 @@ textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-sp
 .req-test-values { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--accent, var(--border)); border-radius: 6px; background: var(--panel); max-width: 560px; }
 .req-test-values table { margin: 6px 0; width: 100%; }
 .req-test-values input { width: 100%; box-sizing: border-box; }
+.req-scope { margin: 14px 0 4px; padding: 6px 10px; border-left: 3px solid var(--border); background: var(--panel-2); border-radius: 0 4px 4px 0; }
+.req-form-tabs { margin-bottom: 10px; }
+.req-new { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.req-new input { flex: 1 1 240px; min-width: 0; }
