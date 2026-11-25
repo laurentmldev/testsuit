@@ -108,11 +108,16 @@ export function tagStyle(color?: string): CSSProperties | undefined {
     ? { color, background: `color-mix(in srgb, ${color} 16%, transparent)`, outlineColor: color } : undefined;
 }
 
+const FOLD_OVER = 5;     // a path with more requirements than this starts folded in the matrix
+
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
+
 export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
   const [open, setOpen] = useState<string | null>(null);
   const [tag, setTag] = useState("");                       // only the requirements with this tag (or dynamic tag)
   const [search, setSearch] = useState("");                 // only the requirements holding these words (id, title, texts, path, tags)
+  // the paths folded or unfolded by a click; else a path of more than FOLD_OVER requirements is folded (not while filtering)
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const tests: any[] = data.tests || [];
   const colors: Record<string, string> = data.tag_colors || {};
   const inNode: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
@@ -140,6 +145,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
     return out;
   }, [rows]);
   const inView = new Set(rows.map((r) => r.key));
+  const isFolded = (path: string, reqs: any[]) => toggled[path] ?? (reqs.length > FOLD_OVER && !search.trim() && !tag);
   return (
     <div className="coverage">
       <CoverageTiles rows={rows} />
@@ -182,8 +188,10 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                 const c = counts(reqs);
                 return (
                   <Fragment key={path}>
-                    <tr className="cov-node"><td colSpan={4 + tests.length}><code>{path || "(no path)"}</code> <span className="muted small">{STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
-                    {reqs.map((r) => (
+                    <tr className="cov-node" onClick={() => setToggled({ ...toggled, [path]: !isFolded(path, reqs) })}
+                      title={isFolded(path, reqs) ? `Show its ${reqs.length} requirements` : "Fold it"}>
+                      <td colSpan={4 + tests.length}><span className="fold">{isFolded(path, reqs) ? "▸" : "▾"}</span> <code>{path || "(no path)"}</code> <span className="muted small">{reqs.length} · {STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
+                    {!isFolded(path, reqs) && reqs.map((r) => (
                       <Fragment key={r.key}>
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono nowrap">{r.key}</td>
