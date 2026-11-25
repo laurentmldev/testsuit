@@ -390,7 +390,13 @@ export function IssuesTab({ sid }: { sid: string }) {
   }, [issues.data]);
   return (
     <div className="issues-tab">
-      <Markdown text={INTRO} className="intro" />
+      <div className="synthesis-head">
+        <Markdown text={INTRO} className="intro" />
+        <span className="spacer" />
+        {d?.file && <div className="synthesis-actions">
+          <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
+        </div>}
+      </div>
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading issues.yml…" />}
       {d && !d.file && (
@@ -445,7 +451,6 @@ export function IssuesTab({ sid }: { sid: string }) {
           <span className="spacer" />
           <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/issues/list?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
             title="Read the whole list again from the tools (otherwise, every few minutes, only the issues updated since are read)">↻ Refresh</button>
-          <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
         </div>
         {Object.entries(issues.data?.errors || {}).map(([name, e]: any) => <div key={name} className="error-box">{name}: {e}</div>)}
         {!issues.data && !issues.error && <Spinner className="block" text="Reading the issues…" />}
