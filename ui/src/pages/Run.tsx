@@ -26,6 +26,7 @@ import { ManualOperations, rerun } from "./Manual";
 import { Interventions, PauseBanners, StepActions, StepModeControl } from "./Operator";
 import { abort, ACTIVE, PriorityInput, repost, RunStateBadge } from "./Queue";
 import { ExportButton, ReviewButtons, ReviewedVerdict, ReviewNotes, ReviewStateBadge, RunReviewTab } from "./Review";
+import { RunIssuesTab, TargetIssues, useRunTickets } from "./Tickets";
 
 const ENDED = ["succeeded", "failed", "error", "skipped"];
 /** The id of a phase's finally lane in the graph (after "phase:<id>/"), a name no step or sub-pipeline can take. */
@@ -506,6 +507,8 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
 export function RunPage({ id, tab, editor, file, line }: { id: string; tab: string; editor?: boolean; file?: string | null; line?: number | null }) {
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation", "pause", "intervention", "review"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
+  // the issues bound to its failures (SPEC §11.3), once it ended
+  const tickets = useRunTickets(run.data?.id || null, ["done", "cancelled"].includes(run.data?.state));
   const labelOf = useLabels();
   const [selected, setSelected] = useState<string | null>(null);
   // the step running now is followed (selected, its log shown, brought into view) until another step is picked by
@@ -544,6 +547,8 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
   tabs.push(["requirements", "Requirements"]);
   const ended = ["done", "cancelled"].includes(r.state);
   if (ended) tabs.push(["review", r.review?.state === "open" ? "Review (open)" : "Review"]);
+  const knownIssues = (tickets.data?.targets || []).reduce((n: number, t: any) => n + (t.issues?.length || 0), 0);
+  if (ended && (tickets.data?.sources?.length || tickets.data?.bindings?.length)) tabs.push(["issues", knownIssues ? `Issues (${knownIssues})` : "Issues"]);
   // the steps and checks as reviewed (SPEC §11.1): the run's own records stay as they ran
   const reviewedState = (s: any) => r.review?.steps?.find((x: any) => x.step === stepKey(s.phase, s.id, slotOf(s)));
   return (
@@ -553,6 +558,7 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
         <RunStateBadge run={r} />
         <ReviewedVerdict verdict={r.review?.verdict ?? r.verdict} raw={r.review?.raw_verdict} />
         <ReviewStateBadge review={r.review} />
+        {ended && r.verdict !== "succeeded" && <TargetIssues runId={r.id} tickets={tickets.data} target={{ kind: "run" }} label="the verdict" onChanged={tickets.refresh} />}
         <span className="spacer" />
         {r.state === "queued" || r.state === "waiting_resources" ? <>priority <PriorityInput run={r} onDone={run.refresh} /></> : null}
         {live && <StepModeControl run={r} onChanged={run.refresh} />}
@@ -601,8 +607,8 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
                 <StepActions run={r} record={logRecord} part={finals.has(`${logRecord?.phase}:${logRecord?.id}`) ? "finally" : undefined} onChanged={run.refresh} />
                 <StepFacts record={logRecord} records={records.filter((s) => isOfStep(selected, s.phase, s.id))} />
                 {editor && logRecord && <EditLabCommand record={logRecord} />}
-                <ExploitChecks runId={r.id} record={logRecord} run={r} onReviewed={run.refresh} />
-                {ended && logRecord && <StepReview run={r} record={logRecord} onDone={run.refresh} />}
+                <ExploitChecks runId={r.id} record={logRecord} run={r} onReviewed={run.refresh} tickets={tickets.data} onTickets={tickets.refresh} />
+                {ended && logRecord && <StepReview run={r} record={logRecord} onDone={run.refresh} tickets={tickets.data} onTickets={tickets.refresh} />}
                 {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
               </>
             ) : <p className="muted">Click a step to see its log. Colors: green succeeded, blue pulsing running, red failed or error, grey pending or skipped; the finally steps, in their dashed lane after the steps, always run at the end, cancel and kill included.</p>}
@@ -630,7 +636,7 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
             {records.length === 0 && <p className="muted">No step has started yet.</p>}
           </div>
           <div className="split-side">
-            {ended && logRecord && <StepReview run={r} record={logRecord} onDone={run.refresh} />}
+            {ended && logRecord && <StepReview run={r} record={logRecord} onDone={run.refresh} tickets={tickets.data} onTickets={tickets.refresh} />}
             {editor && logRecord && <EditLabCommand record={logRecord} />}
             {logKey && <LogTail key={logKey} runId={r.id} step={logKey} live={!!live && !ENDED.includes(logRecord?.state)} />}
           </div>
@@ -641,6 +647,7 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
       {tab === "resources" && <ResourcesTab runId={r.id} ended={!live} />}
       {tab === "requirements" && <RunsCoverage path={`runs/${r.id}/requirements`} events={["run", "step"]} title="The requirements this test and its checks verify, by this run" />}
       {tab === "review" && ended && <RunReviewTab run={r} onChanged={run.refresh} />}
+      {tab === "issues" && ended && <RunIssuesTab runId={r.id} tickets={tickets.data} onChanged={tickets.refresh} />}
       {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" plot={editor ? `plot/runs/${r.id}` : undefined} />}
     </div>
   );
@@ -689,7 +696,8 @@ const checkKey = (step: string, c: any) => `check|${step}|${c.criteria || ""}|${
 
 /** An exploit step's checks (the criteria it ran on the run's outputs): each one's status as reviewed (accept,
  *  reject, comment once the run ended), and its report (as reviewed). */
-function ExploitChecks({ runId, record, run, onReviewed }: { runId: string; record: any; run?: any; onReviewed?: () => void }) {
+function ExploitChecks({ runId, record, run, onReviewed, tickets, onTickets }: { runId: string; record: any; run?: any; onReviewed?: () => void;
+  tickets?: any; onTickets?: () => void }) {
   const x = record?.exploit;
   if (!x) return null;
   const step = stepKey(record.phase, record.id, slotOf(record));
@@ -719,7 +727,9 @@ function ExploitChecks({ runId, record, run, onReviewed }: { runId: string; reco
                   <ReviewNotes notes={review?.targets?.[checkKey(step, c)]} />
                   {ended && <ReviewButtons runId={runId} review={review} raw={c.raw_status || c.status} current={c.status}
                     target={{ kind: "check", step, criteria: c.criteria || "", scenario: c.scenario || "", check: c.check || "" }}
-                    label={`check ${c.check || c.scenario}`} onDone={() => onReviewed?.()} />}</td>
+                    label={`check ${c.check || c.scenario}`} onDone={() => onReviewed?.()} />}
+                  {ended && !checkMet(c) && <TargetIssues runId={runId} tickets={tickets} label={`check ${c.check || c.scenario}`} onChanged={() => onTickets?.()}
+                    target={{ kind: "check", step, criteria: c.criteria || "", scenario: c.scenario || "", check: c.check || "" }} />}</td>
                 <td><span className={classes("badge", checkMet(c) ? "ok" : "bad")}>{String(c.status).toLowerCase()}</span>
                   {c.raw_status && <div className="muted" title="as the run gave it">raw {String(c.raw_status).toLowerCase()} <span className="reviewed-mark">✎</span></div>}</td>
               </tr>
@@ -732,7 +742,7 @@ function ExploitChecks({ runId, record, run, onReviewed }: { runId: string; reco
 }
 
 /** A step of an ended run: its state as reviewed, its review notes, accept, reject or comment on it. */
-function StepReview({ run, record, onDone }: { run: any; record: any; onDone: () => void }) {
+function StepReview({ run, record, onDone, tickets, onTickets }: { run: any; record: any; onDone: () => void; tickets?: any; onTickets?: () => void }) {
   const key = stepKey(record.phase, record.id, slotOf(record));
   const reviewed = run.review?.steps?.find((x: any) => x.step === key);
   if (!["succeeded", "failed", "error"].includes(record.state)) return null;
@@ -742,6 +752,8 @@ function StepReview({ run, record, onDone }: { run: any; record: any; onDone: ()
       <ReviewNotes notes={run.review?.targets?.[`step|${key}`]} />
       <ReviewButtons runId={run.id} review={run.review} raw={record.state} current={reviewed?.state ?? record.state}
         target={{ kind: "step", step: key }} label={`step ${key}`} onDone={onDone} />
+      {["failed", "error"].includes(reviewed?.state ?? record.state) &&
+        <TargetIssues runId={run.id} tickets={tickets} target={{ kind: "step", step: key }} label={`step ${key}`} onChanged={() => onTickets?.()} />}
     </div>
   );
 }

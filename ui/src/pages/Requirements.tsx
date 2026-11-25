@@ -19,6 +19,7 @@ import { htmlToText, RichText } from "../richtext";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { get, url, useResource } from "../api";
 import { createFile } from "../editor/Session";
+import { IssueBadge, RequirementIssues } from "./Tickets";
 import { attempt, classes, Markdown, notify, openInNewTab, Spinner } from "../util";
 import { NavIcon } from "../navicons";
 
@@ -112,8 +113,11 @@ const FOLD_OVER = 5;     // a path with more requirements than this starts folde
 
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
 
-export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
+export function CoverageView({ data, node = "", children = true, showTests = true, sid, issues }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string;
+  issues?: Record<string, any[]> }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [onlyIssues, setOnlyIssues] = useState(false);       // only the requirements an open issue is about
+  const openIssues = (key: string) => (issues?.[key] || []).filter((e: any) => e.issue?.state === "open").length;
   const [tag, setTag] = useState("");                       // only the requirements with this tag (or dynamic tag)
   const [search, setSearch] = useState("");                 // only the requirements holding these words (id, title, texts, path, tags)
   // the paths folded or unfolded by a click; else a path of more than FOLD_OVER requirements is folded (not while filtering)
@@ -131,10 +135,11 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
   }, [inNode]);
   const rows: any[] = useMemo(() => {
     const words = search.toLowerCase().split(/\s+/).filter(Boolean);
-    return inNode.filter((r: any) => (!tag || (tag.startsWith("~") ? (r.dynamic_tags || []).includes(tag.slice(1)) : (r.tags || []).includes(tag)))
+    return inNode.filter((r: any) => (!onlyIssues || openIssues(r.key) > 0) && (!tag || (tag.startsWith("~") ? (r.dynamic_tags || []).includes(tag.slice(1)) : (r.tags || []).includes(tag)))
       && (!words.length || ((text) => words.every((w) => text.includes(w)))(
         [r.key, r.title, htmlToText(String(r.description || "")), r.rationale, r.path, ...(r.tags || []), ...(r.dynamic_tags || [])].join(" ").toLowerCase())));
-  }, [inNode, tag, search]);
+  }, [inNode, tag, search, onlyIssues, issues]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const withIssues = useMemo(() => inNode.filter((r: any) => openIssues(r.key) > 0).length, [inNode, issues]);   // eslint-disable-line react-hooks/exhaustive-deps
   const groups = useMemo(() => {
     const out: [string, any[]][] = [];
     for (const r of rows) {
@@ -153,6 +158,8 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
         <input type="search" className="cov-search" placeholder="Search the requirements: id, title, text, path, tag…" value={search}
           onChange={(e) => setSearch(e.target.value)} title="Only the requirements holding all these words" />
         {search && <span className="muted">{rows.length} of {inNode.length}</span>}
+        {withIssues > 0 && <button className={classes("dyn-tag", onlyIssues && "selected")} onClick={() => setOnlyIssues(!onlyIssues)}
+          title="Only the requirements an open issue is about: by the failure it is bound to, or naming them (tickets.yml)">🐞 with open issues {withIssues}</button>}
       {tagCounts.length > 0 && (<>
           <select value={tag} onChange={(e) => setTag(e.target.value)} title="Only the requirements with this tag (⚑: a dynamic tag, found in their texts)">
             <option value="">All tags</option>
@@ -196,13 +203,14 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono nowrap">{r.key}</td>
                           {(() => { const title = r.title || htmlToText(String(r.description || "")).split("\n")[0];
-                            return <td className="cov-title" title={title}>{title}</td>; })()}
+                            return <td className="cov-title" title={title}><IssueBadge entries={issues?.[r.key]} /> {title}</td>; })()}
                           <td className="cov-tags-cell">{(r.dynamic_tags || []).map((t: string) => <span key={t} className="dyn-tag" style={tagStyle(colors[t])} title="dynamic tag: its texts hold one of its words">⚑ {t}</span>)}
                             {(r.tags || []).map((t: string) => <span key={t} className="tag">{t}</span>)}</td>
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>
-                        {open === r.key && <tr className="cov-detail"><td colSpan={4 + tests.length}><RequirementDetail req={r} sid={sid} colors={colors} /></td></tr>}
+                        {open === r.key && <tr className="cov-detail"><td colSpan={4 + tests.length}><RequirementDetail req={r} sid={sid} colors={colors} />
+                          <RequirementIssues entries={issues?.[r.key]} /></td></tr>}
                       </Fragment>
                     ))}
                   </Fragment>
@@ -463,7 +471,8 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
               </select></label>
               {node && <label title="The requirements of the descendants of the node too"><input type="checkbox" checked={children} onChange={(e) => setChildren(e.target.checked)} /> with sub-nodes</label>}
             </div>
-            <CoverageView data={d.coverage} node={node} children={node ? children : true} sid={sid} />
+            {Object.entries(d.issues_errors || {}).map(([n, e]: any) => <div key={n} className="warn small">issues of {n} not read: {e}</div>)}
+            <CoverageView data={d.coverage} node={node} children={node ? children : true} sid={sid} issues={d.issues} />
           </div>
         </div>
       )}

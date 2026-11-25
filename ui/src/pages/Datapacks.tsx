@@ -19,6 +19,7 @@ import { del, get, post, url, useResource } from "../api";
 import { GenerateDatapack } from "../editor/Generate";
 import { CampaignsTab } from "./Campaigns";
 import { RequirementsTab } from "./Requirements";
+import { TicketsTab } from "./Tickets";
 import { NavIcon } from "../navicons";
 import { KeysExplorer } from "../editor/KeysExplorer";
 import { CredentialsFields, RepoPushDialog, splitPatch, useCredentials } from "../editor/Publish";
@@ -72,7 +73,7 @@ export function DatapacksPage({ route }: { route: Route }) {
   const selected = route.query.get("def") || testdefs[0]?.path || null;
   const [config, setConfig] = useState<string | null>(null);
   useEffect(() => setConfig(null), [selected]);
-  const view = ["campaigns", "requirements"].includes(route.query.get("view") || "") ? route.query.get("view") as string : "testdefs";
+  const view = ["campaigns", "requirements", "tickets"].includes(route.query.get("view") || "") ? route.query.get("view") as string : "testdefs";
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
 
   if (home.error) return <div className="page"><div className="error-box">{home.error}</div></div>;
@@ -106,6 +107,9 @@ export function DatapacksPage({ route }: { route: Route }) {
           <button className={classes(view === "requirements" && "selected")} onClick={() => setQuery("view", "requirements")}
             title="The requirements of this repository (requirements.yml) and how its test definitions cover them">
             <NavIcon name="requirements" size={18} />Requirements</button>
+          <button className={classes(view === "tickets" && "selected")} onClick={() => setQuery("view", "tickets")}
+            title="Where the issues of this repository go (tickets.yml: GitLab, GitHub, Jira), their issues and the requirements they are about">
+            <NavIcon name="tickets" size={18} />Tickets</button>
         </div>
       )}
       {view === "testdefs" && <Markdown text={INTRO} className="intro" />}
@@ -118,6 +122,7 @@ export function DatapacksPage({ route }: { route: Route }) {
       {repo && !ctx && !error && <Spinner className="block" text="Reading the test definitions…" />}
       {ctx && sid && view === "campaigns" && <CampaignsTab sid={sid} ctx={ctx} route={route} reread={reread} />}
       {ctx && sid && view === "requirements" && <RequirementsTab sid={sid} ctx={ctx} />}
+      {ctx && sid && view === "tickets" && <TicketsTab sid={sid} />}
       {ctx && view === "testdefs" && (
         <div className="datapacks">
           <nav className="testdef-list">

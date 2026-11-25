@@ -226,6 +226,22 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         a requirement opened in the Requirements tab."""
         return await run(editor.requirement_item, session(sid), source, id)
 
+    @app.get("/edit/sessions/{sid}/tickets")
+    async def tickets(sid: str):
+        """The tickets sources of a tests repository (tickets.yml, SPEC §11.3), and the backends registered."""
+        return await run(editor.tickets, session(sid))
+
+    @app.get("/edit/sessions/{sid}/tickets/issues")
+    async def tickets_issues(sid: str, source: str | None = None, state: str = "open", q: str = "", refresh: bool = False):
+        """The issues of its sources (state open, closed or all), each with the requirements it names and the results
+        it is bound to."""
+        return await run(editor.tickets_issues, session(sid), source, None if state == "all" else state, q, refresh)
+
+    @app.post("/edit/sessions/{sid}/tickets/test")
+    async def tickets_test(sid: str, body: dict):
+        """Read the open issues of one source: count, first ones, time, or the error; each call (credentials masked)."""
+        return await run(editor.tickets_test, session(sid), str(body.get("source") or ""))
+
     @app.post("/edit/sessions/{sid}/requirements/test")
     async def requirements_test(sid: str, body: dict):
         """Read one source of a sources file (`path`, `source`; `spec`: the source as being edited, else as saved):
