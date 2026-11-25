@@ -51,11 +51,11 @@ MASK = "***"
 TIMEOUT = 20.0
 TRACE_CALLS = 30
 TRACE_ANSWER = 4000
-MAX_PAGES = 20
+MAX_PAGES = 100                              # of 100 issues: 10,000 at most per list
 
 
 class IssueBackend:
-    """Access to the issues of one project of a issue tracker (read-only unless it has the create capability)."""
+    """Access to the issues of one project of an issue tracker (read-only unless it has the create capability)."""
 
     capabilities: frozenset[str] = frozenset()
     description: str = ""
@@ -210,7 +210,7 @@ _backends: dict[str, BackendFactory] = {}
 
 
 def register_issue_backend(name: str, factory: BackendFactory) -> None:
-    """Declare a issues backend, usable as ``backend: <name>`` in issues.yml (case-insensitive; a name registered
+    """Declare an issues backend, usable as ``backend: <name>`` in issues.yml (case-insensitive; a name registered
     again replaces it, the built-in ones included)."""
     _backends[name.lower()] = factory
 

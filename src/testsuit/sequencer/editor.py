@@ -37,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 import threading
 import uuid
@@ -63,6 +64,7 @@ from testsuit.sequencer.util import SequencerError, now
 WORK_DIRS = (".current_datapack/", ".work/")     # what the datapack tool writes next to the definitions: never committed
 SKIP_DIRS = {".git", ".work", ".current_datapack", "__pycache__", "node_modules", ".pytest_cache", ".venv"}
 MAX_FILES = 2000
+ISSUE_PAGES_TTL = 300                            # seconds an issue list being paged through is kept
 TEST_LIMIT = 30.0                                  # seconds: a test of a requirements source (Editor) stops calling after it
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -473,6 +475,7 @@ class Editor:
         self.seq = seq
         self.jobs: dict[str, dict] = {}                 # datapack generations in the background
         self.reqs_progress: dict[str, Any] = {}         # session id -> the progress of its latest requirements reading
+        self._issue_pages: dict[tuple, tuple] = {}      # the issue lists being paged through (issues_list)
         self.base = seq.config.root / "editor"
         self.base.mkdir(parents=True, exist_ok=True)
         self.askpass = self.base / "askpass.sh"
@@ -1424,7 +1427,7 @@ class Editor:
         return []
 
     def check_issues(self, session: EditSession, rel: str, text: str) -> list[dict]:
-        """A issues file reads (SPEC §11.3); a credential not readable here, or an unknown backend, is a warning."""
+        """An issues file reads (SPEC §11.3); a credential not readable here, or an unknown backend, is a warning."""
         from testsuit.issues.model import IssueError
         from testsuit.issues.sources import IssueSources
         path = self.path(session, rel)
@@ -1480,36 +1483,63 @@ class Editor:
         return out
 
     def issues_list(self, session: EditSession, source: str | None = None, state: str | None = "open",
-                       text: str = "", refresh: bool = False) -> dict:
-        """The issues of the issue sources (one, or all), each with the requirements it names and the results it is
-        bound to (the sequencer's bindings)."""
-        from testsuit.issues.results import RequirementMatcher
+                    text: str = "", refresh: bool = False, find: str = "", only: str = "", offset: int = 0,
+                    limit: int = 100) -> dict:
+        """A page of the issues of the issue sources (one, or all), newest first, each with the requirements it names
+        and the results it is bound to (the sequencer's bindings). ``text``: searched by the tools; ``find``: words
+        of the key, title or labels, among those listed; ``only``: ``reqs`` (naming requirements) or ``bound``. The
+        lists are cached a few minutes, so that paging through thousands of issues reads them once."""
         from testsuit.issues.model import IssueError
         file, sources = self._issue_sources(session)
         if file is None:
             raise SequencerError("no issues.yml in this repository")
-        known = self._known_requirements(session)
-        matcher = RequirementMatcher(known)
-        bound: dict[str, list[dict]] = {}
-        for b in self.seq.issues.bindings():
-            bound.setdefault(str((b.get("issue") or {}).get("key")), []).append(
-                {"id": b["id"], "testdef": b.get("testdef"), "target": b.get("target"), "run": b.get("run"), "by": b.get("by")})
-        out: dict[str, Any] = {"issues": [], "errors": {}}
-        for name in [source] if source else sources.names:
+        names = [source] if source else sources.names
+        for name in names:
             if name not in sources.names:
                 raise SequencerError(f"unknown issue source '{name}' (sources: {', '.join(sources.names)})")
-            try:
-                found = sources.backend(name).search(text=text, state=state, limit=200) if text else \
-                    self.seq.issues.listed(sources, name, state, refresh, limit=500)
-            except IssueError as e:
-                out["errors"][name] = str(e)
-                continue
-            rules = sources.req_rules(name)
-            for i in found:
-                out["issues"].append({**i.as_dict(), "source": name, "key": f"{name}#{i.id}",
-                                      "requirements": matcher.match(i, rules), "bindings": bound.get(f"{name}#{i.id}", [])})
-        out["issues"].sort(key=lambda i: str(i.get("updated") or ""), reverse=True)
-        return out
+        key = (session.id, str(file), tuple(names), str(state), text)
+        hit = self._issue_pages.get(key)
+        if hit is None or refresh or time.monotonic() - hit[0] > ISSUE_PAGES_TTL or hit[2] != file.stat().st_mtime:
+            from testsuit.issues.results import RequirementMatcher
+            matcher = RequirementMatcher(self._known_requirements(session))
+            bound: dict[str, list[dict]] = {}
+            for b in self.seq.issues.bindings():
+                bound.setdefault(str((b.get("issue") or {}).get("key")), []).append(
+                    {"id": b["id"], "testdef": b.get("testdef"), "target": b.get("target"), "run": b.get("run"),
+                     "by": b.get("by")})
+            rows: list[dict] = []
+            errors: dict[str, str] = {}
+            for name in names:
+                try:
+                    found = sources.backend(name).search(text=text, state=state, limit=1000) if text else \
+                        self.seq.issues.listed(sources, name, state, refresh)
+                except IssueError as e:
+                    errors[name] = str(e)
+                    continue
+                rules = sources.req_rules(name)
+                for i in found:
+                    rows.append({**i.as_dict(), "source": name, "key": f"{name}#{i.id}",
+                                 "requirements": matcher.match(i, rules), "bindings": bound.get(f"{name}#{i.id}", [])})
+            rows.sort(key=lambda i: str(i.get("updated") or ""), reverse=True)
+            hit = (time.monotonic(), (rows, errors), file.stat().st_mtime)
+            self._issue_pages[key] = hit
+            while len(self._issue_pages) > 20:                  # the oldest lists go
+                self._issue_pages.pop(next(iter(self._issue_pages)))
+        rows, errors = hit[1]
+        shown = rows
+        words = [w for w in str(find or "").lower().split() if w]
+        if words:
+            shown = [i for i in shown if all(w in " ".join([i["key"], i.get("title") or "", *(i.get("labels") or []),
+                                                            *(i.get("assignees") or [])]).lower() for w in words)]
+        if only == "reqs":
+            shown = [i for i in shown if i["requirements"]]
+        elif only == "bound":
+            shown = [i for i in shown if i["bindings"]]
+        offset = max(0, int(offset or 0))
+        limit = min(500, max(1, int(limit or 100)))
+        return {"issues": shown[offset:offset + limit], "total": len(shown), "offset": offset, "limit": limit,
+                "listed": len(rows), "with_requirements": sum(1 for i in rows if i["requirements"]),
+                "bound": sum(1 for i in rows if i["bindings"]), "errors": errors}
 
     def issues_test(self, session: EditSession, source: str, data: Any = None) -> dict:
         """Read the open issues of one source, as the Issues subtab would: how many, the first ones, how long it took,

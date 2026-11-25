@@ -13,7 +13,7 @@
 
 """Issues bound to the results of the sequencer's runs (SPEC section 11.3).
 
-A **binding** ties an issue of a issue source (testsuit.issues) to a target of a test definition: a check, a step
+A **binding** ties an issue of an issue source (testsuit.issues) to a target of a test definition: a check, a step
 or the verdict, by its fingerprint (testsuit.issues.results.fingerprint), so that it is a **known issue** of every
 run of it that fails there, until it is unbound. Bindings are the sequencer's, not the tests repository's: they
 change as issues are opened and closed, without commits. ``storage.results/issues/bindings.yml``::
@@ -29,6 +29,7 @@ minutes (a cache), and kept in the bindings as last seen.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -46,6 +47,7 @@ from testsuit.issues.sources import SNAPSHOT, IssueSources
 log = logging.getLogger("testsuit.sequencer")
 TTL = 300.0                                  # seconds an issue's state is taken as known
 BINDINGS = "bindings.yml"
+LIST_LIMIT = 10000                               # issues of a source listed at most
 
 
 class Issues:
@@ -55,7 +57,7 @@ class Issues:
         self.seq = seq
         self._lock = threading.Lock()
         self._issues: dict[tuple[str, str], tuple[float, Issue | None]] = {}     # (backend identity, id)
-        self._lists: dict[tuple[str, str], tuple[float, list[Issue]]] = {}     # (backend identity, state)
+        self._lists: dict[tuple[str, str, str], tuple[float, list[Issue]]] = {}   # (backend identity, state, filter)
         self._sources: dict[str, IssueSources | None] = {}                     # run id
 
     # ── bindings ───────────────────────────────────────────────────────
@@ -126,10 +128,11 @@ class Issues:
         return found
 
     def listed(self, sources: IssueSources, source: str, state: str | None = OPEN, refresh: bool = False,
-               limit: int = 1000) -> list[Issue]:
+               limit: int = LIST_LIMIT) -> list[Issue]:
         """The issues of a source (open ones: the default), cached."""
         backend = sources.backend(source)
-        key = (backend.identity, str(state))
+        f = sources.filters.get(source)
+        key = (backend.identity, str(state), json.dumps(f.spec if f else {}, sort_keys=True, default=str))
         hit = self._lists.get(key)
         if hit and not refresh and time.monotonic() - hit[0] < TTL:
             return [_renamed(i, source) for i in hit[1]]

@@ -485,3 +485,143 @@ def test_issues_in_the_editor(tmp_path, tracker):
     assert "option 'project' is missing" in bad["error"]
     with pytest.raises(Exception, match="no issues.yml"):
         repos.editor.issues_test(session, "rm")
+
+
+# ── classes, variables, filters ───────────────────────────────────────────────
+
+def _issue(**k) -> Issue:
+    return Issue(**{"source": "x", "id": "1", **k})
+
+
+def test_issue_filter():
+    from datetime import datetime, timezone
+
+    from testsuit.issues.filter import IssueFilter
+    now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+    f = IssueFilter({"state": "open", "labels": ["Bench"], "any_labels": ["bug", "drift"], "not_labels": ["wontfix"],
+                     "text": "speed|counter", "not_text": "duplicate of", "title": r"^\[tsq\]", "projects": ["fw/*"],
+                     "authors": ["Alice"], "assignees": ["carol"], "created_after": "2026-01-01", "updated_after": "90d"})
+    ok = dict(title="[tsq] speed over limit", state="open", labels=["bench", "Bug"], project="fw/core", author="alice",
+              assignees=["carol"], created="2026-03-01T10:00:00Z", updated="2026-11-01T10:00:00Z")
+    assert f and f.post and f.match(_issue(**ok), now)
+    for change in ({"state": "closed"}, {"labels": ["Bug"]}, {"labels": ["bench"]}, {"labels": ["bench", "bug", "wontfix"]},
+                   {"title": "[tsq] noise"}, {"body": "duplicate of #3"}, {"title": "speed over limit"}, {"project": "hw/core"},
+                   {"author": "bob"}, {"assignees": []}, {"created": "2025-12-31"}, {"updated": "2026-05-01T00:00:00Z"},
+                   {"updated": ""}):
+        assert not f.match(_issue(**{**ok, **change}), now), change
+    assert f.match(_issue(**{**ok, "title": "[TSQ] Counter wraps"}), now)        # case independent
+    # state and labels alone: asked of the tool, nothing applied after
+    g = IssueFilter({"state": "closed", "labels": ["x"]})
+    assert g and not g.post and g.state_for("open") is False and g.state_for(None) == "closed" and g.state_for("closed") == "closed"
+    assert not IssueFilter(None) and IssueFilter({"state": "all"}).state_for("open") == "open"
+    for spec, message in (({"text": "("}, "not a regular expression"), ({"updated_after": "soon"}, "a time ago"),
+                          ({"colour": 1}, "unknown key"), ({"state": "done"}, "open, closed or all"), ([], "a mapping")):
+        with pytest.raises(IssueError, match=message):
+            IssueFilter(spec)
+    h = IssueFilter({"created_before": "2w", "updated_before": "2026-06-01 12:00"})
+    assert h.match(_issue(created="2026-11-01", updated="2026-06-01T11:00:00Z"), now)
+    assert not h.match(_issue(created="2026-11-20", updated="2026-06-01T11:00:00Z"), now)
+
+
+def test_issue_classes():
+    data = {"classes": {"corp": {"backend": "gitlab", "description": "the company GitLab",
+                                 "options": {"url": "https://gitlab.corp", "project": "{{ team }}/bench"},
+                                 "credentials": {"token": "env:GITLAB_TOKEN_{{ team | upper }}"}, "labels": ["tsq", "{{ team }}"],
+                                 "filter": {"labels": ["{{ team }}"], "updated_after": "{{ since }}"},
+                                 "vars": {"team": {"mandatory": True, "help": "its team"}, "since": {"value": "1y"}}}},
+            "sources": {"fw": {"class": "corp", "label": "Firmware {{ team }}", "vars": {"team": "fw"}},
+                        "hw": {"class": "corp", "vars": {"team": "hw", "since": "90d"}},
+                        "own": {"backend": "github", "options": {"repo": "{{ org }}/x"}, "vars": {"org": "acme"},
+                                "filter": {"not_labels": ["{{ org }}-noise"]}}}}
+    s = IssueSources(data)
+    assert s.specs["fw"]["options"] == {"url": "https://gitlab.corp", "project": "fw/bench"}
+    assert s.specs["fw"]["credentials"] == {"token": "env:GITLAB_TOKEN_FW"} and s.specs["fw"]["labels"] == ["tsq", "fw"]
+    assert s.label("fw") == "Firmware fw" and s.filters["fw"].spec == {"labels": ["fw"], "updated_after": "1y"}
+    assert s.filters["hw"].spec["updated_after"] == "90d" and s.specs["own"]["options"]["repo"] == "acme/x"
+    assert s.filters["own"].not_labels == {"acme-noise"} and s.vars("hw") == {"team": "hw", "since": "90d"}
+    card = s.card("fw")
+    assert card["class"] == "corp" and card["vars"] == {"team": "fw", "since": "1y"} and card["filter"]["labels"] == ["fw"]
+    assert s.raw["fw"] == data["sources"]["fw"]
+    bad = [({"x": {"class": "corp"}}, "mandatory variable 'team' has no value"),
+           ({"x": {"class": "nope"}}, "unknown class 'nope'"),
+           ({"x": {"class": "corp", "vars": {"team": "a", "colour": 1}}}, "colour: not a variable of class 'corp'"),
+           ({"x": {"class": "corp", "vars": {"team": "a"}, "options": {}}}, "a source of a class sets only its label"),
+           ({"x": {"backend": "gitlab", "options": {"project": "{{ nope }}"}}}, "nope"),
+           ({"x": {"backend": "gitlab", "options": {"project": "a/b"}, "filter": {"text": "("}}}, "not a regular expression")]
+    for sources, message in bad:
+        with pytest.raises(IssueError, match=message):
+            IssueSources({"classes": data["classes"], "sources": sources})
+    with pytest.raises(IssueError, match="names its 'backend'"):
+        IssueSources({"classes": {"c": {"vars": {}}}, "sources": {"x": {"class": "c"}}})
+
+
+def test_filtered_search(tracker):
+    issues = tracker.issues["gitlab"]
+    for n, (title, labels, state, updated) in enumerate([
+            ("speed over limit", ["bench"], "opened", "2026-11-20T10:00:00Z"),
+            ("counter wraps", ["bench", "wontfix"], "opened", "2026-11-21T10:00:00Z"),
+            ("old speed issue", ["bench"], "opened", "2024-01-01T10:00:00Z"),
+            ("speed when closed", ["bench"], "closed", "2026-11-22T10:00:00Z"),
+            ("docs typo", ["docs"], "opened", "2026-11-23T10:00:00Z")], start=1):
+        issues.append({"iid": n, "title": title, "description": "", "state": state, "labels": labels,
+                       "web_url": f"{tracker.url}/test/bench/-/issues/{n}", "assignees": [], "author": {"username": "bot"},
+                       "references": {"full": f"test/bench#{n}"}, "updated_at": updated, "created_at": updated})
+    cfg = _issues_cfg(tracker.url)
+    cfg["sources"]["bench"]["filter"] = {"labels": ["bench"], "not_labels": ["wontfix"], "updated_after": "180d"}
+    s = IssueSources(cfg)
+    tracker.calls.clear()
+    assert [i.id for i in s.backend("bench").search(state=None)] == ["4", "1"]
+    assert [i.id for i in s.backend("bench").search(state="open")] == ["1"]
+    assert [i.id for i in s.backend("bench").search("speed", state=None, limit=1)] == ["4"]
+    asked = [c[2] for c in tracker.calls if c[1].endswith("/issues")]
+    assert asked[0]["labels"] == "bench" and asked[1]["state"] == "opened"
+    cfg["sources"]["bench"]["filter"] = {"state": "closed"}
+    s = IssueSources(cfg)
+    assert s.backend("bench").search(state="open") == [] and [i.id for i in s.backend("bench").search(state=None)] == ["4"]
+    assert s.backend("bench").get(["5"])["5"].title == "docs typo"          # by its reference: whatever the filter
+
+
+def test_issues_file_former_name(tmp_path):
+    """tickets.yml (the former name) still reads, and the bindings of results/tickets move to results/issues."""
+    from testsuit.issues.sources import find_issues_file, is_issues_file
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "tickets.yml").write_text("sources: {}\n")
+    assert find_issues_file(tmp_path) == tmp_path / "tickets.yml"
+    assert is_issues_file("tickets.yml", {"sources": {}}) and is_issues_file("issues.yml", {"sources": {}})
+    (tmp_path / "issues.yml").write_text("sources: {}\n")
+    assert find_issues_file(tmp_path) == tmp_path / "issues.yml"
+
+
+def test_issues_list_pages(tmp_path, tracker):
+    """The Editor's issues list: pages of a list read once, found by words, by requirements, counted."""
+    from editor_t import Repos
+    repos = Repos(tmp_path)
+    session = repos.editor.open("workspace0")
+    for n in range(1, 251):
+        tracker.issues["redmine"].append({"id": n, "subject": f"issue {n}" + (" drift" if n % 10 == 0 else ""),
+                                          "description": "", "status": {"is_closed": False},
+                                          "updated_on": f"2026-11-{1 + n // 10:02d}T10:00:{n % 60:02d}Z"})
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    page = repos.editor.issues_list(session, limit=100)
+    # two sources of the same project, filtered differently: each its own list
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {
+        n: {"backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"},
+            **({"filter": {"title": "drift"}} if n == "drifts" else {})} for n in ("rm", "drifts")}}))
+    assert repos.editor.issues_list(session, source="drifts")["total"] == 25
+    assert repos.editor.issues_list(session, source="rm")["total"] == 250
+    (session.folder / "issues.yml").write_text(yaml.safe_dump({"sources": {"rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench"}, "credentials": {"api_key": "env:ISSUES_TOKEN"}}}}))
+    page = repos.editor.issues_list(session, limit=100)
+    assert (page["total"], page["listed"], len(page["issues"]), page["offset"], page["errors"]) == (250, 250, 100, 0, {})
+    reads = len(tracker.calls)
+    last = repos.editor.issues_list(session, offset=200, limit=100)
+    assert len(last["issues"]) == 50 and len(tracker.calls) == reads            # the list is read once
+    keys = [i["key"] for i in page["issues"] + repos.editor.issues_list(session, offset=100)["issues"] + last["issues"]]
+    assert len(set(keys)) == 250
+    found = repos.editor.issues_list(session, find="DRIFT")
+    assert found["total"] == 25 and all("drift" in i["title"] for i in found["issues"])
+    assert repos.editor.issues_list(session, only="bound")["total"] == 0
+    assert repos.editor.issues_list(session, limit=10000)["limit"] == 500
+    repos.editor.issues_list(session, refresh=True)
+    assert len(tracker.calls) > reads

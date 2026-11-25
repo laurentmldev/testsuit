@@ -19,16 +19,21 @@ root, as ``requirements.yml``)::
     default: bench                         # where an issue goes, and the source of a reference without prefix
     sources:
       bench:
-        backend: gitlab                    # gitlab, github, jira, or a plugin's
+        backend: gitlab                    # gitlab, github, jira, redmine, or a plugin's
         label: Bench                       # OPTIONAL, shown instead of the name
         options: {url: https://gitlab.example.com, project: test/bench}
         credentials: {token: env:GITLAB_TOKEN}       # env:<VARIABLE> or file:<path>, never written here
         labels: [tsq]                      # OPTIONAL: given to the issues created
+        filter: {labels: [bench], not_labels: [wontfix], updated_after: 90d}   # OPTIONAL: the issues it keeps
       firmware: {backend: gitlab, options: {url: https://gitlab.example.com, project: fw/controller},
                  credentials: {token: env:GITLAB_TOKEN}}
       infra: {backend: gitlab, options: {group: lab-infra}, credentials: {token: file:/run/secrets/gitlab}}
       jira: {backend: jira, options: {url: https://acme.atlassian.net, project: BENCH},
              credentials: {email: env:JIRA_EMAIL, token: env:JIRA_TOKEN}}
+      hw: {class: corp, label: Hardware, vars: {team: hw}}        # a source of a class: its label and variables
+    classes:                               # OPTIONAL: what several sources share, {{ variables }} in it (Jinja2)
+      corp: {backend: gitlab, options: {url: https://gitlab.example.com, project: "{{ team }}/bench"},
+             credentials: {token: env:GITLAB_TOKEN}, vars: {team: {mandatory: true}}}
     routes:                                # where a new issue goes: the first that matches (globs), else default
       - {source: firmware, step: "firmware:*"}       # on: testdef, step (<phase>:<step>), criteria, check
       - {source: firmware, criteria: "criteria/firmware/*"}
@@ -53,6 +58,7 @@ import yaml
 
 from testsuit.credentials import CredentialError, is_reference, resolve_secret
 from testsuit.issues.backend import IssueBackend, create_issue_backend
+from testsuit.issues.filter import IssueFilter
 from testsuit.issues.model import IssueError
 
 ISSUES_FILE = "issues.yml"
@@ -80,38 +86,87 @@ def is_issues_file(name: str, data: Any) -> bool:
     return name in (ISSUES_FILE, OLD_FILE) and isinstance(data, dict) and isinstance(data.get("sources"), dict)
 
 
+SOURCE_KEYS = {"backend", "label", "options", "credentials", "labels", "requirements", "filter", "vars"}
+CLASS_KEYS = {"backend", "label", "description", "options", "credentials", "labels", "requirements", "filter", "vars"}
+
+
+def _var(spec: Any, where: str, declaration: bool = False) -> dict[str, Any]:
+    """A variable: a value, or {value, mandatory} (and help, for a class variable)."""
+    if not isinstance(spec, dict):
+        return {"value": spec, "mandatory": False}
+    bad = sorted(set(spec) - ({"value", "mandatory", "help"} if declaration else {"value", "mandatory"}))
+    if bad:
+        raise IssueError(f"{where}: unknown key(s) {', '.join(bad)} (value, mandatory{', help' if declaration else ''})")
+    return {"value": spec.get("value"), "mandatory": bool(spec.get("mandatory"))}
+
+
+def _render(value: Any, variables: Mapping[str, Any], where: str) -> Any:
+    """A value with the variables of its source put in ({{ name }}, Jinja2; one expression keeps its type)."""
+    if isinstance(value, dict):
+        return {k: _render(v, variables, where) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_render(v, variables, where) for v in value]
+    if not isinstance(value, str) or ("{{" not in value and "{%" not in value):
+        return value
+    import jinja2
+    import jinja2.sandbox
+    env = jinja2.sandbox.SandboxedEnvironment(undefined=jinja2.StrictUndefined)
+    try:
+        single = re.fullmatch(r"\s*\{\{(.*)\}\}\s*", value, re.S)
+        if single and "{{" not in single.group(1) and "}}" not in single.group(1):
+            result = env.compile_expression(single.group(1), undefined_to_none=False)(**variables)
+            if isinstance(result, jinja2.Undefined):
+                str(result)                      # raises: an unknown variable
+            return result
+        return env.from_string(value).render(**variables)
+    except jinja2.UndefinedError as e:
+        raise IssueError(f"{where}: {e} (the variables of this source: {', '.join(variables) or 'none'})") from e
+    except jinja2.TemplateError as e:
+        raise IssueError(f"{where}: {e}") from e
+
+
+FILTER_SCAN = 5000                           # issues read at most to find those a filter keeps
+
+
+def _filtered(backend: IssueBackend, f: IssueFilter) -> None:
+    """Make a backend's search keep only the issues of its source's filter (its state and labels asked of the tool)."""
+    inner = backend.search
+
+    def search(text: str = "", state: str | None = "open", labels=(), limit: int = 100):
+        state = f.state_for(state)
+        if state is False:
+            return []
+        asked = list(dict.fromkeys([*labels, *f.labels]))
+        found = inner(text=text, state=state, labels=asked, limit=max(limit, FILTER_SCAN) if f.post else limit)
+        return [i for i in found if f.match(i)][:limit]
+    backend.search = search                      # type: ignore[method-assign]
+
+
 class IssueSources:
-    """The sources of a issues file, their backends created on first use."""
+    """The sources of an issues file, their backends created on first use."""
 
     def __init__(self, data: Any, base_dir: Path | None = None, where: str = ISSUES_FILE) -> None:
         self.where = where
         self.base_dir = base_dir
         if not isinstance(data, dict):
             raise IssueError(f"{where}: a mapping is expected")
-        unknown = sorted(set(data) - {"default", "sources", "routes", "requirements"})
+        unknown = sorted(set(data) - {"default", "sources", "classes", "routes", "requirements"})
         if unknown:
-            raise IssueError(f"{where}: unknown key(s) {', '.join(unknown)} (default, sources, routes, requirements)")
+            raise IssueError(f"{where}: unknown key(s) {', '.join(unknown)} (default, sources, classes, routes, "
+                             "requirements)")
         specs = data.get("sources")
         if not isinstance(specs, dict) or not specs:
             raise IssueError(f"{where}: 'sources' is a mapping of sources by name")
+        classes = data.get("classes") or {}
+        if not isinstance(classes, dict):
+            raise IssueError(f"{where}: 'classes' is a mapping of classes by name")
         self.data = data
-        self.specs: dict[str, dict] = {}
+        self.classes: dict[str, dict] = {str(n): self._class_checked(str(n), c) for n, c in classes.items()}
+        self.raw: dict[str, dict] = {}           # the sources as written
+        self.specs: dict[str, dict] = {}         # as used: of their class, variables rendered
+        self.filters: dict[str, IssueFilter] = {}
         for name, spec in specs.items():
-            name = str(name)
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
-                raise IssueError(f"{where}: source '{name}': not a name (letters, digits, _ and -)")
-            if not isinstance(spec, dict) or not spec.get("backend"):
-                raise IssueError(f"{where}: source '{name}' names its 'backend'")
-            bad = sorted(set(spec) - {"backend", "label", "options", "credentials", "labels", "requirements"})
-            if bad:
-                raise IssueError(f"{where}: source '{name}': unknown key(s) {', '.join(bad)}")
-            for key, value in (spec.get("credentials") or {}).items():
-                if not is_reference(str(value)):
-                    raise IssueError(f"{where}: source '{name}': credential '{key}' must come from the environment "
-                                      "('env:<VARIABLE>') or a file ('file:<path>'), never be written in the file")
-            self._auth(name, spec)
-            self._req_spec(spec.get("requirements"), f"source '{name}'")
-            self.specs[name] = spec
+            self._add(str(name), spec)
         self.default = str(data.get("default") or next(iter(self.specs)))
         if self.default not in self.specs:
             raise IssueError(f"{where}: default source '{self.default}' is not one of its sources")
@@ -126,6 +181,109 @@ class IssueSources:
                 raise IssueError(f"{where}: route {i}: unknown key(s) {', '.join(bad)} ({', '.join(ROUTE_KEYS)})")
         self._req_spec(data.get("requirements"), "requirements")
         self._backends: dict[str, IssueBackend] = {}
+
+    def _add(self, name: str, spec: Any) -> None:
+        where = self.where
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+            raise IssueError(f"{where}: source '{name}': not a name (letters, digits, _ and -)")
+        if isinstance(spec, dict) and spec.get("class"):
+            used = self._of_class(name, spec)
+        else:
+            if not isinstance(spec, dict) or not spec.get("backend"):
+                raise IssueError(f"{where}: source '{name}' names its 'backend' (or its 'class')")
+            bad = sorted(set(spec) - SOURCE_KEYS)
+            if bad:
+                raise IssueError(f"{where}: source '{name}': unknown key(s) {', '.join(bad)}")
+            used = dict(spec)
+            if used.get("vars") is not None and not isinstance(used["vars"], dict):
+                raise IssueError(f"{where}: source '{name}': 'vars' is a mapping of names to values")
+            used["vars"] = {str(k): _var(v, f"{where}: source '{name}': variable '{k}'")
+                            for k, v in (spec.get("vars") or {}).items()}
+        self._check_credentials(used.get("credentials"), f"source '{name}'")
+        used = self._rendered(name, used)
+        self._auth(name, used)
+        self._req_spec(used.get("requirements"), f"source '{name}'")
+        self.filters[name] = IssueFilter(used.get("filter"), f"{where}: source '{name}'")
+        self.raw[name] = spec
+        self.specs[name] = used
+
+    def _check_credentials(self, creds: Any, what: str) -> None:
+        if creds is not None and not isinstance(creds, dict):
+            raise IssueError(f"{self.where}: {what}: 'credentials' is a mapping of names to env:<VARIABLE> or file:<path>")
+        for key, value in (creds or {}).items():
+            if not is_reference(str(value)):
+                raise IssueError(f"{self.where}: {what}: credential '{key}' must come from the environment "
+                                 "('env:<VARIABLE>') or a file ('file:<path>'), never be written in the file")
+
+    def _class_checked(self, name: str, spec: Any) -> dict:
+        where = f"{self.where}: class '{name}'"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+            raise IssueError(f"{where}: not a name (letters, digits, _ and -)")
+        if not isinstance(spec, dict) or not spec.get("backend"):
+            raise IssueError(f"{where} names its 'backend'")
+        bad = sorted(set(spec) - CLASS_KEYS)
+        if bad:
+            raise IssueError(f"{where}: unknown key(s) {', '.join(bad)}")
+        if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
+            raise IssueError(f"{where}: 'vars' is a mapping of the class variables by name")
+        for key, decl in (spec.get("vars") or {}).items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
+                raise IssueError(f"{where}: variable '{key}' is not a name (letters, digits, _)")
+            _var(decl, f"{where}: variable '{key}'", declaration=True)
+        self._check_credentials(spec.get("credentials"), f"class '{name}'")
+        return spec
+
+    def _of_class(self, name: str, spec: dict) -> dict:
+        """A source of a class, as used: the class, with the values the source gives to its variables."""
+        where = f"{self.where}: source '{name}'"
+        cls = str(spec["class"])
+        if cls not in self.classes:
+            raise IssueError(f"{where}: unknown class '{cls}'" + (f" (classes: {', '.join(self.classes)})"
+                                                                  if self.classes else " (no 'classes' in the file)"))
+        other = sorted(set(spec) - {"class", "label", "vars"})
+        if other:
+            raise IssueError(f"{where}: {', '.join(other)}: a source of a class sets only its label and the values of "
+                             f"the class variables (to change the rest, detach it from class '{cls}' in the Editor)")
+        given = spec.get("vars") or {}
+        if not isinstance(given, dict):
+            raise IssueError(f"{where}: 'vars' is a mapping of the class variables to their values")
+        declared = self.classes[cls].get("vars") or {}
+        unknown = sorted(set(map(str, given)) - set(map(str, declared)))
+        if unknown:
+            raise IssueError(f"{where}: {', '.join(unknown)}: not a variable of class '{cls}'"
+                             + (f" (its variables: {', '.join(map(str, declared))})" if declared else " (it has none)"))
+        variables = {}
+        for key, decl in declared.items():
+            d = _var(decl, f"{self.where}: class '{cls}': variable '{key}'", declaration=True)
+            value = given.get(key, d["value"])
+            if isinstance(value, dict):
+                raise IssueError(f"{where}: variable '{key}': a value is expected (mandatory is the class's)")
+            variables[str(key)] = {"value": value, "mandatory": d["mandatory"]}
+        c = self.classes[cls]
+        label = spec.get("label") or c.get("label")
+        return {"backend": c["backend"], "class": cls, **({"label": label} if label else {}),
+                **{k: c[k] for k in ("options", "credentials", "labels", "requirements", "filter") if c.get(k) is not None},
+                "vars": variables}
+
+    def _rendered(self, name: str, spec: dict) -> dict:
+        """A source with its variables put in its label, options, credentials, labels and filter ({{ name }})."""
+        variables = {}
+        for key, v in (spec.get("vars") or {}).items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
+                raise IssueError(f"{self.where}: source '{name}': variable '{key}' is not a name (letters, digits, _)")
+            if v["mandatory"] and v["value"] in (None, ""):
+                raise IssueError(f"{self.where}: source '{name}': mandatory variable '{key}' has no value")
+            variables[key] = "" if v["value"] is None else v["value"]
+        out = dict(spec)
+        out["vars"] = variables
+        for key in ("label", "options", "credentials", "labels", "filter"):
+            if out.get(key) is not None:
+                out[key] = _render(out[key], variables, f"{self.where}: source '{name}': {key}")
+        return out
+
+    def vars(self, name: str) -> dict[str, Any]:
+        """The variables of a source, with their values."""
+        return dict(self.specs[name].get("vars") or {})
 
     def _auth(self, name: str, spec: dict) -> None:
         """A source signs in one way: its credentials are those of one sign-in method of its backend."""
@@ -182,6 +340,8 @@ class IssueSources:
             backend = create_issue_backend(str(spec["backend"]), spec.get("options") or {}, self.credentials(name),
                                             self.base_dir)
             backend.name = name
+            if self.filters[name]:
+                _filtered(backend, self.filters[name])
             self._backends[name] = backend
         return self._backends[name]
 
@@ -193,6 +353,9 @@ class IssueSources:
         from testsuit.issues.backend import _backends
         factory = _backends.get(str(spec["backend"]).lower())
         return {"name": name, "backend": str(spec["backend"]), "project": where,
+                **({"class": str(spec["class"])} if spec.get("class") else {}),
+                **({"vars": spec["vars"]} if spec.get("vars") else {}),
+                **({"filter": self.filters[name].spec} if self.filters[name] else {}),
                 **({"label": str(spec["label"])} if spec.get("label") else {}),
                 **({"url": str(options["url"])} if options.get("url") else {}),
                 **({"default": True} if name == self.default else {}),
@@ -220,7 +383,7 @@ class IssueSources:
                     found = None
                 if found:
                     return name, found
-            raise IssueError(f"{text}: not an issue of a issue source ({', '.join(self.specs)})")
+            raise IssueError(f"{text}: not an issue of an issue source ({', '.join(self.specs)})")
         prefix, sep, rest = text.partition("#")
         if sep and prefix in self.specs and rest:
             return prefix, rest

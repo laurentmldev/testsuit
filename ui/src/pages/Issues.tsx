@@ -14,7 +14,7 @@
 // Issues of issue trackers (GitLab, GitHub, Jira, Redmine) bound to test results (sequencer SPEC section 11.3): the known
 // issues of a run's failures, reporting a new issue pre-filled from a failure or binding an existing one, the
 // Issues subtab of Datapacks (the sources of issues.yml and their issues), and the issues of each requirement.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { get, post, useResource } from "../api";
 import { createFile } from "../editor/Session";
 import { Dialog, Field, Text } from "../fields";
@@ -294,9 +294,16 @@ export function IssuesTab({ sid }: { sid: string }) {
   const [state, setState] = useState("open");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  const [find, setFind] = useState("");          // words among the issues listed (the server filters, a page at a time)
+  const [found, setFound] = useState("");
+  const [only, setOnly] = useState("");
+  const [offset, setOffset] = useState(0);
   const [tests, setTests] = useState<Record<string, any>>({});
+  useEffect(() => { const t = setTimeout(() => setFound(find.trim()), 300); return () => clearTimeout(t); }, [find]);
+  useEffect(() => setOffset(0), [source, state, query, found, only]);
   const d = res.data;
-  const qs = new URLSearchParams({ state, ...(source ? { source } : {}), ...(query ? { q: query } : {}) });
+  const qs = new URLSearchParams({ state, ...(source ? { source } : {}), ...(query ? { q: query } : {}), ...(found ? { find: found } : {}),
+    ...(only ? { only } : {}), offset: String(offset), limit: String(PAGE) });
   const issues = useResource<any>(d?.sources?.length ? `edit/sessions/${sid}/issues/list?${qs}` : null, ["issue"]);
   const edit = () => d?.file && openInNewTab({ path: `edit/${sid}`, query: { file: d.file } });
   const test = async (name: string) => {
@@ -305,7 +312,7 @@ export function IssuesTab({ sid }: { sid: string }) {
     setTests((t) => ({ ...t, [name]: r || { error: "the test failed" } }));
   };
   const list: any[] = issues.data?.issues || [];
-  const withReqs = useMemo(() => list.filter((i) => Object.keys(i.requirements || {}).length).length, [list]);
+  const total: number = issues.data?.total ?? 0;
   return (
     <div className="issues-tab">
       <Markdown text={INTRO} className="intro" />
@@ -349,11 +356,16 @@ export function IssuesTab({ sid }: { sid: string }) {
           })}
         </div>
         <div className="cov-actions">
-          <select value={state} onChange={(e) => setState(e.target.value)}>
+          <select style={{ flex: "none" }} value={state} onChange={(e) => setState(e.target.value)}>
             <option value="open">open</option><option value="closed">closed</option><option value="all">all</option>
           </select>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setQuery(q)}
-            placeholder="Search the issues (Enter)…" />
+            placeholder="Search the tools (Enter)…" title="Searched by the tools themselves: words of the title or the text of every issue, listed or not" />
+          <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Filter: key, title, label, assignee…"
+            title="Among the issues listed (fast, as you type): every word must be in the key, the title, a label or an assignee" />
+          <select style={{ flex: "none" }} value={only} onChange={(e) => setOnly(e.target.value)} title="Only some of the issues listed">
+            <option value="">every issue</option><option value="reqs">naming requirements</option><option value="bound">bound to results</option>
+          </select>
           <span className="spacer" />
           <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/issues/list?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
             title="Read the issues again from the tools, not from the cache (a few minutes)">↻ Refresh</button>
@@ -363,7 +375,11 @@ export function IssuesTab({ sid }: { sid: string }) {
         {!issues.data && !issues.error && <Spinner className="block" text="Reading the issues…" />}
         {issues.error && <div className="error-box">{issues.error}</div>}
         {issues.data && (<>
-          <div className="muted small">{list.length} issue(s){withReqs ? `, ${withReqs} naming requirements` : ""}</div>
+          <Pager offset={offset} total={total} page={PAGE} onOffset={setOffset}>
+            {total.toLocaleString()} issue(s){issues.data.listed !== total ? ` of ${issues.data.listed.toLocaleString()} listed` : ""}
+            {issues.data.with_requirements ? `, ${issues.data.with_requirements.toLocaleString()} naming requirements` : ""}
+            {issues.data.bound ? `, ${issues.data.bound.toLocaleString()} bound` : ""}
+          </Pager>
           <table className="grid compact issues-list">
             <thead><tr><th>Issue</th><th>Title</th><th>Requirements</th><th>Bound to</th><th>Assignees</th><th>Updated</th></tr></thead>
             <tbody>{list.map((i) => (
@@ -376,8 +392,30 @@ export function IssuesTab({ sid }: { sid: string }) {
                 <td className="muted small nowrap">{time(i.updated)}</td>
               </tr>))}</tbody>
           </table>
+          {total > PAGE && <Pager offset={offset} total={total} page={PAGE} onOffset={setOffset} />}
         </>)}
       </>)}
+    </div>
+  );
+}
+
+const PAGE = 100;
+
+/** Pages of a long list: where it is, first, previous, next and last. */
+function Pager({ offset, total, page, onOffset, children }: { offset: number; total: number; page: number; onOffset: (n: number) => void; children?: ReactNode }) {
+  const last = Math.max(0, Math.floor((total - 1) / page) * page);
+  return (
+    <div className="pager muted small">
+      <span>{children}</span>
+      {total > page && (
+        <span className="pager-nav">
+          <button className="icon" disabled={offset === 0} onClick={() => onOffset(0)} title="First page">«</button>
+          <button className="icon" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - page))} title="Previous page">‹</button>
+          <span>{(offset + 1).toLocaleString()}–{Math.min(total, offset + page).toLocaleString()} of {total.toLocaleString()}</span>
+          <button className="icon" disabled={offset >= last} onClick={() => onOffset(offset + page)} title="Next page">›</button>
+          <button className="icon" disabled={offset >= last} onClick={() => onOffset(last)} title="Last page">»</button>
+        </span>
+      )}
     </div>
   );
 }
