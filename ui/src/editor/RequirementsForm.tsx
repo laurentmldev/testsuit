@@ -78,7 +78,7 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
         <div className="tabs req-form-tabs">
           <button className={tab === "config" ? "selected" : ""} onClick={() => setTab("config")}
             title="Where the requirements come from: the sources (each reading a tool or a file) and the classes they can share">
-            Sources &amp; classes</button>
+            Sources</button>
           <button className={tab === "reqs" ? "selected" : ""} onClick={() => setTab("reqs")}
             title="The requirements written in this file, those of the local source: edited here">
             Local Reqs</button>
