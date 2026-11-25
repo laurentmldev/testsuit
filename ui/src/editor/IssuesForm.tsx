@@ -30,18 +30,19 @@ const ROUTE_KEYS: (Choice & { example: string })[] = [
   { value: "criteria", description: "the criteria file of an unmet check (only checks have one)", example: "criteria/firmware/*" },
   { value: "check", description: "the name of an unmet check (only checks have one)", example: "speed_*" },
 ];
-const ROUTES_HELP = `Where a new issue goes. When someone reports a failure (Issue… on the Run page, or tsq issue --create), the routes are read top to bottom: the first one whose patterns all match the failure picks the source; when none matches, the default source.
+const ROUTES_HELP = `Why: one tests repository often serves several teams, each with its own tracker or project: a firmware failure is for the firmware team, a bench calibration problem for the lab. Routes send each new issue straight to the people who will fix it, so nobody has to move issues between projects by hand, and each team sees only its own.
 
-A pattern is a glob: * any text, ? one character, [abc] one of them; it must match the whole value, case counts. A pattern left empty (shown *) matches anything.
+How: when a failure is reported (Issue… on the Run page, or tsq issue --create), the routes are read top to bottom; the first one whose patterns all match the failure picks the source, else the default source. The person reporting can still pick another one.
 
-- testdef: the test definition's name.
-- step: <stage>:<step>, the failed step, or the step that holds an unmet check (exploit:criteria). A failed verdict has no step: a route with a step pattern never takes it.
-- criteria, check: only for an unmet check: its criteria file, its name.
+Patterns are globs (* any text, ? one character, [abc] one of them, the whole value, case counts; left empty: anything) on:
+- testdef: the test definition's name;
+- step: <stage>:<step>, the failed step or the one holding an unmet check (a failed verdict has none);
+- criteria, check: an unmet check's criteria file and name.
 
-Examples: step firmware:* sends the failures of the firmware stage to the firmware project; criteria criteria/bench/* and check calib_* send those checks to the bench project. Put the most precise routes first. The person reporting can still pick another source before creating the issue.`;
-const REQS_HELP = `How an issue says which requirements it is about, besides the requirements its failure verifies (those come from the links of the check, step or test definition it is bound to, with no setting).
+Example: step firmware:* to the firmware project, then criteria criteria/bench/* to the bench project. Put the most precise routes first.`;
+const REQS_HELP = `Why: to see which requirements are at risk. A requirement with an open issue is not really met, whatever its last run said: the Requirements subtab shows each requirement's open issues. An issue is about the requirements its failure verifies (from the links of its check, step or test definition, nothing to set), and about those it names itself, as set here.
 
-- Labels: an issue labelled with the pattern, {id} being a requirement's id (req:{id} → req:REQ-12, req:jama:SYS-4) names it. With "give such labels", tsq adds one label per requirement of the failure to the issues it creates (not on Redmine, which has no labels).
+- Labels: so that the tracker itself shows the issues of a requirement (filter on req:REQ-12), and an issue opened by hand can say which requirement it is about. An issue labelled with the pattern, {id} being a requirement's id (req:{id} → req:REQ-12, req:jama:SYS-4) names it. With "give such labels", tsq adds one per requirement of the failure to the issues it creates (not on Redmine, which has no labels).
 - Text: the id of a known requirement, as a whole word in the issue's title or text, names it (REQ-12 names REQ-12, not REQ-123).
 - Jira links: a Jira issue linked to the Jira issue of a requirement (its id being the Jira key) names it.
 
@@ -308,7 +309,7 @@ function SpecFields({ name, spec, backends, onChange }: { name: string; spec: Da
           <Credentials value={credentials} rows={rows} help={backend?.credentials} onChange={(v) => set("credentials", v)} />
           {mixed && <div className="bad-text small">{given.filter((k) => !shown?.credentials.includes(k)).join(", ")}: not used to sign in this way (remove it)</div>}
         </Field>
-        <Field label="Labels" help={"The labels of every issue tsq creates in it (besides those of requirements)." + (backend?.name === "redmine" ? " Redmine has no labels: not sent." : "")}>
+        <Field label="Labels" help={"Why: to find the issues tsq creates in the tracker at a glance (a filter, a board, triage), apart from those people open by hand: tsq, automated-test, bench... Given to every issue tsq creates in this source, besides one per requirement." + (backend?.name === "redmine" ? " Redmine has no labels: not sent." : "")}>
           <Tags value={spec.labels} onChange={(v) => set("labels", v.length ? v : undefined)} placeholder={spec.labels?.length ? "" : "tsq"} />
         </Field>
         <Field label="Filter" wide help={FILTER_HELP}>
@@ -545,7 +546,7 @@ function ReqRules({ value, onChange, inherit }: { value?: Data | null; onChange:
       <div className="hint">{labelsOff ? "Labels name no requirement." : <>An issue labelled <code>{pattern.replace("{id}", "REQ-12")}</code> is about REQ-12
         (<code>{pattern.replace("{id}", "jama:SYS-4")}</code>: jama:SYS-4 of another source; spaces become _).</>}</div>
       {!labelsOff && <Toggle value={v.add} label="Give such labels to the issues tsq creates" onChange={(x) => put("add", x)} />}
-      {!labelsOff && <div className="hint">One per requirement of the failure, besides the source's labels; editable before the issue is created. Redmine has no labels: none sent.</div>}
+      {!labelsOff && <div className="hint">So that the tracker shows the issues of a requirement, as the Requirements subtab does: one per requirement of the failure, besides the source's labels; editable before the issue is created. Redmine has no labels: none sent.</div>}
       <Toggle value={v.text} label="A known requirement's id in an issue's title or text names it" onChange={(x) => put("text", x)} />
       <div className="hint">As a whole word: “REQ-12 drifts” names REQ-12, “REQ-123” does not. Known requirements: those the test definitions of this repository link (<code>reqs</code>).</div>
       <Toggle value={v.jira_links} label="Jira: an issue link to the requirement's own issue names it" onChange={(x) => put("jira_links", x)} />

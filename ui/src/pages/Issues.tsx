@@ -254,7 +254,7 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
         <Field label="Text" help="Pre-filled from the failure: the run and where it ran, links to its report, exploit report and log, the requirements, the lines of its log that look like errors. Check that nothing secret is in it before creating the issue.">
           <textarea className="mono issue-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
         </Field>
-        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in issues.yml). Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
+        <Field label="Labels" help="Comma-separated. The source's labels (to find the issues tsq creates, in the tracker) and one per requirement of the failure (so the tracker shows the issues of a requirement): issues.yml. Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
         {draft.requirements?.length > 0 && <div className="muted small">Requirements of this failure: {draft.requirements.join(", ")}</div>}
         <Field label="Your token" help="Optional: create the issue in your own name with your token for this tool (never kept; Jira Cloud: email:token; Redmine: your API key). Without it, the sequencer's token creates it, and the text says who reported it.">
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="optional" autoComplete="off" />
