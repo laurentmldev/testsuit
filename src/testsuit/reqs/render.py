@@ -143,6 +143,7 @@ h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:28px 0 8px; }
 .skipped { background:var(--skipbg); color:var(--skip); } .not-run { color:var(--muted); border:1px solid var(--line); }
 .uncovered { color:var(--bad); border:1px dashed var(--bad); }
 .changed { color:var(--err); font-weight:700; cursor:help; }
+.reviewed { color:var(--link); font-weight:700; cursor:help; }
 .tiles { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
 .tile { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 14px; min-width:80px; }
 .tile b { display:block; font-size:20px; }
@@ -154,14 +155,20 @@ tr.node td { background:var(--card); font-weight:600; }
 """
 
 
-def _badge(status: str | None, stale: bool = False) -> str:
+def _badge(status: str | None, stale: bool = False, reviewed: bool = False) -> str:
     e = html.escape
     if status is None:
         return '<span class="muted">–</span>'
     cls = status.replace(" ", "-")
     return (f'<span class="badge {cls}" title="{e(status)}">{_MARK[status]} {e(status)}</span>'
             + (' <span class="changed" title="Changed since: the requirement changed since the version this test '
-               'verified">⟳</span>' if stale else ""))
+               'verified">⟳</span>' if stale else "")
+            + (' <span class="reviewed" title="As reviewed: a person accepted or rejected the result it comes from">✎</span>'
+               if reviewed else ""))
+
+
+def _reviewed(t: Test, req: str) -> bool:
+    return any(lk.reviewed for lk in t.links if lk.req == req)
 
 
 def _req_link(cov: Coverage, key: str) -> str:
@@ -170,11 +177,38 @@ def _req_link(cov: Coverage, key: str) -> str:
     return f'<a href="{e(url)}"><code>{e(key)}</code></a>' if url else f"<code>{e(key)}</code>"
 
 
-def _test_head(t: Test, base: str) -> str:
+class _RootLinks:
+    """Links to the sequencer's pages from its root URL (testsuit.sequencer.reportlinks has the others)."""
+
+    def __init__(self, base: str):
+        self.base = base
+
+    def run(self, run_id: str) -> str | None:
+        return f"{self.base}#/runs/{quote(run_id)}" if self.base else None
+
+    def exploit(self, run_id: str, step: str, path: str = "") -> str | None:
+        return f"{self.base}runs/{quote(run_id)}/files/{quote(path)}" if self.base and path else None
+
+    def run_file(self, run_id: str, file: str, line: int = 0) -> str | None:
+        return (f'{self.base}#/runs/{quote(run_id)}?tab=files&file={quote(file, safe="")}&line={line}'
+                if self.base else None)
+
+
+def _step_key(t: Test, step: str) -> str:
+    return t.report_keys.get(step, step)
+
+
+def _links(base):
+    """base: the sequencer's root URL, or an object giving the links (run, exploit, run_file)."""
+    return _RootLinks(base) if isinstance(base, str) else base
+
+
+def _test_head(t: Test, base) -> str:
     e = html.escape
     label = e(t.testdef)
-    if t.run and base:
-        label = f'<a href="{base}#/runs/{quote(t.run)}">{label}</a>'
+    href = _links(base).run(t.run) if t.run else None
+    if href:
+        label = f'<a href="{e(href)}">{label}</a>'
     return label + (f'<div class="muted">{e(t.run)}</div>' if t.run else '<div class="muted">not run</div>') + (
         f'<div class="muted">{e(t.context_text)}</div>' if t.context else "")
 
@@ -190,7 +224,7 @@ def tiles_html(cov: Coverage) -> str:
             + "".join(f'<div class="tile"><b>{totals[s]}</b>{e(s)}</div>' for s in STATUSES if totals.get(s)) + "</div>")
 
 
-def matrix_html(cov: Coverage, base: str = "") -> str:
+def matrix_html(cov: Coverage, base="") -> str:
     """The requirements × tests table, a header row per path node with its counts."""
     e = html.escape
     by_path = cov.by_path()
@@ -203,7 +237,7 @@ def matrix_html(cov: Coverage, base: str = "") -> str:
             body.append(f'<tr class="node"><td colspan="{3 + len(cov.tests)}"><code>{e(path or "(no path)")}</code> '
                         f'<span class="muted">{e(_counts(by_path.get(path, {})))}</span></td></tr>')
         title_text = req.get("title") or plain_text(str(req.get("description", ""))).split("\n")[0][:120]
-        cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
+        cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t), _reviewed(t, key))}</td>' for t in cov.tests)
         dyn = "".join(f' <span class="dyn" title="dynamic tag"{_tag_style(cov.tag_colors.get(str(t)))}>{e(str(t))}</span>'
                       for t in req.get("dynamic_tags") or [])
         body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}{dyn}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
@@ -226,11 +260,12 @@ def scope_text(scope: dict | None) -> str:
     return "Covers " + " · ".join(parts)
 
 
-def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str = "", scope: str = "") -> str:
-    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports. scope: what it
-    covers, in words, under the title."""
+def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer="", scope: str = "") -> str:
+    """The page. sequencer: the sequencer's root URL, for links to the runs and their exploit reports (or an object
+    giving the links, testsuit.sequencer.reportlinks). scope: what it covers, in words, under the title."""
     e = html.escape
-    base = sequencer.rstrip("/") + "/" if sequencer else ""
+    base = (sequencer.rstrip("/") + "/" if sequencer else "") if isinstance(sequencer, str) else sequencer
+    to = _links(base)
     by_path = cov.by_path()
     path_rows = "".join(f'<tr><td><code>{e(node or "(all)")}</code></td>'
                         + "".join(f'<td class="c">{counts.get(s, "")}</td>' for s in STATUSES) + "</tr>"
@@ -246,13 +281,15 @@ def as_html(cov: Coverage, title: str = "Requirements coverage", sequencer: str 
         for where, links in _groups(t).items():
             report = ""
             step = links[0].step
-            if base and t.run and step in t.reports:
-                report = f' · <a href="{base}runs/{quote(t.run)}/files/{quote(t.reports[step])}">exploit report</a>'
-            reqs = " ".join(f"{_req_link(cov, lk.req)} {_badge(lk.status, cov.stale(lk.req, t))}" for lk in links)
+            href = to.exploit(t.run, _step_key(t, step), t.reports[step]) if t.run and step in t.reports else None
+            if href:
+                report = f' · <a href="{e(href)}">exploit report</a>'
+            reqs = " ".join(f"{_req_link(cov, lk.req)} {_badge(lk.status, cov.stale(lk.req, t), lk.reviewed)}" for lk in links)
             label = f"<code>{e(where)}</code>"
-            if base and t.run and links[0].level == "input" and links[0].file:     # the file of the datapack at that line
-                label = (f'<a href="{base}#/runs/{quote(t.run)}?tab=files&amp;file={quote(links[0].file, safe="")}'
-                         f'&amp;line={links[0].line}">{label}</a>')
+            href = to.run_file(t.run, links[0].file, links[0].line) \
+                if t.run and links[0].level == "input" and links[0].file else None   # the file of the datapack at that line
+            if href:
+                label = f'<a href="{e(href)}">{label}</a>'
             test_rows.append(f"<tr><td></td><td>{label}{report}</td><td>{reqs}</td></tr>")
         for p in t.problems:
             test_rows.append(f'<tr><td></td><td colspan="2" class="warn">problem: {e(p)}</td></tr>')

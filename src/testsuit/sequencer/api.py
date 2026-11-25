@@ -152,14 +152,16 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return await asyncio.to_thread(seq.campaign_view, campaign_id)
 
     @app.get("/campaigns/{campaign_id}/report", include_in_schema=True)
-    async def campaign_report(campaign_id: str, download: bool = False):
-        """The synthetic report of a campaign run, a self-contained HTML page linking to the runs' pages."""
+    async def campaign_report(campaign_id: str, request: Request, download: bool = False):
+        """The synthetic report of a campaign run, a self-contained HTML page linking to the runs' pages (by the
+        sequencer's own URL when downloaded, so that its links work from the file)."""
         from fastapi.responses import HTMLResponse
         from testsuit.sequencer.campaigns import report_html
         view = await asyncio.to_thread(seq.campaign_view, campaign_id)
         headers = {"Content-Disposition": f'attachment; filename="{view["campaign"]}_{view["id"]}_report.html"'} if download else {}
         cov = await asyncio.to_thread(seq.campaign_requirements, campaign_id)
-        return HTMLResponse(report_html(view, base="../../", requirements=cov), headers=headers)
+        return HTMLResponse(report_html(view, base=str(request.base_url) if download else "../../", requirements=cov),
+                            headers=headers)
 
     @app.get("/campaigns/{campaign_id}/requirements")
     async def campaign_requirements(campaign_id: str):
@@ -174,8 +176,37 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         view = await asyncio.to_thread(seq.campaign_view, campaign_id)
         cov = await asyncio.to_thread(seq.campaign_requirements, campaign_id)
         headers = {"Content-Disposition": f'attachment; filename="{view["campaign"]}_{view["id"]}_requirements.html"'} if download else {}
-        return HTMLResponse(as_html(cov, f"{view.get('title') or view['campaign']}: requirements coverage", "../../../"),
+        from testsuit.sequencer.reportlinks import OnlineLinks
+        return HTMLResponse(as_html(cov, f"{view.get('title') or view['campaign']}: requirements coverage", OnlineLinks("../../../")),
                             headers=headers)
+
+    def who(request: Request, body: dict | None) -> str:
+        """Who makes a review entry: the user an authenticating reverse proxy names, else the one the body names."""
+        for header in ("x-remote-user", "remote-user", "x-forwarded-user", "x-auth-request-user"):
+            if request.headers.get(header):
+                return request.headers[header]
+        return str((body or {}).get("by") or "")
+
+    @app.get("/campaigns/{campaign_id}/review")
+    async def campaign_review(campaign_id: str):
+        """The review of a campaign run (its own entries; its runs' reviews are on each run, SPEC §11.1)."""
+        from testsuit.sequencer.campaigns import campaign_review_brief
+        campaign = seq.require_campaign_run(campaign_id)
+        return {"campaign_run": campaign["id"], **campaign_review_brief(seq.campaign_review(campaign["id"]))}
+
+    @app.post("/campaigns/{campaign_id}/review")
+    async def review_campaign(campaign_id: str, body: dict, request: Request):
+        """Add to the review of a campaign run: {action: review, target: {kind: campaign}, comment}, {action:
+        sign_off, comment?} (its runs' open reviews signed off with it), {action: reopen, reason}. "by": who."""
+        return await asyncio.to_thread(seq.review_campaign, campaign_id, body, who(request, body))
+
+    @app.post("/campaigns/{campaign_id}/export")
+    async def export_campaign(campaign_id: str, request: Request, body: dict | None = None):
+        """Export the report of a campaign run, in the background (SPEC §11.2): {mode: synthetic|complete,
+        include_results}. Its progress comes as export_progress events; GET /exports/{id} gives it too."""
+        body = body or {}
+        return await seq.start_export("campaign", campaign_id, str(body.get("mode") or "complete"),
+                                      bool(body.get("include_results")), str(request.base_url))
 
     @app.post("/campaigns/{campaign_id}/{command}")
     async def abort_campaign(campaign_id: str, command: str):
@@ -185,7 +216,13 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
 
     @app.get("/runs")
     async def runs(state: str | None = None, limit: int = 200):
-        return seq.store.runs(state.split(",") if state else None, limit)
+        out = seq.store.runs(state.split(",") if state else None, limit)
+        for run in out:                                  # the verdict as reviewed, when it is (SPEC §11.1)
+            reviewed = seq.reviewed(run)
+            if reviewed is not run:
+                run["review"] = {k: v for k, v in (reviewed.get("review") or {}).items()
+                                 if k in ("state", "verdict", "raw_verdict", "accepted", "rejected")}
+        return out
 
     @app.get("/queue")
     async def queue():
@@ -204,7 +241,67 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
             run["replaced_steps"] = ctx.history
             run["running_phase"] = ctx.phase_runner.id if ctx.phase_runner is not None else None
         run["wait"] = seq.wait_info(run)                 # why it, or its next phase, does not start yet
+        reviewed = seq.reviewed(run)
+        if reviewed is not run:                          # its review (SPEC §11.1): run.yml's results stay as they ran
+            from testsuit.sequencer.review import review_view
+            view = review_view(run, {"entries": []}, reviewed)
+            run["review"] = {**reviewed.get("review"), "steps": view["steps"], "checks": view["checks"]}
         return run
+
+    @app.get("/runs/{run_id}/review")
+    async def run_review(run_id: str):
+        """The review of a run: its state, the entries in force, its journal, its steps and checks as reviewed, and
+        the reviews of its earlier attempt that fit it (reapplicable)."""
+        return await asyncio.to_thread(seq.run_review_view, run_or_404(run_id)["id"])
+
+    @app.post("/runs/{run_id}/review")
+    async def review_run(run_id: str, body: dict, request: Request):
+        """Add to the review of an ended run: {action: review, target: {kind: check|step|run, step, criteria,
+        scenario, check}, status: accepted|rejected (with reason) or none (comment), comment, ref}, {action: revoke,
+        entry, reason}, {action: sign_off, comment?}, {action: reopen, reason}, {action: reapply, entries?}. "by":
+        who (the user named by the reverse proxy, when there is one)."""
+        return await asyncio.to_thread(seq.review_run, run_or_404(run_id)["id"], body, who(request, body))
+
+    @app.get("/runs/{run_id}/report")
+    async def run_report(run_id: str, request: Request, download: bool = False):
+        """The report of a run as reviewed, a self-contained HTML page (links to the sequencer)."""
+        from fastapi.responses import HTMLResponse
+        from testsuit.sequencer.reportlinks import OnlineLinks
+        run = run_or_404(run_id)
+        links = OnlineLinks(str(request.base_url) if download else "../../")
+        page = await asyncio.to_thread(seq.run_report_html, run["id"], links)
+        headers = {"Content-Disposition": f'attachment; filename="{run["id"]}_report.html"'} if download else {}
+        return HTMLResponse(page, headers=headers)
+
+    @app.post("/runs/{run_id}/export")
+    async def export_run(run_id: str, request: Request, body: dict | None = None):
+        """Export the report of a run, in the background: {mode: synthetic|complete, include_results}."""
+        body = body or {}
+        return await seq.start_export("run", run_or_404(run_id)["id"], str(body.get("mode") or "complete"),
+                                      bool(body.get("include_results")), str(request.base_url))
+
+    @app.get("/exports/{job_id}")
+    async def export_job(job_id: str):
+        return seq.export_job(job_id)
+
+    @app.post("/exports/{job_id}/cancel")
+    async def cancel_export(job_id: str):
+        return seq.cancel_export(job_id)
+
+    @app.get("/exports/{job_id}/download")
+    async def download_export(job_id: str):
+        job = seq.export_job(job_id)
+        if job["state"] != "done" or not Path(job["file"] or "").is_file():
+            raise HTTPException(409, f"export {job_id} is {job['state']}" + (f": {job['error']}" if job.get("error") else ""))
+        media = "application/zip" if job["name"].endswith(".zip") else "text/html"
+        return FileResponse(job["file"], media_type=media, filename=job["name"])
+
+    @app.get("/runs/{run_id}/exploit/{step}/report")
+    async def exploit_report(run_id: str, step: str):
+        """The exploit report of an exploit step ('<phase>:<step>', or its id), its checks as reviewed."""
+        from fastapi.responses import HTMLResponse
+        run = run_or_404(run_id)
+        return HTMLResponse(await asyncio.to_thread(seq.exploit_report_html, run["id"], step))
 
     @app.get("/runs/{run_id}/requirements")
     async def run_requirements(run_id: str):
@@ -220,7 +317,8 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         run = run_or_404(run_id)
         cov = await asyncio.to_thread(seq.run_requirements, run_id)
         headers = {"Content-Disposition": f'attachment; filename="{run["id"]}_requirements.html"'} if download else {}
-        return HTMLResponse(as_html(cov, f"{run.get('testdef') or run['id']}: requirements coverage", "../../../"),
+        from testsuit.sequencer.reportlinks import OnlineLinks
+        return HTMLResponse(as_html(cov, f"{run.get('testdef') or run['id']}: requirements coverage", OnlineLinks("../../../")),
                             headers=headers)
 
     def python_label(py: dict) -> str:

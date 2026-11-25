@@ -89,9 +89,12 @@ class Store:
     def close(self) -> None:
         self._db.close()
 
-    def _exec(self, sql: str, args: Iterable = ()) -> sqlite3.Cursor:
+    def _exec(self, sql: str, args: Iterable = ()) -> "_Result":
+        """Run a statement, its rows read under the mutex: the store is shared between threads (the event loop, the
+        export jobs), and a cursor read while another thread runs a statement can give another statement's rows."""
         with self._mutex:
-            return self._db.execute(sql, tuple(args))
+            cursor = self._db.execute(sql, tuple(args))
+            return _Result(cursor.fetchall(), cursor.lastrowid)
 
     # ── runs ──────────────────────────────────────────────────────────────
     @staticmethod
@@ -318,3 +321,17 @@ class Store:
     def events(self, since: int = 0, limit: int = 500) -> list[dict]:
         rows = self._exec("SELECT * FROM events WHERE id > ? ORDER BY id LIMIT ?", [since, limit]).fetchall()
         return [{"id": r["id"], "ts": r["ts"], "kind": r["kind"], "data": json.loads(r["data"])} for r in rows]
+
+
+class _Result(list):
+    """The rows of a statement, read: a list with the cursor methods the store uses."""
+
+    def __init__(self, rows: list, lastrowid: int | None):
+        super().__init__(rows)
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        return self[0] if self else None
+
+    def fetchall(self) -> list:
+        return list(self)

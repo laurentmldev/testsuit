@@ -397,7 +397,7 @@ Credentials MUST come from the environment (`env:<VARIABLE>`) or a file (`file:<
 - **Links.** A test definition's `reqs` and any check's `reqs` (a mexploit scenario entry, beside `description`) list references `[<source>:]<id>[@<version>]`. A prefix that names no source is part of the id. `@<version>` pins the version the link was written against.
 - **Snapshot.** Generation MUST resolve every link of the test definition and of the checks of the criteria its exploit steps name (§6.8), and write `definition/requirements.yml`: `{format, default_source, sources, testdef: [<key>], checks: [{step, criteria, scenario, file, check, reqs}], requirements: {<key>: {..., pinned, changed}}, problems, warnings}`. A key is the id, prefixed by its source unless the default one. Scenarios are rendered with the datapack keys, unknown keys empty.
 - An unknown or inactive requirement, a missing sources file, or a source that cannot be read MUST fail the generation; with `--nocheck` the snapshot and the baseline record them and the datapack is not conform. A pinned version that is not the current one is a warning (`changed: true`).
-- **Status of a link** in a run: a check link from its check (`SUCCESS`/`ACCEPTED` → `passed`, `FAILED`/`REJECTED` → `failed`, `ERROR` → `error`), `skipped` when its exploit step was, `error` when the step failed or errored without reporting the check, `not run` otherwise; a test definition link from the verdict (`succeeded` → `passed`, `failed`, `error`).
+- **Status of a link** in a run, as reviewed (§11.1; a link whose status a review changed is marked `reviewed`): a check link from its check (`SUCCESS`/`ACCEPTED` → `passed`, `FAILED`/`REJECTED` → `failed`, `ERROR` → `error`), `skipped` when its exploit step was, `error` when the step failed or errored without reporting the check, `not run` otherwise; a test definition link from the verdict (`succeeded` → `passed`, `failed`, `error`).
 - **Status of a requirement** over a set of links (one test, or several runs of a campaign): `failed` if one is, else `error` if one is, `passed` if all are, `partial` if one passed, `skipped` if one was skipped, else `not run`; `uncovered` without links. Inactive requirements are never `uncovered`. A link whose tested version differs from the current one is **changed since**.
 - **Coverage** (`reqs matrix | uncovered <targets> [--paths P... [-r]]`): targets are test definitions, campaign files (their test definitions), datapack and results zips, and folders of zips (a campaign's results). It MUST give both a requirements × tests matrix, rolled up per path node, and a tests × requirements view (each test, its test definition and each check with the requirements it verifies), as text, YAML, CSV or one self-contained HTML page linking to the requirements (`url`), and with `--sequencer` to the runs and their exploit reports. `--paths` adds the requirements under those nodes (with `-r`, their descendants) as rows, `uncovered` when not linked.
 
@@ -515,7 +515,7 @@ Binds criteria (mexploit scenarios) to the run contents they check.
 - A key the scenarios read that neither the step's keys nor `with` define MUST make the step `error` before exploit_runner runs, naming it; the Editor MUST report it before generation.
 - At run time the step writes, under `data/_sequencer/exploit/<step>/`: `keys.yml` (the step's keys with its `with`, §7), `exploit.yml` (one exploit_runner session per criteria entry, on every matched data path), then runs `exploit_runner` in a separate process with tsqd's interpreter; its results go to `results/` there. Scenario templates are rendered with those keys.
 - Result: `succeeded` on exit 0 (every check met), `failed` on exit 1 (a check not met), `error` otherwise, or when no data entry matches a file (an entry matching nothing is noted in the log), or when a criteria entry is absent from the datapack. `timeout`, `retries`, `env` apply; `expect` and `detach` do not. Without `continue_on_error`, the steps that need an exploit step MUST run even when it does not succeed, and its result MUST still count in the verdict (§9.4); `continue_on_error: false` makes them skipped, `true` leaves it out of the verdict as for any step.
-- The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`.
+- The step record (§9.3) carries `exploit: {folder, report, status, checks: [{criteria, scenario, check, status}]}`, read from `exploit_synthesis.yml`. A review MAY accept or reject a check after the run (§11.1); `GET /runs/{id}/exploit/{step}/report` serves the exploit report with the checks as reviewed (a banner, statuses changed, the raw ones kept).
 
 ### 6.9 `manual` action
 
@@ -623,7 +623,7 @@ Binding and locking (§8), free-space check (`min_free_space`), self-test (§4.7
 4. Run `finally` with its own timeout.
 5. Release resources the next phase does not use.
 
-Logs: each step to `logs/<phase>/<step>[<component>].log` and the event bus; sequencer actions on the run to `logs/sequencer.log`, written incrementally. A `do` step's log MUST first name the lab command, its component, slot, role and source, then the rendered command. Each step records `lab_command {name, component, source}` in `run.yml`.
+Logs: each step to `logs/<phase>/<step>[<component>].log` and the event bus; sequencer actions on the run to `logs/sequencer.log`, written incrementally. A `do` step's log MUST first name the lab command, its component, slot, role and source, then the rendered command. Each step records `lab_command {name, component, source}` in `run.yml`, and `continue_on_error: true` when it has it (so a review can recompute the verdict, §11.1).
 
 ### 9.4 Results and verdict
 
@@ -654,10 +654,10 @@ The reason of a step `error` (crash, timeout, killed, transport) MUST be kept.
 
 - `POST /campaigns` (`tsq submit-campaign`) takes a generated campaign (§5.4). Each datapack MUST pass intake (§9.1) with the campaign's routing tags and expected baseline; if one fails, none is queued. Runs get the entry's priority, else the campaign's (a priority given at submission overrides both), and record `campaign_run` and `routing`.
 - The campaign run is `queued` while every run is queued, `running` while one has not ended, `done` once all ended. Its verdict is the worst of its runs' (`error` > `failed` > `succeeded`, a cancelled run counting as `error`). It is conform iff the manifest and every run are.
-- When it becomes `done`, its report MUST be written to `storage.results/campaigns/<id>/report.html`. A repost of one of its runs reopens it.
+- When it becomes `done`, its report MUST be written to `storage.results/campaigns/<id>/report.html`, and again whenever a review of it or of one of its runs changes (§11.1). A repost of one of its runs reopens it.
 - `POST /runs/{id}/rerun` (`tsq rerun`) runs a datapack of a campaign run again, when the bench was not set up right for example: a new run of the same zip, unchanged (intake again, same routing, priority and expected baseline), recording `rerun_of`. It takes the place of the ended run in its entry, which keeps the earlier ones in `attempts`; only the last attempt of an entry can be run again, and only once it ended. The campaign run reopens; its state, verdict and counts are those of each entry's last attempt, and the view and the report list the earlier attempts with their verdicts. Changing the datapack of a re-run is not supported.
 - `POST /campaigns/{id}/cancel|kill` aborts each of its runs that has not ended (§10.1).
-- The report gives, per run: test definition, verdict, duration, stages or components bound, exploit checks met and not met, first `failed` or `error` step with its reason, non-conformities, and links to the run, that step's log, the exploit reports and the results zip; and the campaign's git state, conformity, pinned versions and routing tags.
+- Its verdict, counts and report are those of its runs as reviewed (§11.1), the raw verdict kept beside them. The report gives, per run: test definition, verdict (raw verdict and review notes when a review changed it), duration, stages or components bound, exploit checks met and not met, first `failed` or `error` step with its reason, non-conformities, and links to the run, that step's log, the exploit reports and the results zip; and the campaign's git state, conformity, pinned versions and routing tags; its review state (a `DRAFT` banner while a review is open, `Final` once signed off), the counts of accepted and rejected items, and the campaign run's comments and sign-off.
 
 ### 9.7 Operator controls
 
@@ -713,6 +713,35 @@ baseline.yml            completed with the run part (§5.3)
 - Outputs over `max_run_output` end the run in `error` after `finally`.
 - Outputs are readable in the run folder while the run is in progress.
 
+### 11.1 Reviews
+
+Results are immutable: `run.yml` and the results zip MUST NOT change after the run. A **review** is an overlay on them, an append-only journal in `storage.results/<run>/review.yml` (a campaign run's own in `storage.results/campaigns/<id>/review.yml`):
+
+```yaml
+run: <run id>
+entries:
+  - {id: 1, action: review, at, by, target: {kind: check | step | run, step, criteria, scenario, check},
+     status: accepted | rejected, reason, comment, ref, was, reapplied_from: {run, entry}}
+  - {id: 2, action: revoke, at, by, revokes: 1, reason}
+  - {id: 3, action: sign_off, at, by, comment}
+  - {id: 4, action: reopen, at, by, reason}
+```
+
+- A `review` entry has a `status` and a `reason` (mandatory), or a `comment` alone. `accepted` applies only to a `failed` (`FAILED`) target, `rejected` to a `succeeded` or `failed` one; an `error` target MUST NOT be accepted (its outcome is unknown: run it again). `was` records the raw status. A campaign run's entries are comments only (`target: {kind: campaign}`): its verdict comes from its runs.
+- Entries are never changed nor removed: `revoke` withdraws one, the latest entry in force on a target wins. Only an ended run can be reviewed. The review is `none` (no entry), `open`, or `signed_off`; after a `sign_off` only `reopen` is accepted. Signing off a campaign run signs off the open reviews of its runs.
+- `by`: the user an authenticating reverse proxy names (`X-Remote-User`, `Remote-User`, `X-Forwarded-User`, `X-Auth-Request-User`), else the one the request gives.
+- **Effect** (the run *as reviewed*): a check accepted is `ACCEPTED`, rejected `REJECTED` (`raw_status` kept); its exploit step's state is recomputed from its checks (§6.8); a step review overrides the step's state (`raw_state` kept); the verdict is recomputed over the steps that count (§9.4), unless the raw verdict was not the worst of the raw steps (a cancelled run, an error of the run itself): then it stays and a warning says so; a run review overrides the verdict (`raw_verdict` kept). Accepting a failure does not run the steps it held back: a warning lists them. The campaign view, its report, the requirements coverage (§5.5) and the reports of §11.2 MUST use the runs as reviewed.
+- **Re-run** (§9.6): the entries in force of the earlier attempt whose target has, in the new run, the same raw status are offered (`reapplicable`); `{action: reapply}` copies them with `reapplied_from`. Nothing is reapplied by itself.
+- **Repost** archives the review to `storage.results/reviews-archive/<run>-<stamp>.yml`; the new results start without one.
+
+### 11.2 Reports and exports
+
+- `GET /runs/{id}/report` is the report of a run as reviewed: verdict, steps, exploit checks with their review notes, review journal, operator interventions, non-conformities, requirements, and links to logs and exploit reports.
+- An **export** of a campaign run or of a run is built in the background (`POST /campaigns/{id}/export`, `POST /runs/{id}/export`, `{mode: synthetic | complete, include_results}`): a job `{id, state: running | done | error | cancelled, stage, done, total, file, name, size, error}` whose progress is sent as `export_progress` events (a few a second at most, not stored) and given by `GET /exports/{id}`; `POST /exports/{id}/cancel` stops it; `GET /exports/{id}/download` gives the file. An export of the same target, mode, run states and reviews is given again, not built again; a newer one replaces the older ones under `storage.results/exports/`.
+- `synthetic`: the campaign (or run) report alone, one self-contained HTML file, its links to the sequencer's absolute URL.
+- `complete`: every page, linked from the campaign report down: per run (`runs/<test definition>/attempt-<n>/`) its report, step logs, exploit reports as reviewed, previews of its input files (data files plotted with plotly, at most 12 parameters and 4000 points each; text files, their first 200 kB; files over 200 MB listed only), its requirements coverage and `review.yml`; the campaign's coverage. It is **one HTML file** that needs no unpacking: each page gzip-compressed and base64-encoded inside, opened on demand (`DecompressionStream`) in a frame, plotly embedded once. Over 300 MB, or with the results zips (`include_results`), it is a **zip** of the same pages as files (`README.txt`, `assets/plotly.min.js`), which `tsq view <zip>` serves on localhost without unpacking.
+- A log over 2 MB is trimmed: its first and last 2000 lines, and every line between that looks like an error or a warning (a word among `error`, `fail`, `failed`, `failure`, `fatal`, `critical`, `exception`, `traceback`, `panic`, `abort`, `warn`, `warning`, `denied`, `refused`, `timeout`, `timed out`, `not found`, `cannot`, `unable`, any case; at most 20000), the gaps marked.
+
 ---
 
 ## 12. Interfaces
@@ -735,11 +764,16 @@ tsq stages | components
 tsq hold | release | maintenance [--note T] | resume <stage | component>
 tsq selftest [<stage | component>]
 tsq files <run | zip> [<path>] [--results] [--get]
+tsq review <run> [--accept | --reject <target> --reason R [--ref X] | --comment C [--on <target>] | --revoke N --reason R
+               | --sign-off [--comment C] | --reopen --reason R | --reapply] [--by U]
+tsq review --campaign <id> [--comment C | --sign-off [--comment C] | --reopen --reason R]
+tsq export <run | --campaign id> [--synthetic] [--with-results] [-o <file | folder>]
+tsq view <zip> [--port N] [--no-browser]
 tsq lab status | reload [--pull [<rev>]]
 tsq config
 ```
 
-`--wait` exit status: `0` succeeded, `1` failed, `2` error. A unique prefix of a run id identifies it.
+`--wait` exit status: `0` succeeded, `1` failed, `2` error. A unique prefix of a run id identifies it. A review target (§11.1) is `run`, `step:<phase>:<step>` or `check:<step>::[<scenario>/]<check>`; `--by` defaults to `$TSQ_USER`, else `$USER`.
 
 ### 12.2 REST API
 
@@ -756,8 +790,10 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 | `GET /stages`, `GET /components`, `POST /{stages\|components}/{id}/{hold\|release\|maintenance\|resume}` | resources |
 | `GET\|POST /components/{id}/probe`, `POST /components/{id}/bypass`, `GET\|POST /components/{id}/commands[/{cmd}]` | probe report, bypass, manual commands |
 | `POST /selftest`, `GET /lab`, `POST /lab/reload`, `GET /lab/changes`, `GET /lab/view`, `GET\|PUT /lab/layout` | lab |
+| `GET\|POST /runs/{id}/review`, `GET\|POST /campaigns/{id}/review`, `GET /runs/{id}/report`, `GET /runs/{id}/exploit/{step}/report` | reviews and reports (§11.1, §11.2); `GET /runs` and `GET /runs/{id}` give the verdict as reviewed beside the raw one |
+| `POST /runs/{id}/export`, `POST /campaigns/{id}/export`, `GET /exports/{id}`, `POST /exports/{id}/cancel`, `GET /exports/{id}/download` | exported reports (§11.2) |
 | `GET /runs/{id}/requirements[/report]`, `GET /campaigns/{id}/requirements[/report]` | requirements coverage of a run or of a campaign run (§5.5), JSON or one HTML page; `GET /campaigns/{id}/report` includes it |
-| `GET /events` | Server-Sent Events: state changes, log lines |
+| `GET /events` | Server-Sent Events: state changes, log lines, `review`, `export`, `export_progress` |
 | `/edit/...`, `/exploit/...`, `/plot/...` | Editor mode only (§12.4) |
 
 ### 12.3 GitLab runner
@@ -777,6 +813,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Manual operations**: the step palette and form edit a `manual` step (§6.9). The Run page opens the dialog of the operation the run waits for (its Markdown text and pictures, its checks, Done, Failed and Redo from); All runs and the campaign page flag the runs that expect one.
 - **Operator controls** (§9.7): the Run page has a step mode selector (off, after each step, at breakpoints), a banner per paused step (Next, Run again, Continue anyway), the same actions and a breakpoint toggle on the selected step of the running phase, the pass of a step run again, and the list of operator actions; All runs and the campaign page flag paused runs.
 - **Requirements**: the Datapacks page has a Requirements subtab: its sources as cards (`source_cards`: `{name, backend, label?, default?}`), and the path tree of the source picked, or of every source (each a top node of the tree and of the requirement paths) when none is picked; a source picked keeps only its requirements and the links to them. The report covers the same (and the node picked: `node`, `children`) and states it (`scope`: sources, node, campaign) (requirements.yml, kind `requirements`), with per node the coverage of its requirements over the latest ended run of each test definition (else the test definition, linked only), optionally restricted to a campaign's test definitions; the requirements of the node (with or without its sub-nodes), each with its text, status and links; and the matrices of §5.5 (`GET /edit/sessions/{id}/requirements[/report]?source=&campaign=[&node=&children=]`; `POST /edit/sessions/{id}/requirements/test` reads one source, as saved or as given (`spec`), whole or up to a stage (`upto`: `step:<N>`, `list`: the first page, `details:<N>`: that details call for the first requirement of the list; `ids`: the steps and the whole list, the id and title of each requirement; `item:<id>`: the steps, the list up to that requirement, then each field evaluated alone, `fields: [{field, from: list | details:<N>, jq, value | error, default?}]`, with `item_vars` and the list item; with `expr` (Debug), any jq expression on what that stage's jq reads, with the variables known there: a step's answer, the list's first page, a details call's answer for the first requirement, a list item or (`on`: `details:<N>`) a details call's answer for it: `expr: {jq, on, values (at most 50) | error, count}`), and returns each call to the server (`calls: [{call, method, url, headers, body, status, reason, seconds, answer, extracted, items, next, error}]`, at most 30, credentials masked as `***`; the cache of steps not used; the test calls for at most 30 s, after which the next call fails with `stopped: the test takes more than 30 s`); `GET /edit/sessions/{id}/requirements/item?source=&id=` reads one requirement in full, as generation does, for a requirement opened in the tab; `GET /edit/sessions/{id}/requirements/search[?path=]` lists every active requirement of every source by reference, for the quick search of the test definition's `reqs`). The synthesis of a test definition (`POST .../synthesis`) includes `requirements`: `{items: [{key, title, path, status, url, version, found, by}], problems, warnings}`, or null when it lists none. `requirements.yml`, and a file a `yaml` source names, have a form (schema `requirements`): classes (a source written once with class variables, each source of it giving only their values and its label; Detach copies the class into the source; a test of a class asks for test values, kept in the browser; the test API takes `class`, `values` and `classes`, the classes as being edited), sources (backend among those registered, with the `description`, `options_help` and `credentials_help` the backend declares; credentials only as `env:<VARIABLE>` or `file:<path>`), default source, node labels and requirements; their problems are those of reading the sources (a credential not set, or its file not readable, on the host: a warning). The test definition's problems include its unknown or inactive requirements and those of its checks (errors), and pinned versions that changed (warnings) (§5.5).
+- **Reviews** (§11.1): the Run page shows the verdict as reviewed (the raw one beside it), Accept, Reject and Comment on each check, step and the verdict (who, why, comment, reference; who is remembered in the browser), and a Review tab: the journal, Revoke, the reviews of the earlier attempt to reapply, Sign off and Reopen. All runs and the campaign page show the verdicts as reviewed and the review state; the campaign page has its review (comments, sign-off). **Exports** (§11.2): an Export button on the Run and campaign pages (synthetic or complete, results zips or not) with a progress bar, Cancel and the download; a topbar badge lists the exports running.
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
 ---

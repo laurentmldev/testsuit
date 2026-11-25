@@ -1387,3 +1387,22 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .req-progress ul { margin: 4px 0; padding-left: 18px; }
 .req-progress-call { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cov-node { cursor: pointer; } .cov-node .fold { color: var(--muted); font-size: 11px; display: inline-block; width: 12px; }
+
+/* reviews of run results (SPEC §11.1) and exported reports (§11.2) */
+.reviewed-mark { color: var(--run); font-weight: 700; cursor: help; }
+.reviewed-verdict { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.review-notes { margin: 3px 0; display: flex; flex-direction: column; gap: 2px; }
+.review-note { font-size: 12px; }
+.review-note.accepted b, .review-what.accepted { color: var(--ok); }
+.review-note.rejected b, .review-what.rejected { color: var(--bad); }
+.review-note.comment b { color: var(--muted); }
+.review-buttons { display: inline-flex; gap: 4px; flex-wrap: wrap; margin: 2px 0; }
+.review-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+.review-journal tr.revoked td { opacity: 0.55; text-decoration: line-through; }
+.review-journal tr.revoked td:last-child, .review-journal tr.revoked td:nth-child(4) { text-decoration: none; }
+.step-review { margin: 6px 0; display: flex; flex-direction: column; gap: 3px; }
+.export-options { display: flex; flex-direction: column; gap: 10px; }
+.export-options label.radio, .export-options label.check { display: block; line-height: 1.45; }
+.export-progress .progress { height: 10px; margin: 10px 0; }
+.export-progress .progress > div { transition: width 0.3s ease; }
+.exports-badge { margin-left: 6px; }

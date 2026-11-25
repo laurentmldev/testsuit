@@ -165,13 +165,15 @@ class StepRecord:
     # a manual operation: {title, text, checks: [{text, done, by, at}], base, since, outcome, note, by, at}
     manual: dict | None = None
     passes: int = 1                               # its run in the phase: 2 and more once run again by an operator
+    # its result does not count in the verdict (continue_on_error: true): reviews recompute the verdict without it
+    continue_on_error: bool | None = None
 
     @property
     def key(self) -> str:
         return f"{self.phase}:{self.id}" + (f"[{self.slot}]" if self.slot else "")
 
     def as_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if (v is not None or k not in ("progress", "exploit", "manual"))
+        return {k: v for k, v in self.__dict__.items() if (v is not None or k not in ("progress", "exploit", "manual", "continue_on_error"))
                 and not (k == "passes" and v == 1)}
 
 
@@ -965,7 +967,8 @@ class PhaseRunner:
         self.id = flat.phase.id
 
     def record(self, fs: FlatStep, slot: str | None) -> StepRecord:
-        rec = StepRecord(phase=self.id, id=fs.id, slot=slot or "")
+        rec = StepRecord(phase=self.id, id=fs.id, slot=slot or "",
+                         continue_on_error=True if fs.step.continue_on_error else None)
         self.ctx.records[rec.key] = rec
         return rec
 

@@ -25,6 +25,7 @@ import { NavIcon } from "../navicons";
 import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 import { Named } from "../kinds";
+import { CampaignReview, ExportButton, ReviewedVerdict, ReviewNotes, ReviewStateBadge } from "./Review";
 
 const CAMPAIGN_KEYS = "tsq.campaignKeys";              // the values given at generation to the keys of each campaign
 
@@ -436,7 +437,7 @@ export function CampaignProgress({ counts }: { counts: any }) {
 
 /** The page of a campaign run (#/campaigns/<id>): its runs at a glance, with links to go deeper, and its report. */
 export function CampaignRunPage({ id }: { id: string }) {
-  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause"]);
+  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause", "review"]);
   const v = view.data;
   if (view.error) return <div className="page"><div className="error-box">{view.error}</div></div>;
   if (!v) return <div className="page"><Spinner className="block" text="Reading the campaign run…" /></div>;
@@ -452,7 +453,7 @@ export function CampaignRunPage({ id }: { id: string }) {
       <div className="page-head">
         <div>
           <div className="muted small"><a href="#/runs">All runs</a> › campaign run <code>{v.id}</code></div>
-          <h2>{v.title || v.campaign} <CampaignBadge view={v} /> {!v.conform && <Badge value="non-conform" />}</h2>
+          <h2>{v.title || v.campaign} <CampaignBadge view={v} /> {v.raw_verdict && <span className="muted small" title="The verdict as reviewed differs from the runs' own">raw <Badge value={v.raw_verdict} /> <span className="reviewed-mark">✎</span></span>} <ReviewStateBadge review={v.review} /> {!v.conform && <Badge value="non-conform" />}</h2>
           <div className="muted small">
             campaign <code>{v.campaign}</code> · submitted {ago(v.submitted_at)} <span title={time(v.submitted_at)}>({time(v.submitted_at)})</span>
             {v.state === "done" && v.started_at && <> · ran {duration(v.started_at, v.last_ended_at)}</>}
@@ -461,12 +462,16 @@ export function CampaignRunPage({ id }: { id: string }) {
         <span className="spacer" />
         {v.state !== "done" && <button onClick={() => cancel("cancel")} title="Cancel every run of the campaign that has not ended">Cancel all</button>}
         <a className="button" href={url(`campaigns/${v.id}/report`)} target="_blank" rel="noreferrer" title="The synthetic report as a page of its own">Report</a>
-        <a className="button" href={url(`campaigns/${v.id}/report?download=true`)} title="The synthetic report as a self-contained HTML file">Download</a>
+        <a className="button" href={url(`campaigns/${v.id}/report?download=true`)} title="The synthetic report as a self-contained HTML file, its links to this sequencer">Download</a>
+        <ExportButton kind="campaign" id={v.id} />
       </div>
       {v.description && <Markdown text={v.description} className="intro" />}
       <div className="campaign-tiles">
         {([["total", "runs"], ["succeeded", "succeeded"], ["failed", "failed"], ["error", "error"], ["running", "running"], ["waiting", "waiting"]] as const).map(([k, label]) => (
           <div key={k} className={classes("tile", k)}><b>{v.counts[k]}</b>{label}</div>
+        ))}
+        {(["accepted", "rejected"] as const).filter((k) => v.reviews?.[k]).map((k) => (
+          <div key={k} className={classes("tile", k === "accepted" ? "succeeded" : "failed")} title={`results ${k} by a review`}><b>{v.reviews[k]}</b>{k} by review</div>
         ))}
       </div>
       <table className="grid campaign-runs">
@@ -481,14 +486,14 @@ export function CampaignRunPage({ id }: { id: string }) {
                 <td><a href={`#/runs/${r.run}`}>{r.run}</a><div className="muted small">priority {r.priority}{r.attempt > 1 && <> · attempt {r.attempt}</>}</div>
                   {(r.earlier || []).map((a: any) => <div key={a.run} className="small muted earlier-attempt" title={a.failed_step ? `${a.failed_step.phase}:${a.failed_step.id}: ${a.failed_step.reason}` : a.reason}>
                     earlier: <a href={`#/runs/${a.run}`}>{a.run}</a> <Badge value={a.verdict || a.state} /></div>)}</td>
-                <td>{r.state === "done" || r.state === "cancelled" ? <Badge value={r.verdict} /> : <Badge value={r.state} />} <ManualFlag run={r} /> <PausedFlag run={r} />
+                <td>{r.state === "done" || r.state === "cancelled" ? <ReviewedVerdict verdict={r.verdict} raw={r.raw_verdict} /> : <Badge value={r.state} />} <ManualFlag run={r} /> <PausedFlag run={r} /> <ReviewStateBadge review={r.review} />
                   {(r.state === "done" || r.state === "cancelled") && <div><button className="small" title="Run this datapack again, unchanged (the bench was not set up right, for example): a new run takes its place in the campaign, this one is kept as an earlier attempt"
                     onClick={() => rerun(r).then(() => view.refresh())}>Run again</button></div>}</td>
                 <td className="small">{r.activated_at ? duration(r.activated_at, r.ended_at) : ""}</td>
                 <td className="small">{(r.stages?.length ? r.stages : [...new Set(Object.values(r.components || {}))]).map((s: any) => <span key={s} className="chip">{s}</span>)}</td>
                 <td className="small">
                   {r.checks?.total ? <span className={classes("badge", r.checks.met === r.checks.total ? "ok" : "bad")}>{r.checks.met} / {r.checks.total}</span> : <span className="muted">none</span>}
-                  {(r.reports || []).map((x: any) => <div key={x.path}><a href={url(`runs/${r.run}/files/${x.path}`)} target="_blank" rel="noreferrer">exploit report</a></div>)}
+                  {(r.reports || []).map((x: any) => <div key={x.path}><a href={url(`runs/${r.run}/exploit/${encodeURIComponent(x.key || x.step)}/report`)} target="_blank" rel="noreferrer">exploit report</a></div>)}
                 </td>
                 <td className="small">
                   {f && <div><Badge value={f.state} /> <a href={`#/runs/${r.run}?tab=steps`}><code>{step}</code></a>{f.reason && <span className="muted"> {f.reason}</span>}
@@ -499,6 +504,8 @@ export function CampaignRunPage({ id }: { id: string }) {
                   {(r.interventions || []).filter((i: any) => !["next", "bypass"].includes(i.action)).map((i: any, n: number) => <div key={"i" + n} className={i.action === "continue" ? "warn-text" : "muted"} title={time(i.at)}>
                     {ACTION_LABELS[i.action] || i.action} <code>{i.action === "redo_from" ? i.target : i.step}</code>{i.by ? ` (${i.by})` : ""}{i.reason ? `: ${i.reason}` : ""}</div>)}
                   {(r.nonconform || []).slice(0, 2).map((n: string, i: number) => <div key={i} className="warn-text">non-conform: {n}</div>)}
+                  {(r.review?.entries || []).length > 0 && <ReviewNotes notes={r.review.entries.slice(0, 4).map((x: any) => ({ ...x, reason: `${x.label}${x.reason ? `: ${x.reason}` : ""}` }))} />}
+                  {(r.review?.warnings || []).map((w: string) => <div key={w} className="warn-text">review: {w}</div>)}
                   {r.results && <div><a href={url(`runs/${r.run}/files/results.zip?results=true`)}>results zip</a></div>}
                 </td>
               </tr>
@@ -506,6 +513,11 @@ export function CampaignRunPage({ id }: { id: string }) {
           })}
         </tbody>
       </table>
+      <div className="campaign-review-section">
+        <Section title="Review">
+          <CampaignReview view={v} onChanged={view.refresh} />
+        </Section>
+      </div>
       <div className="campaign-facts">
         <Section title="Dataset versions">
           {Object.keys(v.datasets || {}).length === 0 ? <p className="muted small">The campaign pins no dataset.</p> : (

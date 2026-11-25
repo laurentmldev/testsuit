@@ -19,6 +19,7 @@ import { CampaignBadge, CampaignProgress } from "./Campaigns";
 import { PausedFlag } from "./Operator";
 import { ManualFlag } from "./Manual";
 import { RunStateBadge } from "./Queue";
+import { ReviewedVerdict, ReviewStateBadge } from "./Review";
 
 const FILTERS: [string, string][] = [
   ["", "all"], ["queued,waiting_resources", "waiting"], ["reserved,selftest,running,cleaning", "running"],
@@ -57,7 +58,7 @@ function RunRow({ r, nested, replaced }: { r: any; nested?: boolean; replaced?: 
         {r.rerun_of && <span className="chip rerun-tag" title={`Runs the datapack of run ${r.rerun_of} again, unchanged`}>re-run</span>}
         {replaced && <span className="chip muted" title={`An earlier attempt: run ${replaced} ran its datapack again, and counts for the campaign`}>earlier attempt</span>}</td>
       <td><RunStateBadge run={r} /> <ManualFlag run={r} /> <PausedFlag run={r} /></td>
-      <td><Badge value={r.verdict} /></td>
+      <td><ReviewedVerdict verdict={r.review?.verdict ?? r.verdict} raw={r.review?.raw_verdict} /> <ReviewStateBadge review={r.review} /></td>
       <td title={time(r.submitted_at)}>{ago(r.submitted_at)}</td>
       <td>{r.activated_at ? <Elapsed from={r.activated_at} to={r.ended_at} /> : ""}</td>
       <td><Badge value={r.conform ? "conform" : "non-conform"} title={(r.nonconform || []).join("\n")} /></td>
@@ -70,8 +71,8 @@ export function RunsPage() {
   const [state, setState] = useState("");
   const [text, setText] = useState("");
   const [folded, setFolded] = useState<Record<string, boolean>>({});
-  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase", "manual_operation", "pause"]);
-  const campaigns = useResource<any[]>("campaigns?limit=200", ["run", "campaign", "manual_operation", "pause"]);
+  const runs = useResource<any[]>(`runs?limit=500${state ? `&state=${state}` : ""}`, ["run", "phase", "manual_operation", "pause", "review"]);
+  const campaigns = useResource<any[]>("campaigns?limit=200", ["run", "campaign", "manual_operation", "pause", "review"]);
   // the runs a re-run replaced in their campaign: their re-run, by id
   const replacedBy = new Map<string, string>((runs.data || []).filter((r) => r.rerun_of).map((r) => [r.rerun_of, r.id]));
   const needle = text.toLowerCase();
