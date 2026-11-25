@@ -482,7 +482,8 @@ function DynamicTags({ value, onChange }: { value?: Data | null; onChange: (v: D
       </div>
       <div className="hint">A requirement gets the tag when one of its words or phrases is in its texts: whole words, case independent
         (<code>TBD</code> finds “tbd”, not “TBDX”). A word written <code>/…/</code> is a regular expression (Python <code>re</code>),
-        found anywhere and case independent too: <code>/TBD_\w+/</code> finds “TBD_Blablabla”. Shown with ⚑ in the Requirements view, which can show only them. Not part of the
+        found anywhere and case independent too: <code>/TBD_\w+/</code> finds “TBD_Blablabla”, <code>/\bTB[CD]\b/</code> TBC or TBD,
+        <code>/to be (defined|completed)/</code> either phrase, <code>{"/\\?{2,}/"}</code> “??” and more (more samples in the field's help). Shown with ⚑ in the Requirements view, which can show only them. Not part of the
         requirements' versions. With a REST source, texts read by a details call are searched only where the requirement is
         read in full (generation, a requirement opened), not in the list.</div>
     </div>
