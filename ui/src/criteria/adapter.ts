@@ -159,10 +159,18 @@ export interface CriteriaAdapter {
   jobFileUrl(job: string, path: string): string;
   /** URL of a file of the folder as it is */
   rawUrl(path: string): string;
+  /** every requirement a check can list in `reqs` (the sources of the tests repository), when the host has them */
+  requirements?(path: string): Promise<RequirementsList>;
+}
+
+export interface RequirementsList {
+  sources_file: string | null;
+  items: { key: string; title?: string; path?: string; status?: string }[];
+  errors?: string[];
 }
 
 /** The adapter on the REST routes of testsuit.exploit.editor.routes mounted at base. */
-export function restAdapter(base: string, label: string): CriteriaAdapter {
+export function restAdapter(base: string, label: string, session?: string): CriteriaAdapter {
   const enc = (path: string) => path.split("/").map(encodeURIComponent).join("/");
   return {
     label,
@@ -181,5 +189,7 @@ export function restAdapter(base: string, label: string): CriteriaAdapter {
     lastReport: async (utests) => (await post(`${base}/utests/last`, { utests })).report,
     jobFileUrl: (job, path) => url(`${base}/utests/jobs/${job}/files/${enc(path)}`),
     rawUrl: (path) => url(`${base}/raw/${enc(path)}`),
+    // on an editing session of tsqd: the quick search of the test definition form
+    ...(session ? { requirements: (path: string) => get(`edit/sessions/${session}/requirements/search?path=${encodeURIComponent(path)}`) } : {}),
   };
 }
