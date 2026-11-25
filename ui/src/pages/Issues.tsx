@@ -254,7 +254,7 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
         <Field label="Text" help="Pre-filled from the failure: the run and where it ran, links to its report, exploit report and log, the requirements, the lines of its log that look like errors. Check that nothing secret is in it before creating the issue.">
           <textarea className="mono issue-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
         </Field>
-        <Field label="Labels" help="Comma-separated; a label per requirement of the failure is proposed (requirements: labels in issues.yml). Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
+        <Field label="Labels" help="Comma-separated. The source's labels (to find the issues tsq creates, in the tracker) and one per requirement of the failure (so the tracker shows the issues of a requirement): issues.yml. Redmine has no labels: they are not sent."><Text value={labels} onChange={setLabels} /></Field>
         {draft.requirements?.length > 0 && <div className="muted small">Requirements of this failure: {draft.requirements.join(", ")}</div>}
         <Field label="Your token" help="Optional: create the issue in your own name with your token for this tool (never kept; Jira Cloud: email:token; Redmine: your API key). Without it, the sequencer's token creates it, and the text says who reported it.">
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="optional" autoComplete="off" />
@@ -390,7 +390,13 @@ export function IssuesTab({ sid }: { sid: string }) {
   }, [issues.data]);
   return (
     <div className="issues-tab">
-      <Markdown text={INTRO} className="intro" />
+      <div className="synthesis-head">
+        <Markdown text={INTRO} className="intro" />
+        <span className="spacer" />
+        {d?.file && <div className="synthesis-actions">
+          <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
+        </div>}
+      </div>
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading issues.yml…" />}
       {d && !d.file && (
@@ -445,7 +451,6 @@ export function IssuesTab({ sid }: { sid: string }) {
           <span className="spacer" />
           <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/issues/list?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
             title="Read the whole list again from the tools (otherwise, every few minutes, only the issues updated since are read)">↻ Refresh</button>
-          <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
         </div>
         {Object.entries(issues.data?.errors || {}).map(([name, e]: any) => <div key={name} className="error-box">{name}: {e}</div>)}
         {!issues.data && !issues.error && <Spinner className="block" text="Reading the issues…" />}
