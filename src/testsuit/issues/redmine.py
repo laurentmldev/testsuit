@@ -156,6 +156,9 @@ class RedmineBackend(IssueBackend):
                  **({"default": True} if wanted and wanted in (str(t.get("name")).lower(), str(t.get("id"))) else {})}
                 for t in found if isinstance(t, dict)]
 
+    def types_origin(self, types: list[dict[str, Any]]) -> str:
+        return f"the trackers of the project {self.project}; default: option tracker"
+
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
                issue_type: str | None = None) -> Issue:
         fields: dict[str, Any] = {"project_id": project or self.project, "subject": title, "description": body}

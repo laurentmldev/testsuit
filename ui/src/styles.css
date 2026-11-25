@@ -1421,6 +1421,8 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .issue-icon.open { color: var(--ok, #1a7f37); }
 .issue-icon.typed:not(.open) { opacity: 0.5; }
 .issue-type { display: inline-flex; align-items: center; gap: 6px; }
+.issue-types .issue-type { gap: 3px; margin-right: 10px; }
+.issue-types > div { margin-top: 2px; }
 .issue-chip .issue-icon, button .issue-icon { margin-right: 1px; }
 .issue-badge .issue-icon { vertical-align: -1px; }
 .issue-badge { display: inline-block; padding: 0 5px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 600; cursor: help; }

@@ -67,6 +67,27 @@ export function IssueIcon({ state, size = 14, issue }: { state?: string; size?: 
   );
 }
 
+/** What a source's test found of issue types: those a new issue can have and where they come from, the ones proposed
+ * for a failure and for a green run, and the types of the issues read. */
+export function IssueTypes({ types }: { types?: any }) {
+  if (!types) return null;
+  const seen = Object.entries(types.seen || {}) as [string, number][];
+  const read = seen.length > 0 && <> Of the issues read: {seen.map(([k, n], i) => <span key={k}>{i ? ", " : ""}{k || "no type"} {n}</span>)}.</>;
+  if (types.error) return <div className="small warn">Issue types: {types.error}.{read}</div>;
+  const list: any[] = types.list || [];
+  return (
+    <div className="small issue-types">
+      <div>Issue types{types.origin ? <span className="muted"> ({types.origin})</span> : ""}:{" "}
+        {list.length ? list.map((t) => <span key={t.name} className="issue-type" title={t.label || t.name}>
+          <IssueIcon issue={{ type: t.name, type_color: t.color, type_icon: t.icon, state: "open" }} size={12} />{t.name}</span>)
+          : <span className="muted">none, no choice when creating an issue</span>}
+      </div>
+      {list.length > 0 && <div className="muted">Proposed: <strong>{types.failure}</strong> for a failure, <strong>{types.improvement}</strong> for a green run.{read}</div>}
+      {!list.length && read && <div className="muted">{read}</div>}
+    </div>
+  );
+}
+
 export function IssueChip({ issue, via, onUnbind }: { issue: any; via?: string[]; onUnbind?: () => void }) {
   if (!issue) return null;
   const title = `${issue.title || ""}${issue.assignees?.length ? `\nassigned to ${issue.assignees.join(", ")}` : ""}${via?.length ? `\n${via.join(", ")}` : ""}`;
@@ -399,6 +420,7 @@ export function IssuesTab({ sid }: { sid: string }) {
                   {t && !t.running && (t.error ? <span className="warn small" title={t.error}>✗ {t.error.slice(0, 120)}</span>
                     : <span className="ok small">✓ {t.count} open issue(s) read in {t.seconds} s</span>)}
                 </span>
+                {t && !t.running && !t.error && <IssueTypes types={t.types} />}
                 {t?.calls?.length > 0 && (
                   <details className="small" onClick={(e) => e.stopPropagation()}>
                     <summary>{t.calls.length} call(s) to the server</summary>

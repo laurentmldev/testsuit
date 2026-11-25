@@ -137,6 +137,12 @@ class GitLabBackend(IssueBackend):
                     for n in names]
         return [{"name": "issue", "default": True}, {"name": "incident"}, {"name": "task"}]
 
+    def types_origin(self, types: list[dict[str, Any]]) -> str:
+        where = "the group" if not self.project else "the project and its groups"
+        if any(t.get("label") for t in types):
+            return f"the scoped labels type::<name> of {where}; a new issue gets its label"
+        return f"GitLab's own types (no scoped label type::<name> in {where})"
+
     def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
                issue_type: str | None = None) -> Issue:
         project = project or self.project
