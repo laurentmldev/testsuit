@@ -348,7 +348,8 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
                 <tr key={k}>
                   <td><span className="mono">{k}</span>{mandatory && <span className="bad-text" title="mandatory: the context of the requirements"> *</span>}
                     {what && <div className="muted small">{what}</div>}</td>
-                  <td><Text mono value={given[k] === undefined ? "" : String(given[k])} placeholder={value !== undefined && value !== "" ? String(value) : mandatory ? "required" : ""}
+                  <td><Text mono value={given[k] === undefined ? "" : String(given[k])}
+                    placeholder={value !== undefined && value !== null && value !== "" ? `optional: ${value} (the class's default)` : mandatory ? "required" : "optional: empty if not given"}
                     onChange={(v) => setVar(k, v)} />{missing && <div className="bad-text small">a value is required</div>}</td>
                 </tr>
               );

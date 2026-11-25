@@ -1046,3 +1046,16 @@ def test_source_classes(tmp_path, alm_server, monkeypatch):
     assert result["ok"] and result["items"] == 1
     result = editor.requirements_test(session, "requirements.yml", "speed", classes={"alm": edited})
     assert result["ok"] and result["count"] == 1               # a source of it, with the class as being edited
+
+
+def test_source_class_defaults(tmp_path):
+    """A source of a class need not give a variable the class gives a default to: the default is used."""
+    from testsuit.reqs.sources import Sources
+    (tmp_path / "r.yml").write_text("requirements: {R1: {title: t}}\n", encoding="utf-8")
+    (tmp_path / "requirements.yml").write_text(yaml.safe_dump({
+        "classes": {"c": {"backend": "yaml", "options": {"file": "r.yml"},
+                          "vars": {"sub": {"value": "BRAKE", "help": "x"}, "branch": "main", "need": {"mandatory": True, "value": "d"}}}},
+        "sources": {"a": {"class": "c"}, "b": {"class": "c", "vars": {"sub": "SPEED"}}}}), encoding="utf-8")
+    s = Sources(tmp_path / "requirements.yml")
+    assert s.vars("a") == {"sub": "BRAKE", "branch": "main", "need": "d"} and s.vars("b")["sub"] == "SPEED"
+    assert list(s.list(source="a")) == ["R1"]
