@@ -60,13 +60,15 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
   };
   const help = (path: (string | number)[]) => helpText(schemas.requirements, path);
   const showRequirements = !hasSources || data.requirements !== undefined || !sourcesFile;
+  // the source(s) whose requirements are written in this file (a yaml source reading it), and the other sources
+  const fileName = doc.path.split("/").pop();
+  const local: string[] = !sourcesFile ? [] : !hasSources ? ["reqs"] : Object.entries<any>(data.sources || {})
+    .filter(([, s]) => String(s?.backend || "").toLowerCase() === "yaml" && String(s?.options?.file || SOURCES_FILE).split("/").pop() === fileName
+      && !String(s?.options?.file || "").includes("/"))
+    .map(([n]) => n);
+  const others: string[] = hasSources ? Object.keys(data.sources || {}).filter((n) => !local.includes(n)) : [];
   return (
     <div className="form pad">
-      {sourcesFile && hasSources && (
-        <Section title={`Classes (${Object.keys(data.classes || {}).length})`} help={help(["classes"])} collapsed={!Object.keys(data.classes || {}).length}>
-          <Classes data={data} doc={doc} setAll={api.setData} help={help} />
-        </Section>
-      )}
       {sourcesFile && (
         <Section title="Sources" help={help(["sources"])}
           actions={!hasSources && (
@@ -94,7 +96,12 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
           )}
         </Section>
       )}
-      {showRequirements && <Requirements data={data} setTop={setTop} help={help} />}
+      {sourcesFile && hasSources && (
+        <Section title={`Classes (${Object.keys(data.classes || {}).length})`} help={help(["classes"])} collapsed={!Object.keys(data.classes || {}).length}>
+          <Classes data={data} doc={doc} setAll={api.setData} help={help} />
+        </Section>
+      )}
+      {showRequirements && <Requirements data={data} setTop={setTop} help={help} local={local} others={others} />}
     </div>
   );
 }
@@ -619,9 +626,18 @@ function useTestValues(path: string, cls: string, decls: Data) {
 
 // ── requirements of the YAML backend ───────────────────────────────────
 
-function Requirements({ data, setTop, help }: {
-  data: Data; setTop: (k: string, v: any) => void; help: (p: (string | number)[]) => string | undefined;
+function Requirements({ data, setTop, help, local, others }: {
+  data: Data; setTop: (k: string, v: any) => void; help: (p: (string | number)[]) => string | undefined; local: string[]; others: string[];
 }) {
+  const of = local.length ? ` of source ${local.join(", ")}` : "";
+  const scope = (
+    <p className="req-scope small">
+      {local.length ? <>The requirements written <strong>in this file</strong>: those of source <code>{local.join(", ")}</code>{local.length === 1 ? "" : " (they read the same file)"}.</>
+        : <>The requirements written <strong>in this file</strong>.</>}
+      {others.length > 0 && <> The other sources ({others.map((n, i) => <span key={n}>{i ? ", " : ""}<code>{n}</code></span>)}) are read from their
+        own tool or file, not edited here: see all of them in Datapacks › Requirements.</>}
+    </p>
+  );
   const reqs: Data = data.requirements || {};
   const nodes: Data = data.nodes || {};
   const ids = Object.keys(reqs);
@@ -668,7 +684,8 @@ function Requirements({ data, setTop, help }: {
   };
   return (
     <>
-      <Section title="Tree" collapsed={!Object.keys(nodes).length} help={help(["nodes"])}>
+      {scope}
+      <Section title={`Tree${of}`} collapsed={!Object.keys(nodes).length} help={help(["nodes"])}>
         <p className="muted small">
           The nodes come from the paths of the requirements (a node added here with no requirement yet keeps its label); a label shows beside its node in the Requirements tab and the reports.
         </p>
@@ -691,7 +708,7 @@ function Requirements({ data, setTop, help }: {
           <button className="small" disabled={!newNode || paths.includes(newNode)} onClick={addNode}>Add node</button>
         </div>
       </Section>
-      <Section title={`Requirements (${ids.length})`} help={help(["requirements"])}>
+      <Section title={`Requirements${of} (${ids.length})`} help={help(["requirements"])}>
         <div className="req-toolbar">
           <input placeholder="filter: id, path, title, tag…" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <span className="grow" />
