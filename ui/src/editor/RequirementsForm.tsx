@@ -67,9 +67,25 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
       && !String(s?.options?.file || "").includes("/"))
     .map(([n]) => n);
   const others: string[] = hasSources ? Object.keys(data.sources || {}).filter((n) => !local.includes(n)) : [];
+  // with sources and requirements in this one file: two tabs, the configuration (where requirements come from) and
+  // the requirements written here; a source opened from the Requirements view opens the configuration
+  const split = sourcesFile && hasSources && showRequirements;
+  const [tab, setTab] = useState<"config" | "reqs">("config");
+  const showConfig = !split || tab === "config";
+  const reqCount = Object.keys(data.requirements || {}).length;
   return (
     <div className="form pad">
-      {sourcesFile && (
+      {split && (
+        <div className="tabs req-form-tabs">
+          <button className={tab === "config" ? "selected" : ""} onClick={() => setTab("config")}
+            title="Where the requirements come from: the sources (each reading a tool or a file) and the classes they can share">
+            Sources &amp; classes ({Object.keys(data.sources || {}).length}{Object.keys(data.classes || {}).length ? ` + ${Object.keys(data.classes || {}).length}` : ""})</button>
+          <button className={tab === "reqs" ? "selected" : ""} onClick={() => setTab("reqs")}
+            title="The requirements written in this file, those of the local source: edited here">
+            Requirements of {local.length ? local.join(", ") : "this file"} ({reqCount})</button>
+        </div>
+      )}
+      {sourcesFile && showConfig && (
         <Section title="Sources" help={help(["sources"])}
           actions={!hasSources && (
             <button className="small" title="Keep the requirements of this file as the source 'reqs', and add sources read by other backends"
@@ -96,12 +112,15 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
           )}
         </Section>
       )}
-      {sourcesFile && hasSources && (
+      {sourcesFile && hasSources && showConfig && (
         <Section title={`Classes (${Object.keys(data.classes || {}).length})`} help={help(["classes"])} collapsed={!Object.keys(data.classes || {}).length}>
           <Classes data={data} doc={doc} setAll={api.setData} help={help} />
         </Section>
       )}
-      {showRequirements && <Requirements data={data} setTop={setTop} help={help} local={local} others={others} />}
+      {showRequirements && (!split || tab === "reqs") && <Requirements data={data} setTop={setTop} help={help} local={local} others={others} />}
+      {split && tab === "config" && local.length > 0 && (
+        <p className="muted small">The requirements of {local.join(", ")} are written in this file: edit them in the <button className="link small" onClick={() => setTab("reqs")}>Requirements of {local.join(", ")}</button> tab.</p>
+      )}
     </div>
   );
 }
@@ -134,6 +153,14 @@ function Sources({ data, doc, setTop, setAll, help }: {
     : name in sources ? "already a source" : null;
   return (
     <div className="req-sources">
+      <div className="req-new">
+        <strong>New source</strong>
+        <input className="mono" placeholder="its name: the prefix of its references (jama, alm_brakes…)" value={name} onChange={(e) => setName(e.target.value.trim())}
+          onKeyDown={(e) => e.key === "Enter" && name && !bad && (setSource(name, { backend: backends.find((b) => b.name !== "yaml")?.name || "yaml" }), setName(""))} />
+        <button className="primary" disabled={!name || !!bad} onClick={() => { setSource(name, { backend: backends.find((b) => b.name !== "yaml")?.name || "yaml" }); setName(""); }}>+ Create source</button>
+        {bad && <span className="bad-text small">{bad}</span>}
+        {Object.keys(classDefs).length > 0 && <span className="muted small">then pick a backend, or a class (<code>class:{Object.keys(classDefs)[0]}</code>…), in its Backend list</span>}
+      </div>
       {names.length === 0 && <p className="muted">No source yet: the test definitions cannot name any requirement.</p>}
       {names.map((n) => (
         <SourceCard key={n} name={n} spec={sources[n] || {}} doc={doc} isDefault={n === defaultName} taken={names}
@@ -168,12 +195,6 @@ function Sources({ data, doc, setTop, setAll, help }: {
             setTop("sources", next);
           }} />
       ))}
-      <div className="req-toolbar">
-        <input className="mono" placeholder="new source (jama, polarion…)" value={name} onChange={(e) => setName(e.target.value.trim())}
-          onKeyDown={(e) => e.key === "Enter" && name && !bad && (setSource(name, { backend: backends.find((b) => b.name !== "yaml")?.name || "yaml" }), setName(""))} />
-        <button className="small" disabled={!name || !!bad} onClick={() => { setSource(name, { backend: backends.find((b) => b.name !== "yaml")?.name || "yaml" }); setName(""); }}>Add source</button>
-        {bad && <span className="bad-text small">{bad}</span>}
-      </div>
       <p className="muted small">
         Test definitions and checks name a requirement of the default source by its id (<code>REQ-12</code>), and one of another
         source with its name (<code>jama:SYS-4</code>). Backends available here: {backends.map((b) => b.name).join(", ") || "none"}
@@ -428,8 +449,15 @@ function Classes({ data, doc, setAll, help }: {
       <p className="muted small">
         A class is a source written once (backend, options, credentials) with <em>class variables</em>: each source of it only gives their
         values (the same tool, for another subsystem). Use <code>{"{{ name }}"}</code> in the options and credentials, <code>$name</code> in jq.
-        A source picks a class in its Backend list.
+        A source picks a class in its Backend list; <em>Make a class…</em> on a source turns it into one.
       </p>
+      <div className="req-new">
+        <strong>New class</strong>
+        <input className="mono" placeholder="its name (alm, jama…)" value={name} onChange={(e) => setName(e.target.value.trim())}
+          onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button className="primary" disabled={!name || !!bad} onClick={add}>+ Create class</button>
+        {bad && <span className="bad-text small">{bad}</span>}
+      </div>
       {names.map((c) => (
         <ClassCard key={c} name={c} def={defs[c] || {}} doc={doc} taken={names} users={users(c)} backends={backends} backendChoices={backendChoices}
           help={help}
@@ -442,12 +470,6 @@ function Classes({ data, doc, setAll, help }: {
           }}
           onRemove={() => { const next = clone(defs); delete next[c]; setClasses(next); }} />
       ))}
-      <div className="req-toolbar">
-        <input className="mono" placeholder="new class (alm, jama…)" value={name} onChange={(e) => setName(e.target.value.trim())}
-          onKeyDown={(e) => e.key === "Enter" && add()} />
-        <button className="small" disabled={!name || !!bad} onClick={add}>Add class</button>
-        {bad && <span className="bad-text small">{bad}</span>}
-      </div>
     </div>
   );
 }
