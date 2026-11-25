@@ -16,7 +16,7 @@
 // tests × requirements. Used by the Run page (one run), the campaign run page (its runs) and the Requirements subtab
 // of Datapacks (the test definitions of a tests repository, with the tree of the requirements).
 import { htmlToText, RichText } from "../richtext";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type CSSProperties } from "react";
 import { url, useResource } from "../api";
 import { createFile } from "../editor/Session";
 import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
@@ -68,7 +68,7 @@ export function CoverageTiles({ rows }: { rows: any[] }) {
 
 /** A requirement opened. With a session (the Requirements tab, live): read again in full from its source, as
  *  generation reads it (a REST source's details calls), the row's fields shown meanwhile. */
-function RequirementDetail({ req: row, sid }: { req: any; sid?: string }) {
+function RequirementDetail({ req: row, sid, colors = {} }: { req: any; sid?: string; colors?: Record<string, string> }) {
   const full = useResource<any>(sid && row.source && row.id
     ? `edit/sessions/${sid}/requirements/item?source=${encodeURIComponent(row.source)}&id=${encodeURIComponent(row.id)}` : null);
   const req = { ...row, ...(full.data?.requirement || {}), version: row.version };
@@ -86,6 +86,7 @@ function RequirementDetail({ req: row, sid }: { req: any; sid?: string }) {
         {req.pinned && <span>pinned <code>{req.pinned}</code></span>}
         {req.status && <span>status {req.status}</span>}
         {(req.tags || []).length > 0 && <span>{req.tags.map((t: string) => <span key={t} className="chip">{t}</span>)}</span>}
+        {(req.dynamic_tags || []).length > 0 && <span>{req.dynamic_tags.map((t: string) => <span key={t} className="dyn-tag" style={tagStyle(colors[t])} title="dynamic tag: its texts hold one of its words">⚑ {t}</span>)}</span>}
         {req.url && <a href={req.url} target="_blank" rel="noreferrer">open in its tool ↗</a>}
       </div>
     </div>
@@ -101,11 +102,34 @@ function testHref(t: any) {
   return t.run ? `#/runs/${encodeURIComponent(t.run)}?tab=requirements` : null;
 }
 
+/** The style of a dynamic tag of a color its source gives (#rrggbb). */
+export function tagStyle(color?: string): CSSProperties | undefined {
+  return color && /^#([0-9a-f]{3}){1,2}$/i.test(color)
+    ? { color, background: `color-mix(in srgb, ${color} 16%, transparent)`, outlineColor: color } : undefined;
+}
+
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
 export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [tag, setTag] = useState("");                       // only the requirements with this tag (or dynamic tag)
+  const [search, setSearch] = useState("");                 // only the requirements holding these words (id, title, texts, path, tags)
   const tests: any[] = data.tests || [];
-  const rows: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
+  const colors: Record<string, string> = data.tag_colors || {};
+  const inNode: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
+  const tagCounts = useMemo(() => {
+    const out = new Map<string, { n: number; dynamic: boolean }>();
+    for (const r of inNode) {
+      for (const t of r.dynamic_tags || []) out.set(`~${t}`, { n: (out.get(`~${t}`)?.n || 0) + 1, dynamic: true });
+      for (const t of r.tags || []) out.set(t, { n: (out.get(t)?.n || 0) + 1, dynamic: false });
+    }
+    return [...out.entries()].sort(([a, x], [b, y]) => Number(y.dynamic) - Number(x.dynamic) || a.localeCompare(b));
+  }, [inNode]);
+  const rows: any[] = useMemo(() => {
+    const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+    return inNode.filter((r: any) => (!tag || (tag.startsWith("~") ? (r.dynamic_tags || []).includes(tag.slice(1)) : (r.tags || []).includes(tag)))
+      && (!words.length || ((text) => words.every((w) => text.includes(w)))(
+        [r.key, r.title, htmlToText(String(r.description || "")), r.rationale, r.path, ...(r.tags || []), ...(r.dynamic_tags || [])].join(" ").toLowerCase())));
+  }, [inNode, tag, search]);
   const groups = useMemo(() => {
     const out: [string, any[]][] = [];
     for (const r of rows) {
@@ -119,13 +143,28 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
   return (
     <div className="coverage">
       <CoverageTiles rows={rows} />
+      <div className="cov-tags small">
+        <input type="search" className="cov-search" placeholder="Search the requirements: id, title, text, path, tag…" value={search}
+          onChange={(e) => setSearch(e.target.value)} title="Only the requirements holding all these words" />
+        {search && <span className="muted">{rows.length} of {inNode.length}</span>}
+      {tagCounts.length > 0 && (<>
+          <select value={tag} onChange={(e) => setTag(e.target.value)} title="Only the requirements with this tag (⚑: a dynamic tag, found in their texts)">
+            <option value="">All tags</option>
+            {tagCounts.map(([t, c]) => <option key={t} value={t}>{c.dynamic ? `⚑ ${t.slice(1)}` : t} ({c.n})</option>)}
+          </select>
+          {tagCounts.filter(([, c]) => c.dynamic).map(([t, c]) => (
+            <button key={t} className={classes("dyn-tag", tag === t && "selected")} style={tagStyle(colors[t.slice(1)])} onClick={() => setTag(tag === t ? "" : t)}
+              title="A dynamic tag: requirements whose texts hold one of its words. Click to show only them.">⚑ {t.slice(1)} {c.n}</button>
+          ))}
+      </>)}
+      </div>
       {(data.problems || []).length > 0 && <ul className="warn-list">{data.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
       {rows.length === 0 ? <p className="muted">No requirement here.</p> : (
         <div className="scroll">
           <table className="grid compact cov-matrix">
             <thead>
               <tr>
-                <th>Requirement</th><th>Title</th><th>Coverage</th>
+                <th>Requirement</th><th>Title</th><th>Tags</th><th>Coverage</th>
                 {tests.map((t) => {
                   const href = testHref(t);
                   return (
@@ -143,17 +182,19 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                 const c = counts(reqs);
                 return (
                   <Fragment key={path}>
-                    <tr className="cov-node"><td colSpan={3 + tests.length}><code>{path || "(no path)"}</code> <span className="muted small">{STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
+                    <tr className="cov-node"><td colSpan={4 + tests.length}><code>{path || "(no path)"}</code> <span className="muted small">{STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
                     {reqs.map((r) => (
                       <Fragment key={r.key}>
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono nowrap">{r.key}</td>
                           {(() => { const title = r.title || htmlToText(String(r.description || "")).split("\n")[0];
                             return <td className="cov-title" title={title}>{title}</td>; })()}
+                          <td className="cov-tags-cell">{(r.dynamic_tags || []).map((t: string) => <span key={t} className="dyn-tag" style={tagStyle(colors[t])} title="dynamic tag: its texts hold one of its words">⚑ {t}</span>)}
+                            {(r.tags || []).map((t: string) => <span key={t} className="tag">{t}</span>)}</td>
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>
-                        {open === r.key && <tr className="cov-detail"><td colSpan={3 + tests.length}><RequirementDetail req={r} sid={sid} /></td></tr>}
+                        {open === r.key && <tr className="cov-detail"><td colSpan={4 + tests.length}><RequirementDetail req={r} sid={sid} colors={colors} /></td></tr>}
                       </Fragment>
                     ))}
                   </Fragment>
@@ -231,22 +272,32 @@ export function RunsCoverage({ path, events, title }: { path: string; events: st
   );
 }
 
-function TreeNode({ node, prefix, rows, selected, onSelect, depth }: { node: any; prefix: string; rows: any[]; selected: string; onSelect: (p: string) => void; depth: number }) {
+function TreeNode({ node, prefix, rows, selected, onSelect, depth, unfolded, onFold }: { node: any; prefix: string; rows: any[]; selected: string; onSelect: (p: string) => void; depth: number;
+  unfolded: Set<string>; onFold: (p: string) => void }) {
   const path = prefix ? `${prefix}/${node.id}` : node.id;
+  const kids = node.children || [];
+  // folded unless unfolded, or on the way to the node picked
+  const open = unfolded.has(path) || (selected !== path && selected.startsWith(path + "/"));
   const mine = rows.filter((r) => under(r.path, path, true));
   const c = counts(mine);
   const worst = STATUSES.find((s) => ["failed", "error", "uncovered", "partial", "skipped", "not run"].includes(s) && c[s]) || (mine.length ? "passed" : null);
   return (
     <>
-      <button className={classes("req-tree-item", selected === path && "active")} style={{ paddingLeft: 8 + depth * 14 }} onClick={() => onSelect(path)}
+      <button className={classes("req-tree-item", selected === path && "active")} style={{ paddingLeft: 8 + (depth - 1) * 14 }} onClick={() => onSelect(path)}
         title={`${path}: ${STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(", ") || "no requirement"}`}>
+        <span className="req-tree-fold" onClick={(e) => { if (kids.length) { e.stopPropagation(); onFold(path); } }}
+          title={kids.length ? (open ? "Fold it" : `Unfold it: ${kids.length} below`) : undefined}>{kids.length ? (open ? "▾" : "▸") : ""}</span>
         <span>{node.label && node.label !== node.id ? node.label : node.id}</span>
         <span className="muted small">{mine.length}</span>
         {worst && <span className={classes("cov-dot", worst.replace(" ", "-"))} />}
       </button>
-      {(node.children || []).map((ch: any) => <TreeNode key={ch.id} node={ch} prefix={path} rows={rows} selected={selected} onSelect={onSelect} depth={depth + 1} />)}
+      {open && kids.map((ch: any) => <TreeNode key={ch.id} node={ch} prefix={path} rows={rows} selected={selected} onSelect={onSelect} depth={depth + 1} unfolded={unfolded} onFold={onFold} />)}
     </>
   );
+}
+
+function allPaths(nodes: any[], prefix = ""): string[] {
+  return (nodes || []).flatMap((n: any) => { const p = prefix ? `${prefix}/${n.id}` : n.id; return [p, ...allPaths(n.children, p)]; });
 }
 
 const INTRO = `The requirements of this repository (\`requirements.yml\`), and how its test definitions cover them: each test definition by its latest run on this sequencer, else as linked. Test definitions and the checks of their criteria list the requirements they verify with \`reqs\`.`;
@@ -267,6 +318,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   const [source, setSource] = useState<string | null>(null);
   const [campaign, setCampaign] = useState<string>("");
   const [node, setNode] = useState("");
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());   // the tree nodes unfolded: all folded at first
   const [children, setChildren] = useState(true);
   const q = new URLSearchParams();
   if (source) q.set("source", source);
@@ -335,11 +387,15 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
         <div className="requirements-layout">
           <nav className="req-tree">
             {picker}
-            <div className="req-tree-head muted small">{d.source ? <>Tree of <code>{d.source}</code></> : "Tree of every source"}</div>
+            <div className="req-tree-head muted small">{d.source ? <>Tree of <code>{d.source}</code></> : "Tree of every source"}
+              <span className="grow" />
+              <button className="link small" title="Unfold every node" onClick={() => setUnfolded(new Set(allPaths(d.tree)))}>unfold all</button>
+              <button className="link small" title="Fold every node" onClick={() => setUnfolded(new Set())}>fold all</button></div>
             <button className={classes("req-tree-item", node === "" && "active")} onClick={() => setNode("")}>
               <span>All requirements</span><span className="muted small">{rows.length}</span>
             </button>
-            {d.tree.map((n: any) => <TreeNode key={n.id} node={n} prefix="" rows={rows} selected={node} onSelect={setNode} depth={1} />)}
+            {d.tree.map((n: any) => <TreeNode key={n.id} node={n} prefix="" rows={rows} selected={node} onSelect={setNode} depth={1}
+              unfolded={unfolded} onFold={(p) => setUnfolded((u) => { const n2 = new Set(u); if (n2.has(p)) n2.delete(p); else n2.add(p); return n2; })} />)}
             <p className="muted small">From <code>{d.sources_file}</code>
               {!d.sources_file.startsWith("/") && <> <button className="link small" title="Edit the sources and the requirements in the Editor, in a new browser tab"
                 onClick={() => openInNewTab({ path: `edit/${sid}`, query: { file: d.sources_file } })}>✎ Edit…</button></>}</p>

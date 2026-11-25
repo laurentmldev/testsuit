@@ -1661,6 +1661,7 @@ class Editor:
                 probe = backend.probe(upto, expr=expr, on=on) if expr is not None else backend.probe(upto)
             else:
                 reqs = list_requirements(backend, "", True)
+                sources.tagged(source, reqs)
                 tree = backend.tree()
         except ReqError as e:
             out["error"] = str(e).replace(str(session.folder) + os.sep, "")

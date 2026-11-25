@@ -48,6 +48,13 @@ def _counts(counts: dict[str, int]) -> str:
     return " · ".join(f"{s} {counts[s]}" for s in STATUSES if counts.get(s))
 
 
+def _tag_style(color: str | None) -> str:
+    """The style of a dynamic tag of this color (#rgb or #rrggbb, as the sources file checks)."""
+    if not color or not re.fullmatch(r"#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?", color):
+        return ""
+    return f' style="color: {color}; background: color-mix(in srgb, {color} 15%, transparent)"'
+
+
 def text(cov: Coverage) -> str:
     out = []
     rows = cov.rows()
@@ -109,15 +116,17 @@ def as_csv(cov: Coverage, view: str = "reqs") -> str:
             for lk in t.links:
                 w.writerow([t.testdef, t.run, t.verdict, lk.where, lk.req, lk.status])
     else:
-        w.writerow(["requirement", "path", "title", "coverage", *[t.key for t in cov.tests]])
+        w.writerow(["requirement", "path", "title", "coverage", *[t.key for t in cov.tests], "dynamic tags"])
         for key in cov.rows():
             req = cov.requirements.get(key, {})
             w.writerow([key, req.get("path", ""), req.get("title", ""), cov.status(key),
-                        *[(t.status(key) or "") + (" (changed)" if cov.stale(key, t) else "") for t in cov.tests]])
+                        *[(t.status(key) or "") + (" (changed)" if cov.stale(key, t) else "") for t in cov.tests],
+                        ", ".join(req.get("dynamic_tags") or [])])
     return buf.getvalue()
 
 
-CSS = """
+CSS = """.dyn { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 9px; font-size: 11px; background: #fdf0d5; color: #8a5a00; }
+
 :root { --bg:#fff; --fg:#1d2330; --muted:#667085; --line:#e4e7ec; --card:#f8f9fb; --link:#175cd3;
         --ok:#16794c; --okbg:#e7f6ee; --bad:#b42318; --badbg:#fdecea; --err:#93370d; --errbg:#fef0c7;
         --part:#175cd3; --partbg:#e8f0fe; --skip:#475467; --skipbg:#eef0f3; --none:#98a2b3; --nonebg:transparent; }
@@ -195,7 +204,9 @@ def matrix_html(cov: Coverage, base: str = "") -> str:
                         f'<span class="muted">{e(_counts(by_path.get(path, {})))}</span></td></tr>')
         title_text = req.get("title") or plain_text(str(req.get("description", ""))).split("\n")[0][:120]
         cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
-        body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
+        dyn = "".join(f' <span class="dyn" title="dynamic tag"{_tag_style(cov.tag_colors.get(str(t)))}>{e(str(t))}</span>'
+                      for t in req.get("dynamic_tags") or [])
+        body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}{dyn}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
     heads = "".join(f"<th>{_test_head(t, base)}</th>" for t in cov.tests)
     return (f'<div class="scroll"><table><thead><tr><th>Requirement</th><th>Title</th><th>Coverage</th>{heads}</tr>'
             f'</thead><tbody>{"".join(body)}</tbody></table></div>')

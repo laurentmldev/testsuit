@@ -860,10 +860,23 @@ REQUIREMENT = h(
         "url": h("Where to read it (default: the `url` option of the source, `{id}` replaced).", type="string"),
     })
 
+DYNAMIC_TAGS = h(
+    "Dynamic tags: each tag given to the requirements whose title, description, rationale or comments hold one of its "
+    "words or phrases (whole words, case independent): `Maturity Warning: [TBC, TBD, to be defined]`. Found when the "
+    "requirements are read; not part of their version. A source of a class has those of its class.",
+    type="object", additionalProperties={"anyOf": [{"type": "array", "items": {"type": "string"}},
+                                                   h("Words separated by commas.", type="string"),
+                                                   h("The words, and the color the tag is shown in.", type="object",
+                                                     additionalProperties=False, properties={
+                                                         "words": {"type": "array", "items": {"type": "string"}},
+                                                         "color": h("`#rrggbb`", type="string",
+                                                                    pattern="^#([0-9A-Fa-f]{3}){1,2}$")})]})
+
 SOURCE = h(
     "A requirements source: the backend that reads a requirements tool, its options and its credentials; or a "
     "class (`class`) and the values of its variables (`vars`), and nothing else.",
     type="object", additionalProperties=False, properties={
+        "dynamic_tags": DYNAMIC_TAGS,
         "class": h("The class this source is of (`classes`): the source sets only its label and the values of the "
                    "class variables.", type="string"),
         "backend": h("The backend: `yaml` (built in: a YAML file of this repository), or one registered by a plugin "
@@ -897,7 +910,7 @@ CLASS = h(
     type="object", required=["backend"], additionalProperties=False, properties={
         "backend": SOURCE["properties"]["backend"], "label": h("A readable name; a source of it can have its own.", type="string"),
         "description": h("What the class is for, shown when a source picks it.", type="string"),
-        "options": SOURCE["properties"]["options"],
+        "options": SOURCE["properties"]["options"], "dynamic_tags": DYNAMIC_TAGS,
         "credentials": h(SOURCE["properties"]["credentials"]["description"] + " Usually named after a class variable: "
                          "`env:ALM_TOKEN_{{ subsystem }}`.", type="object",
                          additionalProperties=SOURCE["properties"]["credentials"]["additionalProperties"]),
