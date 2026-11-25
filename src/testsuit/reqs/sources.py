@@ -32,6 +32,23 @@ A variable's value can be a Jinja2 expression of the datapack keys (dictionaries
 ``tsq-reqs``). A mandatory variable must have a value (not empty), and is the context of the requirements: shown by
 the Editor and the reports (``jama: version=3.2``). The variables, as resolved, are recorded in the datapack.
 
+A class is a source written once and used by several sources, each giving only the values of its variables (the same
+requirements tool, for another subsystem)::
+
+    classes:
+      alm:
+        backend: rest
+        options: {base: https://alm.example/api, list: {url: "systems/{{ subsystem }}/items", items: ".data[]"}}
+        credentials: {token: "env:ALM_TOKEN_{{ subsystem }}"}   # credentials can use the class variables
+        vars:                           # declared here, given by each source: {mandatory, value (a default), help}
+          subsystem: {mandatory: true, help: The subsystem in the ALM}
+    sources:
+      brakes: {class: alm, vars: {subsystem: BRAKE}}
+      speed: {class: alm, label: Speed, vars: {subsystem: SPEED}}
+
+A source of a class sets only its ``label`` and the values of the class variables: nothing else of the class is
+overridden (the Editor's Detach turns it into a source of its own, a copy of the class).
+
 A sources file without ``sources`` but with ``requirements`` is itself the one source ``reqs`` of the built-in YAML
 backend (the simplest setup: one file).
 """
@@ -89,10 +106,12 @@ def find_sources_file(start: Path) -> Path | None:
     return None
 
 
-def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str, str] | None:
+def _credentials(name: str, spec: Any, base_dir: Path | None = None,
+                 variables: Mapping[str, Any] | None = None) -> dict[str, str] | None:
     """The credentials of a source, each read where its value says: ``env:<VARIABLE>`` (an environment variable) or
     ``file:<path>`` (the content of a file, such as a Docker or Kubernetes secret ``/run/secrets/<name>``; a relative
-    path is relative to the sources file; trailing white space dropped). A value written in the file is refused."""
+    path is relative to the sources file; trailing white space dropped). A value written in the file is refused. A
+    reference can use the variables of the source (``env:ALM_TOKEN_{{ subsystem }}``)."""
     if spec is None:
         return None
     if not isinstance(spec, dict):
@@ -100,6 +119,8 @@ def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str
     out = {}
     for key, value in spec.items():
         text = str(value)
+        if is_reference(text) and "{{" in text:
+            text = str(_render_var(text, variables, f"source '{name}': credential '{key}'"))
         if not is_reference(text):
             raise ReqError(f"source '{name}': credential '{key}' must come from the environment ('env:<VARIABLE>') "
                            "or a file ('file:<path>', such as a Docker secret), never be written in the sources file")
@@ -111,10 +132,11 @@ def _credentials(name: str, spec: Any, base_dir: Path | None = None) -> dict[str
 
 
 def var_spec(spec: Any, where: str) -> tuple[Any, bool, Any]:
-    """(value, mandatory) of a variable: a value, or ``{value, mandatory}`` (a fallback: Jinja2's ``default``)."""
+    """(value, mandatory) of a variable: a value, or ``{value, mandatory}`` (a fallback: Jinja2's ``default``); a
+    class variable has a ``help`` too."""
     if not isinstance(spec, dict):
         return spec, False
-    unknown = sorted(set(spec) - {"value", "mandatory"})
+    unknown = sorted(set(spec) - {"value", "mandatory", "help"})
     if unknown:
         raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)} (value, mandatory; a fallback goes in the value: "
                        "{{ sut.version | default('3.2') }})")
@@ -166,8 +188,16 @@ class Sources:
                                       **({"label": str(data["label"])} if data.get("label") else {})}}
         if not isinstance(specs, dict) or not specs:
             raise ReqError(f"'{self.file}': 'sources' is a mapping of sources by name")
-        self.specs: dict[str, dict] = {}
+        classes = data.get("classes") or {}
+        if not isinstance(classes, dict):
+            raise ReqError(f"'{self.file}': 'classes' is a mapping of classes by name")
+        self.classes: dict[str, dict] = {}
+        for name, spec in classes.items():
+            self.classes[str(name)] = self._class_checked(str(name), spec)
+        self.raw: dict[str, Any] = {}          # each source as written (a source of a class: its class and values)
+        self.specs: dict[str, dict] = {}       # each source as used (a source of a class: the class, with its values)
         for name, spec in specs.items():
+            self.raw[str(name)] = spec
             self.specs[str(name)] = self._checked(str(name), spec)
         self.default = str(data.get("default") or next(iter(self.specs)))
         if self.default not in self.specs:
@@ -175,9 +205,64 @@ class Sources:
         self._backends: dict[str, ReqBackend] = {}
         self._vars: dict[str, dict[str, Any]] = {}
 
-    def _checked(self, name: str, spec: Any) -> dict:
+    def _class_checked(self, name: str, spec: Any) -> dict:
+        where = f"'{self.file}': class '{name}'"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+            raise ReqError(f"{where}: not a name (letters, digits, _ and -)")
         if not isinstance(spec, dict) or not spec.get("backend"):
-            raise ReqError(f"'{self.file}': source '{name}' names its 'backend'")
+            raise ReqError(f"{where} names its 'backend'")
+        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars", "description"})
+        if unknown:
+            raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)}")
+        if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
+            raise ReqError(f"{where}: 'vars' is a mapping of the class variables by name")
+        for key, decl in (spec.get("vars") or {}).items():
+            var_spec(decl, f"{where}: variable '{key}'")
+        return spec
+
+    def _of_class(self, name: str, spec: dict) -> dict:
+        """A source of a class, as used: the class, with the values the source gives to its variables."""
+        where = f"'{self.file}': source '{name}'"
+        cls = str(spec["class"])
+        if cls not in self.classes:
+            raise ReqError(f"{where}: unknown class '{cls}'" + (f" (classes: {', '.join(self.classes)})" if self.classes
+                                                                else " (no 'classes' in the file)"))
+        other = sorted(set(spec) - {"class", "label", "vars"})
+        if other:
+            raise ReqError(f"{where}: {', '.join(other)}: a source of a class sets only its label and the values of the "
+                           f"class variables (to change the rest, detach it from class '{cls}' in the Editor)")
+        given = spec.get("vars") or {}
+        if not isinstance(given, dict):
+            raise ReqError(f"{where}: 'vars' is a mapping of the class variables to their values")
+        declared = self.classes[cls].get("vars") or {}
+        unknown = sorted(set(map(str, given)) - set(map(str, declared)))
+        if unknown:
+            raise ReqError(f"{where}: {', '.join(unknown)}: not a variable of class '{cls}'"
+                           + (f" (its variables: {', '.join(map(str, declared))})" if declared else " (it has none)"))
+        variables = {}
+        for key, decl in declared.items():
+            default, mandatory = var_spec(decl, f"'{self.file}': class '{cls}': variable '{key}'")
+            value = given.get(key, default)
+            if isinstance(value, dict):          # a value of a source is a value: no qualifiers
+                raise ReqError(f"{where}: variable '{key}': a value is expected (mandatory is the class's)")
+            variables[str(key)] = {"value": value, "mandatory": mandatory}
+        c = self.classes[cls]
+        label = spec.get("label") or c.get("label")
+        return {"backend": c["backend"], "class": cls, **({"label": label} if label else {}),
+                **{k: c[k] for k in ("options", "credentials") if c.get(k) is not None},
+                **({"vars": variables} if variables else {})}
+
+    def class_version(self, name: str) -> str:
+        """A short hash of a class as written: which version of it a source used (recorded in the datapack)."""
+        import hashlib
+        import json
+        return hashlib.sha256(json.dumps(self.classes[name], sort_keys=True, default=str).encode()).hexdigest()[:8]
+
+    def _checked(self, name: str, spec: Any) -> dict:
+        if isinstance(spec, dict) and spec.get("class"):
+            return self._of_class(name, spec)
+        if not isinstance(spec, dict) or not spec.get("backend"):
+            raise ReqError(f"'{self.file}': source '{name}' names its 'backend' (or its 'class')")
         unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars"})
         if unknown:
             raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
@@ -187,9 +272,17 @@ class Sources:
 
     def replace(self, name: str, spec: Any) -> None:
         """Use another spec for a source (one being edited, not saved yet: the Editor's tests)."""
+        self.raw[name] = spec
         self.specs[name] = self._checked(name, spec)
         self._backends.pop(name, None)
         self._vars.pop(name, None)
+
+    def replace_class(self, name: str, spec: Any) -> None:
+        """Use another spec for a class (one being edited), and for the sources of it."""
+        self.classes[name] = self._class_checked(name, spec)
+        for source, raw in self.raw.items():
+            if isinstance(raw, dict) and str(raw.get("class") or "") == name:
+                self.replace(source, raw)
 
     def vars(self, name: str) -> dict[str, Any]:
         """The variables of a source, resolved."""
@@ -227,7 +320,8 @@ class Sources:
         if name not in self._backends:
             spec = self.specs[name]
             self._backends[name] = create_req_backend(spec["backend"], spec.get("options") or {},
-                                                      _credentials(name, spec.get("credentials"), self.file.parent),
+                                                      _credentials(name, spec.get("credentials"), self.file.parent,
+                                                                   self.vars(name)),
                                                       self.file.parent, self.vars(name))
         return self._backends[name]
 
@@ -281,7 +375,9 @@ class Sources:
                 found = {}
             variables = {**self.vars(name), **(found or {})}
             context = self.context(name)
+            cls = self.specs[name].get("class")
             out.append({"name": name, "backend": self.specs[name]["backend"],
+                        **({"class": cls, "class_version": self.class_version(cls)} if cls else {}),
                         **({"context": context} if context else {}),
                         **({"vars": variables} if variables else {}),
                         **({"revision": revision} if revision else {})})

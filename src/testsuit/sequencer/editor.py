@@ -1620,12 +1620,15 @@ class Editor:
         return out
 
     def requirements_test(self, session: EditSession, path: str, source: str, spec: dict | None = None,
-                          upto: str | None = None, expr: str | None = None, on: str = "list") -> dict:
+                          upto: str | None = None, expr: str | None = None, on: str = "list",
+                          classes: dict | None = None, klass: str | None = None, values: dict | None = None) -> dict:
         """Read one source of a sources file of the session, as datapack generation would: how many requirements, how
         long it took, the tree and the first requirements, or what went wrong (Editor form). ``spec``: the source as
         being edited (default: as saved). ``upto``: only the calls up to a stage of a backend that has stages (the rest
         backend: ``step:N``, ``list``). ``calls``: each call to the server, for a backend that describes them (its
-        URL, headers, status, answer, what it extracted; credentials masked)."""
+        URL, headers, status, answer, what it extracted; credentials masked). ``classes``: the classes as being edited.
+        ``klass``: test that class instead of a source (``spec``: the class as being edited), with ``values`` for its
+        variables (the test values, given at each test: a class has none of its own)."""
         import time
 
         from testsuit.reqs.backend import ReqError, list_requirements
@@ -1635,7 +1638,17 @@ class Editor:
         backend = None
         try:
             sources = Sources(self.path(session, path))
-            if spec is not None:
+            for name, cls in (classes or {}).items():
+                sources.replace_class(str(name), cls)
+            if klass:
+                if spec is not None:
+                    sources.replace_class(klass, spec)
+                elif klass not in sources.classes:
+                    raise ReqError(f"no class '{klass}' in the file")
+                source = klass
+                given = {str(k): v for k, v in (values or {}).items() if v not in (None, "")}
+                sources.replace(source, {"class": klass, **({"vars": given} if given else {})})
+            elif spec is not None:
                 sources.replace(source, spec)
             backend = sources.backend(source)
             backend.trace = []

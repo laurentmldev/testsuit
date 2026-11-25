@@ -1352,3 +1352,13 @@ textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-sp
 .req-debug pre { max-width: 100%; overflow: auto; }
 .req-debug .req-test { margin-top: 6px; }
 .req-group { min-width: 0; }                      /* a fieldset is as wide as its content by default: a long URL widened the form */
+.req-class { border-style: dashed; }
+.req-class-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); color: var(--muted); }
+.req-class-vars td, .req-class-values td { vertical-align: top; }
+.req-class-values td:first-child { width: 30%; }
+.req-detach { margin: 6px 0 4px; }
+.req-detach-confirm { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.req-detach-confirm p { margin: 0 0 6px; }
+.req-test-values { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--accent, var(--border)); border-radius: 6px; background: var(--panel); max-width: 560px; }
+.req-test-values table { margin: 6px 0; width: 100%; }
+.req-test-values input { width: 100%; box-sizing: border-box; }

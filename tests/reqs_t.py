@@ -987,3 +987,62 @@ def test_rest_test_limit(tmp_path, alm_server):
     assert calls == [] and "more than 30 s" in b.trace[0]["error"]
     b.deadline = time.monotonic() + 30                  # within it: the call is made, waiting at most what is left
     assert b.probe("list") and len(calls) == 1
+
+
+def test_source_classes(tmp_path, alm_server, monkeypatch):
+    """A class: a source written once, used by sources that give values to its variables (another subsystem of the
+    same tool), credentials named after them; nothing else overridden; the class recorded with its version; a test
+    of the class with values given at that test."""
+    from testsuit.reqs.backend import ReqError
+    from testsuit.reqs.sources import Sources
+    base, calls = alm_server
+    monkeypatch.setenv("ALM_TOKEN_SPEED", "s3cret")
+    monkeypatch.setenv("ALM_TOKEN_BRAKE", "s3cret")
+    alm = {"backend": "rest", "label": "ALM", "credentials": {"token": "env:ALM_TOKEN_{{ name }}"},
+           "options": {"base": base + "/api", "auth": {"bearer": "token"}, "fields": {"id": ".key", "title": ".fields.name"},
+                       "list": {"url": "sub/{{ sub }}/items", "items": ".data[]"}},
+           "vars": {"sub": {"mandatory": True, "help": "The subsystem's id"}, "name": {"mandatory": True}}}
+    data = {"classes": {"alm": alm}, "sources": {
+        "brakes": {"class": "alm", "vars": {"sub": 7, "name": "BRAKE"}},
+        "speed": {"class": "alm", "label": "Speed", "vars": {"sub": 9, "name": "SPEED"}}}}
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    sources = Sources(file)
+    assert list(sources.list(source="brakes")) == ["ALM-1", "ALM-2"]
+    assert list(sources.list(source="speed")) == ["speed:ALM-3", "speed:ALM-4", "speed:ALM-5"]
+    assert sources.specs["brakes"]["label"] == "ALM" and sources.specs["speed"]["label"] == "Speed"
+    record = {r["name"]: r for r in sources.record()}
+    assert record["speed"]["class"] == "alm" and len(record["speed"]["class_version"]) == 8
+    assert record["speed"]["context"] == {"sub": 9, "name": "SPEED"}
+
+    def fails(match, **change):
+        bad = {**data, "sources": {**data["sources"], "brakes": change.get("brakes", data["sources"]["brakes"])},
+               **({"classes": change["classes"]} if "classes" in change else {})}
+        file.write_text(yaml.safe_dump(bad), encoding="utf-8")
+        with pytest.raises(ReqError, match=match):
+            s = Sources(file)
+            s.backend("brakes")
+    fails("a source of a class sets only its label and the values", brakes={"class": "alm", "options": {"x": 1}})
+    fails("colour: not a variable of class 'alm'", brakes={"class": "alm", "vars": {"sub": 7, "name": "B", "colour": 1}})
+    fails("mandatory variable 'name' has no value", brakes={"class": "alm", "vars": {"sub": 7}})
+    fails("unknown class 'jira'", brakes={"class": "jira"})
+    fails("class 'alm' names its 'backend'", classes={"alm": {"options": {}}})
+    monkeypatch.delenv("ALM_TOKEN_BRAKE")
+    fails("ALM_TOKEN_BRAKE", brakes={"class": "alm", "vars": {"sub": 7, "name": "BRAKE"}})
+
+    # the Editor: the file checks, a test of the class with the values given at the test, as being edited
+    from editor_t import Repos
+    editor = Repos(tmp_path / "repos").editor
+    session = editor.open("workspace0")
+    editor.write(session, "requirements.yml", content=yaml.safe_dump(data))
+    assert [p for p in editor.check_file(session, "requirements.yml") if p["severity"] == "error"] == []
+    result = editor.requirements_test(session, "requirements.yml", "", klass="alm", values={"sub": 9, "name": "SPEED"})
+    assert result["ok"] and result["count"] == 3
+    result = editor.requirements_test(session, "requirements.yml", "", klass="alm", values={"sub": 9})
+    assert not result["ok"] and "'name' has no value" in result["error"]
+    edited = {**alm, "options": {**alm["options"], "list": {"url": "sub/{{ sub }}/items", "items": ".data[:1][]"}}}
+    result = editor.requirements_test(session, "requirements.yml", "", spec=edited, klass="alm",
+                                      values={"sub": 9, "name": "SPEED"}, upto="list")
+    assert result["ok"] and result["items"] == 1
+    result = editor.requirements_test(session, "requirements.yml", "speed", classes={"alm": edited})
+    assert result["ok"] and result["count"] == 1               # a source of it, with the class as being edited

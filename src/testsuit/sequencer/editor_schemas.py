@@ -861,8 +861,11 @@ REQUIREMENT = h(
     })
 
 SOURCE = h(
-    "A requirements source: the backend that reads a requirements tool, its options and its credentials.",
-    type="object", required=["backend"], additionalProperties=False, properties={
+    "A requirements source: the backend that reads a requirements tool, its options and its credentials; or a "
+    "class (`class`) and the values of its variables (`vars`), and nothing else.",
+    type="object", additionalProperties=False, properties={
+        "class": h("The class this source is of (`classes`): the source sets only its label and the values of the "
+                   "class variables.", type="string"),
         "backend": h("The backend: `yaml` (built in: a YAML file of this repository), or one registered by a plugin "
                      "(`testsuit.reqs.register_req_backend`).", type="string"),
         "label": h("A readable name, shown in the source picker.", type="string"),
@@ -870,9 +873,9 @@ SOURCE = h(
         "credentials": h("Credentials of the backend, by name, each read on the machine that reads the source: "
                          "`env:<VARIABLE>` (an environment variable) or `file:<path>` (the content of a file, such as "
                          "a Docker secret `/run/secrets/<name>`; relative to this file). A value written here is "
-                         "refused.",
+                         "refused. A reference can use the variables (`env:ALM_TOKEN_{{ subsystem }}`).",
                          type="object", additionalProperties=h("`env:<VARIABLE>` or `file:<path>`", type="string",
-                                                               pattern="^(env:[A-Za-z_][A-Za-z0-9_]*|file:.+)$")),
+                                                               pattern="^(env:([A-Za-z_][A-Za-z0-9_]*|.*\\{\\{.*)|file:.+)$")),
         "vars": h("Variables of the source, by name: `{{ name }}` in its options (`$name` in the jq expressions of "
                   "the rest backend). A value can be a Jinja2 expression of the datapack keys, with a fallback for where "
                   "there are none (`{{ sut.version | default('3.2') }}`: the Editor's coverage view). "
@@ -888,6 +891,30 @@ SOURCE = h(
                       })]}),
     })
 
+CLASS = h(
+    "A class of sources: a source written once (backend, options, credentials), with variables each source of it "
+    "gives a value to (the same requirements tool, for another subsystem).",
+    type="object", required=["backend"], additionalProperties=False, properties={
+        "backend": SOURCE["properties"]["backend"], "label": h("A readable name; a source of it can have its own.", type="string"),
+        "description": h("What the class is for, shown when a source picks it.", type="string"),
+        "options": SOURCE["properties"]["options"],
+        "credentials": h(SOURCE["properties"]["credentials"]["description"] + " Usually named after a class variable: "
+                         "`env:ALM_TOKEN_{{ subsystem }}`.", type="object",
+                         additionalProperties=SOURCE["properties"]["credentials"]["additionalProperties"]),
+        "vars": h("The class variables, by name: `{{ name }}` in the options and credentials (`$name` in jq). Each "
+                  "source of the class gives their values; a test asks for them.",
+                  type="object", propertyNames={"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+                  additionalProperties={"anyOf": [
+                      h("A default value.", type=["string", "number", "boolean", "null"]),
+                      h("A class variable.", type="object", additionalProperties=False, properties={
+                          "mandatory": h("Each source must give it a value; it is the context of its requirements.",
+                                         type="boolean"),
+                          "value": h("A default, for a source that gives none (a Jinja2 expression of the datapack keys, "
+                                     "or a constant).", type=["string", "number", "boolean", "null"]),
+                          "help": h("What it is, shown in the form of a source of the class.", type="string"),
+                      })]}),
+    })
+
 REQUIREMENTS_FILE = {
     "$schema": "http://json-schema.org/draft-07/schema#", "title": "Requirements",
     **h("`requirements.yml`, at the root of the tests repository: the requirements themselves (the one source `reqs` "
@@ -899,6 +926,9 @@ REQUIREMENTS_FILE = {
                    "them (the one source `reqs`). With `sources`, each source has its own `label`.", type="string"),
         "default": h("The source of the references without a prefix (`REQ-12`; `jama:SYS-4` names its source). "
                      "Default: the first source.", type="string"),
+        "classes": h("Classes of sources, by name: a source written once, used by several sources that give values to "
+                     "its variables (`sources: {brakes: {class: alm, vars: {subsystem: BRAKE}}}`).",
+                     type="object", additionalProperties=CLASS),
         "sources": h("The requirements sources, by name: the name is the prefix of the references to them.",
                      type="object", additionalProperties=SOURCE),
         "nodes": h("Labels of the nodes of the tree, by path (`SYS/BRAKE: Braking`). Optional: the nodes come from the "
@@ -1052,4 +1082,6 @@ def schemas(context: dict) -> dict:
     if backends:
         result["requirements"]["properties"]["sources"]["additionalProperties"]["properties"]["backend"].update(
             _choices(backends, True))
+        result["requirements"]["properties"]["classes"]["additionalProperties"]["properties"]["backend"] = {
+            **result["requirements"]["properties"]["sources"]["additionalProperties"]["properties"]["backend"]}
     return result
