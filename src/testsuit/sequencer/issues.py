@@ -335,11 +335,11 @@ class Issues:
     # ── a run's targets and their issues ───────────────────────────────
     def targets(self, run: dict) -> list[dict]:
         """What of a run (as reviewed) can have an issue: its checks not met, steps failed or in error, its verdict
-        when not succeeded; each with its status and fingerprint."""
+        (succeeded too: an improvement); each with its status and fingerprint."""
         testdef = str(run.get("testdef") or run.get("name") or "")
         out = []
         verdict = run.get("verdict") or run.get("state")
-        if run.get("state") in rv.ENDED and verdict != "succeeded":
+        if run.get("state") in rv.ENDED:             # a green run too: an improvement, a remark
             out.append({"target": {"kind": "run"}, "status": verdict})
         for s in run.get("steps") or []:
             state = s.get("state")
