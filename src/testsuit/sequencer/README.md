@@ -1281,7 +1281,7 @@ A **campaign** runs a list of test definitions together: the datapack of each on
 5. **Verdict and report**: the campaign run is `queued` while none of its runs has started, `running` while one has not ended, then `done` with the worst verdict of its runs (`error` > `failed` > `succeeded`; a cancelled run counts as `error`). Its report is then written to `storage.results/campaigns/<id>/report.html`. A reposted run reopens its campaign run, whose report is written again when it ends.
 6. **Run a datapack again**: when a run of the campaign went wrong for a reason outside the test (a bench not set up right, a cable missing), **Run again** on its row of the campaign page or on its Run page (`tsq rerun <run>`, `POST /runs/{id}/rerun`) queues a new run of the same datapack zip, unchanged: same routing, priority and expected baseline. It takes the place of the ended run in the campaign, which keeps that one as an earlier attempt: the campaign's state, verdict and counts are those of each datapack's last attempt, and its page and report list the earlier attempts with their verdicts and links. Only the last attempt, once ended, can run again. Changing the datapack before running it again is not supported yet. A run outside a campaign is posted again with **Re-post** instead, which replaces it.
 
-The **report** gives, for each run: its test definition, verdict, duration, the stage or components it ran on, the checks of its exploit steps (met out of total, and those not met), its first failed step with its reason, and its non-conformities. Links lead further: the Run page, the log of the failed step, each exploit report, and the results zip. It also gives the campaign's git state, conformity, dataset versions and tags. The UI shows it as a page (`#/campaigns/<id>`), and `GET /campaigns/{id}/report` serves it as a self-contained HTML page (`?download=true`: as a file).
+The **report** gives, for each run: its test definition, verdict, duration, the stage or components it ran on, the checks of its exploit steps (met out of total, and those not met), its first failed step with its reason, and its non-conformities. Links lead further: the Run page, the log of the failed step, each exploit report, and the results zip. It also gives the campaign's git state, conformity, dataset versions and tags. The UI shows it as a page (`#/campaigns/<id>`), and `GET /campaigns/{id}/report` serves it as a self-contained HTML page (`?download=true`: as a file). Verdicts and counts are those of the runs as reviewed (section 10.5), with a DRAFT banner while a review is open; the **Export** button gives the synthetic report or the complete one.
 
 ### 10.3 Requirements coverage
 
@@ -1428,6 +1428,22 @@ A test with a person in the loop may need a step run again even though it succee
 - **Step-by-step mode** (the **Step mode** selector of the Run page, from the queue on; `tsq step-mode <run> off|each|breakpoints [--breakpoint <step>]...`): **pause after each step**, or **at breakpoints**, set with the **Breakpoint** toggle of a selected step. A paused step has ended; a banner says so, with **Next** (the steps after it go on), **Run again** and **Continue anyway**. Back to **off**, the paused steps go on. **All runs** and the campaign page flag paused runs (**⏸ paused**).
 - Every action is listed under **Operator actions** on the Run page, kept in `run.yml` (`interventions`: when, what, on which step, who, why) and in the campaign view and report.
 
+### 10.5 Reviews and exported reports
+
+A person can judge a result after the run: a check not met that is known and harmless (a bench slower than the real one), a step that succeeded for the wrong reason. Accepting or rejecting it no longer stays inside one exploit report: it is a **review** of the run, at any level.
+
+- **What**: on the Run page (or `tsq review`), **Accept** a check, a step or the verdict that failed, **Reject** one that succeeded or failed, or **Comment** on it. Accept and Reject ask why (mandatory), and optionally a comment and a reference (a ticket). An `error` cannot be accepted: its outcome is unknown, run it again.
+- **Who and when**: every entry records who (the user the authenticating reverse proxy names, else the name given, remembered in the browser; `--by` or `$TSQ_USER` for the CLI), when, why, and the status it changed. The journal is `review.yml` next to the results; entries are never changed: **Revoke** one, with a reason.
+- **What it changes**: nothing in the results zip nor in `run.yml`, which stay as they ran. The run *as reviewed* is computed from them: an accepted check makes its exploit step succeed when it was the only one not met, the verdict follows from the steps (a run cancelled keeps its `error`), and the campaign's verdict from its runs. The raw verdict is always shown beside it (✎), in All runs, the campaign page and report, the run report, the requirements coverage, and the exploit report (a banner, the checks reviewed). Accepting a failure does not run the steps it held back: a warning says so.
+- **Sign-off**: **Sign off** closes the review (the reports say *Final* instead of *DRAFT*); signing off the campaign run signs off its runs. **Reopen** (with a reason) allows more entries.
+- **Run again**: the reviews of the earlier attempt that still fit (same target, same raw status) are offered on the new run's Review tab, to **Reapply** in one click. A repost archives the review under `reviews-archive/`.
+
+**Exported reports**: the **Export** button of a campaign run (or of a run), or `tsq export <run | --campaign id>`, builds in the background, with a progress bar (a badge in the top bar while it runs; Cancel), then downloads:
+- **synthetic**: the campaign report alone, one HTML file, its links to the sequencer;
+- **complete**: everything from the campaign down, readable offline: each run's report and review, step logs, exploit reports as reviewed, plots of its input files, its requirements coverage. It is **one HTML file**, nothing to unzip: the pages are compressed inside and opened on demand. Over 300 MB, or with the results zips, it is a zip instead; `tsq view <zip>` opens it in the browser without unpacking. Logs over 2 MB keep their first and last 2000 lines and every line between that looks like an error or a warning.
+
+The same results and reviews give the same export, kept and not built again.
+
 ## 11. Abort and kill
 
 - **`tsq cancel <run>`**: a queued run leaves the queue. On a running one, pending steps are cancelled and running steps get their `stop` command; after a grace period, the kill below follows.
@@ -1479,6 +1495,11 @@ tsq stages | tsq components                                 # monitored state, l
 tsq hold | release | maintenance | resume <stage | component>
 tsq selftest [<stage | component>]                          # platform self-test on demand (section 7.6)
 tsq files <run | datapack.zip> [<path>] [--get]             # browse or download a datapack's contents
+tsq review <run> [--accept | --reject <target> --reason R | --comment C [--on <target>] | --revoke N --reason R
+                 | --sign-off | --reopen --reason R | --reapply]   # review a run (section 10.5); target: run, step:<phase>:<step>, check:<step>::<check>
+tsq review --campaign <id> [--comment C | --sign-off | --reopen --reason R]
+tsq export <run | --campaign id> [--synthetic] [--with-results] [-o F]   # export its report, with a progress bar
+tsq view <report.zip>                                       # open an exported report zip without unpacking it
 tsq lab status | reload [--pull [<rev>]]                   # inventory git state; reload on demand (section 6.1)
 tsq config                                                  # settings in use, and where each comes from
 ```
@@ -1496,7 +1517,9 @@ tsq config                                                  # settings in use, a
 - `GET /lab/view` (the Lab diagram: links between components deduced from the lab configuration, their pictures, the active runs and the step each component runs now), `GET /lab/icons/{component}` (the image file of its `tsq_icon`), `GET|PUT /lab/layout` (the arrangement of the Lab diagram saved for everyone: positions and opacities; an empty one is the automatic layout);
 - `POST /campaigns` (multipart: the `campaign.yml` manifest and its datapacks, priority), `GET /campaigns`, `GET /campaigns/{id}` (the campaign run, its runs at a glance), `GET /campaigns/{id}/report[?download=true]` (the synthetic report, HTML), `POST /campaigns/{id}/cancel|kill` (section 10.2); a run of a campaign carries `campaign_run` and `routing`;
 - `GET /runs/{id}/requirements[/report]`, `GET /campaigns/{id}/requirements[/report]` (requirements coverage, JSON or HTML, section 10.3);
-- `GET /events` (Server-Sent Events: run, campaign and component state changes, log lines);
+- `GET|POST /runs/{id}/review`, `GET|POST /campaigns/{id}/review` (reviews, section 10.5), `GET /runs/{id}/report` (the run report, as reviewed), `GET /runs/{id}/exploit/{step}/report` (an exploit report, its checks as reviewed);
+- `POST /runs/{id}/export`, `POST /campaigns/{id}/export` (`{mode: synthetic|complete, include_results}`), `GET /exports/{id}` (its progress), `POST /exports/{id}/cancel`, `GET /exports/{id}/download`;
+- `GET /events` (Server-Sent Events: run, campaign and component state changes, log lines, reviews, exports and their progress);
 - `GET /runs/{id}/pipeline` (phases and steps after sub-pipeline expansion, with their `needs`, and the comment cards of each phase and of the sub-pipelines it uses, each with `text`, `step`, `color`, `group` (the `uses` step id, empty for the phase's own) and `part` (`steps` or `finally`): the run graph of the UI);
 - Editor mode only (section 13.2):
   - `GET /edit/repositories/{id}/diff[?download=true]` (its local changes: files and patch, or the patch as a file), `POST /edit/repositories/{id}/revert` (`paths` relative to its folder, or all), `GET /edit/repositories/{id}/archive` (its folder as a zip);
@@ -1526,6 +1549,8 @@ The kernel never depends on the UI below: it is a web front end on the REST API,
 | Do a manual operation | a run whose pipeline waits for a person (a `manual` step, section 8.3) is flagged **✋ manual op** in All runs and on its campaign page; its Run page opens a dialog with what to do (Markdown and pictures) and the checks to tick or bypass with a reason, comments on each and on the whole, then **Done**, **Failed** or **Redo from** an earlier step |
 | Take a run step by step | the **Step mode** of the Run page pauses after each step or at breakpoints: a banner per paused step with **Next**, **Run again** and **Continue anyway**; the same actions on the selected step of the running phase; **⏸ paused** in All runs and on the campaign page; the **Operator actions** list on the Run page |
 | Follow requirements coverage | the **Requirements** tab of a run, the **Requirements** section of a campaign run and its report, and the **Requirements** subtab of Datapacks (section 10.3): statuses per requirement and per test, matrices both ways, links to the requirements, runs and exploit reports |
+| Review results | **Accept**, **Reject** or **Comment** a check, a step or the verdict on the Run page; its **Review** tab: the journal, Revoke, Reapply from the earlier attempt, Sign off, Reopen; the campaign page's Review section; the verdict as reviewed (✎) and the raw one everywhere (section 10.5) |
+| Export a report | **Export** on the campaign and Run pages: synthetic or complete, with or without the results zips, a progress bar and Cancel, then the download; a top-bar badge while exports run |
 | Manage and monitor the queue | queued datapacks in order, with priority (editable), age and what each waits for; cancel |
 | Monitor running datapacks | the pipeline as a graph of phases, sub-pipelines and steps, with live states and logs, each phase's finally steps in a lane of their own after its steps, and the comment cards of each phase (read-only, in their color, under its frame, a pinned one naming its step and linked to it by a dashed line) and of each sub-pipeline (at the bottom of its frame); cancel and kill, re-post an ended run, or run an ended run of a campaign again (its earlier attempt kept) |
 | Access a datapack's contents | before the run (queued: inputs, definition, keys, baseline), during the run (inputs, outputs collected so far, logs) and after it (the results datapack): a file tree with viewers for text, YAML, CSV and logs, and downloads for the rest, large files included. A viewer shows the first 5 MB of a file, the rest not even downloaded (a data file of GBs opens at once): **Load 5 MB more** adds the next part, **Load whole file** the rest of a file of 50 MB at most; the viewer shows 50 MB at most, **Download** (or the Plot tab) is for the rest. A CSV table shows 1000 rows, **Show 1000 more rows** more of what is loaded. The parts are HTTP range requests (`Range: bytes=a-b`, answered 206), files of a results zip or a generated datapack included. A file generated from a template lists the keys it used and the dictionary of each (from `datapack.yml`); each `{{ expression }}` output is underlined, and hovering it shows the expression and the keys it read (from the datapack's `values.json`, written since this was added: older datapacks have the list only). Text written by `{% if %}`/`{% for %}` alone has no hover, a loop variable shows its expression with no key, and a file changed by a postprocess or that a filter makes impossible to locate (such as `length` of a value) keeps the list only |
@@ -1645,6 +1670,10 @@ src/testsuit/sequencer/
   intake.py           # verify zip, unzip, load the embedded definition and context, check against the lab
   store.py            # SQLite: runs, campaign runs, locks, resources (state, maintenance, hold), usage, events
   campaigns.py        # campaign runs: their runs at a glance (earlier attempts of re-runs), verdict, synthetic report
+  review.py           # reviews of results (10.5): the journal, its rules, the run as reviewed, the exploit report overlay
+  runreport.py        # the report of one run, as reviewed
+  reportlinks.py      # where report links lead: the sequencer, or the pages of an exported report
+  export.py           # exported reports: synthetic, complete (one HTML file or a zip), logs trimmed, input previews
   exploitstep.py      # the exploit action: criteria of a pipeline, exploit_runner on outputs of the run
   manualstep.py       # the manual action: its checks and pictures, the operator's answers
   scheduler.py        # binding, backfilling, aging, queue order
@@ -1674,6 +1703,7 @@ Tests (`tests/sequencer_t.py`):
 - end-to-end runs on a bench of local processes: verdicts, queue and parallel stages, backfilling, cancel, kill, self-test failure and requeue, maintenance, restart recovery, shared locks between `tsqd` and `tsq run --local`;
 - `tsqd` on a free port, driven by `tsq` (`submit --follow`, files with range requests, stages, self-test);
 - the ssh transport against an in-process AsyncSSH server (commands, SFTP, killing a process tree);
+- reviews and exports (`tests/review_t.py`): the review rules and their effect on steps, verdicts, campaign runs, reports and coverage, sign-off, reapply on a re-run, the synthetic and complete exports, export jobs and their progress events, log trimming, `tsq review` and `tsq export`;
 - the Editor (`tests/editor_t.py`): comment-keeping YAML edits, sessions on clones of a bench repository with a bare upstream (checks, palette, flattened pipeline, keys, template preview, generate, push with a tag, a rejected push then rebase, an invalid lab refused), and its REST routes;
 - the web UI (`ui/e2e/smoke.mjs`, CI job `ui`): typecheck, build, and every page and editor view rendered without error against `tsqd` on the emulated toy train;
 - still to do: an end-to-end run of `examples/toytrain` in emulated mode (section 6.2), once host builds of the toy-train applications exist (the release store only holds placeholders).

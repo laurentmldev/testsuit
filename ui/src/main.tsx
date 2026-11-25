@@ -33,6 +33,7 @@ import { PlotPage } from "./plot/PlotPage";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
 import { SessionCriteriaPage, StandaloneCriteriaApp } from "./criteria/CriteriaPage";
+import { ExportsBadge } from "./pages/Review";
 
 function LabBanner({ editor }: { editor: boolean }) {
   const lab = useResource<any>("lab", ["lab"]);
@@ -162,6 +163,7 @@ function App() {
           ))}
         </nav>
         <div className="topbar-right">
+          <ExportsBadge />
           {health.data?.lab && (
             <span className="pill" title={`lab commit ${health.data.lab.commit || ""}`}>
               lab {health.data.lab.tag || health.data.lab.commit?.slice(0, 8) || "?"}

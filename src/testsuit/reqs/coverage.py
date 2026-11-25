@@ -17,7 +17,7 @@ A requirement is **linked** when a test definition or one of its checks lists it
 
 | status | for one link | for a requirement (its links rolled up) |
 |---|---|---|
-| ``passed`` | the check met (SUCCESS, or ACCEPTED by review); the run succeeded for a test definition link | every link passed |
+| ``passed`` | the check met (SUCCESS, or ACCEPTED by review); the run succeeded (as reviewed) for a test definition link | every link passed |
 | ``failed`` | the check not met (FAILED, or REJECTED by review); the run failed | a link failed |
 | ``error`` | the check, its step or the run in error | a link in error, none failed |
 | ``partial`` | | some links passed, the others skipped or not run |
@@ -77,6 +77,7 @@ class Link:
     check: str = ""
     line: int = 0
     uid: str = ""                    # the test case (@uid) of an input file's link
+    reviewed: bool = False           # its status comes from a review of the run (accepted or rejected)
 
     @property
     def where(self) -> str:
@@ -98,6 +99,7 @@ class Test:
     run: str = ""                    # run id, for results
     verdict: str = ""
     reports: dict[str, str] = field(default_factory=dict)   # exploit step -> report path in the run folder
+    report_keys: dict[str, str] = field(default_factory=dict)  # exploit step -> its record key (<phase>:<step>)
     links: list[Link] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)  # requirement -> version it was linked against
     problems: list[str] = field(default_factory=list)
@@ -169,7 +171,8 @@ class Coverage:
                        **({"run": t.run, "verdict": t.verdict, "reports": t.reports} if t.run else {}),
                        "links": [{"req": lk.req, "where": lk.where, "level": lk.level, "step": lk.step,
                                   **({"file": lk.file, "line": lk.line} if lk.level == "input" else {}),
-                                  "status": lk.status, **({"changed": True} if self.stale(lk.req, t) else {})}
+                                  "status": lk.status, **({"changed": True} if self.stale(lk.req, t) else {}),
+                                  **({"reviewed": True} if lk.reviewed else {})}
                                  for lk in t.links],
                        **({"context": t.context} if t.context else {}),
                        **({"problems": t.problems} if t.problems else {}),
@@ -209,9 +212,11 @@ def apply_run(test: Test, run: dict) -> None:
     for s in steps:
         if (s.get("exploit") or {}).get("report"):
             test.reports[str(s.get("id"))] = s["exploit"]["report"]
+            test.report_keys[str(s.get("id"))] = f"{s.get('phase')}:{s.get('id')}"
     for lk in test.links:
         if lk.level in ("testdef", "input"):
             lk.status = _VERDICT.get(test.verdict, NOT_RUN)
+            lk.reviewed = bool(run.get("raw_verdict"))
             continue
         rec = _record(steps, lk.step)
         if rec is None:
@@ -226,6 +231,7 @@ def apply_run(test: Test, run: dict) -> None:
             or next((c for c in checks if c.get("check") == lk.check and c.get("scenario") == lk.scenario), None)
         if match is not None:
             lk.status = _CHECK.get(str(match.get("status", "")).upper(), ERROR)
+            lk.reviewed = "raw_status" in match
         else:
             lk.status = ERROR if rec.get("state") in ("error", "failed") else NOT_RUN
 
@@ -383,7 +389,7 @@ def test_of_run(run: dict, snap: dict) -> Test:
                 warnings=list(snap.get("warnings") or []))
     ended = run.get("state") in ("done", "cancelled")
     apply_run(test, {"run": run["id"], "verdict": (run.get("verdict") or "error") if ended else "",
-                     "steps": run.get("steps") or []})
+                     "raw_verdict": run.get("raw_verdict") if ended else None, "steps": run.get("steps") or []})
     return test
 
 

@@ -27,6 +27,7 @@ import secrets
 import shlex
 import shutil
 import socket
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,7 @@ from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resou
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport, strict, traced
 from testsuit.sequencer.results import pack_results
+from testsuit.sequencer import review as review_mod
 from testsuit.sequencer.runlog import RunLog
 if TYPE_CHECKING:
     from testsuit.reqs.coverage import Coverage
@@ -82,6 +84,11 @@ def owner_alive(owner: str | None) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _export_event(job: dict, *keys: str) -> dict:
+    """An export job as an event: what it exports (``of``: campaign or run, ``target``), and those keys."""
+    return {"export": job["id"], "of": job["kind"], "target": job["target"], "mode": job["mode"], **{k: job[k] for k in keys}}
 
 
 def new_run_id() -> str:
@@ -136,6 +143,9 @@ class Sequencer:
         if config.selftest.when_idle:
             self.monitor.on_idle = self._selftest_one
         self.executions: dict[str, "RunExecution"] = {}
+        self._review_lock = threading.Lock()             # review journals: one writer at a time
+        self.exports: dict[str, dict] = {}               # export jobs (SPEC §11.2), by id
+        self._export_cancel: dict[str, threading.Event] = {}
         self.subscribers: set[asyncio.Queue] = set()
         self._wake: asyncio.Event | None = None
         self.scheduled_at: str | None = None         # the last walk of the queue
@@ -154,9 +164,9 @@ class Sequencer:
 
     def notify(self, kind: str, data: dict) -> None:
         self.run_log.event(kind, data)
-        if kind not in ("log", "probe", "manual_output"):   # a probe is not an event worth keeping: every few seconds
+        if kind not in ("log", "probe", "manual_output", "export_progress"):   # a probe is not an event worth keeping: every few seconds
             self.store.add_event(kind, data)
-        if kind not in ("log", "step", "probe", "manual_output"):   # the events in the log of tsqd too (Lab page, Logs)
+        if kind not in ("log", "step", "probe", "manual_output", "export_progress"):   # the events in the log of tsqd too (Lab page, Logs)
             log.log(logging.WARNING if kind == "state_mismatch" or str(data.get("verdict", "")).upper() == "ERROR"
                     else logging.INFO, _event_line(kind, data))
         event = {"kind": kind, "ts": now(), **data}
@@ -355,10 +365,11 @@ class Sequencer:
         return campaign
 
     def campaign_view(self, campaign_id: str, campaign: dict | None = None) -> dict:
-        """A campaign run with its runs and their summary (README, Campaigns)."""
+        """A campaign run with its runs and their summary (README, Campaigns), as reviewed (SPEC §11.1)."""
         from testsuit.sequencer.campaigns import summarize
         campaign = campaign or self.require_campaign_run(campaign_id)
-        return summarize(campaign, self.store.campaign_runs_of(campaign["id"]))
+        return summarize(campaign, [self.reviewed(r) for r in self.store.campaign_runs_of(campaign["id"])],
+                         review=self.campaign_review(campaign["id"]))
 
     def run_requirements(self, run_id: str) -> Coverage:
         """Requirements coverage of a run (SPEC §5.5), from its snapshot; its steps as they are now while it runs."""
@@ -367,13 +378,258 @@ class Sequencer:
         execution = self.executions.get(run["id"])
         if execution is not None and execution.ctx is not None:
             run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
-        return coverage_of_runs([run])
+        return coverage_of_runs([self.reviewed(run)])
 
     def campaign_requirements(self, campaign_id: str) -> Coverage:
-        """Requirements coverage of the runs of a campaign run."""
+        """Requirements coverage of the runs of a campaign run, as reviewed."""
         from testsuit.reqs.coverage import coverage_of_runs
         campaign = self.require_campaign_run(campaign_id)
-        return coverage_of_runs(self.store.campaign_runs_of(campaign["id"]))
+        return coverage_of_runs([self.reviewed(r) for r in self.store.campaign_runs_of(campaign["id"])])
+
+    # ── reviews of the results (SPEC §11.1) ────────────────────────────
+    def review_path(self, run_id: str) -> Path:
+        return self.config.storage_path("results") / run_id / review_mod.REVIEW_FILE
+
+    def campaign_review_path(self, campaign_id: str) -> Path:
+        return self.config.storage_path("results") / "campaigns" / campaign_id / review_mod.REVIEW_FILE
+
+    def run_review(self, run_id: str) -> dict:
+        """The review journal of a run (empty when nobody reviewed it)."""
+        return review_mod.load(self.review_path(run_id), {"run": run_id})
+
+    def campaign_review(self, campaign_id: str) -> dict:
+        return review_mod.load(self.campaign_review_path(campaign_id), {"campaign_run": campaign_id})
+
+    def reviewed(self, run: dict) -> dict:
+        """A run as its review makes it (itself when nobody reviewed it): checks, steps and verdict."""
+        if run.get("state") not in review_mod.ENDED or not self.review_path(run["id"]).is_file():
+            return run
+        try:
+            return review_mod.apply_review(run, self.run_review(run["id"]))
+        except review_mod.ReviewError as e:
+            log.warning(f"run {run['id']}: {e}")
+            return run
+
+    def run_review_view(self, run_id: str) -> dict:
+        """The review of a run, its results as reviewed, and the reviews of its earlier attempt that fit it."""
+        run = self.require_run(run_id)
+        review = self.run_review(run["id"])
+        view = review_mod.review_view(run, review, self.reviewed(run))
+        earlier = self.store.get_run(run["rerun_of"]) if run.get("rerun_of") else None
+        view["reapplicable"] = review_mod.reapplicable(run, earlier, self.run_review(earlier["id"]), review) \
+            if earlier and review_mod.state(review) != review_mod.SIGNED_OFF else []
+        return view
+
+    def review_run(self, run_id: str, body: dict, by: str) -> dict:
+        """Add an entry to the review of an ended run: a status or a comment on a target, a revoke, a sign-off, a
+        reopening; ``{action: reapply, entries: [ids]}`` takes the reviews of its earlier attempt (rerun_of)."""
+        run = self.require_run(run_id)
+        with self._review_lock:
+            review = self.run_review(run["id"])
+            if body.get("action") == "reapply":
+                earlier = self.store.get_run(run["rerun_of"]) if run.get("rerun_of") else None
+                if earlier is None:
+                    raise SequencerError(f"run {run['id']} runs no earlier attempt again: nothing to reapply")
+                fits = {e["id"]: e for e in review_mod.reapplicable(run, earlier, self.run_review(earlier["id"]), review)}
+                wanted = [int(i) for i in body.get("entries") or fits]
+                missing = [i for i in wanted if i not in fits]
+                if missing:
+                    raise SequencerError(f"entries {missing} of run {earlier['id']} do not fit run {run['id']} "
+                                         "(another raw result, or reviewed here already)")
+                added = [review_mod.add(review, {"action": "review", "target": fits[i]["target"],
+                                                 "status": fits[i].get("status"), "reason": fits[i].get("reason"),
+                                                 "comment": fits[i].get("comment"), "ref": fits[i].get("ref"),
+                                                 "reapplied_from": {"run": earlier["id"], "entry": i}}, by, run)
+                         for i in wanted]
+            else:
+                added = [review_mod.add(review, body, by, run)]
+            review_mod.save(self.review_path(run["id"]), review)
+        self._reviewed(run, added)
+        return self.run_review_view(run["id"])
+
+    def review_campaign(self, campaign_id: str, body: dict, by: str) -> dict:
+        """Add an entry to the review of a campaign run: a comment on it, a sign-off (of every run of it whose
+        review is open too), a reopening."""
+        campaign = self.require_campaign_run(campaign_id)
+        action = body.get("action") or "review"
+        with self._review_lock:
+            review = self.campaign_review(campaign["id"])
+            view = self.campaign_view(campaign["id"], campaign)
+            if action == "sign_off" and view["state"] != "done":
+                raise SequencerError(f"campaign run {campaign['id']} is {view['state']}: sign it off once its runs ended")
+            entry = review_mod.add(review, body, by, campaign=True)
+            if action == "sign_off":                           # its runs reviewed and not signed off yet: with it
+                for r in view["runs"]:
+                    path = self.review_path(r["run"])
+                    run_review = review_mod.load(path, {"run": r["run"]})
+                    if review_mod.state(run_review) == review_mod.OPEN:
+                        review_mod.add(run_review, {"action": "sign_off", "comment": f"with campaign run {campaign['id']}"},
+                                       by, self.store.get_run(r["run"]))
+                        review_mod.save(path, run_review)
+            review_mod.save(self.campaign_review_path(campaign["id"]), review)
+        self.notify("review", {"campaign_run": campaign["id"], "action": entry["action"], "by": entry["by"],
+                               "state": review_mod.state(review)})
+        self._write_campaign_report(campaign["id"])
+        return self.campaign_view(campaign["id"])
+
+    def _reviewed(self, run: dict, entries: list[dict]) -> None:
+        review = self.run_review(run["id"])
+        for entry in entries:
+            self.notify("review", {"run": run["id"], "campaign_run": run.get("campaign_run"), "action": entry["action"],
+                                   "by": entry["by"], "entry": entry["id"],
+                                   **({"target": review_mod.target_label(entry["target"])} if entry.get("target") else {}),
+                                   **({"status": entry["status"]} if entry.get("status") else {}),
+                                   "state": review_mod.state(review)})
+        if run.get("campaign_run"):
+            self._write_campaign_report(run["campaign_run"])
+
+    def read_run_file(self, run: dict, rel: str) -> bytes | None:
+        """A file of a run, from its run folder while it exists, else from its results zip (None: no such file)."""
+        folder = Path(run["dir"]) if run.get("dir") else None
+        if folder is not None and folder.is_dir():
+            path = (folder / rel).resolve()
+            if not path.is_relative_to(folder.resolve()) or not path.is_file():
+                return None
+            return path.read_bytes()
+        if run.get("results") and Path(run["results"]).is_file():
+            import zipfile
+            with zipfile.ZipFile(run["results"]) as z:
+                root = z.namelist()[0].split("/")[0]
+                try:
+                    return z.read(f"{root}/{rel}")
+                except KeyError:
+                    return None
+        return None
+
+    def live_run(self, run_id: str) -> dict:
+        """A run, with its steps as they are now while it runs."""
+        run = self.require_run(run_id)
+        execution = self.executions.get(run["id"])
+        if execution is not None and execution.ctx is not None:
+            run["steps"] = [r.as_dict() for r in execution.ctx.records.values()]
+        return run
+
+    def exploit_record(self, run: dict, step: str) -> dict:
+        """The record of an exploit step of a run, by its key (``<phase>:<step>``) or its id alone when unique."""
+        records = [r for r in run.get("steps") or [] if r.get("exploit")]
+        found = [r for r in records if review_mod.step_key(r) == step] or [r for r in records if r.get("id") == step]
+        if len(found) != 1:
+            raise SequencerError(f"run {run['id']} has no single exploit step '{step}'")
+        return found[0]
+
+    def exploit_report_html(self, run_id: str, step: str) -> str:
+        """The exploit report of an exploit step, its checks shown as reviewed (SPEC §11.1)."""
+        run = self.reviewed(self.live_run(run_id))
+        record = self.exploit_record(run, step)
+        rel = (record.get("exploit") or {}).get("report")
+        data = self.read_run_file(run, rel) if rel else None
+        if data is None:
+            raise SequencerError(f"run {run['id']}: step {step} has no exploit report")
+        return review_mod.reviewed_exploit_html(data.decode("utf-8", "replace"), record, run.get("review"))
+
+    def run_report_html(self, run_id: str, links=None) -> str:
+        """The report of a run (SPEC §11.2), as reviewed."""
+        from testsuit.sequencer.runreport import run_report_html
+        run = self.live_run(run_id)
+        return run_report_html(self.reviewed(run), self.run_review(run["id"]).get("entries") or [], links,
+                               self.run_requirements(run["id"]))
+
+    # ── exported reports (SPEC §11.2) ──────────────────────────────────
+    def _export_stamp(self, kind: str, target: str) -> str:
+        """What an export of a target depends on: its runs' states and ends, their reviews (a change: a new export)."""
+        import hashlib
+        runs = self.store.campaign_runs_of(target) if kind == "campaign" else [self.require_run(target)]
+        paths = [self.review_path(r["id"]) for r in runs] + ([self.campaign_review_path(target)] if kind == "campaign" else [])
+        parts = [f"{r['id']}:{r.get('state')}:{r.get('ended_at')}" for r in runs] + \
+                [f"{p}:{p.stat().st_mtime_ns if p.is_file() else 0}" for p in paths]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+    async def start_export(self, kind: str, target: str, mode: str = "complete", include_results: bool = False,
+                           sequencer_url: str = "") -> dict:
+        """Export the report of a campaign run (kind campaign) or of a run, in the background: a job whose progress
+        is sent as export_progress events; an export of the same results and reviews is given again, not redone."""
+        from testsuit.sequencer import export as ex
+        if mode not in (ex.SYNTHETIC, ex.COMPLETE):
+            raise SequencerError(f"unknown export mode '{mode}' (synthetic or complete)")
+        if kind == "campaign":
+            target = self.require_campaign_run(target)["id"]
+        elif kind == "run":
+            target = self.require_run(target)["id"]
+        else:
+            raise SequencerError(f"unknown export kind '{kind}'")
+        key = f"{kind}:{target}:{mode}:{int(bool(include_results))}:{self._export_stamp(kind, target)}"
+        for job in self.exports.values():
+            if job["key"] == key and (job["state"] == "running" or (job["state"] == "done" and Path(job["file"]).is_file())):
+                return dict(job)
+        job = {"id": secrets.token_hex(6), "kind": kind, "target": target, "mode": mode,
+               "include_results": bool(include_results), "state": "running", "stage": "starting", "done": 0,
+               "total": 0, "started_at": now(), "ended_at": None, "key": key, "file": None, "name": None,
+               "size": None, "error": None}
+        self.exports[job["id"]] = job
+        self._export_cancel[job["id"]] = cancel = threading.Event()
+        loop = asyncio.get_running_loop()
+        self.notify("export", _export_event(job, "state"))
+        loop.run_in_executor(None, self._build_export, job, cancel, loop, sequencer_url)
+        return dict(job)
+
+    def _build_export(self, job: dict, cancel: threading.Event, loop, sequencer_url: str) -> None:
+        from testsuit.sequencer import export as ex
+        last = [0.0]
+
+        def progress(stage: str, done: int, total: int) -> None:
+            job.update(stage=stage, done=done, total=total)
+            if time.monotonic() - last[0] > 0.2 or done == total:      # a few events a second, at most
+                last[0] = time.monotonic()
+                loop.call_soon_threadsafe(self.notify, "export_progress", _export_event(job, "stage", "done", "total"))
+        try:
+            build = ex.campaign_export if job["kind"] == "campaign" else ex.run_export
+            export = build(self, job["target"], job["mode"], sequencer_url, job["include_results"], progress, cancel.is_set)
+            folder = self.config.storage_path("results") / "exports"
+            folder.mkdir(parents=True, exist_ok=True)
+            if job["kind"] == "campaign":
+                campaign = self.require_campaign_run(job["target"])
+                stem = f"{campaign.get('campaign') or 'campaign'}_{job['target']}"
+            else:
+                run = self.require_run(job["target"])
+                stem = f"{(run.get('name') or 'run')}_{job['target']}"
+            stem = re.sub(r"[^\w.@-]+", "_", stem) + f"_{job['mode']}_report"
+            job.update(stage="writing")
+            out = ex.write(export, folder / job["id"] / stem, job["include_results"], synthetic=job["mode"] == ex.SYNTHETIC)
+            job.update(state="done", file=str(out), name=out.name, size=out.stat().st_size)
+            for other in list(self.exports.values()):                    # the earlier exports of it: gone
+                if other is not job and other["key"].rsplit(":", 1)[0] == job["key"].rsplit(":", 1)[0] \
+                        and other["state"] != "running" and other.get("file"):
+                    shutil.rmtree(Path(other["file"]).parent, ignore_errors=True)
+                    self.exports.pop(other["id"], None)
+        except ex.Cancelled:
+            job.update(state="cancelled", error="cancelled")
+        except Exception as e:
+            log.exception(f"export {job['id']} of {job['kind']} {job['target']}")
+            job.update(state="failed", error=f"{type(e).__name__}: {e}")
+        finally:
+            job["ended_at"] = now()
+            self._export_cancel.pop(job["id"], None)
+            loop.call_soon_threadsafe(self.notify, "export", _export_event(job, "state", "name", "size", "error"))
+
+    def export_job(self, job_id: str) -> dict:
+        job = self.exports.get(job_id)
+        if job is None:
+            raise SequencerError(f"no export '{job_id}' (exports are kept until tsqd restarts)")
+        return dict(job)
+
+    def cancel_export(self, job_id: str) -> dict:
+        job = self.export_job(job_id)
+        if job_id in self._export_cancel:
+            self._export_cancel[job_id].set()
+        return job
+
+    def _archive_review(self, run_id: str) -> None:
+        """A run posted again: its review is about results that are gone, kept aside (results/reviews-archive)."""
+        path = self.review_path(run_id)
+        if path.is_file():
+            archive = self.config.storage_path("results") / "reviews-archive"
+            archive.mkdir(parents=True, exist_ok=True)
+            path.replace(archive / f"{run_id}-{now().replace(':', '')}.yml")
 
     def campaign_views(self, limit: int = 200) -> list[dict]:
         return [self.campaign_view(c["id"], c) for c in self.store.campaign_runs(limit)]
@@ -386,19 +642,26 @@ class Sequencer:
         view = self.campaign_view(run["campaign_run"])
         if view["state"] != "done":
             return
+        report = self._write_campaign_report(view["id"], view)
+        self.store.update_campaign_run(view["id"], ended_at=now(), verdict=view["verdict"], report=report)
+        self.notify("campaign", {"campaign_run": view["id"], "campaign": view["campaign"], "state": "done",
+                                 "verdict": view["verdict"]})
+
+    def _write_campaign_report(self, campaign_id: str, view: dict | None = None) -> str | None:
+        """The report of a campaign run that ended, in its results folder (again after each review)."""
         from testsuit.sequencer.campaigns import report_html
+        view = view or self.campaign_view(campaign_id)
+        if view["state"] != "done":
+            return None
         folder = self.config.storage_path("results") / "campaigns" / view["id"]
         try:
             folder.mkdir(parents=True, exist_ok=True)
             (folder / "report.html").write_text(report_html(view, base="../", requirements=self.campaign_requirements(view["id"])),
                                                 encoding="utf-8")
-            report = str(folder / "report.html")
+            return str(folder / "report.html")
         except OSError as e:
             log.warning(f"campaign run {view['id']}: writing its report: {e}")
-            report = None
-        self.store.update_campaign_run(view["id"], ended_at=now(), verdict=view["verdict"], report=report)
-        self.notify("campaign", {"campaign_run": view["id"], "campaign": view["campaign"], "state": "done",
-                                 "verdict": view["verdict"]})
+            return None
 
     async def abort_campaign(self, campaign_id: str, mode: str) -> dict:
         """Cancel (or kill) every run of a campaign run that has not ended."""
@@ -534,6 +797,7 @@ class Sequencer:
             shutil.rmtree(fresh, ignore_errors=True)
             raise
         shutil.rmtree(run_dir, ignore_errors=True)
+        self._archive_review(run["id"])
         shutil.rmtree(self.config.storage_path("results") / run["id"], ignore_errors=True)
         fresh.rename(run_dir)
         self.store.release(run["id"])

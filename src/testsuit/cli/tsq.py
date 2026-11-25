@@ -296,6 +296,145 @@ def cmd_rerun(args, client: Client) -> int:
     return 0
 
 
+def _review_target(text: str, view: dict) -> dict:
+    """A review target from the command line: ``run``, ``step:<phase>:<step>``, ``check:<step>::<check>`` (or
+    ``check:<step>::<scenario>/<check>`` when the name alone is ambiguous; <step> is ``<phase>:<step>`` or its id)."""
+    if text == "run":
+        return {"kind": "run"}
+    kind, _, rest = text.partition(":")
+    if kind == "step" and rest:
+        steps = [s["step"] for s in view.get("steps") or []]
+        found = [s for s in steps if s == rest] or [s for s in steps if s.split(":", 1)[-1] == rest]
+        if len(found) != 1:
+            raise CliError(f"no single step '{rest}' in run {view.get('run')}" + (f": {', '.join(found)}" if found else ""))
+        return {"kind": "step", "step": found[0]}
+    if kind == "check" and "::" in rest:
+        step, _, name = rest.partition("::")
+        scenario, _, check = name.rpartition("/")
+        checks = [c for c in view.get("checks") or [] if (c["step"] == step or c["step"].split(":", 1)[-1] == step)
+                  and c["check"] == check and (not scenario or c["scenario"] == scenario)]
+        if len(checks) != 1:
+            raise CliError(f"no single check '{name}' in step {step} of run {view.get('run')}"
+                           + (" (name its scenario: <scenario>/<check>)" if checks else ""))
+        return {k: checks[0][k] for k in ("kind", "step", "criteria", "scenario", "check")}
+    raise CliError(f"unknown review target '{text}': run, step:<phase>:<step>, check:<step>::[<scenario>/]<check>")
+
+
+def _print_review(view: dict) -> None:
+    state = {"none": "nobody reviewed it", "open": "open", "signed_off": "signed off"}.get(view.get("state"), view.get("state"))
+    verdict = view.get("verdict")
+    print(f"review: {state}" + (f"; verdict {verdict}" if verdict else "")
+          + (f" (raw {view['raw_verdict']})" if view.get("raw_verdict") and view["raw_verdict"] != verdict else ""))
+    for w in view.get("warnings") or []:
+        print(f"  warning: {w}")
+    gone = {e.get("revokes") for e in view.get("journal") or [] if e.get("action") == "revoke"}
+    for e in view.get("journal") or []:
+        if e["action"] == "review":
+            from testsuit.sequencer.review import target_label
+            what = f"{e.get('status') or 'comment'} {target_label(e['target'])}" + (" [revoked]" if e["id"] in gone else "")
+        elif e["action"] == "revoke":
+            what = f"revoke {e['revokes']}"
+        else:
+            what = e["action"].replace("_", " ")
+        print(f"  {e['id']:>3} {e['at']} {e['by']}: {what}" + (f" (was {e['was']})" if e.get("was") and e.get("status") else "")
+              + (f": {e['reason']}" if e.get("reason") else "") + (f" -- {e['comment']}" if e.get("comment") else "")
+              + (f" [{e['ref']}]" if e.get("ref") else ""))
+    for e in view.get("reapplicable") or []:
+        print(f"  reapplicable from run {e['run']}: {e.get('status') or 'comment'} {e['label']} ({e['by']}: {e.get('reason') or e.get('comment')})")
+
+
+def cmd_review(args, client: Client) -> int:
+    """Show the review of a run (or a campaign run), or add to it (SPEC section 11.1)."""
+    by = args.by or os.environ.get("TSQ_USER") or os.environ.get("USER") or ""
+    if args.campaign:
+        path = f"/campaigns/{args.id}/review"
+        body = None
+        if args.sign_off:
+            body = {"action": "sign_off", "comment": args.comment}
+        elif args.reopen:
+            body = {"action": "reopen", "reason": args.reason}
+        elif args.comment:
+            body = {"action": "review", "target": {"kind": "campaign"}, "comment": args.comment}
+        elif args.accept or args.reject or args.revoke or args.reapply:
+            raise CliError("a campaign run is reviewed through its runs: review each run (tsq review <run>)")
+        if body is None:
+            view = client.get(path)
+        else:
+            client.post(path, json={**body, "by": by})
+            view = client.get(path)
+        _print_review({**view, "journal": view.get("journal")})
+        return 0
+    path = f"/runs/{args.id}/review"
+    view = client.get(path)
+    body = None
+    if args.accept or args.reject:
+        body = {"action": "review", "target": _review_target(args.accept or args.reject, view),
+                "status": "accepted" if args.accept else "rejected", "reason": args.reason, "comment": args.comment,
+                "ref": args.ref}
+    elif args.revoke is not None:
+        body = {"action": "revoke", "entry": args.revoke, "reason": args.reason}
+    elif args.sign_off:
+        body = {"action": "sign_off", "comment": args.comment}
+    elif args.reopen:
+        body = {"action": "reopen", "reason": args.reason}
+    elif args.reapply:
+        body = {"action": "reapply"}
+    elif args.comment:
+        body = {"action": "review", "target": _review_target(args.on or "run", view), "comment": args.comment,
+                "ref": args.ref}
+    if body is not None:
+        view = client.post(path, json={**{k: v for k, v in body.items() if v is not None}, "by": by})
+    _print_review(view)
+    return 0
+
+
+def _bar(done: int, total: int, width: int = 30) -> str:
+    filled = int(width * done / total) if total else 0
+    return "[" + "#" * filled + "." * (width - filled) + f"] {done}/{total}"
+
+
+def cmd_export(args, client: Client) -> int:
+    """Export the report of a run or of a campaign run (SPEC section 11.2): its progress shown, the file downloaded."""
+    path = f"/campaigns/{args.id}/export" if args.campaign else f"/runs/{args.id}/export"
+    job = client.post(path, json={"mode": "synthetic" if args.synthetic else "complete",
+                                  "include_results": args.with_results})
+    tty = sys.stdout.isatty()
+    last = None
+    while job["state"] == "running":
+        line = f"{job.get('stage') or 'starting'} {_bar(job.get('done') or 0, job.get('total') or 0)}"
+        if tty:
+            print(f"\r{line:<78}", end="", flush=True)
+        elif line != last and (job.get("done") or 0) % 10 == 0:
+            print(line, flush=True)
+        last = line
+        time.sleep(0.5)
+        job = client.get(f"/exports/{job['id']}")
+    if tty:
+        print()
+    if job["state"] != "done":
+        raise CliError(f"export {job['id']} {job['state']}" + (f": {job['error']}" if job.get("error") else ""))
+    out = Path(args.output or ".")
+    if out.is_dir() or not out.suffix:
+        out.mkdir(parents=True, exist_ok=True)
+        out = out / job["name"]
+    response = client.request("GET", f"/exports/{job['id']}/download", stream=True, timeout=None)
+    with open(out, "wb") as f:
+        for chunk in response.iter_content(1 << 20):
+            f.write(chunk)
+    print(f"{out} ({job['size']} bytes)" + ("; open it with: tsq view " + str(out) if out.suffix == ".zip" else ""))
+    return 0
+
+
+def cmd_view(args, client: Client | None) -> int:
+    """Serve an exported report zip on localhost, without unpacking it."""
+    from testsuit.sequencer.export import serve_zip
+    path = Path(args.zip)
+    if not zipfile.is_zipfile(path):
+        raise CliError(f"{path}: not a zip (an exported report as one .html file opens in a browser as it is)")
+    serve_zip(path, args.port, not args.no_browser)
+    return 0
+
+
 def cmd_manual(args, client: Client) -> int:
     """The manual operations a run waits for; tick checks, answer done or failed."""
     run = client.get(f"/runs/{args.run}")
@@ -632,6 +771,37 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("rerun", help="run a datapack of a campaign run again (a new run, the earlier one kept)")
     s.add_argument("run")
     s.set_defaults(fn=cmd_rerun)
+    s = sub.add_parser("review", help="the review of a run's results: show it, accept or reject a check, a step or "
+                                      "the run, comment, revoke, sign off (--campaign: of a campaign run)")
+    s.add_argument("id", help="run (or campaign run, with --campaign)")
+    s.add_argument("--campaign", action="store_true", help="the review of a campaign run: --comment, --sign-off, --reopen")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--accept", metavar="TARGET", help="accept a result not met: run, step:<phase>:<step>, "
+                                                     "check:<step>::[<scenario>/]<check> (needs --reason)")
+    g.add_argument("--reject", metavar="TARGET", help="reject a result (needs --reason)")
+    g.add_argument("--revoke", type=int, metavar="ENTRY", help="revoke a review entry (needs --reason)")
+    g.add_argument("--sign-off", action="store_true", help="close the review: its reports are final")
+    g.add_argument("--reopen", action="store_true", help="open a signed-off review again (needs --reason)")
+    g.add_argument("--reapply", action="store_true", help="take the reviews of the earlier attempt that fit this re-run")
+    s.add_argument("--reason", help="why")
+    s.add_argument("--comment", help="a comment (alone: on --on, the run by default)")
+    s.add_argument("--on", metavar="TARGET", help="what --comment alone is about (default: run)")
+    s.add_argument("--ref", help="a reference: a ticket, a deviation report...")
+    s.add_argument("--by", help="who (default: $TSQ_USER, else $USER; a reverse proxy's user wins)")
+    s.set_defaults(fn=cmd_review)
+    s = sub.add_parser("export", help="export the report of a run or a campaign run, as reviewed: one HTML file "
+                                      "(or a zip when too large), downloaded")
+    s.add_argument("id", help="run (or campaign run, with --campaign)")
+    s.add_argument("--campaign", action="store_true")
+    s.add_argument("--synthetic", action="store_true", help="the report alone, its links to the sequencer")
+    s.add_argument("--with-results", action="store_true", help="the results zips too (a zip)")
+    s.add_argument("-o", "--output", help="file or folder (default: here)")
+    s.set_defaults(fn=cmd_export)
+    s = sub.add_parser("view", help="serve an exported report zip on localhost, without unpacking it")
+    s.add_argument("zip")
+    s.add_argument("--port", type=int, default=0)
+    s.add_argument("--no-browser", action="store_true")
+    s.set_defaults(fn=cmd_view, local=True)
     s = sub.add_parser("manual", help="the manual operation a run waits for: show it, tick checks, answer it")
     s.add_argument("run")
     s.add_argument("--step", help="'<phase>:<step>' when the run waits for several")

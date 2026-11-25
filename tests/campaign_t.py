@@ -342,7 +342,7 @@ def test_campaign_api_and_cli(tmp_path, monkeypatch, capsys):
         [view] = await routes[("/campaigns", "GET")]()
         assert view["state"] == "queued" and [r["priority"] for r in view["runs"]] == [20, 20]
         assert (await routes[("/campaigns/{campaign_id}", "GET")](view["id"][:8]))["id"] == view["id"]
-        page = await routes[("/campaigns/{campaign_id}/report", "GET")](view["id"])
+        page = await routes[("/campaigns/{campaign_id}/report", "GET")](view["id"], SimpleNamespace(base_url="http://tsq/"))
         assert page.status_code == 200 and "<title>Nightly · campaign report</title>" in page.body.decode()
         assert {r["campaign_run"] for r in await routes[("/runs", "GET")]()} == {view["id"]}
         cancelled = await routes[("/campaigns/{campaign_id}/{command}", "POST")](view["id"], "cancel")
