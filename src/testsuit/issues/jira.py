@@ -29,7 +29,7 @@ from typing import Any
 from testsuit.issues.backend import MAX_PAGES, Api, IssueBackend, need, register_issue_backend
 from testsuit.issues.model import CLOSED, OPEN, Issue, IssueError
 
-FIELDS = "summary,status,labels,assignee,reporter,created,updated,description,issuelinks,project"
+FIELDS = "summary,status,labels,assignee,reporter,created,updated,description,issuelinks,project,issuetype"
 
 
 class JiraBackend(IssueBackend):
@@ -85,9 +85,11 @@ class JiraBackend(IssueBackend):
             if other.get("key"):
                 links.append(str(other["key"]))
         key = str(item.get("key"))
+        kind = f.get("issuetype") or {}
         return Issue(source=self.name, id=key, title=str(f.get("summary") or ""), state=CLOSED if done else OPEN,
                      url=f"{self.server}/browse/{key}", labels=[str(x) for x in f.get("labels") or []],
                      assignees=[str((f.get("assignee") or {}).get("displayName") or "")] if f.get("assignee") else [],
+                     type=str(kind.get("name") or ""), type_icon=str(kind.get("iconUrl") or ""),
                      author=str((f.get("reporter") or {}).get("displayName") or ""), created=str(f.get("created") or ""),
                      updated=str(f.get("updated") or ""), body=str(f.get("description") or ""),
                      project=str((f.get("project") or {}).get("key") or self.project), links=links)
@@ -150,13 +152,28 @@ class JiraBackend(IssueBackend):
             out[str(id)] = self.issue(item) if item else None
         return out
 
-    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
+    def issue_types(self, project: str | None = None) -> list[dict[str, Any]]:
+        """The issue types of the project (no sub-task), the one of option ``issue_type`` (Bug) the default."""
+        key = project or self.project
+        try:
+            data = self.api.get(f"issue/createmeta/{key}/issuetypes") or {}
+            found = data.get("values") or data.get("issueTypes") or []
+        except IssueError:                           # an older server
+            found = (self.api.get(f"project/{key}") or {}).get("issueTypes") or []
+        default = str(self.options.get("issue_type") or "Bug").lower()
+        return [{"name": str(t.get("name")), **({"default": True} if str(t.get("name")).lower() == default else {}),
+                 **({"icon": str(t["iconUrl"])} if t.get("iconUrl") else {})}
+                for t in found if isinstance(t, dict) and not t.get("subtask")]
+
+    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
+               issue_type: str | None = None) -> Issue:
         bad = [x for x in labels if " " in x]
         if bad:
             raise IssueError(f"jira backend: a label has no space: {', '.join(bad)}")
         made = self.api.post("issue", {"fields": {"project": {"key": project or self.project}, "summary": title,
                                                   "description": body, "labels": list(labels),
-                                                  "issuetype": {"name": str(self.options.get("issue_type") or "Bug")}}})
+                                                  "issuetype": {"name": str(issue_type or self.options.get("issue_type")
+                                                                            or "Bug")}}})
         key = str((made or {}).get("key") or "")
         if not key:
             raise IssueError("jira backend: the issue was created, but Jira did not give its key")

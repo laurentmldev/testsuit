@@ -32,11 +32,35 @@ export function targetKey(t: any): string {
   return String(t?.kind || "run");
 }
 
-/** An issue: its key (a link to it), its state, its title on hover. */
-/** An issue: a circle with a small dot (any kind of issue, not only a bug); green when open, grey when closed. */
-export function IssueIcon({ state, size = 14 }: { state?: string; size?: number }) {
+const GITHUB_COLORS: Record<string, string> = { gray: "#59636e", blue: "#0969da", green: "#1a7f37", yellow: "#9a6700",
+  orange: "#bc4c00", red: "#cf222e", pink: "#bf3989", purple: "#8250df" };
+
+/** The colour of an issue's type: the tool's (a GitLab type:: label, a GitHub issue type), else by what the type is like
+ * (a bug red, an improvement blue, a task purple); none for an issue of no known type. */
+export function typeColor(issue: any): string | undefined {
+  const c = GITHUB_COLORS[String(issue?.type_color || "").toLowerCase()] || issue?.type_color;
+  if (c && /^#[0-9a-f]{3,8}$/i.test(c)) return c;
+  const t = String(issue?.type || "");
+  if (/bug|defect|incident|problem|fault/i.test(t)) return "#cf222e";
+  if (/improv|enhanc|feature|story|request/i.test(t)) return "#0969da";
+  if (/task|chore|epic/i.test(t)) return "#8250df";
+  return undefined;
+}
+
+/** An issue: the icon its tool gives its type when there is one (Jira), else a circle with a small dot (any kind of
+ * issue, not only a bug) in the colour of its type, else green when open and grey when closed; faded when closed. */
+export function IssueIcon({ state, size = 14, issue }: { state?: string; size?: number; issue?: any }) {
+  const [broken, setBroken] = useState(false);
+  const st = state ?? issue?.state;
+  const color = typeColor(issue);
+  const title = issue?.type ? `${issue.type}${st ? ` (${st})` : ""}` : undefined;
+  if (issue?.type_icon && !broken)
+    return <img className={classes("issue-icon", st, "typed")} src={issue.type_icon} width={size} height={size} alt={issue.type}
+      title={title} onError={() => setBroken(true)} />;
   return (
-    <svg className={classes("issue-icon", state)} viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
+    <svg className={classes("issue-icon", st, color && "typed")} viewBox="0 0 16 16" width={size} height={size}
+      style={color ? { color } : undefined} aria-hidden={title ? undefined : true} role={title ? "img" : undefined}>
+      {title && <title>{title}</title>}
       <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <circle cx="8" cy="8" r="1.25" fill="currentColor" />
     </svg>
@@ -48,7 +72,7 @@ export function IssueChip({ issue, via, onUnbind }: { issue: any; via?: string[]
   const title = `${issue.title || ""}${issue.assignees?.length ? `\nassigned to ${issue.assignees.join(", ")}` : ""}${via?.length ? `\n${via.join(", ")}` : ""}`;
   return (
     <span className={classes("issue-chip", issue.state)} title={title.trim()}>
-      <IssueIcon state={issue.state} /> {issue.url ? <a href={issue.url} target="_blank" rel="noreferrer">{issue.key}</a> : issue.key}
+      <IssueIcon issue={issue} /> {issue.url ? <a href={issue.url} target="_blank" rel="noreferrer">{issue.key}</a> : issue.key}
       <span className="issue-state">{issue.state}</span>
       {onUnbind && <button className="link small" title="Unbind this issue (with the reason why)" onClick={onUnbind}>×</button>}
     </span>
@@ -112,6 +136,7 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [labels, setLabels] = useState("");
+  const [kind, setKind] = useState("");
   const [project, setProject] = useState("");
   const [token, setToken] = useState("");
   const [by, setBy] = useState(who());
@@ -127,7 +152,7 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
     post(`runs/${runId}/issues/draft`, { target, source, by: who() })
       .then((d: any) => {
         if (!live) return;
-        setDraft(d); setTitle(d.title); setBody(d.body); setLabels((d.labels || []).join(", "));
+        setDraft(d); setTitle(d.title); setBody(d.body); setLabels((d.labels || []).join(", ")); setKind(d.type || "");
         setProject(d.projects?.[0] || "");
       })
       .catch((e) => live && setError(e.message));
@@ -138,7 +163,7 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
     setBusy(true);
     remember(by.trim());
     const done = await attempt(() => post(`runs/${runId}/issues`, {
-      action: "create", target, source: draft.source, project: project || undefined, title, body, by: by.trim(),
+      action: "create", target, source: draft.source, project: project || undefined, ...(kind ? { type: kind } : {}), title, body, by: by.trim(),
       labels: labels.split(",").map((x) => x.trim()).filter(Boolean), ...(token.trim() ? { token: token.trim() } : {}),
     }), "Issue created and bound");
     setBusy(false);
@@ -191,6 +216,17 @@ export function IssueDialog({ runId, target, label, onClose, onDone }: {
             <select value={project} onChange={(e) => setProject(e.target.value)}>
               {(draft.projects || []).map((p: string) => <option key={p} value={p}>{p}</option>)}
             </select>
+          </Field>
+        )}
+        {(draft.types || []).length > 0 && (
+          <Field label="Type" help="The kind of issue, as its tool has them: GitLab's scoped labels type::<name> of the project or its group (else GitLab's own types), the GitHub organization's issue types, the Jira project's issue types, the Redmine project's trackers. Proposed: the source's default (else a bug) for a failure, an improvement for a green run.">
+            <span className="issue-type">
+              {(() => { const t = (draft.types || []).find((x: any) => x.name === kind);
+                return t && <IssueIcon key={t.name} issue={{ type: t.name, type_color: t.color, type_icon: t.icon, state: "open" }} />; })()}
+              <select value={kind} onChange={(e) => setKind(e.target.value)}>
+                {(draft.types || []).map((t: any) => <option key={t.name} value={t.name}>{t.name}{t.label && t.label !== t.name ? ` (${t.label})` : ""}</option>)}
+              </select>
+            </span>
           </Field>
         )}
         <Field label="Title"><Text value={title} onChange={setTitle} invalid={!title.trim()} /></Field>

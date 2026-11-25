@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from testsuit.issues.model import Issue, IssueError
+from testsuit.issues.model import FAILURE_TYPES, Issue, IssueError
 
 MASK = "***"
 TIMEOUT = 20.0
@@ -127,8 +127,22 @@ class IssueBackend:
         """The issues of these ids (None: no such issue)."""
         raise NotImplementedError
 
-    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
+    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
+               issue_type: str | None = None) -> Issue:
+        """A new issue; ``issue_type``: one of ``issue_types()`` (None: the tool's default)."""
         raise IssueError(f"{type(self).__name__} cannot create issues")
+
+    def issue_types(self, project: str | None = None) -> list[dict[str, Any]]:
+        """The types a new issue can have: ``[{name, default?}]`` (empty: no choice)."""
+        return []
+
+    @property
+    def supports_types(self) -> bool:
+        """Whether its create takes ``issue_type`` (a plugin's may not)."""
+        try:
+            return "issue_type" in inspect.signature(type(self).create).parameters
+        except (TypeError, ValueError):
+            return False
 
     def comment(self, id: str, body: str) -> None:
         raise IssueError(f"{type(self).__name__} cannot comment issues")
@@ -281,6 +295,20 @@ class Api:
 
 BackendFactory = Callable[[dict, "dict | None", "Path | None"], IssueBackend]
 _backends: dict[str, BackendFactory] = {}
+
+
+OTHER_TYPES = re.compile(r"improv|enhanc|feature|story|task|request", re.I)
+
+
+def default_type(types: list[dict[str, Any]], failed: bool) -> str | None:
+    """The type proposed for a new issue: about a failure, the source's default (else a bug); else an improvement."""
+    if not types:
+        return None
+    configured = [t["name"] for t in types if t.get("default")]
+    likely = [t["name"] for t in types if (FAILURE_TYPES if failed else OTHER_TYPES).search(str(t["name"]))]
+    if failed:
+        return (configured or likely or [types[0]["name"]])[0]
+    return (likely or configured or [types[0]["name"]])[0]
 
 
 def register_issue_backend(name: str, factory: BackendFactory) -> None:

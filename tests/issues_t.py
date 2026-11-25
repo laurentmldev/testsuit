@@ -42,6 +42,7 @@ class Tracker:
         self.issues = {"gitlab": [], "github": [], "jira": [], "redmine": []}
         self.calls = []
         self.delay = 0.0
+        self.gitlab_labels = []                  # names of the project's labels
 
 
 def _handler(tracker: Tracker):
@@ -87,6 +88,8 @@ def _handler(tracker: Tracker):
                 return self._send(401, {"message": "401 Unauthorized"})
             base = f"http://{self.headers['Host']}"
             # GitLab
+            if re.fullmatch(r"/api/v4/(projects|groups)/.+?/labels", path):
+                return self._send(200, [{"name": n, "color": "#dc143c" if "bug" in n else "#428bca"} for n in tracker.gitlab_labels if q.get("search", "") in n])
             m = re.fullmatch(r"/api/v4/projects/(.+?)/issues(?:/(\d+))?(/notes)?", path)
             if m:
                 issues = tracker.issues["gitlab"]
@@ -98,7 +101,7 @@ def _handler(tracker: Tracker):
                             "state": "opened", "labels": [x for x in str(b.get("labels") or "").split(",") if x],
                             "web_url": f"{base}/{m.group(1)}/-/issues/{len(issues) + 1}", "assignees": [],
                             "author": {"username": "bot"}, "references": {"full": f"{m.group(1)}#{len(issues) + 1}"},
-                            "updated_at": f"2026-11-25T10:0{len(issues)}:00Z"}
+                            "updated_at": f"2026-11-25T10:0{len(issues)}:00Z", "issue_type": b.get("issue_type", "issue")}
                     issues.append(item)
                     return self._send(201, item)
                 if m.group(2):
@@ -108,6 +111,11 @@ def _handler(tracker: Tracker):
                        and (not q.get("search") or q["search"] in i["title"] + i["description"])]
                 return self._send(200, out[::-1])
             # GitHub
+            if re.fullmatch(r"/orgs/acme/issue-types", path):
+                return self._send(200, [{"name": "Bug", "color": "red"}, {"name": "Feature", "color": "blue"}, {"name": "Task"},
+                                        {"name": "Old", "is_enabled": False}])
+            if re.fullmatch(r"/orgs/[^/]+/issue-types", path):
+                return self._send(404, {"message": "Not Found"})
             m = re.fullmatch(r"/repos/([^/]+/[^/]+)/issues(?:/(\d+))?(/comments)?", path)
             if m:
                 issues = tracker.issues["github"]
@@ -115,6 +123,7 @@ def _handler(tracker: Tracker):
                     b = self._body()
                     n = len(issues) + 1
                     item = {"number": n, "title": b["title"], "body": b.get("body", ""), "state": "open",
+                            "type": {"name": b["type"], "color": "blue"} if b.get("type") else None,
                             "labels": [{"name": x} for x in b.get("labels") or []], "html_url": f"https://github.com/{m.group(1)}/issues/{n}",
                             "repository_url": f"{base}/repos/{m.group(1)}", "user": {"login": "bot"}, "assignees": []}
                     issues.append(item)
@@ -128,6 +137,9 @@ def _handler(tracker: Tracker):
             if path.startswith("/rest/api/2/"):
                 issues = tracker.issues["jira"]
                 rest = path[len("/rest/api/2/"):]
+                if re.fullmatch(r"issue/createmeta/[A-Z]+/issuetypes", rest):
+                    return self._send(200, {"values": [{"name": "Bug", "iconUrl": f"{tracker.url}/bug.svg"}, {"name": "Improvement"}, {"name": "Story"},
+                                                       {"name": "Sub-task", "subtask": True}]})
                 if rest == "search":
                     return self._send(200, {"issues": issues, "total": len(issues), "startAt": 0})
                 if rest == "issue" and method == "POST":
@@ -136,7 +148,8 @@ def _handler(tracker: Tracker):
                     issues.append({"key": key, "fields": {"summary": b["summary"], "description": b["description"],
                                                           "labels": b["labels"], "status": {"statusCategory": {"key": "new"}},
                                                           "project": {"key": b["project"]["key"]},
-                                                          "issuelinks": [{"outwardIssue": {"key": "REQ-1"}}]}})
+                                                          "issuelinks": [{"outwardIssue": {"key": "REQ-1"}}],
+                                                          "issuetype": b.get("issuetype")}})
                     return self._send(201, {"key": key})
                 m = re.fullmatch(r"issue/([A-Z]+-\d+)(/remotelink|/comment)?", rest)
                 if m:
@@ -146,6 +159,8 @@ def _handler(tracker: Tracker):
                     found = [i for i in issues if i["key"] == m.group(1)]
                     return self._send(200, found[0]) if found else self._send(404, {})
             # Redmine
+            if re.fullmatch(r"/projects/[^/]+\.json", path):
+                return self._send(200, {"project": {"trackers": [{"id": 1, "name": "Feature"}, {"id": 3, "name": "Bug"}]}})
             if path == "/trackers.json":
                 return self._send(200, {"trackers": [{"id": 1, "name": "Feature"}, {"id": 3, "name": "Bug"}]})
             m = re.fullmatch(r"/issues(?:/(\d+))?\.json", path)
@@ -388,9 +403,11 @@ def test_issues_on_the_sequencer(failed_run, tracker):
     assert d["source"] == "bench" and d["title"] == "[tsq] short: check counted_enough failed"
     assert "http://tsq:8640/#/runs/" in d["body"] and f"tsq:fingerprint={d['fingerprint']}" in d["body"]
     assert d["labels"][0] == "tsq" and d["duplicates"] == [] and d["known"] == []
+    assert [t["name"] for t in d["types"]] == ["issue", "incident", "task"] and d["type"] == "issue"
     b = seq.issues.create(run_id, {"target": CHECK, "source": "bench", "title": d["title"], "body": d["body"],
-                                    "labels": d["labels"]}, "dana", "http://tsq:8640/")
-    assert b["issue"]["key"] == "bench#1" and b["created"] and b["by"] == "dana"
+                                    "labels": d["labels"], "type": "incident"}, "dana", "http://tsq:8640/")
+    assert b["issue"]["key"] == "bench#1" and b["created"] and b["by"] == "dana" and b["issue"]["type"] == "incident"
+    assert tracker.issues["gitlab"][-1]["issue_type"] == "incident"
     with pytest.raises(Exception, match="already bound"):
         seq.issues.bind(run_id, {"target": CHECK, "issue": "bench#1"}, "dana")
     view = seq.issues.run_view(run_id)
@@ -720,3 +737,48 @@ def test_issue_server_down(tmp_path, tracker):
     with pytest.raises(IssueError, match="cannot be reached since"):
         sources.backend("rm").search("x")
     assert time.monotonic() - start < 1 and tracker.url in netguard.down_hosts()
+
+
+def test_issue_types(tracker):
+    """The type of a new issue, as each tool has them: GitLab's scoped labels type::<name> (else its own types), the
+    GitHub organization's issue types, the Jira project's, the Redmine project's trackers; a bug proposed for a failure,
+    an improvement for a green run."""
+    from testsuit.issues.backend import default_type
+    from testsuit.issues.model import type_color
+    s = IssueSources({**_issues_cfg(tracker.url), "sources": {**_issues_cfg(tracker.url)["sources"], "rm": {
+        "backend": "redmine", "options": {"url": tracker.url, "project": "bench", "tracker": "Bug"},
+        "credentials": {"api_key": "env:ISSUES_TOKEN"}}}})
+    gl = s.backend("bench")
+    assert [t["name"] for t in gl.issue_types()] == ["issue", "incident", "task"]           # no type:: label
+    made = gl.create("x", "y", ["tsq"], issue_type="incident")
+    assert tracker.issues["gitlab"][-1]["issue_type"] == "incident" and made.labels == ["tsq"] and made.type == "incident"
+    assert type_color(made.type) == "#cf222e" and type_color("", "", "closed") == "#777"
+    tracker.gitlab_labels = ["type::bug", "type::feature", "priority::high"]
+    types = gl.issue_types()
+    assert types == [{"name": "bug", "label": "type::bug", "color": "#dc143c"},
+                     {"name": "feature", "label": "type::feature", "color": "#428bca"}]
+    made = gl.create("x", "y", ["tsq", "type::old"], issue_type="feature")
+    assert made.type == "feature" and made.brief()["type"] == "feature"
+    assert made.labels == ["tsq", "type::feature"] and tracker.issues["gitlab"][-1]["issue_type"] == "issue"
+    with pytest.raises(IssueError, match="no issue type 'nope'"):
+        gl.create("x", "y", issue_type="nope")
+    assert (default_type(types, True), default_type(types, False)) == ("bug", "feature")
+    gh = s.backend("gh")
+    assert [t["name"] for t in gh.issue_types()] == ["Bug", "Feature", "Task"]
+    gh.create("x", "y", issue_type="Feature")
+    assert tracker.issues["github"][-1]["type"]["name"] == "Feature" and gh.issue_types()[0]["color"] == "red"
+    found = gh.issue(tracker.issues["github"][-1])
+    assert (found.type, found.type_color, type_color(found.type, found.type_color)) == ("Feature", "blue", "#0969da")
+    assert IssueSources({"sources": {"g": {"backend": "github", "options": {"url": tracker.url, "repo": "lee/x"},
+                                           "credentials": {"token": "env:ISSUES_TOKEN"}}}}).backend("g").issue_types() == []
+    jira = s.backend("jira")
+    types = jira.issue_types()
+    assert [t["name"] for t in types] == ["Bug", "Improvement", "Story"] and types[0].get("default")
+    assert types[0]["icon"].endswith("/bug.svg")
+    assert (default_type(types, True), default_type(types, False)) == ("Bug", "Improvement")
+    assert jira.create("x", "y", issue_type="Story").type == "Story"
+    assert tracker.issues["jira"][-1]["fields"]["issuetype"] == {"name": "Story"}
+    rm = s.backend("rm")
+    types = rm.issue_types()
+    assert [t["name"] for t in types] == ["Feature", "Bug"] and default_type(types, True) == "Bug"
+    assert default_type(types, False) == "Feature" and rm.create("x", "y", issue_type="Feature").type == "Feature"

@@ -84,6 +84,7 @@ class RedmineBackend(IssueBackend):
                 links.append(str(other))
         return Issue(source=self.name, id=str(item.get("id")), title=str(item.get("subject") or ""),
                      state=CLOSED if closed else OPEN, url=f"{self.server}/issues/{item.get('id')}", labels=labels,
+                     type=str((item.get("tracker") or {}).get("name") or ""),
                      assignees=[str((item.get("assigned_to") or {}).get("name"))] if item.get("assigned_to") else [],
                      author=str((item.get("author") or {}).get("name") or ""), created=str(item.get("created_on") or ""),
                      updated=str(item.get("updated_on") or ""), body=str(item.get("description") or ""),
@@ -146,9 +147,25 @@ class RedmineBackend(IssueBackend):
             self._tracker = int(match[0]["id"])
         return self._tracker
 
-    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
+    def issue_types(self, project: str | None = None) -> list[dict[str, Any]]:
+        """The trackers of the project (else of the server), the one of option ``tracker`` the default."""
+        data = self.api.get(f"projects/{project or self.project}.json", {"include": "trackers"}, missing_ok=True) or {}
+        found = (data.get("project") or {}).get("trackers") or (self.api.get("trackers.json") or {}).get("trackers") or []
+        wanted = str(self.options.get("tracker") or "").lower()
+        return [{"name": str(t.get("name")), "id": t.get("id"),
+                 **({"default": True} if wanted and wanted in (str(t.get("name")).lower(), str(t.get("id"))) else {})}
+                for t in found if isinstance(t, dict)]
+
+    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
+               issue_type: str | None = None) -> Issue:
         fields: dict[str, Any] = {"project_id": project or self.project, "subject": title, "description": body}
-        tracker = self.tracker()
+        if issue_type:
+            match = [t for t in self.issue_types(project) if t["name"].lower() == issue_type.lower()]
+            if not match:
+                raise IssueError(f"redmine backend: no tracker '{issue_type}' in '{project or self.project}'")
+            tracker = int(match[0]["id"])
+        else:
+            tracker = self.tracker()
         if tracker is not None:
             fields["tracker_id"] = tracker
         data = self.api.post("issues.json", {"issue": fields}) or {}

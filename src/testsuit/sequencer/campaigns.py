@@ -210,10 +210,15 @@ def a(href: str | None, text: str) -> str:
     return f'<a href="{html.escape(href)}">{text}</a>' if href else text
 
 
-def issue_icon(state: str = "") -> str:
-    """An issue (any kind, not only a bug): a circle with a small dot, green when open."""
-    color = "#1a7f37" if state == "open" else "#777"
-    return (f'<svg viewBox="0 0 16 16" width="13" height="13" style="vertical-align:-2px" aria-hidden="true">'
+def issue_icon(state: str = "", issue: dict | None = None) -> str:
+    """An issue (any kind, not only a bug): a circle with a small dot, in the colour of its type (the tool's, else a bug
+    red, an improvement blue, a task purple), else green when open; faded when closed."""
+    from testsuit.issues.model import type_color
+    issue = issue or {}
+    color = html.escape(type_color(issue.get("type") or "", issue.get("type_color") or "", state))
+    title = f'<title>{html.escape(str(issue["type"]))}</title>' if issue.get("type") else ""
+    fade = ' opacity="0.5"' if state != "open" and issue.get("type") else ""
+    return (f'<svg viewBox="0 0 16 16" width="13" height="13" style="vertical-align:-2px"{fade} aria-hidden="true">{title}'
             f'<circle cx="8" cy="8" r="6.25" fill="none" stroke="{color}" stroke-width="1.5"/>'
             f'<circle cx="8" cy="8" r="1.25" fill="{color}"/></svg>')
 
@@ -310,7 +315,7 @@ def report_html(view: dict, base: str = "", requirements=None, links=None) -> st
                           f'{e(": " + i["reason"] if i.get("reason") else "")}</div>'
                           for i in r.get("interventions") or [] if i.get("action") not in ("next", "bypass"))
         detail += review_lines(r.get("review"))
-        detail += "".join(f'<div class="issue {e(str(i.get("state") or ""))}">{issue_icon(str(i.get("state") or ""))} '
+        detail += "".join(f'<div class="issue {e(str(i.get("state") or ""))}">{issue_icon(str(i.get("state") or ""), i)} '
                           + (f'<a href="{e(str(i["url"]))}">{e(str(i.get("key")))}</a>' if i.get("url") else e(str(i.get("key"))))
                           + f' [{e(str(i.get("state") or ""))}] {e(str(i.get("title") or ""))}'
                           f' <span class="muted">({e(str(i.get("target") or ""))})</span></div>'
