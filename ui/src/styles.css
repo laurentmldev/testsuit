@@ -1434,3 +1434,9 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .tickets-req-rules .row .text-field { max-width: 220px; }
 .tickets-routes td .text-field, .tickets-routes td input { min-width: 90px; }
 .tickets-routes .nowrap { white-space: nowrap; }
+.tickets-tls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tickets-tls .text-field { min-width: 260px; }
+.tickets-route-hit td { background: var(--ok-soft); }
+.tickets-route-try { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tickets-route-try input { width: 140px; }
+.tickets-req-rules .hint { margin: -2px 0 4px 24px; }

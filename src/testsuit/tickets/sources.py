@@ -107,6 +107,7 @@ class TicketSources:
                 if not is_reference(str(value)):
                     raise TicketError(f"{where}: source '{name}': credential '{key}' must come from the environment "
                                       "('env:<VARIABLE>') or a file ('file:<path>'), never be written in the file")
+            self._auth(name, spec)
             self._req_spec(spec.get("requirements"), f"source '{name}'")
             self.specs[name] = spec
         self.default = str(data.get("default") or next(iter(self.specs)))
@@ -123,6 +124,17 @@ class TicketSources:
                 raise TicketError(f"{where}: route {i}: unknown key(s) {', '.join(bad)} ({', '.join(ROUTE_KEYS)})")
         self._req_spec(data.get("requirements"), "requirements")
         self._backends: dict[str, TicketBackend] = {}
+
+    def _auth(self, name: str, spec: dict) -> None:
+        """A source signs in one way: its credentials are those of one sign-in method of its backend."""
+        from testsuit.tickets.backend import _backends
+        given = {str(k) for k, v in (spec.get("credentials") or {}).items() if v}
+        methods = getattr(_backends.get(str(spec["backend"]).lower()), "auth_methods", None) or {}
+        if not given or not methods or any(given <= set(m.get("credentials") or []) for m in methods.values()):
+            return
+        ways = "; ".join(f"{m.get('label') or k}: {', '.join(m.get('credentials') or [])}" for k, m in methods.items())
+        raise TicketError(f"{self.where}: source '{name}': credentials {', '.join(sorted(given))} are not one way to sign "
+                          f"in ({ways})")
 
     @classmethod
     def from_file(cls, path: Path) -> "TicketSources":

@@ -17,6 +17,7 @@ import asyncio
 import json
 import re
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
@@ -215,6 +216,21 @@ def test_tickets_file(tracker):
         TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"}, "credentials": {"token": "abc"}}}})
     with pytest.raises(TicketError, match="unknown key"):
         TicketSources({"sources": {"x": {"backend": "gitlab"}}, "colour": 1})
+    # one way to sign in: the credentials of one method of the backend
+    with pytest.raises(TicketError, match=r"credentials oauth_token, token are not one way to sign in \(Access token"):
+        TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b"},
+                                         "credentials": {"token": "env:A", "oauth_token": "env:B"}}}})
+    with pytest.raises(TicketError, match="credentials token, user are not one way"):
+        TicketSources({"sources": {"x": {"backend": "jira", "credentials": {"token": "env:A", "user": "env:B"}}}})
+    TicketSources({"sources": {"x": {"backend": "jira", "credentials": {"email": "env:A", "token": "env:B"}}}})
+    from testsuit.tickets import describe_ticket_backends
+    auth = {b["name"]: [m["name"] for m in b["auth"]] for b in describe_ticket_backends()}
+    assert auth["gitlab"] == ["access_token", "oauth"] and auth["jira"] == ["cloud", "pat", "basic"]
+    # the TLS check: false, written as a string too, or a CA bundle relative to the file's folder
+    for verify, expected in ((False, False), ("false", False), ("no", False), (True, True), ("certs/ca.pem", "/base/certs/ca.pem")):
+        b = TicketSources({"sources": {"x": {"backend": "gitlab", "options": {"project": "a/b", "verify": verify}}}},
+                          Path("/base")).backend("x")
+        assert b.api.verify == expected, verify
     with pytest.raises(TicketError, match="a pattern with"):
         TicketSources({"sources": {"x": {"backend": "gitlab"}}, "requirements": {"labels": "req"}})
 
