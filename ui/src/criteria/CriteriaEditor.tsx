@@ -21,7 +21,7 @@ import { ApiError } from "../api";
 import { Dialog } from "../fields";
 import { CodeEditor, type Marker } from "../monaco";
 import { attempt, classes, Markdown, notify, relPath, Spinner } from "../util";
-import type { CriteriaAdapter, CriterionInfo, Description, FileDoc, Overview, Problem, RunEntry, ScenarioInfo, UtestsInfo } from "./adapter";
+import type { CriteriaAdapter, CriterionInfo, Description, FileDoc, Overview, Problem, RequirementsList, RunEntry, ScenarioInfo, UtestsInfo } from "./adapter";
 import { DataView } from "./DataView";
 import { setCriteriaContext } from "./expressions";
 import { entries, entryAt, fieldsOf, freeEntryName, templateEntryName, templateNamed, type Entry } from "./scenario";
@@ -228,11 +228,19 @@ export function CriteriaEditor({ adapter, scope, file, onFile, bar }: {
 
   // ── editor context: completion of expressions and parameter names ──
   const uri = file ? `file:///criteria/${encodeURIComponent(adapter.label)}/${file}` : "";
+  // the requirements a check can list (reqs), when the host has them: read once
+  const [reqs, setReqs] = useState<RequirementsList | null>(null);
+  const wantReqs = !!adapter.requirements && isScenarioDoc(file);
+  useEffect(() => {
+    if (!wantReqs || reqs || !file) return;
+    adapter.requirements!(file).then(setReqs).catch((e) => setReqs({ sources_file: null, items: [], errors: [e.message] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantReqs, adapter]);
   useEffect(() => {
     if (!uri || !isScenarioDoc(file)) return;
-    setCriteriaContext(uri, { describe: desc, params });
+    setCriteriaContext(uri, { describe: desc, params, reqs: reqs?.items });
     return () => setCriteriaContext(uri, null);
-  }, [uri, file, desc, params]);
+  }, [uri, file, desc, params, reqs]);
   const schema = isScenarioDoc(file) ? desc?.scenario_schema ?? null : file && isUtestsFile(file) ? UTESTS_SCHEMA : null;
 
   const open = useCallback((path: string, line?: number) => {
@@ -446,7 +454,8 @@ function EntryHelp({ entry, desc, open }: { entry: Entry | null; desc: Descripti
       <div className="help-panel">
         <h4>Criteria</h4>
         <p className="muted">Put the cursor in an entry to see its criterion and fields. In a value, Ctrl+Space completes: the
-          helpers and computed parameters in expressions, the parameters of the data in parameter names, <code>{"{{"}</code> the keys.</p>
+          helpers and computed parameters in expressions, the parameters of the data in parameter names, <code>{"{{"}</code> the keys, and the requirements of the repository in
+          a check's <code>reqs</code> (by id, title or path).</p>
       </div>
     );
   }

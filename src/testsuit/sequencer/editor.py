@@ -470,6 +470,7 @@ class Editor:
     def __init__(self, seq):
         self.seq = seq
         self.jobs: dict[str, dict] = {}                 # datapack generations in the background
+        self.reqs_progress: dict[str, Any] = {}         # session id -> the progress of its latest requirements reading
         self.base = seq.config.root / "editor"
         self.base.mkdir(parents=True, exist_ok=True)
         self.askpass = self.base / "askpass.sh"
@@ -1563,9 +1564,22 @@ class Editor:
             problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": problem})
         return problems
 
-    def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None) -> dict:
-        out, cov = self.requirements_coverage(session, source, campaign)
+    def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None,
+                     refresh: bool = False) -> dict:
+        """``refresh``: every call to the servers made again, even those the cache still has (the Refresh button)."""
+        from contextlib import nullcontext
+
+        from testsuit.reqs.progress import Progress, reporting
+        from testsuit.reqs.rest import fresh
+        self.reqs_progress[session.id] = progress = Progress()
+        with reporting(progress), (fresh() if refresh else nullcontext()):
+            out, cov = self.requirements_coverage(session, source, campaign)
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
+
+    def requirements_progress(self, session: EditSession) -> dict:
+        """How the requirements reading of the Requirements view goes: its steps, its calls to the servers."""
+        progress = self.reqs_progress.get(session.id)
+        return progress.as_dict() if progress is not None else {"done": True, "steps": [], "calls": 0, "seconds": 0}
 
     def requirement_item(self, session: EditSession, source: str, req_id: str) -> dict:
         """One requirement in full, as generation reads it (the rest backend: with its details calls): what the

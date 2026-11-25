@@ -876,8 +876,13 @@ class _Builder:
         from testsuit.reqs.snapshot import SNAPSHOT, snapshot_of_testdef
         raw = load_yaml_mapping(self.testdef_file)
         inputs = sorted(p for p in (self.work / "data").glob("*/input") if p.is_dir())
-        self.requirements = snapshot_of_testdef(self.testdef_file, {"reqs": testdef.reqs, "pipeline": raw.get("pipeline")},
-                                                context, input_dirs=inputs, root=self.work)
+        from testsuit.reqs.progress import Progress, reporting
+        echo = lambda line: _info(Fore.LIGHTBLACK_EX + "     [REQS] " + line)   # noqa: E731
+        with reporting(Progress(echo=echo)) as progress:
+            self.requirements = snapshot_of_testdef(self.testdef_file, {"reqs": testdef.reqs, "pipeline": raw.get("pipeline")},
+                                                    context, input_dirs=inputs, root=self.work)
+        if progress.calls:
+            _info(Fore.LIGHTBLACK_EX + f"     [REQS] {progress.calls} call(s) to the servers in {progress.as_dict()['seconds']} s")
         if self.requirements is None:
             return
         problems = self.requirements.get("problems") or []

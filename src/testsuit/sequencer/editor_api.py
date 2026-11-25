@@ -204,9 +204,15 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
         return await run(editor.context, session(sid))
 
     @app.get("/edit/sessions/{sid}/requirements")
-    async def requirements(sid: str, source: str | None = None, campaign: str | None = None):
-        """The requirements of a tests repository and their coverage by its test definitions (SPEC §5.5)."""
-        return await run(editor.requirements, session(sid), source, campaign)
+    async def requirements(sid: str, source: str | None = None, campaign: str | None = None, refresh: bool = False):
+        """The requirements of a tests repository and their coverage by its test definitions (SPEC §5.5).
+        ``refresh``: not from the cache of the rest sources."""
+        return await run(editor.requirements, session(sid), source, campaign, refresh)
+
+    @app.get("/edit/sessions/{sid}/requirements/progress")
+    async def requirements_progress(sid: str):
+        """How the reading of the Requirements view goes (polled while it waits)."""
+        return editor.requirements_progress(session(sid))
 
     @app.get("/edit/sessions/{sid}/requirements/search")
     async def requirements_search(sid: str, path: str | None = None):

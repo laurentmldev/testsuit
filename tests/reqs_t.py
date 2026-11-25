@@ -707,6 +707,13 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
         # the step's answer is cached across backends; datapack keys set a variable
         calls.clear()
         assert list(Sources(file).list("", True)) == ["ALM-3", "ALM-4"] and calls == ["/api/sub/9/items"]
+        calls.clear()                                   # a refresh asked for: the step called again, cached again
+        with rest.fresh():
+            assert list(Sources(file).list("", True)) == ["ALM-3", "ALM-4"]
+        assert calls == ["/api/systems?branch=main", "/api/sub/9/items"]
+        calls.clear()
+        Sources(file).list("", True)
+        assert calls == ["/api/sub/9/items"]
         with pytest.raises(ReqError, match="HTTP 404"):
             Sources(file, {"sut": {"branch": "dev"}}).list("", True)
 
@@ -928,6 +935,13 @@ def test_input_file_tags(bench, tmp_path, monkeypatch):
     assert links == [{"file": "f.py", "line": 1, "reqs": ["REQ-3"]},
                      {"file": "f.py", "line": 3, "uid": "TC-1", "reqs": ["REQ-2", "jama:X@2"]}]
     assert len(problems) == 2 and "f.py:4" in problems[0] and "f.py:5" in problems[1]
+    # Spexygen: a title after the id, other @uid_... tags left alone, @enduid ends the test case
+    cases, links, problems = scan_text("## \n# @uid{TC-FEEDODIDO-10, test case 1}\n# @uid_bw_trace{brief}\n# - @tr{requirement-uid-1}\n"
+                                       "# - @tr{requirement-uid-2}\n# @uid_fw_trace{1}\n# @enduid\n# @tr{REQ-9}\n", "g.py")
+    assert cases == [{"uid": "TC-FEEDODIDO-10", "file": "g.py", "line": 2, "title": "test case 1"}] and problems == []
+    assert links == [{"file": "g.py", "line": 4, "uid": "TC-FEEDODIDO-10", "reqs": ["requirement-uid-1"]},
+                     {"file": "g.py", "line": 5, "uid": "TC-FEEDODIDO-10", "reqs": ["requirement-uid-2"]},
+                     {"file": "g.py", "line": 8, "reqs": ["REQ-9"]}]
 
     monkeypatch.setattr(datapack_tools, "git_state", lambda folder: {"commit": "0" * 40, "tag": "v1", "clean": True})
     write(bench.dp / "setup" / "files" / "conf.txt", "{{ testdef.id }}\n# @tr{REQ-3}\n# @uid{TC-1}\n# @tr{REQ-2, REQ-5}\n")
@@ -1099,3 +1113,27 @@ def test_dynamic_tags(tmp_path):
                     encoding="utf-8")
     with pytest.raises(ReqError, match="is not #rgb"):
         Sources(file)
+
+
+def test_reading_progress(tmp_path, alm_server, monkeypatch):
+    """The progress of a reading: the steps of the sources and each call to a server, echoed to a log at most every
+    few seconds; nothing reported outside a reading."""
+    from testsuit.reqs import progress
+    from testsuit.reqs.sources import Sources
+    base, calls = alm_server
+    monkeypatch.setenv("ALM_TOKEN_SPEED", "s3cret")
+    spec = {"backend": "rest", "credentials": {"token": "env:ALM_TOKEN_SPEED"},
+            "options": {"base": base + "/api", "auth": {"bearer": "token"}, "fields": {"id": ".key", "title": ".fields.name"},
+                        "list": {"url": "sub/9/items", "items": ".data[]"}}}
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"sources": {"speed": spec}}), encoding="utf-8")
+    sources = Sources(file)
+    lines = []
+    with progress.reporting(progress.Progress(echo=lines.append, every=0)) as p:
+        assert len(sources.list(source="speed")) == 3
+    assert p.done and p.calls >= 1 and "sub/9/items" in p.last_call
+    assert p.steps == ["source 'speed': listing its requirements", "source 'speed': 3 requirement(s)"]
+    assert lines[0] == p.steps[0] and any("call 1:" in line for line in lines)
+    assert set(p.as_dict()) >= {"seconds", "steps", "calls", "last_call", "done"}
+    sources.list(source="speed")                      # no reading: nothing reported, nothing fails
+    assert p.calls == len([x for x in lines if "call" in x])

@@ -34,7 +34,7 @@ function GitTag({ ov }: { ov: Overview | null }) {
 }
 
 export function SessionCriteriaPage({ sid, route }: { sid: string; route: Route }) {
-  const adapter = useMemo(() => restAdapter(`edit/sessions/${sid}/criteria`, sid), [sid]);
+  const adapter = useMemo(() => restAdapter(`edit/sessions/${sid}/criteria`, sid, sid), [sid]);
   const file = route.query.get("file");
   const scope = route.query.get("scope");
   const [session, setSession] = useState<any>(null);

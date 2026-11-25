@@ -16,10 +16,10 @@
 // tests × requirements. Used by the Run page (one run), the campaign run page (its runs) and the Requirements subtab
 // of Datapacks (the test definitions of a tests repository, with the tree of the requirements).
 import { htmlToText, RichText } from "../richtext";
-import { Fragment, useMemo, useState, type CSSProperties } from "react";
-import { url, useResource } from "../api";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { get, url, useResource } from "../api";
 import { createFile } from "../editor/Session";
-import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
+import { attempt, classes, Markdown, notify, openInNewTab, Spinner } from "../util";
 import { NavIcon } from "../navicons";
 
 export const STATUSES = ["passed", "failed", "error", "partial", "skipped", "not run", "uncovered"];
@@ -108,11 +108,16 @@ export function tagStyle(color?: string): CSSProperties | undefined {
     ? { color, background: `color-mix(in srgb, ${color} 16%, transparent)`, outlineColor: color } : undefined;
 }
 
+const FOLD_OVER = 5;     // a path with more requirements than this starts folded in the matrix
+
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
+
 export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
   const [open, setOpen] = useState<string | null>(null);
   const [tag, setTag] = useState("");                       // only the requirements with this tag (or dynamic tag)
   const [search, setSearch] = useState("");                 // only the requirements holding these words (id, title, texts, path, tags)
+  // the paths folded or unfolded by a click; else a path of more than FOLD_OVER requirements is folded (not while filtering)
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const tests: any[] = data.tests || [];
   const colors: Record<string, string> = data.tag_colors || {};
   const inNode: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
@@ -140,6 +145,7 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
     return out;
   }, [rows]);
   const inView = new Set(rows.map((r) => r.key));
+  const isFolded = (path: string, reqs: any[]) => toggled[path] ?? (reqs.length > FOLD_OVER && !search.trim() && !tag);
   return (
     <div className="coverage">
       <CoverageTiles rows={rows} />
@@ -182,8 +188,10 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                 const c = counts(reqs);
                 return (
                   <Fragment key={path}>
-                    <tr className="cov-node"><td colSpan={4 + tests.length}><code>{path || "(no path)"}</code> <span className="muted small">{STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
-                    {reqs.map((r) => (
+                    <tr className="cov-node" onClick={() => setToggled({ ...toggled, [path]: !isFolded(path, reqs) })}
+                      title={isFolded(path, reqs) ? `Show its ${reqs.length} requirements` : "Fold it"}>
+                      <td colSpan={4 + tests.length}><span className="fold">{isFolded(path, reqs) ? "▸" : "▾"}</span> <code>{path || "(no path)"}</code> <span className="muted small">{reqs.length} · {STATUSES.filter((s) => c[s]).map((s) => `${s} ${c[s]}`).join(" · ")}</span></td></tr>
+                    {!isFolded(path, reqs) && reqs.map((r) => (
                       <Fragment key={r.key}>
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono nowrap">{r.key}</td>
@@ -300,6 +308,26 @@ function allPaths(nodes: any[], prefix = ""): string[] {
   return (nodes || []).flatMap((n: any) => { const p = prefix ? `${prefix}/${n.id}` : n.id; return [p, ...allPaths(n.children, p)]; });
 }
 
+/** How the reading of the requirements goes, while the page waits for it: the sources read, the calls to their servers. */
+function ReadingProgress({ sid }: { sid: string }) {
+  const [p, setP] = useState<any>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = () => get(`edit/sessions/${sid}/requirements/progress`).then((r) => { if (live) setP(r); }).catch(() => undefined);
+    const first = window.setTimeout(tick, 400);
+    const timer = window.setInterval(tick, 800);
+    return () => { live = false; window.clearTimeout(first); window.clearInterval(timer); };
+  }, [sid]);
+  if (!p || p.done || (!p.steps.length && !p.calls)) return null;
+  return (
+    <div className="req-progress small">
+      <Spinner text={`Reading the requirements: ${p.seconds} s, ${p.calls} call(s) to the servers`} />
+      <ul className="muted">{p.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+      {p.last_call && <div className="mono muted req-progress-call" title={p.last_call}>{p.last_call}</div>}
+    </div>
+  );
+}
+
 const INTRO = `The requirements of this repository (\`requirements.yml\`), and how its test definitions cover them: each test definition by its latest run on this sequencer, else as linked. Test definitions and the checks of their criteria list the requirements they verify with \`reqs\`.`;
 
 /** Datapacks, Requirements: the tree of the requirements of the repository, and their coverage. */
@@ -325,6 +353,19 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   if (campaign) q.set("campaign", campaign);
   const path = `edit/sessions/${sid}/requirements${q.toString() ? "?" + q : ""}`;
   const res = useResource<any>(path, ["run"]);
+  // Refresh: read the sources again, the rest sources without their cache (even what is still in its time)
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    try { res.setData(await get(`${path}${path.includes("?") ? "&" : "?"}refresh=true`)); }
+    catch (e: any) { notify(`The refresh failed: ${e.message}`, "error"); }
+    finally { setRefreshing(false); }
+  };
+  const refreshButton = (
+    <button disabled={refreshing || res.loading} onClick={refresh}
+      title="Read the sources again now, without the cache of the rest sources (even the answers still within their cache time)">
+      {refreshing ? "Refreshing…" : "↻ Refresh"}</button>
+  );
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
   // the sources, as cards: the one picked (none: every source) shows its tree below them; a click on it again unpicks it
@@ -365,6 +406,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
       <Markdown text={INTRO} className="intro" />
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading the requirements…" />}
+      {(res.loading || refreshing) && <ReadingProgress sid={sid} />}
       {d && !d.sources_file && (
         <div className="muted">
           <p>No <code>requirements.yml</code> in this repository: write one at its root, with the requirements themselves (<code>requirements:</code>) or the sources they come from (<code>sources:</code>). See the sequencer README, section 10.3.</p>
@@ -378,7 +420,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
         <div className="requirements-layout">
           <nav className="req-tree">{picker}</nav>
           <div className="req-main">
-            {edit && <div className="synthesis-head"><span className="spacer" /><div className="synthesis-actions">{edit}</div></div>}
+            <div className="synthesis-head"><span className="spacer" /><div className="synthesis-actions">{refreshButton}{edit}</div></div>
             <div className="error-box">{d.error}</div>
           </div>
         </div>
@@ -408,6 +450,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
               </div>
               <span className="spacer" />
               <div className="synthesis-actions">
+                {refreshButton}
                 {edit}
                 <a className="button primary" href={url(`edit/sessions/${sid}/requirements/report?${reportQuery}`)} target="_blank" rel="noreferrer"
                   title="Both matrices of what is shown here (the source, the campaign and the node picked) as a page of their own, in a new browser tab"><NavIcon name="requirements" size={16} />Report</a>

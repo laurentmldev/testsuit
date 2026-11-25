@@ -15,12 +15,13 @@
 // and computed parameters in expressions, the parameters of the data in parameter names. What a model
 // can use is set per model URI by the criteria editor (setCriteriaContext).
 import { monaco } from "../monaco";
-import type { Description } from "./adapter";
+import type { Description, RequirementsList } from "./adapter";
 import { computedBefore, entries, entryAt, fieldAt, kindsOf } from "./scenario";
 
 export interface CriteriaContext {
   describe: Description | null;
   params: string[];          // '<file>::<param>'
+  reqs?: RequirementsList["items"];   // what `reqs` of a check can list
 }
 
 const contexts = new Map<string, CriteriaContext>();
@@ -56,13 +57,38 @@ function paramNames(params: string[]): { name: string; files: string[] }[] {
   return [...by.entries()].map(([name, files]) => ({ name, files }));
 }
 
+const REF = /[\w.:@\-/]/;
+
+/** The requirement reference around a column of a line (1-based, end exclusive). */
+function reqAt(line: string, column: number): { ref: string; start: number; end: number } | null {
+  let a = column - 1, b = column - 1;
+  while (a > 0 && REF.test(line[a - 1])) a--;
+  while (b < line.length && REF.test(line[b])) b++;
+  return a < b ? { ref: line.slice(a, b), start: a + 1, end: b + 1 } : null;
+}
+
+/** The requirements a check's `reqs` can list, matched on id, title or path by what is typed. */
+function reqItems(model: monaco.editor.ITextModel, position: monaco.Position, reqs: RequirementsList["items"]) {
+  const K = monaco.languages.CompletionItemKind;
+  const before = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+  if (/^\s*reqs\s*:\s*$/.test(before)) return [];          // after "reqs:": a list first
+  const typed = before.match(/[\w.:@\-/]*$/)?.[0] || "";
+  const range = new monaco.Range(position.lineNumber, position.column - typed.length, position.lineNumber, position.column);
+  return reqs.map((r, i) => ({
+    label: { label: r.key, description: r.title || "" }, kind: K.Reference, insertText: r.key, range,
+    filterText: `${r.key} ${r.title || ""} ${r.path || ""}`, detail: [r.path, r.status].filter(Boolean).join(" · "),
+    sortText: String(i).padStart(6, "0"),
+  }));
+}
+
 function register() {
   registered = true;
   const K = monaco.languages.CompletionItemKind;
   monaco.languages.registerCompletionItemProvider("yaml", {
-    triggerCharacters: [".", "(", "\"", "'"],
+    triggerCharacters: [".", "(", "\"", "'", "[", ",", "-", " "],
     provideCompletionItems(model, position) {
       const w = where(model, position);
+      if (w?.field === "reqs") return { suggestions: reqItems(model, position, w.ctx.reqs || []) };
       if (!w || !w.kind) return { suggestions: [] };
       const before = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
       const word = before.match(/[\w]*$/)?.[0] || "";
@@ -105,6 +131,13 @@ function register() {
   monaco.languages.registerHoverProvider("yaml", {
     provideHover(model, position) {
       const w = where(model, position);
+      if (w?.field === "reqs") {
+        const m = reqAt(model.getLineContent(position.lineNumber), position.column);
+        const r = m && (w.ctx.reqs || []).find((x) => x.key === m.ref.replace(/@[^@]*$/, ""));
+        if (!m || !r) return null;
+        return { range: new monaco.Range(position.lineNumber, m.start, position.lineNumber, m.end),
+          contents: [{ value: `**${r.key}**${r.title ? ` · ${r.title}` : ""}` }, { value: [r.path, r.status].filter(Boolean).join(" · ") }] };
+      }
       if (!w || (w.kind !== "expression" && w.kind !== "sequence_expression")) return null;
       const word = model.getWordAtPosition(position);
       if (!word) return null;
