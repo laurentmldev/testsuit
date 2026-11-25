@@ -74,6 +74,7 @@ from typing import Any
 import yaml
 
 from testsuit.credentials import CredentialError, is_reference, resolve_secret
+from testsuit.reqs import progress
 from testsuit.reqs.backend import ReqBackend, ReqError, create_req_backend, list_requirements
 from testsuit.reqs.model import Node, Ref, Requirement, ref_key, split_ref
 
@@ -411,6 +412,7 @@ class Sources:
         for source, items in by_source.items():
             backend = self.backend(source)
             ids = sorted({r.id for r in items})
+            progress.step(f"source '{source}': reading {len(ids)} requirement(s)")
             found = backend.brief(ids) if brief else backend.get(ids)
             self.tagged(source, [r for r in found.values() if r is not None])
             for r in items:
@@ -421,13 +423,16 @@ class Sources:
         return out
 
     def tree(self, source: str | None = None) -> list[Node]:
+        progress.step(f"source '{source or self.default}': its tree")
         return self.backend(source or self.default).tree()
 
     def list(self, path: str = "", children: bool = False, source: str | None = None) -> dict[str, Requirement]:
         """The requirements under a path of a source, by key."""
         name = source or self.default
         out = {}
+        progress.step(f"source '{name}': listing its requirements{f' under {path}' if path else ''}")
         reqs = list_requirements(self.backend(name), path, children)
+        progress.step(f"source '{name}': {len(reqs)} requirement(s)")
         self.tagged(name, reqs)
         for req in reqs:
             req.source = name

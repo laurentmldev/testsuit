@@ -1383,3 +1383,6 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .cov-tags-cell .tag { padding: 1px 8px; font-size: 11.5px; }
 .cov-search { width: 320px; max-width: 100%; }
 .req-tag-color { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.req-progress { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel, transparent); max-width: 900px; }
+.req-progress ul { margin: 4px 0; padding-left: 18px; }
+.req-progress-call { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -16,8 +16,8 @@
 // tests × requirements. Used by the Run page (one run), the campaign run page (its runs) and the Requirements subtab
 // of Datapacks (the test definitions of a tests repository, with the tree of the requirements).
 import { htmlToText, RichText } from "../richtext";
-import { Fragment, useMemo, useState, type CSSProperties } from "react";
-import { url, useResource } from "../api";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { get, url, useResource } from "../api";
 import { createFile } from "../editor/Session";
 import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
 import { NavIcon } from "../navicons";
@@ -300,6 +300,26 @@ function allPaths(nodes: any[], prefix = ""): string[] {
   return (nodes || []).flatMap((n: any) => { const p = prefix ? `${prefix}/${n.id}` : n.id; return [p, ...allPaths(n.children, p)]; });
 }
 
+/** How the reading of the requirements goes, while the page waits for it: the sources read, the calls to their servers. */
+function ReadingProgress({ sid }: { sid: string }) {
+  const [p, setP] = useState<any>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = () => get(`edit/sessions/${sid}/requirements/progress`).then((r) => { if (live) setP(r); }).catch(() => undefined);
+    const first = window.setTimeout(tick, 400);
+    const timer = window.setInterval(tick, 800);
+    return () => { live = false; window.clearTimeout(first); window.clearInterval(timer); };
+  }, [sid]);
+  if (!p || p.done || (!p.steps.length && !p.calls)) return null;
+  return (
+    <div className="req-progress small">
+      <Spinner text={`Reading the requirements: ${p.seconds} s, ${p.calls} call(s) to the servers`} />
+      <ul className="muted">{p.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+      {p.last_call && <div className="mono muted req-progress-call" title={p.last_call}>{p.last_call}</div>}
+    </div>
+  );
+}
+
 const INTRO = `The requirements of this repository (\`requirements.yml\`), and how its test definitions cover them: each test definition by its latest run on this sequencer, else as linked. Test definitions and the checks of their criteria list the requirements they verify with \`reqs\`.`;
 
 /** Datapacks, Requirements: the tree of the requirements of the repository, and their coverage. */
@@ -365,6 +385,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
       <Markdown text={INTRO} className="intro" />
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading the requirements…" />}
+      {res.loading && <ReadingProgress sid={sid} />}
       {d && !d.sources_file && (
         <div className="muted">
           <p>No <code>requirements.yml</code> in this repository: write one at its root, with the requirements themselves (<code>requirements:</code>) or the sources they come from (<code>sources:</code>). See the sequencer README, section 10.3.</p>

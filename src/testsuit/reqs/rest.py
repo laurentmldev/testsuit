@@ -90,6 +90,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urljoin
 
+from testsuit.reqs import progress
 from testsuit.reqs.backend import ReqBackend, ReqError, register_req_backend, under
 from testsuit.reqs.model import Node, Requirement
 
@@ -540,6 +541,7 @@ class RestBackend(ReqBackend):
             else:
                 self.trace_more += 1
         self._record = record
+        progress.call(f"{label}: {method} {shown}")
         start = time.monotonic()
         timeout = self.timeout
         if self.deadline is not None:                # a test of the Editor: the whole of it within a limit
@@ -963,9 +965,11 @@ class RestBackend(ReqBackend):
         if self.trace is not None or len(reqs) == 1:
             done = [one(r) for r in reqs]
         else:
+            import contextvars
             from concurrent.futures import ThreadPoolExecutor
+            contexts = [contextvars.copy_context() for _ in reqs]      # the progress reported goes on in the pool
             with ThreadPoolExecutor(max_workers=DETAILS_PARALLEL) as pool:
-                done = list(pool.map(one, reqs))
+                done = list(pool.map(lambda c, r: c.run(one, r), contexts, reqs))
         for r in done:
             self._detailed[r.id] = r
 
