@@ -72,17 +72,16 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
   const split = sourcesFile && hasSources && showRequirements;
   const [tab, setTab] = useState<"config" | "reqs">("config");
   const showConfig = !split || tab === "config";
-  const reqCount = Object.keys(data.requirements || {}).length;
   return (
     <div className="form pad">
       {split && (
         <div className="tabs req-form-tabs">
           <button className={tab === "config" ? "selected" : ""} onClick={() => setTab("config")}
             title="Where the requirements come from: the sources (each reading a tool or a file) and the classes they can share">
-            Sources &amp; classes ({Object.keys(data.sources || {}).length}{Object.keys(data.classes || {}).length ? ` + ${Object.keys(data.classes || {}).length}` : ""})</button>
+            Sources &amp; classes</button>
           <button className={tab === "reqs" ? "selected" : ""} onClick={() => setTab("reqs")}
             title="The requirements written in this file, those of the local source: edited here">
-            Requirements of {local.length ? local.join(", ") : "this file"} ({reqCount})</button>
+            Local Reqs</button>
         </div>
       )}
       {sourcesFile && showConfig && (
@@ -119,7 +118,7 @@ export function RequirementsForm({ doc, api }: { doc: Doc; api: { setData: (d: a
       )}
       {showRequirements && (!split || tab === "reqs") && <Requirements data={data} setTop={setTop} help={help} local={local} others={others} />}
       {split && tab === "config" && local.length > 0 && (
-        <p className="muted small">The requirements of {local.join(", ")} are written in this file: edit them in the <button className="link small" onClick={() => setTab("reqs")}>Requirements of {local.join(", ")}</button> tab.</p>
+        <p className="muted small">The requirements of {local.join(", ")} are written in this file: edit them in the <button className="link small" onClick={() => setTab("reqs")}>Local Reqs</button> tab.</p>
       )}
     </div>
   );
