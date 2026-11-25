@@ -126,6 +126,7 @@ class Coverage:
     current: dict[str, str] = field(default_factory=dict)         # key -> current version (live sources)
     universe: list[str] | None = None                             # requirements under the paths asked for
     problems: list[str] = field(default_factory=list)
+    tag_colors: dict[str, str] = field(default_factory=dict)      # dynamic tag -> its color, when the source gives one
 
     def linked(self) -> list[str]:
         return list(dict.fromkeys(lk.req for t in self.tests for lk in t.links))
@@ -176,6 +177,7 @@ class Coverage:
             "by_path": self.by_path(),
             **({"uncovered": self.uncovered()} if self.universe is not None else {}),
             **({"problems": self.problems} if self.problems else {}),
+            **({"tag_colors": self.tag_colors} if self.tag_colors else {}),
         }
 
 
@@ -294,6 +296,7 @@ def add_test(cov: Coverage, snap: dict, test: Test, keys: dict[str, int] | None 
 def add_sources(cov: Coverage, sources: Sources, paths: list[str] | None = None, children: bool = False,
                 live: bool = True) -> None:
     """The requirements under paths as rows (inactive ones left out), and the current version of every row (live)."""
+    cov.tag_colors.update(sources.tag_colors())
     if paths:
         cov.universe = []
         for p in paths:

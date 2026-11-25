@@ -1072,7 +1072,7 @@ def test_dynamic_tags(tmp_path):
         "R2": {"title": "Speed", "description": "<p>It is <b>to be\n  defined</b></p>"},
         "R3": {"title": "TBDX not a word", "rationale": "fine\\nTBC"},
         "R4": {"title": "Done", "comments": "all good"}}}), encoding="utf-8")
-    tags = {"Maturity Warning": ["TBD", "to be defined"], "Check": "TBC, later"}
+    tags = {"Maturity Warning": ["TBD", "to be defined"], "Check": {"words": ["TBC", "later"], "color": "#c0392b"}}
     file = tmp_path / "requirements.yml"
     file.write_text(yaml.safe_dump({"classes": {"c": {"backend": "yaml", "options": {"file": "r.yml"}, "dynamic_tags": tags}},
                                     "sources": {"a": {"backend": "yaml", "options": {"file": "r.yml"}, "dynamic_tags": tags},
@@ -1081,6 +1081,12 @@ def test_dynamic_tags(tmp_path):
     for source in ("a", "b"):
         found = {r.id: r.dynamic_tags for r in s.list(source=source).values()}
         assert found == {"R1": ["Maturity Warning"], "R2": ["Maturity Warning"], "R3": ["Check"], "R4": []}
+    assert s.tag_colors() == {"Check": "#c0392b"}
+    from testsuit.reqs.coverage import Coverage, add_sources
+    from testsuit.reqs.render import as_html
+    cov = Coverage()
+    add_sources(cov, s, ["a:"], True)
+    assert cov.as_dict()["tag_colors"] == {"Check": "#c0392b"} and "color: #c0392b" in as_html(cov)
     r1 = s.get([Ref("a", "R1")])[Ref("a", "R1")]
     assert r1.dynamic_tags == ["Maturity Warning"] and r1.as_dict()["dynamic_tags"] == ["Maturity Warning"]
     plain = Sources(file)
@@ -1088,4 +1094,8 @@ def test_dynamic_tags(tmp_path):
     assert plain.list(source="a")["R1"].version == r1.version                # not part of the version
     file.write_text(yaml.safe_dump({"sources": {"a": {"backend": "yaml", "dynamic_tags": {"x": 3}}}}), encoding="utf-8")
     with pytest.raises(ReqError, match="dynamic tag 'x': a list"):
+        Sources(file)
+    file.write_text(yaml.safe_dump({"sources": {"a": {"backend": "yaml", "dynamic_tags": {"x": {"words": ["a"], "color": "red;x"}}}}}),
+                    encoding="utf-8")
+    with pytest.raises(ReqError, match="is not #rgb"):
         Sources(file)

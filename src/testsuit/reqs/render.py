@@ -48,6 +48,13 @@ def _counts(counts: dict[str, int]) -> str:
     return " · ".join(f"{s} {counts[s]}" for s in STATUSES if counts.get(s))
 
 
+def _tag_style(color: str | None) -> str:
+    """The style of a dynamic tag of this color (#rgb or #rrggbb, as the sources file checks)."""
+    if not color or not re.fullmatch(r"#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?", color):
+        return ""
+    return f' style="color: {color}; background: color-mix(in srgb, {color} 15%, transparent)"'
+
+
 def text(cov: Coverage) -> str:
     out = []
     rows = cov.rows()
@@ -197,7 +204,8 @@ def matrix_html(cov: Coverage, base: str = "") -> str:
                         f'<span class="muted">{e(_counts(by_path.get(path, {})))}</span></td></tr>')
         title_text = req.get("title") or plain_text(str(req.get("description", ""))).split("\n")[0][:120]
         cells = "".join(f'<td class="c">{_badge(t.status(key), cov.stale(key, t))}</td>' for t in cov.tests)
-        dyn = "".join(f' <span class="dyn" title="dynamic tag">{e(str(t))}</span>' for t in req.get("dynamic_tags") or [])
+        dyn = "".join(f' <span class="dyn" title="dynamic tag"{_tag_style(cov.tag_colors.get(str(t)))}>{e(str(t))}</span>'
+                      for t in req.get("dynamic_tags") or [])
         body.append(f"<tr><td>{_req_link(cov, key)}</td><td>{e(str(title_text))}{dyn}</td><td>{_badge(cov.status(key))}</td>{cells}</tr>")
     heads = "".join(f"<th>{_test_head(t, base)}</th>" for t in cov.tests)
     return (f'<div class="scroll"><table><thead><tr><th>Requirement</th><th>Title</th><th>Coverage</th>{heads}</tr>'

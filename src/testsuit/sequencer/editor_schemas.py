@@ -865,7 +865,12 @@ DYNAMIC_TAGS = h(
     "words or phrases (whole words, case independent): `Maturity Warning: [TBC, TBD, to be defined]`. Found when the "
     "requirements are read; not part of their version. A source of a class has those of its class.",
     type="object", additionalProperties={"anyOf": [{"type": "array", "items": {"type": "string"}},
-                                                   h("Words separated by commas.", type="string")]})
+                                                   h("Words separated by commas.", type="string"),
+                                                   h("The words, and the color the tag is shown in.", type="object",
+                                                     additionalProperties=False, properties={
+                                                         "words": {"type": "array", "items": {"type": "string"}},
+                                                         "color": h("`#rrggbb`", type="string",
+                                                                    pattern="^#([0-9A-Fa-f]{3}){1,2}$")})]})
 
 SOURCE = h(
     "A requirements source: the backend that reads a requirements tool, its options and its credentials; or a "

@@ -55,6 +55,7 @@ space)::
 
     dynamic_tags:
       Maturity Warning: [TBC, TBD, to be defined, to be completed]
+      Open question: {words: [TBC, open point], color: "#c0392b"}     # with the color it is shown in
 
 They are found when the requirements are read, after their version (a rule changed does not change the versions).
 
@@ -185,6 +186,14 @@ def _tag_rules(spec: Any, where: str) -> list[tuple[str, re.Pattern]]:
         raise ReqError(f"{where}: 'dynamic_tags' is a mapping of tags to the words that give them")
     rules = []
     for tag, words in spec.items():
+        if isinstance(words, dict):                   # {words, color}
+            unknown = sorted(set(words) - {"words", "color"})
+            if unknown:
+                raise ReqError(f"{where}: dynamic tag '{tag}': unknown key(s) {', '.join(unknown)} (words, color)")
+            color = words.get("color")
+            if color is not None and not re.fullmatch(r"#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?", str(color)):
+                raise ReqError(f"{where}: dynamic tag '{tag}': color '{color}' is not #rgb or #rrggbb")
+            words = words.get("words") or []
         if isinstance(words, str):
             words = [w for w in words.split(",")]
         if not isinstance(words, list):
@@ -301,6 +310,15 @@ class Sources:
                 continue
             text = "\n".join(_plain(str(t or "")) for t in (req.title, req.description, req.rationale, req.comments))
             req.dynamic_tags = [tag for tag, pattern in rules if pattern.search(text)]
+
+    def tag_colors(self) -> dict[str, str]:
+        """The color of each dynamic tag that has one, of every source (the first one given for a tag)."""
+        out: dict[str, str] = {}
+        for spec in self.specs.values():
+            for tag, rule in (spec.get("dynamic_tags") or {}).items():
+                if isinstance(rule, dict) and rule.get("color"):
+                    out.setdefault(str(tag), str(rule["color"]))
+        return out
 
     def class_version(self, name: str) -> str:
         """A short hash of a class as written: which version of it a source used (recorded in the datapack)."""
