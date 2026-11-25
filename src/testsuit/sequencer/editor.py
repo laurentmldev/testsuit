@@ -1564,10 +1564,15 @@ class Editor:
             problems.append({"file": rel, "line": line, "column": column, "severity": severity, "message": problem})
         return problems
 
-    def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None) -> dict:
+    def requirements(self, session: EditSession, source: str | None = None, campaign: str | None = None,
+                     refresh: bool = False) -> dict:
+        """``refresh``: every call to the servers made again, even those the cache still has (the Refresh button)."""
+        from contextlib import nullcontext
+
         from testsuit.reqs.progress import Progress, reporting
+        from testsuit.reqs.rest import fresh
         self.reqs_progress[session.id] = progress = Progress()
-        with reporting(progress):
+        with reporting(progress), (fresh() if refresh else nullcontext()):
             out, cov = self.requirements_coverage(session, source, campaign)
         return {**out, **({"coverage": cov.as_dict()} if cov is not None else {})}
 

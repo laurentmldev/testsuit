@@ -19,7 +19,7 @@ import { htmlToText, RichText } from "../richtext";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { get, url, useResource } from "../api";
 import { createFile } from "../editor/Session";
-import { attempt, classes, Markdown, openInNewTab, Spinner } from "../util";
+import { attempt, classes, Markdown, notify, openInNewTab, Spinner } from "../util";
 import { NavIcon } from "../navicons";
 
 export const STATUSES = ["passed", "failed", "error", "partial", "skipped", "not run", "uncovered"];
@@ -345,6 +345,19 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
   if (campaign) q.set("campaign", campaign);
   const path = `edit/sessions/${sid}/requirements${q.toString() ? "?" + q : ""}`;
   const res = useResource<any>(path, ["run"]);
+  // Refresh: read the sources again, the rest sources without their cache (even what is still in its time)
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    try { res.setData(await get(`${path}${path.includes("?") ? "&" : "?"}refresh=true`)); }
+    catch (e: any) { notify(`The refresh failed: ${e.message}`, "error"); }
+    finally { setRefreshing(false); }
+  };
+  const refreshButton = (
+    <button disabled={refreshing || res.loading} onClick={refresh}
+      title="Read the sources again now, without the cache of the rest sources (even the answers still within their cache time)">
+      {refreshing ? "Refreshing…" : "↻ Refresh"}</button>
+  );
   const campaigns: any[] = ctx?.workspace?.campaigns || [];
   const d = res.data;
   // the sources, as cards: the one picked (none: every source) shows its tree below them; a click on it again unpicks it
@@ -385,7 +398,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
       <Markdown text={INTRO} className="intro" />
       {res.error && <div className="error-box">{res.error}</div>}
       {!d && !res.error && <Spinner className="block" text="Reading the requirements…" />}
-      {res.loading && <ReadingProgress sid={sid} />}
+      {(res.loading || refreshing) && <ReadingProgress sid={sid} />}
       {d && !d.sources_file && (
         <div className="muted">
           <p>No <code>requirements.yml</code> in this repository: write one at its root, with the requirements themselves (<code>requirements:</code>) or the sources they come from (<code>sources:</code>). See the sequencer README, section 10.3.</p>
@@ -399,7 +412,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
         <div className="requirements-layout">
           <nav className="req-tree">{picker}</nav>
           <div className="req-main">
-            {edit && <div className="synthesis-head"><span className="spacer" /><div className="synthesis-actions">{edit}</div></div>}
+            <div className="synthesis-head"><span className="spacer" /><div className="synthesis-actions">{refreshButton}{edit}</div></div>
             <div className="error-box">{d.error}</div>
           </div>
         </div>
@@ -429,6 +442,7 @@ export function RequirementsTab({ sid, ctx }: { sid: string; ctx: any }) {
               </div>
               <span className="spacer" />
               <div className="synthesis-actions">
+                {refreshButton}
                 {edit}
                 <a className="button primary" href={url(`edit/sessions/${sid}/requirements/report?${reportQuery}`)} target="_blank" rel="noreferrer"
                   title="Both matrices of what is shown here (the source, the campaign and the node picked) as a page of their own, in a new browser tab"><NavIcon name="requirements" size={16} />Report</a>

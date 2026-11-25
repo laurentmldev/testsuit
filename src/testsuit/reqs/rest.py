@@ -85,7 +85,9 @@ import json
 import re
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urljoin
@@ -147,6 +149,20 @@ def duration(value: Any, where: str) -> float:
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
+
+
+_fresh: ContextVar[bool] = ContextVar("rest_fresh", default=False)
+
+
+@contextmanager
+def fresh() -> Iterator[None]:
+    """Within it, the calls go to the servers even when the cache has their answer (still in its time): a refresh
+    asked for. Their answers fill the cache again."""
+    token = _fresh.set(True)
+    try:
+        yield
+    finally:
+        _fresh.reset(token)
 
 
 _SUBST = (" `{{ name }}`: a plain substitution of a variable (of the source, or extracted by a step), not Jinja2 (no "
@@ -595,7 +611,7 @@ class RestBackend(ReqBackend):
         now = time.monotonic()
         with _cache_lock:
             hit = _cache.get(key)
-        if hit and hit[0] > now:
+        if hit and hit[0] > now and not _fresh.get():
             return hit[1]
         answer = self._call(step, url, variables=variables, label=label, missing_ok=missing_ok)
         with _cache_lock:

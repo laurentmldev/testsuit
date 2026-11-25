@@ -707,6 +707,13 @@ def test_rest_variables_and_steps(tmp_path, alm_server):
         # the step's answer is cached across backends; datapack keys set a variable
         calls.clear()
         assert list(Sources(file).list("", True)) == ["ALM-3", "ALM-4"] and calls == ["/api/sub/9/items"]
+        calls.clear()                                   # a refresh asked for: the step called again, cached again
+        with rest.fresh():
+            assert list(Sources(file).list("", True)) == ["ALM-3", "ALM-4"]
+        assert calls == ["/api/systems?branch=main", "/api/sub/9/items"]
+        calls.clear()
+        Sources(file).list("", True)
+        assert calls == ["/api/sub/9/items"]
         with pytest.raises(ReqError, match="HTTP 404"):
             Sources(file, {"sut": {"branch": "dev"}}).list("", True)
 
