@@ -68,7 +68,8 @@ class GitHubBackend(IssueBackend):
                      author=str((item.get("user") or {}).get("login") or ""), created=str(item.get("created_at") or ""),
                      updated=str(item.get("updated_at") or ""), body=str(item.get("body") or ""), project=repo)
 
-    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100) -> list[Issue]:
+    def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100,
+               since: str | None = None) -> list[Issue]:
         labels = list(labels)
         if text or self.org:                     # the search API: text, or every repository of an owner
             q = [f"repo:{self.repo}" if self.repo else f"user:{self.org}", "is:issue"]
@@ -77,13 +78,18 @@ class GitHubBackend(IssueBackend):
             q += [f'label:"{x}"' for x in labels]
             if text:
                 q.append(text)
+            if since:
+                q.append(f"updated:>={since}")
             out = []
             page = 1
-            while len(out) < limit and page <= 10:
+            while len(out) < limit and page <= 10:          # the search API gives 1,000 at most
                 data = self.api.get("search/issues", {"q": " ".join(q), "per_page": 100, "page": page,
                                                       "sort": "updated", "order": "desc"}) or {}
                 items = data.get("items") or []
-                out += [self.issue(x) for x in items if "pull_request" not in x]
+                batch = [self.issue(x) for x in items if "pull_request" not in x]
+                out += batch
+                total = data.get("total_count")
+                self.paged(batch, len(out), min(int(total), 1000) if str(total).isdigit() else None)
                 if len(items) < 100:
                     break
                 page += 1
@@ -91,12 +97,16 @@ class GitHubBackend(IssueBackend):
         params: dict[str, Any] = {"state": state or "all", "per_page": 100, "sort": "updated", "direction": "desc"}
         if labels:
             params["labels"] = ",".join(labels)
-        out = []
-        for x in self.api.pages(f"repos/{self.repo}/issues", params, limit * 2):
-            if "pull_request" not in x:          # the issues API lists pull requests too
-                out.append(self.issue(x))
-                if len(out) >= limit:
-                    break
+        if since:
+            params["since"] = since
+        out: list[Issue] = []
+        for items, total, exact in self.api.page_lists(f"repos/{self.repo}/issues", params):
+            # the issues API lists pull requests too: the total is an estimate
+            batch = [self.issue(x) for x in items if "pull_request" not in x][:limit - len(out)]
+            out += batch
+            self.paged(batch, len(out), min(total, limit) if total is not None else None, False)
+            if len(out) >= limit:
+                break
         return out
 
     def _where(self, id: str) -> tuple[str, str]:

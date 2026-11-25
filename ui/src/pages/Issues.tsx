@@ -313,6 +313,14 @@ export function IssuesTab({ sid }: { sid: string }) {
   };
   const list: any[] = issues.data?.issues || [];
   const total: number = issues.data?.total ?? 0;
+  const reading: Record<string, any> = issues.data?.loading || {};
+  const busy = Object.keys(reading).length > 0;
+  useEffect(() => {                                 // a list still read in the background: its progress, every second
+    if (!busy) return;
+    const t = setTimeout(() => issues.refresh(), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issues.data]);
   return (
     <div className="issues-tab">
       <Markdown text={INTRO} className="intro" />
@@ -368,11 +376,12 @@ export function IssuesTab({ sid }: { sid: string }) {
           </select>
           <span className="spacer" />
           <button onClick={() => { issues.setData(null); get(`edit/sessions/${sid}/issues/list?${qs}&refresh=true`).then(issues.setData).catch(() => issues.refresh()); }}
-            title="Read the issues again from the tools, not from the cache (a few minutes)">↻ Refresh</button>
+            title="Read the whole list again from the tools (otherwise, every few minutes, only the issues updated since are read)">↻ Refresh</button>
           <button className="edit-testdef" onClick={edit} title="Edit issues.yml in the Editor, in a new browser tab"><NavIcon name="edit" size={16} />Edit</button>
         </div>
         {Object.entries(issues.data?.errors || {}).map(([name, e]: any) => <div key={name} className="error-box">{name}: {e}</div>)}
         {!issues.data && !issues.error && <Spinner className="block" text="Reading the issues…" />}
+        {Object.entries(reading).map(([name, r]: any) => <ListProgress key={name} name={name} r={r} />)}
         {issues.error && <div className="error-box">{issues.error}</div>}
         {issues.data && (<>
           <Pager offset={offset} total={total} page={PAGE} onOffset={setOffset}>
@@ -400,6 +409,22 @@ export function IssuesTab({ sid }: { sid: string }) {
 }
 
 const PAGE = 100;
+
+/** A list read in the background: how many issues, of how many when the tool says. */
+function ListProgress({ name, r }: { name: string; r: { read: number; total?: number | null; exact?: boolean; mode?: string } }) {
+  const total = r.total ?? null;
+  const since = r.mode === "since";
+  const pct = total ? Math.min(100, Math.round((100 * r.read) / Math.max(1, total))) : null;
+  return (
+    <div className="upload-progress issues-progress small muted">
+      <Spinner />
+      <span className="nowrap">{r.mode === "first" ? "Reading" : since ? "Refreshing" : "Reading again"} <b>{name}</b>: {r.read.toLocaleString()}
+        {total && !since ? ` of ${r.exact === false ? "about " : ""}${total.toLocaleString()}` : ""} issue(s){since ? " changed since the last reading" : ""}
+        {r.mode === "first" && r.read > 0 ? " (shown as they come)" : r.mode === "whole" ? " (the list shown until done)" : ""}</span>
+      {pct !== null && !since && <div className="progress"><div style={{ width: `${pct}%` }} /></div>}
+    </div>
+  );
+}
 
 /** Pages of a long list: where it is, first, previous, next and last. */
 function Pager({ offset, total, page, onOffset, children }: { offset: number; total: number; page: number; onOffset: (n: number) => void; children?: ReactNode }) {

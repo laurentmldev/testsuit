@@ -51,6 +51,10 @@ class Issue:
             out.pop("body", None)
         return {"key": self.key, **out}
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Issue":
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
     def brief(self) -> dict[str, Any]:
         """What a binding keeps of it: enough to show it without calling the tool."""
         return {"source": self.source, "id": self.id, "key": self.key, "title": self.title, "state": self.state,
