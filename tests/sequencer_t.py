@@ -1981,6 +1981,63 @@ def test_zip_entry_ranges(tmp_path):
     assert get("data/big.csv", "bytes=0-1,5-6")[1] == data
     assert [e["name"] for e in zip_entry(archive, "data", "bytes=0-1")] == ["big.csv"]
 
+def test_results_unpacked_again(tmp_path):
+    """A run folder gone (retention) comes back from its results zip, the files the zip leaves out
+    (large_files.mode: external) linked from <name>.data/; it is then kept another retention period."""
+    import os
+
+    from testsuit.sequencer.results import RESTORED, external_files, pack_results, unpack_results
+    bag = tmp_path / "runs" / "r1" / "pack"
+    write(bag / "data" / "dut" / "output" / "big.bin", "x" * 2000)
+    write(bag / "data" / "dut" / "output" / "small.txt", "hello")
+    write(bag / "run.yml", "verdict: succeeded\n")
+    zip_path = pack_results(bag, tmp_path / "results" / "r1", "pack_results", threshold=1000, mode="external")
+    with zipfile.ZipFile(zip_path) as z:
+        assert "pack_results/data/dut/output/big.bin" not in z.namelist()
+    import shutil
+    shutil.rmtree(bag.parent)
+    with pytest.raises(OSError):                       # not enough room left: nothing unpacked
+        unpack_results(zip_path, bag, min_free=1 << 62)
+    assert not bag.parent.exists() or not any(bag.parent.iterdir())
+    unpack_results(zip_path, bag)
+    assert (bag / "run.yml").read_text() == "verdict: succeeded\n"
+    assert (bag / "data" / "dut" / "output" / "small.txt").read_text() == "hello"
+    big = bag / "data" / "dut" / "output" / "big.bin"
+    assert big.read_text() == "x" * 2000
+    assert os.path.samefile(big, tmp_path / "results" / "r1" / "pack_results.data" / "data" / "dut" / "output" / "big.bin")
+    assert external_files(bag) == {"data/dut/output/big.bin"}
+    assert (bag.parent / RESTORED).is_file()
+
+
+def test_unpacked_run_folder_kept_another_retention_period(bench):
+    """cleanup removes a run folder past retention.runs, but one unpacked again from its zip only that long after."""
+    import os
+    from datetime import datetime, timezone
+
+    from testsuit.sequencer.results import RESTORED
+
+    async def main():
+        seq = bench.sequencer()
+        [run] = await run_until_done(seq, [seq.submit(bench.build())["id"]])
+        return seq, run
+    seq, run = asyncio.run(main())
+    folder = Path(run["dir"])
+    seq.config.storage.retention.runs = 3600
+    old = time.time() - 7200
+    seq.store.update_run(run["id"], ended_at=datetime.fromtimestamp(old, timezone.utc).isoformat())
+    seq.cleanup()
+    assert not folder.exists()
+    assert seq.restore_run_folder(seq.store.get_run(run["id"])) and (folder / "run.yml").is_file()
+    seq.cleanup()                                   # unpacked just now: kept
+    assert folder.is_dir()
+    os.utime(folder.parent / RESTORED, (old, old))  # unpacked over an hour ago: removed again
+    seq.cleanup()
+    assert not folder.exists()
+    Path(run["results"]).unlink()                   # no zip: nothing to unpack
+    assert not seq.restore_run_folder(seq.store.get_run(run["id"]))
+    asyncio.run(seq.close())
+
+
 def test_daemon_api_and_cli(daemon, capsys):
     import requests
 
@@ -2008,6 +2065,18 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert part.status_code == 206 and part.content == in_zip.content[2:10]
     assert part.headers["Content-Range"] == f"bytes 2-9/{len(in_zip.content)}"
     assert requests.get(f"{url}/runs/{run['id']}/logs/test_run:start").text.startswith("[tsq ")
+
+    # the run folder gone (retention): the Files tab unpacks it again from the results zip, kept another period
+    import shutil
+
+    from testsuit.sequencer.results import RESTORED
+    shown = requests.get(f"{url}/runs/{run['id']}").json()
+    run_dir = Path(shown["dir"])
+    shutil.rmtree(run_dir.parent)
+    listed = requests.get(f"{url}/runs/{run['id']}/files/data/dut/output").json()
+    assert {f["name"] for f in listed} == {"app.log", "count.txt"} and run_dir.is_dir()
+    assert (run_dir.parent / RESTORED).is_file()
+    assert requests.get(f"{url}/runs/{run['id']}/pipeline").status_code == 200
 
     resources = requests.get(f"{url}/runs/{run['id']}/resources").json()
     assert resources["stage_slots"][0]["bound"] == "bench_1" and resources["problems"] == []

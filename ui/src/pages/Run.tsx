@@ -504,7 +504,9 @@ function WaitBanner({ run, onRetry }: { run: any; onRetry: () => void }) {
   );
 }
 
-export function RunPage({ id, tab, editor, file, line }: { id: string; tab: string; editor?: boolean; file?: string | null; line?: number | null }) {
+export function RunPage({ id, tab: asked, editor, file, line }: { id: string; tab: string; editor?: boolean; file?: string | null; line?: number | null }) {
+  // the Results tab was merged into Files (a link to it opens Files): the run folder, unpacked again from the zip when gone
+  const tab = asked === "results" ? "files" : asked;
   const run = useResource<any>(`runs/${id}`, ["run", "phase", "step", "manual_operation", "pause", "intervention", "review"], (d) => !d.run || String(d.run).startsWith(id));
   const pipeline = useResource<any>(`runs/${id}/pipeline`, []);
   // the issues bound to its failures (SPEC §11.3), once it ended
@@ -543,7 +545,6 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
   if (run.error) return <div className="page"><div className="error-box">{run.error}</div></div>;
   if (!r) return <div className="page muted">Loading…</div>;
   const tabs: [string, string][] = [["pipeline", "Pipeline"], ["steps", `Steps (${records.length})`], ["files", "Files"], ["resources", "Resources"]];
-  if (r.results) tabs.push(["results", "Results"]);
   tabs.push(["requirements", "Requirements"]);
   const ended = ["done", "cancelled"].includes(r.state);
   if (ended) tabs.push(["review", r.review?.state === "open" ? "Review (open)" : "Review"]);
@@ -648,7 +649,6 @@ export function RunPage({ id, tab, editor, file, line }: { id: string; tab: stri
       {tab === "requirements" && <RunsCoverage path={`runs/${r.id}/requirements`} events={["run", "step"]} title="The requirements this test and its checks verify, by this run" />}
       {tab === "review" && ended && <RunReviewTab run={r} onChanged={run.refresh} />}
       {tab === "issues" && ended && <RunIssuesTab runId={r.id} tickets={tickets.data} onChanged={tickets.refresh} />}
-      {tab === "results" && <FileBrowser base={`runs/${r.id}/files`} query="results=true&list=true" plot={editor ? `plot/runs/${r.id}` : undefined} />}
     </div>
   );
 }

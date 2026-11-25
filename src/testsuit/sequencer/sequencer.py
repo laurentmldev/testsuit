@@ -47,7 +47,7 @@ from testsuit.sequencer.monitor import Monitor, component_keys, selftest_compone
 from testsuit.sequencer.scheduler import (Availability, Binding, candidate_resources, find_binding, order_queue)
 from testsuit.sequencer.store import ACTIVE_STATES, QUEUED_STATES, Store
 from testsuit.sequencer.transports import Transport, create_transport, strict, traced
-from testsuit.sequencer.results import pack_results
+from testsuit.sequencer.results import RESTORED, pack_results, unpack_results
 from testsuit.sequencer import review as review_mod
 from testsuit.sequencer.runlog import RunLog
 if TYPE_CHECKING:
@@ -144,6 +144,7 @@ class Sequencer:
             self.monitor.on_idle = self._selftest_one
         self.executions: dict[str, "RunExecution"] = {}
         self._review_lock = threading.Lock()             # review journals: one writer at a time
+        self._restore_lock = threading.Lock()            # run folders unpacked again from their results zip
         self.exports: dict[str, dict] = {}               # export jobs (SPEC §11.2), by id
         self._export_cancel: dict[str, threading.Event] = {}
         from testsuit.sequencer.tickets import Tickets
@@ -1389,7 +1390,8 @@ class Sequencer:
             await asyncio.gather(*started, return_exceptions=True)
 
     def cleanup(self) -> None:
-        """Remove run folders past storage.retention.runs (the results zips stay)."""
+        """Remove run folders past storage.retention.runs (the results zips stay): from the end of the run, or
+        from when the folder was unpacked again from its results zip (restore_run_folder)."""
         keep = self.config.storage.retention.runs
         if keep is None:
             return
@@ -1398,7 +1400,33 @@ class Sequencer:
             if run.get("ended_at") and datetime.fromisoformat(run["ended_at"]).timestamp() < limit:
                 folder = Path(run["dir"]).parent
                 if folder.is_dir() and folder.parent == self.config.storage_path("runs"):
+                    restored = folder / RESTORED
+                    if restored.is_file() and restored.stat().st_mtime >= limit:
+                        continue
                     shutil.rmtree(folder, ignore_errors=True)
+
+    def restore_run_folder(self, run: dict) -> bool:
+        """The folder of an ended run, unpacked again from its results zip once retention removed it (the Files
+        tab opened on it): kept another storage.retention.runs from now. False when there is no zip to unpack,
+        or not enough free space (storage.min_free_space): its files are then read from the zip."""
+        folder = Path(run["dir"])
+        if folder.is_dir():
+            return True
+        zip_path = Path(run["results"]) if run.get("results") else None
+        if run.get("state") not in DONE_STATES or zip_path is None or not zip_path.is_file():
+            return False
+        if folder.parent.parent != self.config.storage_path("runs"):
+            return False
+        with self._restore_lock:
+            if folder.is_dir():
+                return True
+            try:
+                unpack_results(zip_path, folder, self.config.storage.min_free_space)
+            except OSError as e:
+                log.warning(f"run {run['id']}: its folder not unpacked from {zip_path.name}: {e}")
+                return False
+        log.info(f"run {run['id']}: its folder unpacked again from {zip_path.name}")
+        return True
 
     async def close(self) -> None:
         logging.getLogger("testsuit").removeHandler(self.run_log)

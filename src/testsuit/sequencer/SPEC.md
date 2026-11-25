@@ -94,7 +94,7 @@ One YAML file, `tsq.yml`, located by `--config`, else `$TSQ_CONFIG`, else `/etc/
 | `storage.min_free_space` | | a run MUST NOT be activated below it |
 | `storage.max_run_output` | | collected outputs above it end the run in `error` |
 | `storage.large_files` | `{threshold: 200MB, mode: zip}` | `mode: zip \| external` (§11) |
-| `storage.retention` | | `{runs: <duration>, results: <duration> \| forever}` |
+| `storage.retention` | `{runs: 30d, results: forever}` | `{runs: <duration>, results: <duration> \| forever}`; `runs` counts from the end of the run, or from when its folder was unpacked again (§11) |
 | `server.listen` | `0.0.0.0:8640` | REST API and UI |
 | `server.ui`, `server.editor` | `true`, `false` | serve the UI; enable the Editor |
 | `server.workspaces` | `[]` | tests repositories offered by the Editor |
@@ -712,6 +712,7 @@ baseline.yml            completed with the run part (§5.3)
 - Zip64; files over `large_files.threshold` and already compressed formats are stored uncompressed. With `mode: external`, such files stay in `<datapack>_results.data/` and are listed in BagIt `fetch.txt` with size and checksum.
 - Outputs over `max_run_output` end the run in `error` after `finally`.
 - Outputs are readable in the run folder while the run is in progress.
+- After `retention.runs`, the run folder MUST be removed and the results zip kept. Browsing the files of a run whose folder is gone (`GET /runs/{id}/files/...`, the UI's Files tab, `tsq files`) MUST unpack the zip back into it, kept another `retention.runs` from then (marker `storage.runs/<run>/.restored`); files left out by `mode: external` are linked from `<datapack>_results.data/` and listed with `external: true`. When unpacking would leave less than `min_free_space`, files are read from the zip. `?results=true` reads the zip itself (the bare path downloads it).
 
 ### 11.1 Reviews
 
