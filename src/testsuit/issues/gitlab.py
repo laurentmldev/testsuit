@@ -75,16 +75,21 @@ class GitLabBackend(IssueBackend):
         full = str(refs.get("full") or "")
         project = full.rsplit("#", 1)[0] if "#" in full else self.project
         iid = str(item.get("iid"))
+        labels = [x if isinstance(x, dict) else {"name": str(x)} for x in item.get("labels") or []]
+        typed = next((x for x in labels if str(x.get("name") or "").lower().startswith("type::")), None)
+        kind = str(typed["name"]).split("::", 1)[1] if typed else str(item.get("issue_type") or "")
         return Issue(source=self.name, id=iid if self.project else f"{project}#{iid}", title=str(item.get("title") or ""),
                      state=CLOSED if item.get("state") == "closed" else OPEN, url=str(item.get("web_url") or ""),
-                     labels=[str(x) for x in item.get("labels") or []],
+                     labels=[str(x.get("name")) for x in labels],
+                     type=kind, type_color=str((typed or {}).get("color") or ""),
                      assignees=[str(a.get("username")) for a in item.get("assignees") or [] if a],
                      author=str((item.get("author") or {}).get("username") or ""), created=str(item.get("created_at") or ""),
                      updated=str(item.get("updated_at") or ""), body=str(item.get("description") or ""), project=project)
 
     def search(self, text: str = "", state: str | None = OPEN, labels: Iterable[str] = (), limit: int = 100,
                since: str | None = None) -> list[Issue]:
-        params: dict[str, Any] = {"per_page": min(100, max(1, limit)), "order_by": "updated_at", "sort": "desc"}
+        params: dict[str, Any] = {"per_page": min(100, max(1, limit)), "order_by": "updated_at", "sort": "desc",
+                                  "with_labels_details": "true"}           # the colour of a label type::<name>
         if state:
             params["state"] = "opened" if state == OPEN else "closed"
         if labels:
@@ -119,13 +124,37 @@ class GitLabBackend(IssueBackend):
             out[str(id)] = self.issue(item) if item else None
         return out
 
-    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
+    def issue_types(self, project: str | None = None) -> list[dict[str, Any]]:
+        """The scoped labels ``type::<name>`` of the project (and its groups) or of the group, when it has some; else
+        GitLab's own types."""
+        scope = f"projects/{self._p(project)}" if project else self._scope()
+        found = self.api.get(f"{scope}/labels", {"search": "type::", "per_page": 100}) or []
+        names = sorted({str(x.get("name") or "") for x in found if str(x.get("name") or "").lower().startswith("type::")},
+                       key=str.lower)
+        if names:
+            colors = {str(x.get("name")): str(x.get("color") or "") for x in found}
+            return [{"name": n.split("::", 1)[1], "label": n} | ({"color": colors[n]} if colors.get(n) else {})
+                    for n in names]
+        return [{"name": "issue", "default": True}, {"name": "incident"}, {"name": "task"}]
+
+    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
+               issue_type: str | None = None) -> Issue:
         project = project or self.project
         if not project:
             raise IssueError(f"gitlab backend: group '{self.group}': which project should the issue go to?")
-        item = self.api.post(f"projects/{self._p(project)}/issues",
-                             {"title": title, "description": body, **({"labels": ",".join(labels)} if labels else {})})
-        return self.issue(item)
+        labels = list(labels)
+        fields: dict[str, Any] = {"title": title, "description": body}
+        if issue_type:
+            kind = next((t for t in self.issue_types(project) if t["name"].lower() == issue_type.lower()), None)
+            if kind is None:
+                raise IssueError(f"gitlab backend: no issue type '{issue_type}' in '{project}'")
+            if kind.get("label"):                    # a scoped label type::<name>
+                labels = [x for x in labels if not x.lower().startswith("type::")] + [kind["label"]]
+            else:
+                fields["issue_type"] = kind["name"]
+        if labels:
+            fields["labels"] = ",".join(labels)
+        return self.issue(self.api.post(f"projects/{self._p(project)}/issues", fields))
 
     def comment(self, id: str, body: str) -> None:
         project, iid = self._where(id)

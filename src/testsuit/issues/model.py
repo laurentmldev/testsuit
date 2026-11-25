@@ -15,6 +15,7 @@
 source ``infra#lab/power#3``), or its URL."""
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -40,6 +41,9 @@ class Issue:
     body: str = ""
     project: str = ""                         # its repository or project
     links: list[str] = field(default_factory=list)   # keys of the issues it links (Jira issue links)
+    type: str = ""                            # its type, as the tool names it: bug, Feature, incident...
+    type_color: str = ""                      # the colour the tool gives its type (#rrggbb), if any
+    type_icon: str = ""                       # the URL of the icon the tool gives its type (Jira), if any
 
     @property
     def key(self) -> str:
@@ -58,4 +62,24 @@ class Issue:
     def brief(self) -> dict[str, Any]:
         """What a binding keeps of it: enough to show it without calling the tool."""
         return {"source": self.source, "id": self.id, "key": self.key, "title": self.title, "state": self.state,
-                "url": self.url}
+                "url": self.url} | {k: v for k in ("type", "type_color", "type_icon") if (v := getattr(self, k))}
+
+
+FAILURE_TYPES = re.compile(r"bug|defect|incident|problem|fault", re.I)
+OTHER_TYPES = re.compile(r"improv|enhanc|feature|story|request", re.I)
+TASK_TYPES = re.compile(r"task|chore|epic", re.I)
+GITHUB_COLORS = {"gray": "#59636e", "blue": "#0969da", "green": "#1a7f37", "yellow": "#9a6700", "orange": "#bc4c00",
+                 "red": "#cf222e", "pink": "#bf3989", "purple": "#8250df"}
+
+
+def type_color(kind: str = "", color: str = "", state: str = OPEN) -> str:
+    """The colour of an issue's icon: the colour its tool gives its type, else one by what the type is like (a bug red,
+    an improvement blue, a task purple), else green when open and grey when closed."""
+    color = GITHUB_COLORS.get(str(color).lower(), str(color or ""))
+    if re.fullmatch(r"#[0-9a-fA-F]{3,8}", color):
+        return color
+    kind = str(kind or "")
+    for rx, c in ((FAILURE_TYPES, "#cf222e"), (OTHER_TYPES, "#0969da"), (TASK_TYPES, "#8250df")):
+        if rx.search(kind):
+            return c
+    return "#1a7f37" if state == OPEN else "#777"

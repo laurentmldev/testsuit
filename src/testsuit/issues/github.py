@@ -61,10 +61,12 @@ class GitHubBackend(IssueBackend):
     def issue(self, item: dict[str, Any]) -> Issue:
         repo = "/".join(str(item.get("repository_url") or "").rstrip("/").split("/")[-2:]) or self.repo
         n = str(item.get("number"))
+        kind = item.get("type") if isinstance(item.get("type"), dict) else {}
         return Issue(source=self.name, id=n if self.repo else f"{repo}#{n}", title=str(item.get("title") or ""),
                      state=CLOSED if item.get("state") == "closed" else OPEN, url=str(item.get("html_url") or ""),
                      labels=[str(x.get("name") if isinstance(x, dict) else x) for x in item.get("labels") or []],
                      assignees=[str(a.get("login")) for a in item.get("assignees") or [] if a],
+                     type=str(kind.get("name") or ""), type_color=str(kind.get("color") or ""),
                      author=str((item.get("user") or {}).get("login") or ""), created=str(item.get("created_at") or ""),
                      updated=str(item.get("updated_at") or ""), body=str(item.get("body") or ""), project=repo)
 
@@ -125,11 +127,24 @@ class GitHubBackend(IssueBackend):
             out[str(id)] = self.issue(item) if item and "pull_request" not in item else None
         return out
 
-    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None) -> Issue:
+    def issue_types(self, project: str | None = None) -> list[dict[str, Any]]:
+        """The issue types of the organization that owns the repository (none for a user's repository)."""
+        owner = str(project or self.repo or self.org).split("/")[0]
+        try:
+            found = self.api.get(f"orgs/{owner}/issue-types", missing_ok=True) or []
+        except IssueError:
+            return []
+        return [{"name": str(t.get("name"))} | ({"color": str(t["color"])} if t.get("color") else {}) for t in found if isinstance(t, dict) and t.get("is_enabled", True)]
+
+    def create(self, title: str, body: str, labels: Iterable[str] = (), project: str | None = None,
+               issue_type: str | None = None) -> Issue:
         repo = project or self.repo
         if not repo:
             raise IssueError(f"github backend: '{self.org}': which repository should the issue go to?")
-        return self.issue(self.api.post(f"repos/{repo}/issues", {"title": title, "body": body, "labels": list(labels)}))
+        fields: dict[str, Any] = {"title": title, "body": body, "labels": list(labels)}
+        if issue_type:
+            fields["type"] = issue_type
+        return self.issue(self.api.post(f"repos/{repo}/issues", fields))
 
     def comment(self, id: str, body: str) -> None:
         repo, n = self._where(id)

@@ -43,7 +43,7 @@ from testsuit.sequencer import review as rv
 from testsuit.sequencer.util import SequencerError, now
 from testsuit.issues import results as iss
 from testsuit.issues.model import OPEN, Issue, IssueError
-from testsuit.issues.backend import IssueBackend, reporting
+from testsuit.issues.backend import IssueBackend, default_type, reporting
 from testsuit.issues.filter import parse_time
 from testsuit.netguard import is_down_error
 from testsuit.issues.sources import SNAPSHOT, IssueSources
@@ -464,7 +464,17 @@ class Issues:
                 projects = sources.backend(source).projects()
             except IssueError as e:
                 log.info(f"issues: projects of '{source}': {e}")
+        types: list[dict] = []
+        try:
+            backend = sources.backend(source)
+            if backend.supports_types and "create" in backend.capabilities:
+                types = backend.issue_types(projects[0] if projects else None)
+        except IssueError as e:
+            log.info(f"issues: types of '{source}': {e}")
+        failed = str(status).lower() not in ("succeeded", "ok", "met", "accepted")
         return {"run": run["id"], "target": target, "label": rv.target_label(target), "status": status,
+                "types": [{k: v for k, v in t.items() if k in ("name", "label", "default", "color", "icon")} for t in types],
+                "type": default_type(types, failed),
                 "source": source, "sources": [sources.card(n) for n in sources.names], "projects": projects,
                 "title": d["title"], "body": d["body"], "labels": labels, "fingerprint": d["fingerprint"],
                 "requirements": reqs, "known": known, "duplicates": duplicates}
@@ -488,7 +498,7 @@ class Issues:
         return binding
 
     def create(self, run_id: str, body: dict, by: str = "", base: str = "") -> dict:
-        """Create an issue about a target of a run and bind it: {target, source, project, title, body, labels,
+        """Create an issue about a target of a run and bind it: {target, source, project, type, title, body, labels,
         token (the person's own: created in their name; never kept)}."""
         run = self.seq.reviewed(self.seq.require_run(run_id))
         sources = self._require_sources(run)
@@ -502,8 +512,10 @@ class Issues:
             raise SequencerError(f"issue source '{source}' cannot create issues")
         if body.get("token"):
             backend = backend.with_token(str(body["token"]))
+        kind = str(body.get("type") or "").strip() or None
         try:
-            issue = backend.create(title, text, [str(x) for x in body.get("labels") or []], body.get("project") or None)
+            issue = backend.create(title, text, [str(x) for x in body.get("labels") or []], body.get("project") or None,
+                                   **({"issue_type": kind} if kind and backend.supports_types else {}))
         except IssueError as e:
             raise SequencerError(str(e)) from e
         issue.source = source
