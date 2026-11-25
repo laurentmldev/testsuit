@@ -184,7 +184,7 @@ function Sources({ data, doc, setTop, setAll, help }: {
             }
             const all = clone(data);
             all.classes = { ...(data.classes || {}), [c]: pruned({ backend: spec.backend, label: spec.label, options: spec.options,
-              credentials: spec.credentials, vars: Object.fromEntries(Object.entries(decls).map(([k, d]) => [k, Object.keys(d).length ? d : { mandatory: false }])) }) };
+              credentials: spec.credentials, dynamic_tags: spec.dynamic_tags, vars: Object.fromEntries(Object.entries(decls).map(([k, d]) => [k, Object.keys(d).length ? d : { mandatory: false }])) }) };
             all.sources = { ...all.sources, [n]: pruned({ class: c, label: spec.label, vars: values }) };
             setAll(all);
           }}
@@ -304,7 +304,7 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
                 <table className="grid compact">
                   <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th><th>Version</th></tr></thead>
                   <tbody>{result.sample.map((r: any) => (
-                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{r.title}</td><td>{r.status}</td><td className="mono small">{r.version}</td></tr>
+                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{(r.dynamic_tags || []).map((t: string) => <span key={t} className="dyn-tag">⚑ {t}</span>)}{r.title}</td><td>{r.status}</td><td className="mono small">{r.version}</td></tr>
                   ))}</tbody>
                 </table>
               )}
@@ -324,6 +324,9 @@ function SourceCard({ name, spec, doc, isDefault, taken, backends, backendChoice
       <Field label="Label" help={help(["sources", name, "label"])}><Text value={spec.label} onChange={(v) => set("label", v)} placeholder={name} /></Field>
       <Field label="Variables" help={help(["sources", name, "vars"])}>
         <Variables value={spec.vars} onChange={(v) => set("vars", Object.keys(v).length ? v : undefined)} />
+      </Field>
+      <Field label="Dynamic tags" help={help(["sources", name, "dynamic_tags"])} wide>
+        <DynamicTags value={spec.dynamic_tags} onChange={(v) => set("dynamic_tags", v)} />
       </Field>
       <Field label="Options" help={help(["sources", name, "options"])} wide
         hint={yamlFile && (yamlFound
@@ -359,7 +362,7 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
       vars[k] = mandatory ? { value: v ?? "", mandatory: true } : v ?? "";
     }
     onChange(pruned({ backend: def?.backend, label: spec.label || def?.label, options: clone(def?.options || {}),
-      credentials: clone(def?.credentials || {}), vars }));
+      credentials: clone(def?.credentials || {}), dynamic_tags: clone(def?.dynamic_tags || {}), vars }));
   };
   const unknown = Object.keys(given).filter((k) => !(k in decls));
   // a variable the class makes optional (not mandatory, with a default) is listed only when given or picked
@@ -402,6 +405,12 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
         {unknown.length > 0 && <div className="bad-text small">Not variables of class '{cls}': {unknown.join(", ")}
           {" "}<button className="link small" onClick={() => onChange(pruned({ ...spec, vars: Object.fromEntries(Object.entries(given).filter(([k]) => k in decls)) }))}>remove them</button></div>}
       </Field>
+      {def?.dynamic_tags && Object.keys(def.dynamic_tags).length > 0 && (
+        <Field label="Dynamic tags" help={help(["sources", name, "dynamic_tags"])}>
+          <span className="small">{Object.keys(def.dynamic_tags).map((t) => <span key={t} className="dyn-tag">⚑ {t}</span>)}
+            <span className="muted"> from class {cls}</span></span>
+        </Field>
+      )}
       <div className="req-detach small">
         <span className="muted">Backend, options and credentials come from class <code>{cls}</code>{def?.backend ? <> (backend <code>{def.backend}</code>)</> : null}: a change to the class reaches every source of it.</span>{" "}
         {!confirm ? <button className="link small" onClick={() => setConfirm(true)}>Detach…</button> : (
@@ -415,6 +424,39 @@ function ClassSourceForm({ name, cls, def, spec, help, onChange }: {
         )}
       </div>
     </>
+  );
+}
+
+/** Dynamic tags: each tag and the words or phrases that give it (case independent, whole words). */
+function DynamicTags({ value, onChange }: { value?: Data | null; onChange: (v: Data | undefined) => void }) {
+  const tags: Data = value && typeof value === "object" ? value : {};
+  const [name, setName] = useState("");
+  const write = (next: Data) => onChange(Object.keys(next).length ? next : undefined);
+  const words = (v: any): string[] => (Array.isArray(v) ? v : String(v || "").split(",")).map((w: any) => String(w).trim()).filter(Boolean);
+  const add = () => { if (!name.trim() || name.trim() in tags) return; write({ ...tags, [name.trim()]: [] }); setName(""); };
+  return (
+    <div>
+      {Object.keys(tags).length > 0 && (
+        <table className="grid compact req-dyn-tags">
+          <thead><tr><th>Tag</th><th>Words or phrases found in the title, description, rationale or comments</th><th /></tr></thead>
+          <tbody>{Object.entries<any>(tags).map(([t, w]) => (
+            <tr key={t}>
+              <td><Text value={t} onChange={(v) => v.trim() && !(v.trim() in tags) && write(renamed(tags, t, v.trim()))} /></td>
+              <td><Tags value={words(w)} onChange={(v) => write({ ...tags, [t]: v })} /></td>
+              <td><button className="icon" title="Remove this tag" onClick={() => { const next = { ...tags }; delete next[t]; write(next); }}>×</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      <div className="req-toolbar">
+        <input placeholder="new tag (Maturity Warning…)" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button className="small" disabled={!name.trim() || name.trim() in tags} onClick={add}>Add tag</button>
+      </div>
+      <div className="hint">A requirement gets the tag when one of its words or phrases is in its texts: whole words, case independent
+        (<code>TBD</code> finds “tbd”, not “TBDX”). Shown with ⚑ in the Requirements view, which can show only them. Not part of the
+        requirements' versions. With a REST source, texts read by a details call are searched only where the requirement is
+        read in full (generation, a requirement opened), not in the list.</div>
+    </div>
   );
 }
 
@@ -531,7 +573,7 @@ function ClassCard({ name, def, doc, taken, users, backends, backendChoices, hel
                 <table className="grid compact">
                   <thead><tr><th>Id</th><th>Path</th><th>Title</th><th>Status</th></tr></thead>
                   <tbody>{result.sample.map((r: any) => (
-                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{r.title}</td><td>{r.status}</td></tr>
+                    <tr key={r.id}><td><code>{r.id}</code></td><td className="small">{r.path}</td><td>{(r.dynamic_tags || []).map((t: string) => <span key={t} className="dyn-tag">⚑ {t}</span>)}{r.title}</td><td>{r.status}</td></tr>
                   ))}</tbody>
                 </table>
               )}
@@ -549,6 +591,9 @@ function ClassCard({ name, def, doc, taken, users, backends, backendChoices, hel
       <Field label="Description" help={help(["classes", name, "description"])}><Text value={def.description} onChange={(v) => set("description", v)} placeholder="what it reads" /></Field>
       <Field label="Class variables" help={help(["classes", name, "vars"])} wide>
         <ClassVars value={decls} onChange={(v) => set("vars", Object.keys(v).length ? v : undefined)} />
+      </Field>
+      <Field label="Dynamic tags" help={help(["classes", name, "dynamic_tags"])} wide>
+        <DynamicTags value={def.dynamic_tags} onChange={(v) => set("dynamic_tags", v)} />
       </Field>
       <Field label="Options" help={help(["classes", name, "options"])} wide>
         <BackendOptions backend={backend} options={options} onChange={(v) => set("options", v)}

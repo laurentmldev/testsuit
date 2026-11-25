@@ -86,6 +86,7 @@ function RequirementDetail({ req: row, sid }: { req: any; sid?: string }) {
         {req.pinned && <span>pinned <code>{req.pinned}</code></span>}
         {req.status && <span>status {req.status}</span>}
         {(req.tags || []).length > 0 && <span>{req.tags.map((t: string) => <span key={t} className="chip">{t}</span>)}</span>}
+        {(req.dynamic_tags || []).length > 0 && <span>{req.dynamic_tags.map((t: string) => <span key={t} className="dyn-tag" title="dynamic tag: its texts hold one of its words">⚑ {t}</span>)}</span>}
         {req.url && <a href={req.url} target="_blank" rel="noreferrer">open in its tool ↗</a>}
       </div>
     </div>
@@ -104,8 +105,19 @@ function testHref(t: any) {
 /** A coverage: its counts, both matrices. node / children: only the requirements under a node of the tree. */
 export function CoverageView({ data, node = "", children = true, showTests = true, sid }: { data: any; node?: string; children?: boolean; showTests?: boolean; sid?: string }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [tag, setTag] = useState("");                       // only the requirements with this tag (or dynamic tag)
   const tests: any[] = data.tests || [];
-  const rows: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
+  const inNode: any[] = useMemo(() => (data.requirements || []).filter((r: any) => under(r.path, node, children)), [data, node, children]);
+  const tagCounts = useMemo(() => {
+    const out = new Map<string, { n: number; dynamic: boolean }>();
+    for (const r of inNode) {
+      for (const t of r.dynamic_tags || []) out.set(`~${t}`, { n: (out.get(`~${t}`)?.n || 0) + 1, dynamic: true });
+      for (const t of r.tags || []) out.set(t, { n: (out.get(t)?.n || 0) + 1, dynamic: false });
+    }
+    return [...out.entries()].sort(([a, x], [b, y]) => Number(y.dynamic) - Number(x.dynamic) || a.localeCompare(b));
+  }, [inNode]);
+  const rows: any[] = useMemo(() => !tag ? inNode : inNode.filter((r: any) => tag.startsWith("~")
+    ? (r.dynamic_tags || []).includes(tag.slice(1)) : (r.tags || []).includes(tag)), [inNode, tag]);
   const groups = useMemo(() => {
     const out: [string, any[]][] = [];
     for (const r of rows) {
@@ -119,6 +131,18 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
   return (
     <div className="coverage">
       <CoverageTiles rows={rows} />
+      {tagCounts.length > 0 && (
+        <div className="cov-tags small">
+          <select value={tag} onChange={(e) => setTag(e.target.value)} title="Only the requirements with this tag (⚑: a dynamic tag, found in their texts)">
+            <option value="">All tags</option>
+            {tagCounts.map(([t, c]) => <option key={t} value={t}>{c.dynamic ? `⚑ ${t.slice(1)}` : t} ({c.n})</option>)}
+          </select>
+          {tagCounts.filter(([, c]) => c.dynamic).map(([t, c]) => (
+            <button key={t} className={classes("dyn-tag", tag === t && "selected")} onClick={() => setTag(tag === t ? "" : t)}
+              title="A dynamic tag: requirements whose texts hold one of its words. Click to show only them.">⚑ {t.slice(1)} {c.n}</button>
+          ))}
+        </div>
+      )}
       {(data.problems || []).length > 0 && <ul className="warn-list">{data.problems.map((p: string) => <li key={p}>{p}</li>)}</ul>}
       {rows.length === 0 ? <p className="muted">No requirement here.</p> : (
         <div className="scroll">
@@ -149,7 +173,8 @@ export function CoverageView({ data, node = "", children = true, showTests = tru
                         <tr className={classes("cov-row", open === r.key && "open")} onClick={() => setOpen(open === r.key ? null : r.key)} title="Show the requirement">
                           <td className="mono nowrap">{r.key}</td>
                           {(() => { const title = r.title || htmlToText(String(r.description || "")).split("\n")[0];
-                            return <td className="cov-title" title={title}>{title}</td>; })()}
+                            return <td className="cov-title" title={[title, ...(r.dynamic_tags || []).map((t: string) => `⚑ ${t}`)].join("\n")}>
+                              {(r.dynamic_tags || []).map((t: string) => <span key={t} className="dyn-tag" title="dynamic tag: its texts hold one of its words">⚑ {t}</span>)}{title}</td>; })()}
                           <td><CoverageBadge status={r.coverage} /></td>
                           {tests.map((t) => <td key={t.key} className="c"><CoverageBadge status={r.tests?.[t.key]?.status} changed={r.tests?.[t.key]?.changed} /></td>)}
                         </tr>

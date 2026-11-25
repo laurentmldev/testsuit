@@ -1059,3 +1059,33 @@ def test_source_class_defaults(tmp_path):
     s = Sources(tmp_path / "requirements.yml")
     assert s.vars("a") == {"sub": "BRAKE", "branch": "main", "need": "d"} and s.vars("b")["sub"] == "SPEED"
     assert list(s.list(source="a")) == ["R1"]
+
+
+def test_dynamic_tags(tmp_path):
+    """Dynamic tags: given to the requirements whose texts hold one of their words (whole, case independent, any
+    white space in a phrase, HTML and escaped line breaks as spaces), from a source or its class; not in versions."""
+    from testsuit.reqs.backend import ReqError
+    from testsuit.reqs.model import Ref
+    from testsuit.reqs.sources import Sources
+    (tmp_path / "r.yml").write_text(yaml.safe_dump({"requirements": {
+        "R1": {"title": "Brakes", "description": "Pressure is tbd."},
+        "R2": {"title": "Speed", "description": "<p>It is <b>to be\n  defined</b></p>"},
+        "R3": {"title": "TBDX not a word", "rationale": "fine\\nTBC"},
+        "R4": {"title": "Done", "comments": "all good"}}}), encoding="utf-8")
+    tags = {"Maturity Warning": ["TBD", "to be defined"], "Check": "TBC, later"}
+    file = tmp_path / "requirements.yml"
+    file.write_text(yaml.safe_dump({"classes": {"c": {"backend": "yaml", "options": {"file": "r.yml"}, "dynamic_tags": tags}},
+                                    "sources": {"a": {"backend": "yaml", "options": {"file": "r.yml"}, "dynamic_tags": tags},
+                                                "b": {"class": "c"}}}), encoding="utf-8")
+    s = Sources(file)
+    for source in ("a", "b"):
+        found = {r.id: r.dynamic_tags for r in s.list(source=source).values()}
+        assert found == {"R1": ["Maturity Warning"], "R2": ["Maturity Warning"], "R3": ["Check"], "R4": []}
+    r1 = s.get([Ref("a", "R1")])[Ref("a", "R1")]
+    assert r1.dynamic_tags == ["Maturity Warning"] and r1.as_dict()["dynamic_tags"] == ["Maturity Warning"]
+    plain = Sources(file)
+    plain.replace("a", {"backend": "yaml", "options": {"file": "r.yml"}})
+    assert plain.list(source="a")["R1"].version == r1.version                # not part of the version
+    file.write_text(yaml.safe_dump({"sources": {"a": {"backend": "yaml", "dynamic_tags": {"x": 3}}}}), encoding="utf-8")
+    with pytest.raises(ReqError, match="dynamic tag 'x': a list"):
+        Sources(file)

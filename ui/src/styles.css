@@ -1366,3 +1366,7 @@ textarea.grow-text { resize: none; overflow: hidden; line-height: 1.35; white-sp
 .req-form-tabs { margin-bottom: 10px; }
 .req-new { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
 .req-new input { flex: 1 1 240px; min-width: 0; }
+.dyn-tag { display: inline-block; margin-right: 5px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 600; border: 0; background: var(--warn-soft, #fdf0d5); color: var(--warn, #8a5a00); white-space: nowrap; cursor: default; }
+button.dyn-tag { cursor: pointer; }
+button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
+.cov-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }

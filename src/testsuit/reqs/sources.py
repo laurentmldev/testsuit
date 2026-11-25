@@ -49,6 +49,15 @@ requirements tool, for another subsystem)::
 A source of a class sets only its ``label`` and the values of the class variables: nothing else of the class is
 overridden (the Editor's Detach turns it into a source of its own, a copy of the class).
 
+Dynamic tags (``dynamic_tags``, on a source or a class): tags given to the requirements whose title, description,
+rationale or comments hold one of their words or phrases (whole words, case independent; spaces match any white
+space)::
+
+    dynamic_tags:
+      Maturity Warning: [TBC, TBD, to be defined, to be completed]
+
+They are found when the requirements are read, after their version (a rule changed does not change the versions).
+
 A sources file without ``sources`` but with ``requirements`` is itself the one source ``reqs`` of the built-in YAML
 backend (the simplest setup: one file).
 """
@@ -167,6 +176,32 @@ def _render_var(value: Any, keys: Mapping[str, Any] | None, where: str) -> Any:
         raise ReqError(f"{where}: {e}") from e
 
 
+def _tag_rules(spec: Any, where: str) -> list[tuple[str, re.Pattern]]:
+    """The dynamic tags of a source: (tag, the pattern of its words), each word or phrase whole, case independent,
+    a space matching any white space."""
+    if spec is None:
+        return []
+    if not isinstance(spec, dict):
+        raise ReqError(f"{where}: 'dynamic_tags' is a mapping of tags to the words that give them")
+    rules = []
+    for tag, words in spec.items():
+        if isinstance(words, str):
+            words = [w for w in words.split(",")]
+        if not isinstance(words, list):
+            raise ReqError(f"{where}: dynamic tag '{tag}': a list of words or phrases is expected")
+        words = [str(w).strip() for w in words if str(w or "").strip()]
+        if not words:
+            continue
+        alternatives = "|".join(r"\s+".join(re.escape(part) for part in w.split()) for w in words)
+        rules.append((str(tag), re.compile(rf"(?<!\w)(?:{alternatives})(?!\w)", re.IGNORECASE)))
+    return rules
+
+
+def _plain(text: str) -> str:
+    """A long text as words: HTML tags and escaped line breaks (\\n) as spaces."""
+    return re.sub(r"<[^>]+>|\\[rn]", " ", text) if text else ""
+
+
 class Sources:
     """The requirements sources of a sources file, their backends created on first use."""
 
@@ -204,6 +239,7 @@ class Sources:
             raise ReqError(f"'{self.file}': default source '{self.default}' is not one of its sources")
         self._backends: dict[str, ReqBackend] = {}
         self._vars: dict[str, dict[str, Any]] = {}
+        self._rules: dict[str, list[tuple[str, re.Pattern]]] = {}
 
     def _class_checked(self, name: str, spec: Any) -> dict:
         where = f"'{self.file}': class '{name}'"
@@ -211,11 +247,12 @@ class Sources:
             raise ReqError(f"{where}: not a name (letters, digits, _ and -)")
         if not isinstance(spec, dict) or not spec.get("backend"):
             raise ReqError(f"{where} names its 'backend'")
-        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars", "description"})
+        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars", "description", "dynamic_tags"})
         if unknown:
             raise ReqError(f"{where}: unknown key(s) {', '.join(unknown)}")
         if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
             raise ReqError(f"{where}: 'vars' is a mapping of the class variables by name")
+        _tag_rules(spec.get("dynamic_tags"), where)
         for key, decl in (spec.get("vars") or {}).items():
             var_spec(decl, f"{where}: variable '{key}'")
         return spec
@@ -249,8 +286,21 @@ class Sources:
         c = self.classes[cls]
         label = spec.get("label") or c.get("label")
         return {"backend": c["backend"], "class": cls, **({"label": label} if label else {}),
-                **{k: c[k] for k in ("options", "credentials") if c.get(k) is not None},
+                **{k: c[k] for k in ("options", "credentials", "dynamic_tags") if c.get(k) is not None},
                 **({"vars": variables} if variables else {})}
+
+    def tagged(self, name: str, reqs: Iterable[Requirement]) -> None:
+        """Give the requirements of a source its dynamic tags (those their texts match)."""
+        if name not in self._rules:
+            self._rules[name] = _tag_rules(self.specs[name].get("dynamic_tags"), f"source '{name}'")
+        rules = self._rules[name]
+        if not rules:
+            return
+        for req in reqs:
+            if req is None:
+                continue
+            text = "\n".join(_plain(str(t or "")) for t in (req.title, req.description, req.rationale, req.comments))
+            req.dynamic_tags = [tag for tag, pattern in rules if pattern.search(text)]
 
     def class_version(self, name: str) -> str:
         """A short hash of a class as written: which version of it a source used (recorded in the datapack)."""
@@ -263,11 +313,12 @@ class Sources:
             return self._of_class(name, spec)
         if not isinstance(spec, dict) or not spec.get("backend"):
             raise ReqError(f"'{self.file}': source '{name}' names its 'backend' (or its 'class')")
-        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars"})
+        unknown = sorted(set(spec) - {"backend", "options", "credentials", "label", "vars", "dynamic_tags"})
         if unknown:
             raise ReqError(f"'{self.file}': source '{name}': unknown key(s) {', '.join(unknown)}")
         if spec.get("vars") is not None and not isinstance(spec["vars"], dict):
             raise ReqError(f"'{self.file}': source '{name}': 'vars' is a mapping of names to values")
+        _tag_rules(spec.get("dynamic_tags"), f"'{self.file}': source '{name}'")
         return spec
 
     def replace(self, name: str, spec: Any) -> None:
@@ -276,6 +327,7 @@ class Sources:
         self.specs[name] = self._checked(name, spec)
         self._backends.pop(name, None)
         self._vars.pop(name, None)
+        self._rules.pop(name, None)
 
     def replace_class(self, name: str, spec: Any) -> None:
         """Use another spec for a class (one being edited), and for the sources of it."""
@@ -342,6 +394,7 @@ class Sources:
             backend = self.backend(source)
             ids = sorted({r.id for r in items})
             found = backend.brief(ids) if brief else backend.get(ids)
+            self.tagged(source, [r for r in found.values() if r is not None])
             for r in items:
                 req = found.get(r.id)
                 if req is not None:
@@ -356,7 +409,9 @@ class Sources:
         """The requirements under a path of a source, by key."""
         name = source or self.default
         out = {}
-        for req in list_requirements(self.backend(name), path, children):
+        reqs = list_requirements(self.backend(name), path, children)
+        self.tagged(name, reqs)
+        for req in reqs:
             req.source = name
             out[self.key(Ref(name, req.id))] = req
         return out
