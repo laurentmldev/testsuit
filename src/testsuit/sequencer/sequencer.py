@@ -146,6 +146,8 @@ class Sequencer:
         self._review_lock = threading.Lock()             # review journals: one writer at a time
         self.exports: dict[str, dict] = {}               # export jobs (SPEC §11.2), by id
         self._export_cancel: dict[str, threading.Event] = {}
+        from testsuit.sequencer.tickets import Tickets
+        self.tickets = Tickets(self)                     # issues bound to results (SPEC §11.3)
         self.subscribers: set[asyncio.Queue] = set()
         self._wake: asyncio.Event | None = None
         self.scheduled_at: str | None = None         # the last walk of the queue
@@ -368,8 +370,19 @@ class Sequencer:
         """A campaign run with its runs and their summary (README, Campaigns), as reviewed (SPEC §11.1)."""
         from testsuit.sequencer.campaigns import summarize
         campaign = campaign or self.require_campaign_run(campaign_id)
-        return summarize(campaign, [self.reviewed(r) for r in self.store.campaign_runs_of(campaign["id"])],
-                         review=self.campaign_review(campaign["id"]))
+        runs = [self.reviewed(r) for r in self.store.campaign_runs_of(campaign["id"])]
+        view = summarize(campaign, runs, review=self.campaign_review(campaign["id"]))
+        by_id = {r["id"]: r for r in runs}
+        for entry in view.get("runs") or []:             # the known issues of its failures (SPEC §11.3), as last seen
+            run = by_id.get(entry.get("run"))
+            if run is not None and run.get("verdict") not in (None, "succeeded"):
+                try:
+                    issues = self.tickets.known_brief(run)
+                except SequencerError:
+                    issues = []
+                if issues:
+                    entry["issues"] = issues
+        return view
 
     def run_requirements(self, run_id: str) -> Coverage:
         """Requirements coverage of a run (SPEC §5.5), from its snapshot; its steps as they are now while it runs."""
@@ -530,9 +543,9 @@ class Sequencer:
     def run_report_html(self, run_id: str, links=None) -> str:
         """The report of a run (SPEC §11.2), as reviewed."""
         from testsuit.sequencer.runreport import run_report_html
-        run = self.live_run(run_id)
-        return run_report_html(self.reviewed(run), self.run_review(run["id"]).get("entries") or [], links,
-                               self.run_requirements(run["id"]))
+        run = self.reviewed(self.live_run(run_id))
+        return run_report_html(run, self.run_review(run["id"]).get("entries") or [], links,
+                               self.run_requirements(run["id"]), issues=self.tickets.known_brief(run))
 
     # ── exported reports (SPEC §11.2) ──────────────────────────────────
     def _export_stamp(self, kind: str, target: str) -> str:

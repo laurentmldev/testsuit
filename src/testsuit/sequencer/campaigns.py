@@ -187,6 +187,7 @@ tr.node td { background:var(--card); font-weight:600; } td.c { text-align:center
 .review-banner { margin:0 0 14px; padding:8px 14px; border-radius:8px; border:1px solid var(--line); }
 .review-banner.draft { background:var(--errbg); color:var(--err); } .review-banner.final { background:var(--okbg); color:var(--ok); }
 .review-line.accepted b { color:var(--ok); } .review-line.rejected b { color:var(--bad); } .review-line.comment b { color:var(--muted); }
+.issue.closed { color:var(--muted); text-decoration: line-through; } .issue a { font-weight:600; }
 """
 
 
@@ -301,6 +302,11 @@ def report_html(view: dict, base: str = "", requirements=None, links=None) -> st
                           f'{e(": " + i["reason"] if i.get("reason") else "")}</div>'
                           for i in r.get("interventions") or [] if i.get("action") not in ("next", "bypass"))
         detail += review_lines(r.get("review"))
+        detail += "".join(f'<div class="issue {e(str(i.get("state") or ""))}">🐞 '
+                          + (f'<a href="{e(str(i["url"]))}">{e(str(i.get("key")))}</a>' if i.get("url") else e(str(i.get("key"))))
+                          + f' [{e(str(i.get("state") or ""))}] {e(str(i.get("title") or ""))}'
+                          f' <span class="muted">({e(str(i.get("target") or ""))})</span></div>'
+                          for i in r.get("issues") or [])
         if r.get("earlier"):                       # re-runs: the attempts it replaced, each linked
             detail += (f'<div class="muted">attempt {r.get("attempt")}; earlier: '
                        + ", ".join(f'{a(to.run(x["run"]), e(x["run"]))} {badge(x.get("verdict") or x.get("state"))}'

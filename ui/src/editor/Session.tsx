@@ -41,6 +41,7 @@ const KIND_LABELS: [string, string, string][] = [
   ["dictionary", "Key files", "Keys used by the templates (dictionaries)."],
   ["template", "Templates", "Input files rendered with the keys (Jinja2)."],
   ["requirements", "Requirements", "requirements.yml: the requirements of the tests, or the sources they come from (Datapacks, Requirements)."],
+  ["tickets", "Tickets", "tickets.yml: the GitLab, GitHub or Jira projects the issues of the tests go to (Datapacks, Tickets)."],
   ["criteria", "Criteria (mexploit scenarios)", "The checks run on the results of a test: open them in the criteria editor for completion, checks and unit tests."],
   ["utests", "Unit tests of criteria", "Small data cases, each with the status expected of each check (mxp utest)."],
   ["yaml", "Other YAML", ""],
@@ -53,7 +54,7 @@ const SCHEMA_OF: Record<string, string> = { inventory: "inventory", library: "li
 const KIND_NAME: Record<string, string> = {
   inventory: "Lab inventory", library: "Roles and classes", testdef: "Test definition", setup: "Setup",
   subpipelines: "Sub-pipelines", dictionary: "Key file", template: "Template", yaml: "YAML", other: "File",
-  criteria: "Criteria", utests: "Unit tests of criteria", requirements: "Requirements",
+  criteria: "Criteria", utests: "Unit tests of criteria", requirements: "Requirements", tickets: "Tickets",
 };
 
 /** The folder (with its trailing slash) and the name of a path. */

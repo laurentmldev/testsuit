@@ -1406,3 +1406,24 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .export-progress .progress { height: 10px; margin: 10px 0; }
 .export-progress .progress > div { transition: width 0.3s ease; }
 .exports-badge { margin-left: 6px; }
+
+/* issues bound to results (SPEC §11.3) */
+.issue-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; margin: 1px 4px 1px 0; border-radius: 10px;
+  border: 1px solid var(--line, #ccc); font-size: 12px; white-space: nowrap; }
+.issue-chip a { font-weight: 600; }
+.issue-chip .issue-state { font-size: 11px; color: var(--muted, #777); }
+.issue-chip.open { border-color: #d97706; }
+.issue-chip.closed { opacity: .7; } .issue-chip.closed a { text-decoration: line-through; }
+.issue-chip.missing { border-style: dashed; }
+.issue-chip button.link { padding: 0 2px; }
+.target-issues { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: 6px; }
+.issue-badge { display: inline-block; padding: 0 5px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 600; cursor: help; }
+.issue-badge.closed { background: transparent; color: var(--muted, #777); }
+.requirement-issues { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.ticket-body { width: 100%; font-size: 12px; }
+.ticket-search { display: flex; gap: 6px; margin: 6px 0; } .ticket-search input { flex: 1; }
+.ticket-sources .testdef-item { cursor: pointer; }
+.ticket-test { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.tickets-list .tag { margin-left: 4px; }
+.run-issues table { margin-bottom: 12px; }
+@media (prefers-color-scheme: dark) { .issue-badge { background: #78350f; color: #fde68a; } }

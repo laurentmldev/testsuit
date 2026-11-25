@@ -62,9 +62,10 @@ def journal_html(entries: list[dict]) -> str:
 
 
 def run_report_html(run: dict, journal: list[dict] | None = None, links=None, requirements=None,
-                    inputs: list[dict] | None = None, title_suffix: str = "") -> str:
+                    inputs: list[dict] | None = None, title_suffix: str = "", issues: list[dict] | None = None) -> str:
     """The report of a run as reviewed (``review.apply_review``). journal: its review's entries; links: where links
-    lead (default: none); requirements: its coverage; inputs: its input files ``[{slot, path, size}]`` (an export)."""
+    lead (default: none); requirements: its coverage; inputs: its input files ``[{slot, path, size}]`` (an export);
+    issues: the known issues of its failures (SPEC §11.3), as last seen."""
     e = html.escape
     to = links or OnlineLinks(None)
     review = run.get("review") or {}
@@ -162,12 +163,25 @@ def run_report_html(run: dict, journal: list[dict] | None = None, links=None, re
 <div class="scroll"><table><thead><tr><th>Step</th><th>State</th><th>Duration</th><th>Exit</th><th>Reason, review</th><th></th></tr></thead>
 <tbody>{"".join(step_rows) or '<tr><td colspan="6" class="muted">No step ran.</td></tr>'}</tbody></table></div>
 {"<h2>Exploit checks</h2>" + "".join(exploit_parts) if exploit_parts else ""}
+{_issues_html(issues)}
 <h2>Review</h2>
 {journal_html(journal or [])}
 {req}
 {files}
 </main></body></html>
 """
+
+
+def _issues_html(issues: list[dict] | None) -> str:
+    if not issues:
+        return ""
+    e = html.escape
+    rows = "".join(f'<tr class="issue {e(str(i.get("state") or ""))}"><td>'
+                   + (f'<a href="{e(str(i["url"]))}">{e(str(i.get("key")))}</a>' if i.get("url") else e(str(i.get("key"))))
+                   + f'</td><td>{e(str(i.get("state") or ""))}</td><td>{e(str(i.get("title") or ""))}</td>'
+                   f'<td><code>{e(str(i.get("target") or ""))}</code></td></tr>' for i in issues)
+    return ('<h2>Known issues</h2><div class="scroll"><table><thead><tr><th>Issue</th><th>State</th><th>Title</th>'
+            f'<th>Of</th></tr></thead><tbody>{rows}</tbody></table></div>')
 
 
 def _size(n) -> str:

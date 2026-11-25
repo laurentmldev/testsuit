@@ -23,6 +23,7 @@ const PATHS: Record<string, string> = {
   testdefs: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6",   // a document
   campaigns: "M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM7 14.5l2 2l3.5-4",   // a stack of documents, run together
   requirements: "M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5l3-3M3.5 12l1.5 1.5l3-3M3.5 18l1.5 1.5l3-3",   // a checklist
+  tickets: "M8 8a4 4 0 0 1 8 0v1H8zM7 10h10v5a5 5 0 0 1-10 0zM12 10v10M3 13h4M17 13h4M4 19l3-2M20 19l-3-2M4 7l3 2M20 7l-3 2",   // a bug
   // in buttons
   edit: "M4 20h4l10.5-10.5a2.83 2.83 0 0 0-4-4L4 16zM13.5 6.5l4 4",   // a pencil
 };

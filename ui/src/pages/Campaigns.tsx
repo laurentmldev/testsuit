@@ -26,6 +26,7 @@ import { ACTION_LABELS, PausedFlag } from "./Operator";
 import { ManualFlag, rerun } from "./Manual";
 import { Named } from "../kinds";
 import { CampaignReview, ExportButton, ReviewedVerdict, ReviewNotes, ReviewStateBadge } from "./Review";
+import { IssueChip } from "./Tickets";
 
 const CAMPAIGN_KEYS = "tsq.campaignKeys";              // the values given at generation to the keys of each campaign
 
@@ -437,7 +438,7 @@ export function CampaignProgress({ counts }: { counts: any }) {
 
 /** The page of a campaign run (#/campaigns/<id>): its runs at a glance, with links to go deeper, and its report. */
 export function CampaignRunPage({ id }: { id: string }) {
-  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause", "review"]);
+  const view = useResource<any>(`campaigns/${id}`, ["run", "phase", "campaign", "manual_operation", "pause", "review", "ticket"]);
   const v = view.data;
   if (view.error) return <div className="page"><div className="error-box">{view.error}</div></div>;
   if (!v) return <div className="page"><Spinner className="block" text="Reading the campaign run…" /></div>;
@@ -506,6 +507,7 @@ export function CampaignRunPage({ id }: { id: string }) {
                   {(r.nonconform || []).slice(0, 2).map((n: string, i: number) => <div key={i} className="warn-text">non-conform: {n}</div>)}
                   {(r.review?.entries || []).length > 0 && <ReviewNotes notes={r.review.entries.slice(0, 4).map((x: any) => ({ ...x, reason: `${x.label}${x.reason ? `: ${x.reason}` : ""}` }))} />}
                   {(r.review?.warnings || []).map((w: string) => <div key={w} className="warn-text">review: {w}</div>)}
+                  {(r.issues || []).map((i: any) => <div key={`${i.binding}`} className="small"><IssueChip issue={i} /> {i.title} <span className="muted">({i.target})</span></div>)}
                   {r.results && <div><a href={url(`runs/${r.run}/files/results.zip?results=true`)}>results zip</a></div>}
                 </td>
               </tr>
