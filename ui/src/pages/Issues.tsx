@@ -33,12 +33,22 @@ export function targetKey(t: any): string {
 }
 
 /** An issue: its key (a link to it), its state, its title on hover. */
+/** An issue: a circle with a small dot (any kind of issue, not only a bug); green when open, grey when closed. */
+export function IssueIcon({ state, size = 14 }: { state?: string; size?: number }) {
+  return (
+    <svg className={classes("issue-icon", state)} viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
+      <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="8" cy="8" r="1.25" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function IssueChip({ issue, via, onUnbind }: { issue: any; via?: string[]; onUnbind?: () => void }) {
   if (!issue) return null;
   const title = `${issue.title || ""}${issue.assignees?.length ? `\nassigned to ${issue.assignees.join(", ")}` : ""}${via?.length ? `\n${via.join(", ")}` : ""}`;
   return (
     <span className={classes("issue-chip", issue.state)} title={title.trim()}>
-      🐞 {issue.url ? <a href={issue.url} target="_blank" rel="noreferrer">{issue.key}</a> : issue.key}
+      <IssueIcon state={issue.state} /> {issue.url ? <a href={issue.url} target="_blank" rel="noreferrer">{issue.key}</a> : issue.key}
       <span className="issue-state">{issue.state}</span>
       {onUnbind && <button className="link small" title="Unbind this issue (with the reason why)" onClick={onUnbind}>×</button>}
     </span>
@@ -65,7 +75,7 @@ export function TargetIssues({ runId, known, target, label, onChanged }: {
       {issues.map((b) => <IssueChip key={b.id} issue={b.issue} onUnbind={() => setUnbind(b)} />)}
       {(known.sources || []).length > 0 && (
         <button className="small" title="Report this failure as a new issue (pre-filled), or bind an existing issue to it: it is then a known issue of every run of this test definition that fails here"
-          onClick={() => setOpen(true)}>🐞 Issue…</button>
+          onClick={() => setOpen(true)}><IssueIcon /> Issue…</button>
       )}
       {open && <IssueDialog runId={runId} target={target} label={label} onClose={() => setOpen(false)} onDone={() => { setOpen(false); onChanged(); }} />}
       {unbind && <UnbindDialog binding={unbind} onClose={() => setUnbind(null)} onDone={() => { setUnbind(null); onChanged(); }} />}
@@ -267,7 +277,7 @@ export function RunIssuesTab({ runId, known, onChanged }: { runId: string; known
 
 // ── Datapacks, Issues ──────────────────────────────────────────────────────
 
-const INTRO = `Where the issues of this tests repository go (**issues.yml**): GitLab, GitHub, Jira or Redmine projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (🐞 **Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
+const INTRO = `Where the issues of this tests repository go (**issues.yml**): GitLab, GitHub, Jira or Redmine projects. A failure of a run (a check, a step, its verdict) can be reported as an issue, pre-filled, or bound to an existing one from its Run page (**Issue…**); it is then a **known issue** of every run of the test definition that fails there. An issue is about the requirements its failure verifies, and those it names (a label \`req:<id>\`, or their id in its text): the Requirements subtab shows them.`;
 
 const STARTER = `# Where the issues of these tests go (sequencer SPEC, section 11.3)
 default: bench
@@ -447,12 +457,12 @@ function Pager({ offset, total, page, onOffset, children }: { offset: number; to
 
 // ── the issues of requirements ──────────────────────────────────────────────
 
-/** How many open issues are about a requirement (🐞 n), their keys and why on hover. */
+/** How many open issues are about a requirement (◉ n), their keys and why on hover. */
 export function IssueBadge({ entries }: { entries?: any[] }) {
   if (!entries?.length) return null;
   const open = entries.filter((e) => e.issue?.state === "open").length;
   const title = entries.map((e) => `${e.issue.key} [${e.issue.state}] ${e.issue.title || ""} (${(e.via || []).join(", ")})`).join("\n");
-  return <span className={classes("issue-badge", !open && "closed")} title={title}>🐞 {open || entries.length}</span>;
+  return <span className={classes("issue-badge", !open && "closed")} title={title}><IssueIcon state={open ? "open" : "closed"} size={12} /> {open || entries.length}</span>;
 }
 
 /** The issues of a requirement, each with why it is about it. */

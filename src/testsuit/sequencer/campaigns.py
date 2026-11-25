@@ -210,6 +210,14 @@ def a(href: str | None, text: str) -> str:
     return f'<a href="{html.escape(href)}">{text}</a>' if href else text
 
 
+def issue_icon(state: str = "") -> str:
+    """An issue (any kind, not only a bug): a circle with a small dot, green when open."""
+    color = "#1a7f37" if state == "open" else "#777"
+    return (f'<svg viewBox="0 0 16 16" width="13" height="13" style="vertical-align:-2px" aria-hidden="true">'
+            f'<circle cx="8" cy="8" r="6.25" fill="none" stroke="{color}" stroke-width="1.5"/>'
+            f'<circle cx="8" cy="8" r="1.25" fill="{color}"/></svg>')
+
+
 def badge(value: str | None) -> str:
     value = value or "pending"
     return f'<span class="badge {html.escape(value)}">{html.escape(value)}</span>'
@@ -302,7 +310,7 @@ def report_html(view: dict, base: str = "", requirements=None, links=None) -> st
                           f'{e(": " + i["reason"] if i.get("reason") else "")}</div>'
                           for i in r.get("interventions") or [] if i.get("action") not in ("next", "bypass"))
         detail += review_lines(r.get("review"))
-        detail += "".join(f'<div class="issue {e(str(i.get("state") or ""))}">🐞 '
+        detail += "".join(f'<div class="issue {e(str(i.get("state") or ""))}">{issue_icon(str(i.get("state") or ""))} '
                           + (f'<a href="{e(str(i["url"]))}">{e(str(i.get("key")))}</a>' if i.get("url") else e(str(i.get("key"))))
                           + f' [{e(str(i.get("state") or ""))}] {e(str(i.get("title") or ""))}'
                           f' <span class="muted">({e(str(i.get("target") or ""))})</span></div>'
