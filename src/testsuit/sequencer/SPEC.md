@@ -842,7 +842,7 @@ A gitlab-runner Custom executor (`gitlab/`): `config` declares the builds dir, `
 
 Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add semantics the files cannot express.
 
-- **Sessions**: a scratch git clone of one repository on one branch, or in place on the folder. Several browsers MAY share a session; each save carries the base version of the file and MUST be refused (409, with the current file) when the file changed.
+- **Sessions**: a scratch git clone of one repository on one branch, or in place on the folder (on its checked-out branch; on a detached HEAD, such as a lab on a tag, the push goes to the requested branch, else the upstream default branch (origin/HEAD, else main or master, else the only branch fetched), and the folder stays detached on the pushed commit). Several browsers MAY share a session; each save carries the base version of the file and MUST be refused (409, with the current file) when the file changed.
 - **Writes** keep comments, key order and layout (ruamel.yaml); a new string of several lines is written as a `|` block when that keeps it exactly.
 - **Push**: commit in the user's name, optional tag, push with credentials supplied in the request; credentials MUST NOT be stored or logged, and tsqd MUST NOT push with its own credentials (agent, credential helper, `insteadOf` rewrites). A rejected push applies nothing.
 - **Lab changes** apply only on reload (§4.9).

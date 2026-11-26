@@ -60,7 +60,10 @@ function LabBanner({ editor }: { editor: boolean }) {
         <div className="banner warn" key={w}>
           {w}
           {/* local changes of the lab folder: committed and pushed in the user's name, with their own credentials */}
-          {editor && w.endsWith("has local changes") && d.git?.branch &&
+          {/* a lab on a tag (detached HEAD) too: its changes are pushed to the upstream default branch */}
+          {w.endsWith("has local changes") && d.git?.commit && !editor &&
+            <span className="muted"> To commit and push them from here, turn the Editor on (<code>server.editor: true</code>).</span>}
+          {editor && w.endsWith("has local changes") && d.git?.commit &&
             <button className="small" onClick={() => setPushing(true)} title="Review the changes of the lab folder, then commit and push them in your name, with your own git credentials (used for this push only, never stored)">Commit and push…</button>}
         </div>
       ))}

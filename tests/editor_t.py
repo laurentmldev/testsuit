@@ -801,11 +801,23 @@ def test_in_place_session(repos, tmp_path):
     editor.close(session.id)
     assert (folder / "setup" / "globals.yml").is_file()                     # closing keeps the folder
 
-    # the lab, checked out on a tag: edited in place, not pushed from a detached HEAD
+    # the lab, checked out on a tag: edited in place, pushed from its detached HEAD to the upstream default branch
     lab = editor.open("lab", local=True)
-    assert lab.branch == "" and editor.kind(lab, "inventory.yml") == "inventory"
-    with pytest.raises(SequencerError, match="detached"):
-        editor.push(lab, "x", "Ada", "ada@example.com", credentials=CREDS)
+    assert lab.detached and lab.branch == "main" and editor.kind(lab, "inventory.yml") == "inventory"
+    assert editor.open("lab", "other", local=True).id == lab.id            # detached: no branch to contradict
+    inventory = repos.root / "lab-clone" / "lab" / "inventory.yml"
+    inventory.write_text(inventory.read_text() + "# by hand\n")
+    assert editor.diff(lab)["detached"]
+    refused = editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)   # main moved past v1
+    assert not refused["ok"] and "rebase" in refused["hint"]
+    assert editor.rebase(lab)["ok"]
+    pushed = editor.push(lab, "Note", "Ada", "ada@example.com", tag="v2", credentials=CREDS)
+    assert pushed["ok"] and pushed["branch"] == "main"
+    assert "# by hand" in repos.upstream_file("lab/inventory.yml")
+    assert git(repos.root / "upstream.git", "rev-parse", "v2^{commit}").strip() == pushed["commit"]
+    clone = repos.root / "lab-clone"
+    assert git(clone, "status", "--porcelain") == "" and git(clone, "describe", "--tags", "--exact-match").strip() == "v2"
+    assert subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=clone).returncode   # still detached
 
     # a folder outside git: files only
     plain = tmp_path / "plain"
@@ -817,6 +829,33 @@ def test_in_place_session(repos, tmp_path):
     assert "3s" in (plain / "setup" / "globals.yml").read_text()
     with pytest.raises(SequencerError, match="not a git work tree"):
         editor.diff(loose)
+
+
+def test_detached_lab_follows_the_fetch_refspec(repos):
+    """A lab cloned on one branch with a renamed tracking ref (lab_pil fetched as origin/lab, no origin/HEAD),
+    checked out on a tag: pushed to lab_pil, rebased on origin/lab."""
+    upstream, clone = repos.root / "upstream.git", repos.root / "lab-clone"
+    git(upstream, "branch", "lab_pil", "main")
+    git(clone, "config", "remote.origin.fetch", "+refs/heads/lab_pil:refs/remotes/origin/lab")
+    for ref in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main"):
+        git(clone, "update-ref", "-d", ref)
+    git(clone, "fetch", "-q", "origin")
+    lab = repos.editor.open("lab", local=True)
+    assert lab.detached and lab.branch == "lab_pil"
+    # someone pushed to lab_pil meanwhile: refused, then rebased on origin/lab (what tracks lab_pil here)
+    other = repos.root / "other"
+    git(repos.root, "clone", "-q", "-b", "lab_pil", "upstream.git", "other")
+    (other / "lab" / "notes.md").write_text("meanwhile\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-qm", "meanwhile")
+    git(other, "push", "-q", "origin", "lab_pil")
+    inventory = clone / "lab" / "inventory.yml"
+    inventory.write_text(inventory.read_text() + "# by hand\n")
+    assert "rebase" in repos.editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)["hint"]
+    assert repos.editor.rebase(lab)["ok"] and (clone / "lab" / "notes.md").is_file()
+    assert repos.editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)["ok"]
+    assert "# by hand" in git(upstream, "show", "lab_pil:lab/inventory.yml")
+    assert "# by hand" not in repos.upstream_file("lab/inventory.yml")             # main untouched
 
 
 def test_lab_session(repos):
