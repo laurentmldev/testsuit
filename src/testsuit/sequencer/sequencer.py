@@ -1145,6 +1145,15 @@ class Sequencer:
 
     MANUAL_ROOT_WAIT = 3.0          # seconds the Commands dialog waits for a component's remote root
 
+    def _runs_on_itself(self, comp_id: str) -> bool:
+        """Whether a command run by hand reaches the component itself: one of its ``run`` commands has no
+        ``via``. Its ``http`` commands are sent from the sequencer host or their ``via``, and ``signal`` and
+        ``kill`` reach the processes started by hand where its ``run`` commands started them."""
+        comp = self.lab.inventory.components[comp_id]
+        stage = self.lab.inventory.stages[comp.stages[0]] if comp.stages else None
+        return any(isinstance(spec, dict) and "run" in spec and not spec.get("via")
+                   for spec in self.lab.resolve(comp, stage).commands.values())
+
     async def _manual_root(self, comp_id: str) -> tuple[str, str | None]:
         """The remote root of a component for the commands shown by hand, and a note when it is the root as
         configured because the component does not answer (yet).
@@ -1152,8 +1161,13 @@ class Sequencer:
         Resolving it can mean an ssh login (a root under ``~``), which can take up to its connect timeout on a
         component that is down, as one in maintenance often is: the dialog waits for it MANUAL_ROOT_WAIT
         seconds at most. The lookup goes on meanwhile (it is not cancelled), and the next call (a key set by
-        hand) waits for that same lookup instead of starting a new one."""
+        hand) waits for that same lookup instead of starting a new one.
+
+        A component whose ``run`` commands all go through another component (``via``) is not reached itself
+        by what is run by hand: its root is then the one configured, with no lookup and no note."""
         transport = self.transport_for(comp_id)
+        if not self._runs_on_itself(comp_id):
+            return transport._root, None
         known = self._root_lookups.get(comp_id)
         failed = known is not None and known[1].done() and (known[1].cancelled() or known[1].exception() is not None)
         if known is None or known[0] is not transport or failed:      # none yet, lab reloaded, or it failed: again
@@ -1302,7 +1316,7 @@ class Sequencer:
         elif command["kind"] != "run":                 # signal, kill: the processes started by hand
             sig = "KILL" if command["kind"] == "builtin kill" else str(spec["signal"])
             # on the component (when it answers), and on what its commands run through
-            places = [(transport, manual_dir)] if reached else []
+            places = [(transport, manual_dir)] if reached and self._runs_on_itself(comp_id) else []
             for via in {v.id: v for v in vias.values()}.values():
                 other = self.transport_for(via.id)
                 places.append((other, f"{await other.resolve_root()}/.tsq/manual/{comp_id}"))

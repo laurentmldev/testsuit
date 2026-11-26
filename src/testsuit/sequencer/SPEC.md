@@ -277,6 +277,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 - `maintenance` (repair) and `hold` (personal use) take a stage or component out of scheduling, with an optional note, until `resume` / `release`.
 - A component in maintenance (or in a stage in maintenance) and not held by a run MAY have its `run`, `signal`, built-in `kill` and `http` commands executed by hand. `deploy`, `collect`, `wait_for` and `python` require a run and MUST NOT be offered.
 - Manual commands render with lab keys only (§7), the defaults of their parameters as `params.*`, plus keys set by hand. Detached processes go under `<remote_root>/.tsq/manual/<component>/`.
+- A component none of whose `run` commands runs on itself (each has a `via`) MUST NOT be reached directly to list or run its manual commands: its remote root is used as configured (`~` not expanded), with no note.
 - Each manual command MUST be recorded as an auditable `manual_command` event, including the keys set by hand and the values they overrode.
 
 ### 4.9 Lab folder and reload
