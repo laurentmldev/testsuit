@@ -283,7 +283,7 @@ Before deploying anything, once its resources are locked, a run MUST self-test e
 ### 4.9 Lab folder and reload
 
 - `lab.folder` SHOULD be a git work tree on a clean tag. Otherwise a warning MUST be shown (startup, `tsq lab status`, UI banner, and every run activated meanwhile); it MUST NOT stop the sequencer. The git state (commit, tag, clean) is recorded in each results baseline.
-- The inventory is loaded at startup and reloaded ONLY on demand: `tsq lab reload` (folder as is) or `tsq lab reload --pull [<rev>]` (fetch, checkout). A reload MUST be validated first and refused if invalid, leaving the previous revision in place.
+- The inventory is loaded at startup and reloaded ONLY on demand: `tsq lab reload` (folder as is) or `tsq lab reload --pull [<rev>]` (fetch, then a fast-forward of the folder's branch when <rev> is further on it, else a checkout; without <rev>: the latest commit of the branch, or for a detached HEAD of the branch it pushes to, §12 Sessions). A reload MUST be validated first and refused if invalid, leaving the previous revision in place.
 - Running runs keep their binding; a reload applies to subsequent activations.
 
 ---
