@@ -482,7 +482,7 @@ class StepRunner:
             self.note(f"no answer: {answer.error}")
             return ERROR, f"no answer: {answer.error}"
         if request.get("extract") is not None:
-            self.note(f"extract {request['extract']}" + (f": {answer.extract_error}" if answer.extract_error else ""))
+            self.note(f"extract {httpcall.one_line(request['extract'])}" + (f": {answer.extract_error}" if answer.extract_error else ""))
         self.write(answer.body + ("" if answer.body.endswith("\n") or not answer.body else "\n"))
         if request.get("save"):
             name = str(request["save"])

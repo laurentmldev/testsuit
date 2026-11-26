@@ -124,7 +124,8 @@ STEP:
   python: {script: <path> | code: <inline, not templated>, args: [...], interpreter: <path>}
                                       keys available as `keys` dict / $TSQ_KEYS JSON. Exception = error.
   http: <url> | {url, method, headers, params, json|body|body_file, extract, expect: {status, regex, json}, save,
-                 timeout, verify}     default expects status < 400
+                 timeout, verify}     default expects status < 400. extract: a jq expression on the JSON answer
+                                      (.jobs[0].state, or any filter, multi-line `|` allowed); expect sees its result.
   exploit: {criteria: [<folder>...], data: ["[<phase>:]<slot|*>/<path|glob>"...], name, description}   see EXPLOIT
   manual: {title, text: <markdown>, checks: [<str>...], redo_from: [<step id>...]}                     see MANUAL
   push: {from: <path in run folder>, to: <path on component>}     needs slot

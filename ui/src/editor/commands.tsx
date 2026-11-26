@@ -209,8 +209,8 @@ export function HttpEditor({ value, onChange, help, withSave }: {
       {bodyKind === "json" && <Field label="JSON body" help={help("json")} wide><JsonField value={v.json} onChange={(x) => onChange({ ...v, json: x ?? {} })} placeholder='{"mode": "run"}' /></Field>}
       {bodyKind === "body" && <Field label="Raw body" help={help("body")} wide><Text keys mono multiline value={v.body} onChange={(x) => onChange({ ...v, body: x })} /></Field>}
       {bodyKind === "body_file" && <Field label="File to send" help={help("body_file")} wide><Text keys mono value={v.body_file} onChange={(x) => onChange({ ...v, body_file: x })} placeholder="{{ component.input_dir }}/payload.bin" /></Field>}
-      <Field label="Extract (jq path)" help={help("extract")}>
-        <Text keys mono grow="wrap" value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
+      <Field label="Extract (jq)" help={help("extract")}>
+        <Text keys mono grow="lines" value={v.extract} onChange={(x) => set("extract", x)} placeholder=".jobs[0].state" />
       </Field>
       <Section title="Expected answer" help={help("expect")}>
         <div className="inline-fields">
