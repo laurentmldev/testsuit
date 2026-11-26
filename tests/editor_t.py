@@ -831,6 +831,33 @@ def test_in_place_session(repos, tmp_path):
         editor.diff(loose)
 
 
+def test_detached_lab_follows_the_fetch_refspec(repos):
+    """A lab cloned on one branch with a renamed tracking ref (lab_pil fetched as origin/lab, no origin/HEAD),
+    checked out on a tag: pushed to lab_pil, rebased on origin/lab."""
+    upstream, clone = repos.root / "upstream.git", repos.root / "lab-clone"
+    git(upstream, "branch", "lab_pil", "main")
+    git(clone, "config", "remote.origin.fetch", "+refs/heads/lab_pil:refs/remotes/origin/lab")
+    for ref in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main"):
+        git(clone, "update-ref", "-d", ref)
+    git(clone, "fetch", "-q", "origin")
+    lab = repos.editor.open("lab", local=True)
+    assert lab.detached and lab.branch == "lab_pil"
+    # someone pushed to lab_pil meanwhile: refused, then rebased on origin/lab (what tracks lab_pil here)
+    other = repos.root / "other"
+    git(repos.root, "clone", "-q", "-b", "lab_pil", "upstream.git", "other")
+    (other / "lab" / "notes.md").write_text("meanwhile\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-qm", "meanwhile")
+    git(other, "push", "-q", "origin", "lab_pil")
+    inventory = clone / "lab" / "inventory.yml"
+    inventory.write_text(inventory.read_text() + "# by hand\n")
+    assert "rebase" in repos.editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)["hint"]
+    assert repos.editor.rebase(lab)["ok"] and (clone / "lab" / "notes.md").is_file()
+    assert repos.editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)["ok"]
+    assert "# by hand" in git(upstream, "show", "lab_pil:lab/inventory.yml")
+    assert "# by hand" not in repos.upstream_file("lab/inventory.yml")             # main untouched
+
+
 def test_lab_session(repos):
     editor = repos.editor
     session = editor.open("lab")

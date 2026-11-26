@@ -390,13 +390,44 @@ def _repo_root(folder: Path) -> Path:
         raise SequencerError(f"'{folder}' is not in a git work tree: the Editor edits git repositories") from e
 
 
+def _fetch_specs(root: Path) -> list[tuple[str, str]]:
+    """origin's fetch refspecs as (remote ref, local ref) pairs, the default one when none is set."""
+    specs = _git(root, "config", "--get-all", "remote.origin.fetch", check=False).split()
+    pairs = [tuple(spec.lstrip("+").split(":", 1)) for spec in specs if ":" in spec]
+    return pairs or [("refs/heads/*", "refs/remotes/origin/*")]
+
+
+def _map_ref(ref: str, specs: list[tuple[str, str]], reverse: bool = False) -> str | None:
+    """A ref through origin's fetch refspecs: remote -> local, or local -> remote with reverse."""
+    for src, dst in specs:
+        frm, to = (dst, src) if reverse else (src, dst)
+        if "*" in frm:
+            head, tail = frm.split("*", 1)
+            if ref.startswith(head) and ref.endswith(tail) and len(ref) >= len(head) + len(tail):
+                return to.replace("*", ref[len(head):len(ref) - len(tail)], 1)
+        elif ref == frm:
+            return to
+    return None
+
+
 def _default_branch(root: Path) -> str:
-    """The upstream default branch of a work tree (origin/HEAD), else main or master if origin has it, else main."""
-    head = _git(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False).strip()
-    if "/" in head:
-        return head.split("/", 1)[1]
-    remote = _git(root, "branch", "-r", "--format=%(refname:short)", check=False).split()
-    return next((b for b in ("main", "master") if f"origin/{b}" in remote), "main")
+    """The upstream branch a work tree on no branch pushes to, by its name on origin: origin/HEAD's, else main or
+    master if fetched, else the only branch fetched (a clone of one branch), else main. The fetch refspecs are
+    followed: with +refs/heads/lab_pil:refs/remotes/origin/lab, origin/lab is the branch lab_pil."""
+    specs = _fetch_specs(root)
+    remote = lambda local: (_map_ref(local, specs, reverse=True) or "").removeprefix("refs/heads/") or None
+    head = _git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", check=False).strip()
+    if head and remote(head):
+        return remote(head)
+    fetched = [r for r in _git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/", check=False).split()
+               if r != "refs/remotes/origin/HEAD" and remote(r)]
+    names = [remote(r) for r in fetched]
+    return next((b for b in ("main", "master") if b in names), names[0] if len(names) == 1 else "main")
+
+
+def _tracking_ref(root: Path, branch: str) -> str:
+    """The local ref that follows origin's branch, through the fetch refspecs (origin/<branch> by default)."""
+    return _map_ref(f"refs/heads/{branch}", _fetch_specs(root)) or f"refs/remotes/origin/{branch}"
 
 
 def _pydantic_problems(e: ValidationError, file: str, text: str, prefix: list | None = None) -> list[dict]:
@@ -790,8 +821,11 @@ class Editor:
         if not branch:                                # detached (a lab on a tag): the upstream default branch
             branch = _default_branch(src_root)
         remote_refs = _git(root, "branch", "-r", "--format=%(refname:short)").split()
+        tracking = _tracking_ref(src_root, branch).removeprefix("refs/remotes/")    # as the sequencer's copy names it
         if f"origin/{branch}" in remote_refs:
             _git(root, "checkout", "--quiet", "-B", branch, f"origin/{branch}")
+        elif tracking in remote_refs:
+            _git(root, "checkout", "--quiet", "-B", branch, tracking)
         else:
             _git(root, "checkout", "--quiet", "-B", branch)
         with open(root / ".git" / "info" / "exclude", "a") as f:
@@ -3502,8 +3536,8 @@ class Editor:
         has_stash = len(_git(session.root, "stash", "list").splitlines()) > before
         if session.local:
             # the user's working copy: its own commits are replayed on the upstream branch, never dropped
-            moved = subprocess.run(["git", "rebase", "--quiet", f"origin/{session.branch}"], cwd=session.root,
-                                   capture_output=True, text=True)
+            moved = subprocess.run(["git", "rebase", "--quiet", _tracking_ref(session.root, session.branch)],
+                                   cwd=session.root, capture_output=True, text=True)
             if moved.returncode:
                 _git(session.root, "rebase", "--abort", check=False)
                 if has_stash:
