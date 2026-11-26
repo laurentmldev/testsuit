@@ -23,7 +23,7 @@ One request description everywhere::
       json: {mode: run}                         # or body: "raw text", or body_file: path (only one of them)
       timeout: 10s                              # of the request (default 30 s)
       verify: true                              # TLS certificate check (false for a self-signed lab server)
-      extract: .jobs[0].state                   # jq-style path: what the expectations and states see
+      extract: .jobs[0].state                   # jq expression: what the expectations and states see
       expect: {status: [200, 201], regex: "ok", json: {state: started}}   # default: a status below 400
       save: start_response.json                 # commands and steps: the answer, kept with the results
 
@@ -103,11 +103,11 @@ def parse_path(path: str) -> list[tuple[str, Any]]:
     return steps
 
 
-def extract(data: Any, path: str) -> Any:
-    """The part of a JSON value a jq-style path gives, as jq does: a missing key or index gives null; ``[]``
+def _path_extract(data: Any, steps: list[tuple[str, Any]]) -> Any:
+    """The part of a JSON value a simple path gives, as jq does: a missing key or index gives null; ``[]``
     gives the list of what follows for each element."""
     values, many = [data], False
-    for kind, arg in parse_path(path):
+    for kind, arg in steps:
         nxt = []
         for v in values:
             if kind == "key":
@@ -130,6 +130,38 @@ def extract(data: Any, path: str) -> Any:
     return values if many else values[0]
 
 
+def _jq_program(expr: str):
+    """The jq expression compiled; ValueError with jq's message when it is not one."""
+    import jq                   # a core dependency
+    try:
+        return jq.compile(expr)
+    except ValueError as e:
+        raise ValueError(str(e).splitlines()[0].rstrip(":")) from None
+
+
+def one_line(expr: Any) -> str:
+    """An expression written over several lines, on one line (for the logs and the errors)."""
+    return " ".join(str(expr).split())
+
+
+def extract(data: Any, expr: str) -> Any:
+    """The part of a JSON value an ``extract`` gives. A simple path (``.a.b``, ``."a b"``, ``.items[0]``,
+    ``.items[-1]``, ``.items[]``, ``.``) keeps its meaning: a ``[]`` gives a list. Any other jq expression
+    (``.jobs | map(select(.state == "run")) | length``, several lines allowed) is run by jq: one value gives
+    that value, none gives null, several give the list of them. Raises ValueError when it does not apply."""
+    try:
+        steps = parse_path(expr)
+    except ValueError:
+        steps = None
+    if steps is not None:
+        return _path_extract(data, steps)
+    try:
+        values = _jq_program(expr).input_value(data).all()
+    except ValueError as e:
+        raise ValueError(str(e).splitlines()[0]) from None
+    return None if not values else values[0] if len(values) == 1 else values
+
+
 def apply_extract(spec: dict, answer: Answer) -> Answer:
     """The answer as the expectations, states and logs see it: the ``extract`` part of the JSON answer (a string
     as is, like ``jq -r``, anything else as JSON); the whole answer stays in ``raw``."""
@@ -140,7 +172,7 @@ def apply_extract(spec: dict, answer: Answer) -> Answer:
         value = extract(json.loads(answer.body), str(path))
     except ValueError as e:      # not JSON (JSONDecodeError is a ValueError), or a path that does not apply
         reason = "the answer is not JSON" if isinstance(e, json.JSONDecodeError) else str(e)
-        return Answer(answer.status, "", answer.error, answer.body, f"cannot extract '{path}': {reason}")
+        return Answer(answer.status, "", answer.error, answer.body, f"cannot extract '{one_line(path)}': {reason}")
     text = value if isinstance(value, str) else json.dumps(value)
     return Answer(answer.status, text, answer.error, answer.body)
 
@@ -181,11 +213,15 @@ def normalize(spec: Any, where: str) -> dict:
             raise SequencerError(f"{where}: unknown 'http.expect' key(s) {', '.join(unknown)} "
                                  f"(known: {', '.join(EXPECT_KEYS)})")
     if spec.get("extract") is not None and "{{" not in str(spec["extract"]):
+        expr = str(spec["extract"])
         try:
-            parse_path(str(spec["extract"]))
-        except ValueError as e:
-            raise SequencerError(f"{where}: 'http.extract' '{spec['extract']}' is not a path like "
-                                 f".items[0].state ({e})") from None
+            parse_path(expr)
+        except ValueError:
+            try:
+                _jq_program(expr)
+            except ValueError as e:
+                raise SequencerError(f"{where}: 'http.extract' '{one_line(expr)}' is not a jq expression "
+                                     f"like .items[0].state ({e})") from None
     for key in ("headers", "params"):
         if spec.get(key) is not None and not isinstance(spec[key], dict):
             raise SequencerError(f"{where}: 'http.{key}' takes a mapping")

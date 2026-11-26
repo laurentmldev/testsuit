@@ -2717,7 +2717,7 @@ def test_http_upload_progress(tmp_path, api):
 
 
 def test_http_extract():
-    """'extract' takes a part of the JSON answer with a jq-style path; the expectations see that part."""
+    """'extract' takes a part of the JSON answer with a jq expression; the expectations see that part."""
     from testsuit.sequencer.httpcall import Answer, apply_extract, extract, judge, normalize
     from testsuit.sequencer.util import SequencerError
     data = {"jobs": [{"id": 1, "state": "run"}, {"id": 2, "state": "idle"}], "a b": {"x": 3}}
@@ -2727,9 +2727,17 @@ def test_http_extract():
     assert extract(data, ".missing.x") is None and extract(data, ".jobs[9]") is None
     with pytest.raises(ValueError, match="cannot take"):
         extract(data, ".jobs.state")
-    for bad in ("jobs", ".jobs[", ".a..b"):
-        with pytest.raises(SequencerError, match="is not a path"):
+    for bad in (".jobs[", ".a..b", ".jobs |", "map("):
+        with pytest.raises(SequencerError, match="is not a jq expression"):
             normalize({"url": "x", "extract": bad}, "here")
+    # any jq expression, over several lines: one value is that value, none null, several the list of them
+    assert extract(data, '.jobs | map(select(.state == "run")) | length') == 1
+    assert extract(data, ".jobs[]\n| select(.id > 1)\n| .state") == "idle"
+    assert extract(data, ".jobs[] | .id") == [1, 2] and extract(data, ".jobs[] | select(.id > 5)") is None
+    assert extract(data, "[.jobs[] | .id] | add") == 3 and extract(data, "length") == 2
+    normalize({"url": "x", "extract": ".jobs[]\n| select(.id > 1)"}, "here")
+    with pytest.raises(ValueError, match="Cannot index array"):
+        extract(data, ".jobs | .state")
     normalize({"url": "x", "extract": "{{ component.vars.path }}"}, "here")       # rendered first
     body = '{"jobs": [{"id": 1, "state": "run"}]}'
     spec = {"extract": ".jobs[0].state", "expect": {"regex": "^run$", "json": "run"}}
@@ -2739,6 +2747,10 @@ def test_http_extract():
     wrong = apply_extract(spec, Answer(200, "<html>"))
     assert judge(spec, wrong) == (False, "cannot extract '.jobs[0].state': the answer is not JSON")
     assert judge(spec, apply_extract(spec, Answer(500, "<html>"))) == (False, "status 500")
+    upper = apply_extract({"extract": ".jobs[0].state\n| ascii_upcase"}, Answer(200, body))
+    assert upper.body == "RUN" and upper.raw == body
+    failed = apply_extract({"extract": ".jobs\n| .state"}, Answer(200, body))
+    assert failed.extract_error.startswith("cannot extract '.jobs | .state': Cannot index array")
 
 
 def test_http_probe(tmp_path, no_git, api):

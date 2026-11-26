@@ -237,7 +237,8 @@ http:
   headers: {...}
   params: {...}
   json: <value> | body: <text> | body_file: <path>   # at most one
-  extract: <jq-style path>           # ., .a.b, .a[0], .a[-1], .a[].id, ."k", .["k"]
+  extract: <jq expression>           # a path (., .a.b, .a[0], .a[-1], .a[].id: a list, ."k", .["k"]) or any jq
+                                     # filter, MAY span several lines; several values: their list, none: null
   expect: {status: [<int>...], regex: <re>, json: <subset>}   # default: status < 400
   save: <file>                       # whole answer to data/<slot>/http/
   timeout: <duration>

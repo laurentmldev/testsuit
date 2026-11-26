@@ -252,7 +252,7 @@ export function IdText({ value, onChange, taken = [], placeholder, className }: 
 
 /** A field that looks like a one-line input and grows with its text: a textarea of one row whose height follows
  * its contents. lines: Enter (or a paste) writes a new line, for expressions written over several lines (jq);
- * otherwise a long value only wraps, its line breaks dropped (a URL, a jq-style path). */
+ * otherwise a long value only wraps, its line breaks dropped (a URL). */
 export function GrowText({ value, onChange, lines, className, placeholder, disabled, invalid, onBlur, onKeyDown, title }: {
   value: string; onChange: (v: string, el: HTMLTextAreaElement) => void; lines?: boolean; className?: string;
   placeholder?: string; disabled?: boolean; invalid?: boolean; onBlur?: () => void; title?: string;
