@@ -3041,3 +3041,45 @@ def test_command_params_refused(tmp_path, no_git):
     record = yaml.safe_load(read_member(run, "run.yml"))
     states = {s["id"]: (s["state"], s["reason"]) for s in record["steps"]}
     assert states["criteria"][0] == "error" and "params.least" in states["criteria"][1]
+
+
+def test_mixed_probe_checks(tmp_path, no_git, api):
+    """A probe's checks can mix kinds: a shell command and an HTTP request run one after the other, each OK or
+    FAILED; the rules see their outputs (the HTTP body) in order, exit the first non-zero status (an HTTP check
+    not answering as expected: its HTTP status)."""
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    types["component_classes"]["counter_host"]["status"] = {
+        "probe": {"run": ["echo POWER ON", {"http": {"url": f"{api.url}/status", "extract": ".state",
+                                                      "expect": {"regex": "^(ready|busy)$"}}, "timeout": "3s"}]},
+        "states": {"running": {"regex": "ON\\nbusy"}, "idle": {"regex": "ON\\nready"}, "broken": {"exit": "nonzero"}}}
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        states = []
+        for state in ("ready", "busy", "odd"):
+            api.state = state
+            states.append((await seq.monitor.probe("counter_1"), dict(seq.monitor.reports["counter_1"])))
+        await seq.close()
+        return states
+    (idle, r1), (running, _), (broken, r3) = asyncio.run(main())
+    assert (idle, running, broken) == ("idle", "running", "broken")
+    ran = [s for s in r1["steps"] if "ok" in s]
+    assert r1["kind"] == "checks" and [s["ok"] for s in ran] == [True, True]
+    assert ran[0]["command"] == "echo POWER ON" and ran[1]["command"] == f"GET {api.url}/status"
+    assert "HTTP request" in ran[1]["action"] and "timeout 3 s" in ran[1]["action"]
+    assert r1["detail"] == "all checks OK"
+    ran = [s for s in r3["steps"] if "ok" in s]
+    assert [s["ok"] for s in ran] == [True, False] and r3["detail"] == "1 of 2 checks failed"
+    assert "first non-zero exit status 200" in r3["why"]          # the expected answer is not there: its status
+
+
+def test_probe_check_kinds():
+    """Each check of a probe's list is a shell command, an HTTP request or a plugin probe."""
+    from testsuit.sequencer.monitor import _check_of
+    assert _check_of("echo x") == ("run", "echo x") and _check_of({"run": "echo x", "timeout": "2s"}) == ("run", "echo x")
+    assert _check_of({"http": "http://h/x"}) == ("http", "http://h/x")
+    assert _check_of({"bogus": 1})[0] == "" and "unsupported check" in _check_of({"bogus": 1})[1]
+    assert _check_of(["a"])[0] == ""

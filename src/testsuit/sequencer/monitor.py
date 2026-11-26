@@ -91,38 +91,94 @@ def _matched(report: dict, states: dict, output: str, exit_status: int | None, a
     return "unknown"
 
 
-async def _probe_commands(report: dict, status: dict, probe: dict, keys: dict, transport: Transport, on: Component,
-                          comp: Component, via: Component | None) -> tuple[str, str]:
-    """A status probe of several commands (``run: [...]``): each runs, whatever the others gave, and is OK when
-    it exits with 0. The rules match their outputs, one after the other; ``exit`` rules the first non-zero exit
-    status (0 when all are OK)."""
-    report["kind"] = "commands"
-    timeout = parse_duration(probe.get("timeout")) or 15
+def _check_of(item: Any) -> tuple[str, Any]:
+    """The kind of one check of a probe's list (``run: [...]``) and what it runs: ``("run", <command>)`` for a
+    shell command (a string, or ``{run: ...}``), ``("http", <request>)``, ``("probe <name>", <spec>)`` for a
+    plugin state probe; ``("", <why>)`` when it is none of them."""
+    if isinstance(item, (str, int, float)):
+        return "run", item
+    if not isinstance(item, dict):
+        return "", f"a check is a shell command or a mapping ({{run: ...}}, {{http: ...}}, a plugin probe), not {item!r}"
+    if "run" in item and not isinstance(item["run"], (list, dict)):
+        return "run", item["run"]
+    if "http" in item:
+        return "http", item["http"]
+    for name, spec in item.items():
+        if name.lower() in registry.state_probes:
+            return f"probe {name}", spec
+    return "", f"unsupported check {sorted(item)} (known: run, http{''.join(', ' + p for p in sorted(registry.state_probes))})"
+
+
+async def _probe_checks(report: dict, status: dict, probe: dict, keys: dict, transport: Transport, on: Component,
+                        comp: Component, via: Component | None) -> tuple[str, str]:
+    """A status probe of several checks (``run: [...]``), of any kind: shell commands, HTTP requests
+    (``{http: ...}``) and plugin state probes, mixed. Each runs, whatever the others gave, and is OK when it
+    exits with 0 (an HTTP request: when its answer is the expected one). The rules match their outputs (an HTTP
+    request: its body), one after the other; ``exit`` rules the first non-zero exit status (an HTTP request:
+    its HTTP status), 0 when all are OK. Offline only when none of them answered."""
+    checks = probe["run"]
+    kinds = {_check_of(item)[0].split(" ")[0] for item in checks}
+    report["kind"] = "commands" if kinds == {"run"} else "checks"
+    default = parse_duration(probe.get("timeout"))
     outputs, exits, errors = [], [], []
-    for i, item in enumerate(probe["run"]):
-        command = str(render(item, keys, f"{comp.id} status"))
-        step = {"action": f"check {i + 1} of {len(probe['run'])} on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
-                + f" (timeout {timeout:g} s)", "command": command}
-        report["steps"].append(step)
-        result = await transport.shell(strict(command), timeout=timeout)
-        step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
-                    ok=result.completed and result.exit_status == 0)
-        if result.completed:
-            outputs.append(result.output)
-            exits.append(result.exit_status)
+    where = f" on {on.host}" + (f" ({via.id}, for {comp.id})" if via else "")
+    for i, item in enumerate(checks):
+        kind, what = _check_of(item)
+        own = parse_duration(item.get("timeout")) if isinstance(item, dict) else None
+        label = f"check {i + 1} of {len(checks)}"
+        if kind == "run":
+            timeout = own or default or 15
+            command = str(render(what, keys, f"{comp.id} status"))
+            step = {"action": f"{label}{where} (timeout {timeout:g} s)", "command": command}
+            report["steps"].append(step)
+            result = await transport.shell(strict(command), timeout=timeout)
+            step.update(exit=result.exit_status, output=result.output[-4000:], error=result.error or "",
+                        ok=result.completed and result.exit_status == 0)
+            answered, output, code, error = result.completed, result.output, result.exit_status, result.error
+        elif kind == "http":
+            from testsuit.sequencer import httpcall
+            spec = httpcall.normalize(render(what, keys), f"{comp.id} status probe, check {i + 1}")
+            timeout = own or default or httpcall.timeout_of(spec, 5)
+            step = {"action": f"{label}: HTTP request" + (f" from {via.id} (curl)" if via else " from the sequencer")
+                    + f" (timeout {timeout:g} s)", "command": httpcall.describe(spec)}
+            report["steps"].append(step)
+            answer = await httpcall.request(spec, transport if via else None, timeout)
+            ok, _ = httpcall.judge(spec, answer)
+            step.update(exit=answer.status, output=answer.body[-4000:], ok=ok)
+            if answer.status is None:
+                step["error"] = answer.error
+            answered, output, code, error = answer.status is not None, answer.body, 0 if ok else answer.status, answer.error
+        elif kind:
+            name = kind.split(" ", 1)[1]
+            spec = render(what, keys)
+            step = {"action": f"{label}: probe {name}{where}", "command": str(spec)}
+            report["steps"].append(step)
+            try:
+                output, code = await registry.state_probes[name.lower()](transport, spec, keys)
+                output, answered, error = str(output), True, ""
+                step.update(exit=code, output=output[-4000:], ok=code == 0)
+            except Exception as e:
+                output, code, answered, error = "", None, False, f"{type(e).__name__}: {e}"
+                step.update(error=error, ok=False)
         else:
-            errors.append(result.error or "no answer")
+            report["steps"].append({"action": label, "error": what, "ok": False})
+            answered, error = False, what
+        if answered:
+            outputs.append(output)
+            exits.append(code)
+        else:
+            errors.append(error or "no answer")
     if not outputs:
-        report["why"] = f"none of the status commands completed: {errors[0] if errors else 'no command'}"
+        report["why"] = f"none of the checks answered: {errors[0] if errors else 'no check'}"
         return "offline", errors[0] if errors else ""
-    checks = [s for s in report["steps"] if "ok" in s]
-    failed = [s for s in checks if not s["ok"]]
+    ran = [s for s in report["steps"] if "ok" in s]
+    failed = [s for s in ran if not s["ok"]]
     exit_status = next((e for e in exits if e), 0)
     output = "".join(o if o.endswith("\n") else o + "\n" for o in outputs)
     state = _matched(report, status.get("states") or {}, output, exit_status,
-                     f"their answers ({len(checks) - len(failed)} OK, {len(failed)} failed"
+                     f"their answers ({len(ran) - len(failed)} OK, {len(failed)} failed"
                      + (f", first non-zero exit status {exit_status}" if exit_status else "") + ")")
-    return state, f"{len(failed)} of {len(probe['run'])} checks failed" if failed else "all checks OK"
+    return state, f"{len(failed)} of {len(checks)} checks failed" if failed else "all checks OK"
 
 
 async def probe_component(comp: Component, resolved: Resolved, transport: Transport,
@@ -190,7 +246,7 @@ async def probe_component(comp: Component, resolved: Resolved, transport: Transp
     probe = status.get("probe") or {}
     keys = component_keys(comp, root, via, lab)
     if "run" in probe and isinstance(probe["run"], list):
-        return await _probe_commands(report, status, probe, keys, transport, on, comp, via)
+        return await _probe_checks(report, status, probe, keys, transport, on, comp, via)
     if "run" in probe:
         report["kind"] = "command"
         command = str(render(probe["run"], keys, f"{comp.id} status"))

@@ -255,7 +255,7 @@ States: `offline` (unreachable), `idle`, `configured` (deployed, not started), `
 
 - The probe runs every `status.interval` (default `monitor.interval`), more often for components held by an active run.
 - `states` rules are evaluated in order on the probe output; the first match wins. Rules are `{regex: <re>}` or `{exit: 0 | nonzero | <int>}`.
-- A probe `run: [<cmd>, ...]` runs each check in its own shell; regex rules see the outputs in order, `exit` sees the first non-zero status (0 if none).
+- A probe `run: [<check>, ...]` runs every check, whatever the others gave; a check is a shell command (`<cmd>` or `{run: <cmd>, timeout}`, each in its own shell, OK on exit 0), `{http: <request>}` (OK when the answer is the expected one) or `{<plugin probe>: <spec>}`, mixed freely. Regex rules see the outputs in order (a request: its body), `exit` sees the first non-zero status (a request not as expected: its HTTP status; 0 if none). The state is `offline` only when no check answered.
 - The sequencer tracks an **expected** state (`configured` after `deploy`, `running` after `start`, `idle` after `stop`). A mismatch raises an event and, per `on_state_mismatch: warn | fail` (default `warn`), fails the step.
 - `broken` and `offline` components MUST NOT be bound by new runs.
 - **Lock state** (free / held, holder) is independent of the monitored state.

@@ -292,6 +292,12 @@ tr.finally-row td { color: var(--muted); }
 .probe-check > .text-field { flex: 1; }
 .probe-check > span { padding-top: 6px; }
 .probe-check textarea { width: 100%; min-height: 3.4em; resize: vertical; }
+.probe-check > select { flex: none; }
+.probe-check > .probe-check-what { flex: 1; padding-top: 6px; overflow-wrap: anywhere; }
+.probe-check-row { margin-bottom: 8px; }
+.probe-check-row + .probe-check-row { border-top: 1px dashed var(--border); padding-top: 8px; }
+.probe-check-timeout { gap: 6px; align-items: center; margin-top: 4px; }
+.probe-check-timeout .text-field { max-width: 10em; }
 .with-button { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .with-button > .combo, .with-button > input { flex: 1; }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
