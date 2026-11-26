@@ -332,8 +332,12 @@ def pull_lab(folder: Path, revision: str | None = None) -> str:
     try:
         for remote in repo.remotes:
             remote.fetch(tags=True)
-        if revision:
+        if revision and not repo.head.is_detached and _on_branch(repo, revision):
+            repo.git.merge("--ff-only", revision)          # on its branch, ahead: the folder stays on the branch
+        elif revision:
             repo.git.checkout(revision)
+        elif repo.head.is_detached:
+            _pull_detached(repo, folder)
         else:
             branch = repo.active_branch
             tracking = branch.tracking_branch()
@@ -344,6 +348,48 @@ def pull_lab(folder: Path, revision: str | None = None) -> str:
     return previous
 
 
+def _pull_detached(repo, folder: Path) -> None:
+    """A lab on no branch (checked out on a tag), pulled without a revision: moved to the latest commit of the
+    branch its changes are pushed to (origin/HEAD's, else main or master, else the only branch fetched), detached
+    still. Left as is when it is already there or ahead (pushed from it meanwhile)."""
+    from testsuit.sequencer.editor import _default_branch, _tracking_ref
+    root = Path(repo.working_tree_dir)
+    branch = _default_branch(root)
+    target = _tracking_ref(root, branch)
+    try:
+        latest = repo.commit(target).hexsha
+    except Exception as e:
+        raise SequencerError(f"lab folder '{folder}' is on no branch and origin has no branch '{branch}' "
+                             f"to pull: give the revision to check out") from e
+    head = repo.head.commit.hexsha
+    if latest == head or repo.is_ancestor(latest, head):
+        return
+    if not repo.is_ancestor(head, latest):
+        raise SequencerError(f"lab folder '{folder}' is on no branch, on a commit that is not on '{branch}': "
+                             f"give the revision to check out")
+    repo.git.checkout(latest)
+
+
+def _on_branch(repo, revision: str) -> bool:
+    """Whether revision is ahead of HEAD (or at it) on the current branch as last fetched: reached by a
+    fast-forward, it keeps the folder on its branch instead of detaching it."""
+    try:
+        target = repo.commit(revision)
+        tracking = repo.active_branch.tracking_branch()
+        upstream = tracking.commit if tracking is not None else None
+    except Exception:
+        return False
+    head = repo.head.commit
+    return (head == target or repo.is_ancestor(head, target)) and \
+        (upstream is None or upstream == target or repo.is_ancestor(target, upstream))
+
+
 def checkout(folder: Path, revision: str) -> None:
+    """Back to revision (a rejected reload): the branch is moved back when the folder is on one, so that it
+    stays on it; a detached folder checks it out."""
     import git
-    git.Repo(folder, search_parent_directories=True).git.checkout(revision)
+    repo = git.Repo(folder, search_parent_directories=True)
+    if repo.head.is_detached:
+        repo.git.checkout(revision)
+    else:
+        repo.git.reset("--keep", revision)

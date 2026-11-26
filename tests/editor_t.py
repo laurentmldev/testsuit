@@ -856,6 +856,38 @@ def test_detached_lab_follows_the_fetch_refspec(repos):
     assert repos.editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)["ok"]
     assert "# by hand" in git(upstream, "show", "lab_pil:lab/inventory.yml")
     assert "# by hand" not in repos.upstream_file("lab/inventory.yml")             # main untouched
+    # pulled without a revision: already there, then moved to the latest lab_pil, detached still
+    from testsuit.sequencer.lab import pull_lab
+    pushed = git(clone, "rev-parse", "HEAD").strip()
+    assert pull_lab(clone / "lab") == pushed and git(clone, "rev-parse", "HEAD").strip() == pushed
+    git(other, "pull", "-q", "origin", "lab_pil")
+    (other / "lab" / "notes.md").write_text("later\n")
+    git(other, "commit", "-qam", "later")
+    git(other, "push", "-q", "origin", "lab_pil")
+    pull_lab(clone / "lab")
+    assert (clone / "lab" / "notes.md").read_text() == "later\n"
+    assert subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=clone).returncode   # still detached
+
+
+def test_lab_pull_on_a_revision_keeps_the_branch(repos):
+    """A lab cloned on its branch, reloaded on a newer tag of that branch: fast-forwarded, still on the branch;
+    rolled back (an invalid revision) on the branch too. An older tag detaches it, as asked."""
+    from testsuit.sequencer.lab import checkout, pull_lab
+    git(repos.root, "clone", "-q", "--single-branch", "-b", "main", "upstream.git", "lab-branch")
+    folder, other = repos.root / "lab-branch" / "lab", repos.root / "tests-clone"
+    (other / "lab" / "notes.md").write_text("v2\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-qm", "v2")
+    git(other, "tag", "v2")
+    git(other, "push", "-q", "origin", "main", "--tags")
+    branch = lambda: git(folder, "symbolic-ref", "-q", "--short", "HEAD").strip()
+    previous = pull_lab(folder, "v2")
+    assert branch() == "main" and (folder / "notes.md").is_file()
+    checkout(folder, previous)
+    assert branch() == "main" and not (folder / "notes.md").exists()
+    pull_lab(folder, "v2")
+    pull_lab(folder, "v1")
+    assert subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=folder).returncode   # detached on v1
 
 
 def test_lab_session(repos):
