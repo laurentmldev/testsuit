@@ -359,6 +359,7 @@ class EditSession:
     local: bool = False             # in place: edits the folder itself, no clone
     local_root: str = ""            # in place: the git work tree root, or the folder when it is not in one
     git: bool = True                # in place: whether local_root is a git work tree
+    detached: bool = False          # in place: the folder is on no branch (a lab on a tag): pushed to `branch`
 
     @property
     def root(self) -> Path:
@@ -387,6 +388,15 @@ def _repo_root(folder: Path) -> Path:
         return Path(_git(folder, "rev-parse", "--show-toplevel").strip())
     except (SequencerError, FileNotFoundError, NotADirectoryError) as e:
         raise SequencerError(f"'{folder}' is not in a git work tree: the Editor edits git repositories") from e
+
+
+def _default_branch(root: Path) -> str:
+    """The upstream default branch of a work tree (origin/HEAD), else main or master if origin has it, else main."""
+    head = _git(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False).strip()
+    if "/" in head:
+        return head.split("/", 1)[1]
+    remote = _git(root, "branch", "-r", "--format=%(refname:short)", check=False).split()
+    return next((b for b in ("main", "master") if f"origin/{b}" in remote), "main")
 
 
 def _pydantic_problems(e: ValidationError, file: str, text: str, prefix: list | None = None) -> list[dict]:
@@ -778,8 +788,7 @@ class Editor:
         if not branch:
             branch = _git(src_root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip()
         if not branch:                                # detached (a lab on a tag): the upstream default branch
-            head = _git(src_root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", check=False).strip()
-            branch = head.split("/", 1)[1] if "/" in head else "main"
+            branch = _default_branch(src_root)
         remote_refs = _git(root, "branch", "-r", "--format=%(refname:short)").split()
         if f"origin/{branch}" in remote_refs:
             _git(root, "checkout", "--quiet", "-B", branch, f"origin/{branch}")
@@ -797,7 +806,10 @@ class Editor:
         """A session on the folder itself. The one already open on that repository is returned as is."""
         for existing in self.sessions.values():
             if existing.local and existing.repo == repo_id:
-                if branch and branch != existing.branch:
+                if existing.git and not existing.branch and existing.base:    # saved before detached sessions pushed
+                    existing.detached, existing.branch = True, branch or _default_branch(existing.root)
+                    self._save(existing)
+                if branch and branch != existing.branch and not existing.detached:
                     raise SequencerError(f"an in-place session works on the checked-out branch "
                                          f"('{existing.branch or 'detached'}'), not '{branch}'")
                 return existing
@@ -810,7 +822,11 @@ class Editor:
         except SequencerError:
             root, git = source, False
         current = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).strip() if git else ""
-        if branch and branch != current:
+        base = _git(root, "rev-parse", "HEAD", check=False).strip() if git else ""
+        # on no branch (a lab checked out on a tag): its changes are committed on top of that commit and pushed
+        # to the given branch, or the upstream default one; the folder stays detached, on the pushed commit
+        detached = git and not current and bool(base)
+        if branch and branch != current and not detached:
             raise SequencerError(f"an in-place session works on the checked-out branch ('{current or 'detached'}'), "
                                  f"not '{branch}': check it out first, or open a session on a clone")
         session_id = uuid.uuid4().hex[:8]
@@ -827,9 +843,9 @@ class Editor:
                 with open(exclude, "a") as f:
                     f.write("".join(f"\n{d}" for d in missing) + "\n")
         session = EditSession(id=session_id, repo=repo_id, kind=repo["kind"], source=str(source), dir=str(folder),
-                              sub=source.relative_to(root).as_posix() if source != root else "", branch=current,
-                              base=_git(root, "rev-parse", "HEAD", check=False).strip() if git else "",
-                              upstream=upstream, local=True, local_root=str(root), git=git)
+                              sub=source.relative_to(root).as_posix() if source != root else "",
+                              branch=(branch or _default_branch(root)) if detached else current, base=base,
+                              upstream=upstream, local=True, local_root=str(root), git=git, detached=detached)
         self.sessions[session_id] = session
         self._save(session)
         return session
@@ -3356,7 +3372,7 @@ class Editor:
         patch = _git(session.root, "diff", "--cached", session.base, *where)
         files = [{"status": line.split("\t")[0], "path": line.split("\t")[-1]} for line in names.splitlines() if line]
         ahead = _git(session.root, "rev-list", "--count", f"{session.base}..HEAD").strip()
-        return {"files": files, "patch": patch, "branch": session.branch, "base": session.base,
+        return {"files": files, "patch": patch, "branch": session.branch, "detached": session.detached, "base": session.base,
                 "local_commits": int(ahead or 0)}
 
     def _push_env(self, credentials: dict) -> dict:

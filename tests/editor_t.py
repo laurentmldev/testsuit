@@ -801,11 +801,23 @@ def test_in_place_session(repos, tmp_path):
     editor.close(session.id)
     assert (folder / "setup" / "globals.yml").is_file()                     # closing keeps the folder
 
-    # the lab, checked out on a tag: edited in place, not pushed from a detached HEAD
+    # the lab, checked out on a tag: edited in place, pushed from its detached HEAD to the upstream default branch
     lab = editor.open("lab", local=True)
-    assert lab.branch == "" and editor.kind(lab, "inventory.yml") == "inventory"
-    with pytest.raises(SequencerError, match="detached"):
-        editor.push(lab, "x", "Ada", "ada@example.com", credentials=CREDS)
+    assert lab.detached and lab.branch == "main" and editor.kind(lab, "inventory.yml") == "inventory"
+    assert editor.open("lab", "other", local=True).id == lab.id            # detached: no branch to contradict
+    inventory = repos.root / "lab-clone" / "lab" / "inventory.yml"
+    inventory.write_text(inventory.read_text() + "# by hand\n")
+    assert editor.diff(lab)["detached"]
+    refused = editor.push(lab, "Note", "Ada", "ada@example.com", credentials=CREDS)   # main moved past v1
+    assert not refused["ok"] and "rebase" in refused["hint"]
+    assert editor.rebase(lab)["ok"]
+    pushed = editor.push(lab, "Note", "Ada", "ada@example.com", tag="v2", credentials=CREDS)
+    assert pushed["ok"] and pushed["branch"] == "main"
+    assert "# by hand" in repos.upstream_file("lab/inventory.yml")
+    assert git(repos.root / "upstream.git", "rev-parse", "v2^{commit}").strip() == pushed["commit"]
+    clone = repos.root / "lab-clone"
+    assert git(clone, "status", "--porcelain") == "" and git(clone, "describe", "--tags", "--exact-match").strip() == "v2"
+    assert subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=clone).returncode   # still detached
 
     # a folder outside git: files only
     plain = tmp_path / "plain"

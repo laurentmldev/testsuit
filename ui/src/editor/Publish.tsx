@@ -137,6 +137,9 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
       </>
     }>
       {error && <pre className="error-box">{error}</pre>}
+      {(diff?.detached ?? info.detached) && (
+        <p className="muted">The {info.kind === "lab" ? "lab folder" : "folder"} is on no branch (detached HEAD, such as a checkout of a tag): the commit is made on top of <code>{(diff?.base || info.base || "").slice(0, 10)}</code> and pushed to the branch <strong>{diff?.branch || info.branch}</strong>. The folder stays on the pushed commit.</p>
+      )}
       {diff && !diff.files.length && <p>No change since the session started: nothing to push.</p>}
       {diff && diff.files.length > 0 && (
         <div className="publish">
