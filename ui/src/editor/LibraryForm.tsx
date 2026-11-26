@@ -482,6 +482,29 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, fo
 
 const STATES = ["running", "idle", "configured", "broken", "offline", "unknown"];
 
+/** The kind of one check of a status probe: `run` (a shell command, or `{run: ...}`), `http`, or a plugin probe. */
+function checkKind(c: any): string {
+  if (c === undefined || c === null || typeof c !== "object") return "run";
+  if ("run" in c) return "run";
+  if ("http" in c) return "http";
+  return Object.keys(c).find((k) => k !== "timeout" && k !== "comments") || "run";
+}
+
+/** The checks of a status probe, as a list: its commands and requests (`run: [...]`), or its one command or request. */
+function probeChecks(probe: any): any[] {
+  if (!probe) return [""];
+  if (Array.isArray(probe.run)) return probe.run.length ? probe.run : [""];
+  if ("http" in probe) return [{ http: probe.http }];
+  if ("run" in probe) return [probe.run ?? ""];
+  const plugin = Object.keys(probe).find((k) => k !== "timeout");
+  return plugin ? [{ [plugin]: probe[plugin] }] : [""];
+}
+
+/** A status probe in a few words: its command, its request, or its checks. */
+function probeSummary(probe: any): string {
+  return probeChecks(probe).map((c) => (typeof c === "string" ? c : checkKind(c) === "run" ? c.run : summary(c))).join("; ");
+}
+
 export function StatusEditor({ value, onChange, inherited }: { value: any; onChange: (v: any) => void; inherited?: any }) {
   const { schemas, ctx } = useSession();
   const help = (p: string[]) => helpText(schemas.library, [...TP, "status", ...p]);
@@ -492,45 +515,68 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
     if (v === undefined || v === "") delete next[k];
     onChange(next);
   };
-  // one command, or several checks (run: [...]) that all run
-  const isHttp = !!s?.probe && "http" in s.probe;
-  const runs: string[] = Array.isArray(s?.probe?.run) ? s.probe.run : [s?.probe?.run ?? ""];
-  const setRuns = (list: string[]) => set("probe", { ...s.probe, run: list.length > 1 ? list : list[0] ?? "" });
+  // one check, or several (run: [...]) that all run, each a shell command or an HTTP request (or a plugin probe)
+  const checks = probeChecks(s?.probe);
+  const setChecks = (list: any[]) => {
+    const { run: _r, http: _h, ...rest } = s.probe || {};
+    const one = list.length === 1 ? list[0] : undefined;
+    if (one !== undefined && typeof one === "string") set("probe", { ...rest, run: one });
+    else if (one !== undefined && checkKind(one) === "http" && !("timeout" in one)) set("probe", { ...rest, http: one.http });
+    else set("probe", { ...rest, run: list });
+  };
+  const setCheck = (i: number, v: any) => setChecks(checks.map((x, j) => (j === i ? v : x)));
   return (
     <Section title="State monitoring (status)" help={help([])} collapsed={!s}>
       {!s && (
         <p>
-          {inherited ? <>Inherited from <code>{inherited.from}</code>: {inherited.spec.builtin ? `built-in ${inherited.spec.builtin}` : summary(inherited.spec.probe)}. </> : "No probe: the state stays unknown. "}
+          {inherited ? <>Inherited from <code>{inherited.from}</code>: {inherited.spec.builtin ? `built-in ${inherited.spec.builtin}` : probeSummary(inherited.spec.probe)}. </> : "No probe: the state stays unknown. "}
           <button className="small" onClick={() => onChange({ probe: { run: "" }, states: { running: { regex: "^active" }, idle: { regex: "^inactive" } } })}>Define a probe</button>
         </p>
       )}
       {!s && inherited && <CommentsNote text={inherited.spec?.comments} />}
       {s && (
         <>
-          <Field label="Probe with" help={help(["probe"])}>
-            <Choices value={isHttp ? "http" : "run"} onChange={(k) => {
-              if (!k || k === (isHttp ? "http" : "run")) return;
-              set("probe", k === "http" ? { http: { url: "http://{{ component.host }}:8080/health" } } : { run: "" });
-            }} choices={[{ value: "run", label: "shell command(s)", description: "on the component, or the component it goes through" },
-              { value: "http", label: "HTTP request", description: "a REST API call; the states match its answer" }]} />
+          <Field label={checks.length > 1 ? "Probe checks" : "Probe"} help={help(["probe"])} wide
+            hint={checks.length > 1 ? "each check runs and is OK when it exits with 0 (a request: when its answer is the expected one); the rules match their outputs, one after the other, and the exit rules the first non-zero status (a request: its HTTP status)"
+              : "a shell command (over several lines if long), or an HTTP request (a REST API call: the states match its answer); add checks to probe several items of any kind, each with its own result"}>
+            {checks.map((c, i) => {
+              const kind = checkKind(c);
+              return (
+                <div key={i} className="probe-check-row">
+                  <div className="inline-fields probe-check">
+                    {checks.length > 1 && <span className="muted small">{i + 1}.</span>}
+                    {kind === "run" || kind === "http" ? (
+                      <select value={kind} title="What this check does" onChange={(e) => setCheck(i, e.target.value === "http" ? { http: { url: "http://{{ component.host }}:8080/health" } } : "")}>
+                        <option value="run">shell command</option>
+                        <option value="http">HTTP request</option>
+                      </select>
+                    ) : <span className="muted small">probe <code>{kind}</code></span>}
+                    {kind === "run" && <Text keys mono multiline value={typeof c === "string" ? c : c.run} onChange={(v) => setCheck(i, typeof c === "string" ? v : { ...c, run: v })} placeholder={i ? "ping -c 1 -W 1 {{ component.host }}" : "systemctl is-active my-service"} />}
+                    {kind === "http" && <span className="muted small probe-check-what">{c.http?.url ? `${String(c.http.method || "GET").toUpperCase()} ${c.http.url}` : ""}</span>}
+                    {kind !== "run" && kind !== "http" && <code className="small probe-check-what">{JSON.stringify(c[kind])}</code>}
+                    {checks.length > 1 && <button className="icon" title="Remove this check" onClick={() => setChecks(checks.filter((_, j) => j !== i))}>×</button>}
+                  </div>
+                  {kind === "http" && (
+                    <div className="sub-form"><HttpEditor value={c.http} onChange={(v) => setCheck(i, { ...c, http: v })} help={(f) => help(["probe", "http", ...(f ? [f] : [])])} /></div>
+                  )}
+                  {checks.length > 1 && kind === "run" && (
+                    <div className="inline-fields probe-check-timeout"><span className="muted small">timeout</span>
+                      <Text value={typeof c === "string" ? undefined : c.timeout} placeholder={s.probe?.timeout || "15s"} onChange={(v) => {
+                        const { timeout: _t, ...o } = typeof c === "string" ? { run: c } : c;
+                        setCheck(i, v ? { ...o, timeout: v } : Object.keys(o).length === 1 ? o.run : o);
+                      }} /></div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="add-row">
+              <button className="small" onClick={() => setChecks([...checks, ""])}>+ Add a shell check</button>
+              <button className="small" onClick={() => setChecks([...checks, { http: { url: "http://{{ component.host }}:8080/health" } }])}>+ Add an HTTP check</button>
+            </div>
           </Field>
-          {isHttp ? (
-            <Field label="Request" help={help(["probe", "http"])} wide hint="sent from the sequencer host, or with curl from the component it goes through; the exit rules see 0 when the answer is the expected one, else the HTTP status">
-              <div className="sub-form"><HttpEditor value={s.probe.http} onChange={(v) => set("probe", { ...s.probe, http: v })} help={(f) => help(["probe", "http", ...(f ? [f] : [])])} /></div>
-            </Field>
-          ) : (
-          <Field label={runs.length > 1 ? "Probe commands" : "Probe command"} help={help(["probe"])} wide
-            hint={runs.length > 1 ? "each check runs and is OK when it exits with 0; the rules match their outputs, one after the other" : "shell command, over several lines if long; + Add a check probes several items, each with its own result"}>
-            {runs.map((r, i) => (
-              <div key={i} className="inline-fields probe-check">
-                {runs.length > 1 && <span className="muted small">{i + 1}.</span>}
-                <Text keys mono multiline value={r} onChange={(v) => setRuns(runs.map((x, j) => (j === i ? v : x)))} placeholder={i ? "ping -c 1 -W 1 {{ component.host }}" : "systemctl is-active my-service"} />
-                {runs.length > 1 && <button className="icon" title="Remove this check" onClick={() => setRuns(runs.filter((_, j) => j !== i))}>×</button>}
-              </div>
-            ))}
-            <button className="small" onClick={() => setRuns([...runs, ""])}>+ Add a check</button>
+          <Field label="Timeout" help={help(["probe", "timeout"])}>
+            <Text value={s.probe?.timeout} onChange={(v) => { const { timeout: _t, ...p } = s.probe || {}; set("probe", v ? { ...p, timeout: v } : p); }} placeholder={checks.length > 1 ? "each check: 15s (a request: 5s)" : checkKind(checks[0]) === "http" ? "5s" : "15s"} />
           </Field>
-          )}
           <Field label="Run it through" help={help(["via"])}
             hint={s.via ? <>runs on <code>{s.via}</code>; use <code>{"{{ component.host }}"}</code> for the component probed, <code>{"{{ via.host }}"}</code> for <code>{s.via}</code></> : "empty: on the component itself"}>
             <Combo value={s.via} onChange={(v) => set("via", v)} choices={viaChoices(ctx)} placeholder="stage_server" mono />

@@ -249,6 +249,12 @@ STATE_HELP = {"offline": "unreachable", "idle": "reachable, nothing running", "c
               "running": "started", "broken": "reachable but faulty: not used for new runs",
               "unknown": "no probe can tell"}
 
+PROBE_CHECK = h(
+    "One check of a status probe's list: `{run: <shell command>}`, `{http: <request>}` or a plugin state probe, "
+    "with its own `timeout` if needed.", type="object",
+    properties={"run": h("Shell command: OK when it exits with 0.", type="string"), "http": HTTP, "timeout": DURATION},
+    defaultSnippets=[{"label": "HTTP request", "body": {"http": {"url": "${1:http://{{ component.host }}:8080/health}"}}},
+                     {"label": "shell command", "body": {"run": "${1:systemctl is-active my-service}"}}])
 STATUS = h(
     "How the state monitor finds the component's state (section 7.5): a `probe` command whose output and exit "
     "status are matched against `states`, first match wins. `interval`: time between probes (default 30 s, "
@@ -256,15 +262,19 @@ STATUS = h(
     type="object",
     properties={
         "probe": h("The probe: `{run: <shell command>}`, `{http: <request>}` (its states match the answer's body; "
-                   "`exit` is 0 when the answer is the expected one, else the HTTP status), or a plugin state probe.",
+                   "`exit` is 0 when the answer is the expected one, else the HTTP status), a plugin state probe, or "
+                   "`{run: [...]}`: several checks of any of these kinds, mixed (a shell command and a REST call).",
                    type="object", properties={"run": h("Shell command run on the component (locally with "
                                                        "`transport: local`, on the `via` component with `via`). "
-                                                       "A list of commands: several checks, each run whatever the "
-                                                       "others gave and OK when it exits with 0; the rules match "
-                                                       "their outputs one after the other, `exit` rules the first "
-                                                       "non-zero exit status, each check in a shell of its own. "
-                                                       + STRICT_NOTE,
-                                                       type=["string", "array"], items={"type": "string"}),
+                                                       "A list: several checks, each run whatever the others gave, "
+                                                       "of any kind: a shell command (each in a shell of its own, OK "
+                                                       "when it exits with 0), `{http: <request>}` (OK when its answer "
+                                                       "is the expected one), a plugin state probe, each with its own "
+                                                       "`timeout` if needed. The rules match their outputs (a request: "
+                                                       "its body) one after the other, `exit` rules the first non-zero "
+                                                       "exit status (a request: its HTTP status). " + STRICT_NOTE,
+                                                       type=["string", "array"],
+                                                       items={"anyOf": [{"type": "string"}, PROBE_CHECK]}),
                                               "http": HTTP, "timeout": DURATION}),
         "states": h("Rules giving a state from the probe result, first match wins: `{regex: ...}` on the output, "
                     "or `{exit: 0 | nonzero}`.", type="object",
