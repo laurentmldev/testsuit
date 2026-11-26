@@ -1463,6 +1463,39 @@ def test_manual_commands_do_not_wait_for_a_component_that_does_not_answer(tmp_pa
     assert "error" in add["segments"][1]
 
 
+def test_manual_commands_through_via_do_not_reach_the_component(tmp_path, no_git):
+    """A component whose run commands all go through another component (via) is not reached itself by the
+    Commands dialog: no lookup of its remote root, no note, and a signal reaches only what its via runs."""
+    bench = Bench(tmp_path, stages=1)
+    types = yaml.safe_load((tmp_path / "lab" / "classes" / "bench.yml").read_text())
+    commands = types["component_classes"]["counter_host"]["commands"]
+    for spec in commands.values():
+        if isinstance(spec, dict) and "run" in spec:
+            spec["via"] = "seq_host"
+    write(tmp_path / "lab" / "classes" / "bench.yml", yaml.safe_dump(types))
+
+    async def main():
+        seq = bench.sequencer()
+        seq.monitor.on_idle = None
+        transport = seq.transport_for("counter_1")
+        lookups = []
+
+        async def unreachable():
+            lookups.append(1)
+            raise AssertionError("the component itself is reached")
+        transport.resolve_root = unreachable
+        transport.alive_in = unreachable
+        seq.set_flag("counter_1", "maintenance", True)
+        info = await seq.manual_commands("counter_1")
+        stop = next((c["name"] for c in info["commands"] if c["kind"] in ("signal", "builtin kill")), None)
+        stopped = await seq.manual_command("counter_1", stop) if stop else None
+        await seq.close()
+        return info, stopped, lookups
+    info, stopped, lookups = asyncio.run(main())
+    assert not lookups and info["root_note"] is None
+    assert stopped is None or stopped["ok"], stopped
+
+
 def test_manual_command(tmp_path, no_git):
     """In maintenance, a component's run and signal commands can be run by hand; not otherwise."""
     from testsuit.sequencer.util import SequencerError
