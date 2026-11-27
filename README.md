@@ -20,7 +20,7 @@ Optional features are installed as extras:
 | `plotly`   | plotly figures updated in place in Jupyter   |
 | `jupyter`  | notebook GUIs (`jupytertools`)               |
 | `influxdb` | InfluxDB readers and `data2db` targets       |
-| `editor`   | the criteria editor, exploit runs and plots of data in the browser (`mxp webui`) |
+| `editor`   | the criteria editor, exploit runs, plots of data and parameter extraction to HDF5 (Extract tab) in the browser (`mxp webui`) |
 | `sequencer`| the test sequencer `tsq`/`tsqd` and its web UI, with `editor` |
 | `test`     | what the test suite needs                    |
 | `dev`      | `test` plus build and lint tools             |
