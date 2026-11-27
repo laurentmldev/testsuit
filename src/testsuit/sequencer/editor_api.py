@@ -477,7 +477,9 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
 
     def plot_allowed(path: str) -> Path:
         p = Path(os.path.expanduser(str(path))).resolve()
-        return p if p.is_relative_to(extracted) else exploit_runs().allowed(path)
+        if p.is_relative_to(extracted) or p.is_relative_to(extracts.connections):    # the Extract tab's databases
+            return p
+        return exploit_runs().allowed(path)
 
     plots = PlotData(plot_allowed)
     app.include_router(plot_routes(lambda: plots), prefix="/plot")

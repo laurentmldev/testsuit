@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { get, post, url } from "../api";
 import { PathList, PathPicker, type Info, type Root } from "../exploit/ExploitPage";
+import { Dialog } from "../fields";
 import { classes, notify } from "../util";
 
 interface Sources { sources: { label: string; path: string }[]; fields: string[]; total: number; truncated: boolean }
@@ -48,6 +49,7 @@ export function ExtractPage() {
   const [output, setOutput] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const [database, setDatabase] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);      // set: the server decides where files are written (tsqd)
   const roots: Root[] = info?.roots || [];
 
@@ -84,7 +86,8 @@ export function ExtractPage() {
       <aside className="plot-side">
         <section className="card plot-section">
           <div className="card-head"><strong>1. Input</strong><span className="muted small">files or folders, any format</span>
-            <span style={{ flex: 1 }} /><button className="small" disabled={running} onClick={() => setPicker(true)}>Browse…</button></div>
+            <span style={{ flex: 1 }} /><button className="small" disabled={running} onClick={() => setPicker(true)}>File…</button>
+            <button className="small" disabled={running} onClick={() => setDatabase(true)} title="Read a database: its connection is written to a temporary file the data loaders read">Database…</button></div>
           <PathList paths={sources} roots={roots} onRemove={(p) => setSources((s) => s.filter((x) => x !== p))}
             empty="Pick recordings: TDMS, MDF, CSV, HDF5, DXD… or a folder of them." />
           {opening && <p className="muted small">Opening…</p>}
@@ -132,9 +135,45 @@ export function ExtractPage() {
           )}
         </div>
       </section>
+      {database && <DatabaseDialog onClose={() => setDatabase(false)}
+        onAdd={(p) => setSources((s) => (s.includes(p) ? s : [...s, p]))} />}
       {picker && <PathPicker title="Pick the input (files or folders)" pick="any" roots={roots}
         start={roots.find((r) => r.kind === "data")?.path || null}
         onPick={(p) => setSources((s) => [...s, ...p.filter((x) => !s.includes(x))])} onClose={() => setPicker(false)} />}
     </div>
+  );
+}
+
+/** The access to a database, written to a temporary file its data loader reads (route /extract/database). */
+function DatabaseDialog({ onAdd, onClose }: { onAdd: (path: string) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ type: "influxdbV3", host: "http://localhost:8181", token: "", org: "", database: "", table: "*" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const add = async () => {
+    setBusy(true); setError(null);
+    try { onAdd((await post<{ path: string }>("extract/database", form)).path); onClose(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const row = (k: keyof typeof form, label: string, hint = "", type = "text") => (
+    <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{label}
+      <input className="mono" type={type} value={form[k]} placeholder={hint} autoComplete="off" onChange={(e) => set(k, e.target.value)} /></label>
+  );
+  return (
+    <Dialog title="Database" onClose={onClose} footer={<>
+      <span style={{ flex: 1 }} />
+      <button className="primary" disabled={busy || !form.host || !form.org || !form.database} onClick={add}>Add</button>
+    </>}>
+      <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>Type
+        <select value={form.type} onChange={(e) => set("type", e.target.value)}><option value="influxdbV3">InfluxDB 3</option></select></label>
+      {row("host", "Host", "http://localhost:8181")}
+      {row("token", "Token", "", "password")}
+      {row("org", "Organization")}
+      {row("database", "Database")}
+      {row("table", "Table", "* for all (a regex)")}
+      <p className="muted small">Written to a temporary file (readable by you only) that the data loader reads, removed when the server stops.</p>
+      {error && <div className="banner error">{error}</div>}
+    </Dialog>
   );
 }
