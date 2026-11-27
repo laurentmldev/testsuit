@@ -16,16 +16,17 @@
 // testsuit.exploit.editor.extract), with a progress bar. The data are listed by the Plot routes (/plot/sources).
 // CSV output and other sources of parameters (an InfluxDB query, as a pseudo-file) are not there yet.
 import { useEffect, useMemo, useState } from "react";
-import { get, post } from "../api";
+import { get, post, url } from "../api";
 import { PathList, PathPicker, type Info, type Root } from "../exploit/ExploitPage";
 import { classes, notify } from "../util";
 
 interface Sources { sources: { label: string; path: string }[]; fields: string[]; total: number; truncated: boolean }
-interface Job { id: string; state: "running" | "done" | "failed"; phase: string; done: number; total: number; output: string; error: string | null }
+interface Job { id: string; state: "running" | "done" | "failed"; phase: string; done: number; total: number; output: string; size: number | null; error: string | null }
 
 const MAX_LISTED = 500;
 const paramOf = (f: string) => (f.includes("::") ? f.slice(f.indexOf("::") + 2) : f);
 const count = (n: number) => n.toLocaleString("en-US");
+const bytes = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : n < 1 << 30 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / (1 << 30)).toFixed(2)} GB`);
 
 function matcher(filter: string): (field: string) => boolean {
   const f = filter.trim();
@@ -123,7 +124,7 @@ export function ExtractPage() {
             <div style={{ marginTop: 10 }}>
               <progress value={percent} max={100} style={{ width: "100%" }} />
               <div className="small muted">{job.state === "running" ? `${percent}% · ${job.phase}` : job.state === "done" ? `Done: ${count(job.total)} parameters written to` : "Failed"}
-                {job.state === "done" && <> <code>{job.output}</code></>}</div>
+                {job.state === "done" && <> <code>{job.output}</code> ({bytes(job.size ?? 0)}) · <a href={url(`extract/${job.id}/download`)} download>Download</a></>}</div>
               {job.error && <div className="banner error">{job.error}</div>}
             </div>
           )}
