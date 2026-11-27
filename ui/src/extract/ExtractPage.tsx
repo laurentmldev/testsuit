@@ -48,15 +48,17 @@ export function ExtractPage() {
   const [output, setOutput] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const [folder, setFolder] = useState<string | null>(null);      // set: the server decides where files are written (tsqd)
   const roots: Root[] = info?.roots || [];
 
   useEffect(() => { get<Info>("exploit").then(setInfo).catch(() => setInfo(null)); }, []);
+  useEffect(() => { get<{ folder: string | null }>("extract/info").then((i) => setFolder(i.folder)).catch(() => undefined); }, []);
   useEffect(() => {
     setFound(null); setError(null); setTicked(new Set());
     if (!sources.length) return;
     setOpening(true);
     post<Sources>("plot/sources", { paths: sources }).then(setFound).catch((e) => setError(e.message)).finally(() => setOpening(false));
-    if (!output) setOutput(sources[0].replace(/[\\/]+$/, "").replace(/\.[^./\\]*$/, "") + "_params.h5");
+    if (!output) setOutput(folder ? sources[0].split(/[\\/]/).filter(Boolean).pop()!.replace(/\.[^.]*$/, "") + "_params.h5" : sources[0].replace(/[\\/]+$/, "").replace(/\.[^./\\]*$/, "") + "_params.h5");
   }, [sources]);
 
   const match = useMemo(() => matcher(filter), [filter]);
@@ -114,7 +116,7 @@ export function ExtractPage() {
       <section className="plot-main">
         <div className="card plot-section">
           <div className="card-head"><strong>3. Extract to HDF5</strong></div>
-          <label className="small muted">Output file</label>
+          <label className="small muted">{folder ? `Output file name (kept on the server in ${folder}; download it once done)` : "Output file"}</label>
           <input className="mono" value={output} onChange={(e) => setOutput(e.target.value)} disabled={running} placeholder="/path/to/params.h5" />
           <label className="small"><input type="checkbox" checked={overwrite} disabled={running} onChange={(e) => setOverwrite(e.target.checked)} /> Overwrite if it exists</label>
           <div className="plot-field-actions">

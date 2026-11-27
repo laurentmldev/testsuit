@@ -482,6 +482,12 @@ def add_editor_routes(app: FastAPI, seq) -> Editor:
     plots = PlotData(plot_allowed)
     app.include_router(plot_routes(lambda: plots), prefix="/plot")
 
+    # the Extract page: parameters of the same data written to HDF5 files in <root>/extract, downloaded from there
+    from testsuit.exploit.editor.extract import ExtractJobs
+    from testsuit.exploit.editor.routes import extract_routes
+    extracts = ExtractJobs(plots, seq.config.root / "extract")
+    app.include_router(extract_routes(lambda: extracts), prefix="/extract")
+
     @app.get("/plot/runs/{run_id}/{path:path}")
     async def run_data_file(run_id: str, path: str):
         """A file of a run (its Files tab) the Plot page can open: {path (on this host), format, fields}; 404
