@@ -21,13 +21,14 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.datatools.DataFileMgrs.ADatabaseFileMgr import ADatabaseFileMgr
 
 import os
 import re
 
 from testsuit.credentials import resolve_secret
 
-class InfluxDbV3FileMgr(AFileMgr):
+class InfluxDbV3FileMgr(ADatabaseFileMgr):
     """Uses a YML description as a pseudo data file to access DB contents."""
     def __init__(self, filename: str, fileIdx: int) -> None:
         
@@ -127,6 +128,32 @@ class InfluxDbV3FileMgr(AFileMgr):
         except Exception:
             pass
         
+    def listDatabases(self) -> list[str]:
+        """The databases of the server (its HTTP API, which needs only the host and the token)."""
+        if not self._host:
+            raise Exception("no 'host' in the InfluxDB V3 description")
+        import requests
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        r = requests.get(self._host.rstrip("/") + "/api/v3/configure/database", params={"format": "json"},
+                         headers=headers, timeout=10)
+        r.raise_for_status()
+        names = []
+        for entry in r.json():
+            # {"iox::database": "name"} (InfluxDB 3 Core), or a plain name, or {"name": ...}
+            value = entry if isinstance(entry, str) else entry.get("iox::database") or entry.get("name") or ""
+            if value and not value.startswith("_"):     # _internal: the server's own
+                names.append(str(value))
+        return sorted(set(names))
+
+    def listTables(self) -> list[str]:
+        """The tables of the database, all of them."""
+        self._connect()
+        result = self._query_to_dataframe(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'iox' AND table_type = 'BASE TABLE'")
+        if result is None or "table_name" not in result.columns:
+            return []
+        return sorted(str(t) for t in result["table_name"])
+
     def _get_matching_tables(self) -> list[str]:
         """
         Resolve table name with wildcard support.
