@@ -132,7 +132,7 @@ def _path_extract(data: Any, steps: list[tuple[str, Any]]) -> Any:
 
 def _jq_program(expr: str):
     """The jq expression compiled; ValueError with jq's message when it is not one."""
-    import jq                   # a core dependency
+    import jq                   # the sequencer extra: pip install testsuit[sequencer]
     try:
         return jq.compile(expr)
     except ValueError as e:

@@ -117,8 +117,8 @@ _cache_lock = threading.Lock()
 def _jq(expr: str, where: str, args: Mapping[str, Any] | None = None):
     try:
         import jq
-    except ImportError as e:            # a core dependency: only a broken install lacks it
-        raise ReqError("the rest backend needs the 'jq' Python package (pip install jq)") from e
+    except ImportError as e:            # the sequencer extra: the Anaconda app does not have it
+        raise ReqError("the rest backend needs the 'jq' Python package (pip install jq, or testsuit[sequencer])") from e
     try:
         return jq.compile(str(expr), args=dict(args or {}))
     except ValueError as e:
