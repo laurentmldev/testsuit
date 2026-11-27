@@ -29,6 +29,7 @@ import { ConfigPage } from "./pages/Config";
 import { EditorHome } from "./editor/EditorHome";
 import { DatapacksPage } from "./pages/Datapacks";
 import { ExploitPage } from "./exploit/ExploitPage";
+import { ExtractPage } from "./extract/ExtractPage";
 import { PlotPage } from "./plot/PlotPage";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
@@ -92,6 +93,7 @@ function RunsSubtabs({ page }: { page: string }) {
 const EXPLOIT_SUBTABS: [string, string, string][] = [
   ["exploit", "exploit_runner", "Run exploit_runner on scenarios and the data of runs, open its reports"],
   ["exploit/plot", "Plot", "Plot the parameters of the data of runs (or of the workspaces) by hand"],
+  ["exploit/extract", "Extract", "Extract parameters of the data of runs (or of the workspaces) to an HDF5 file"],
 ];
 
 function ExploitSubtabs({ sub }: { sub: string }) {
@@ -127,7 +129,7 @@ function App() {
   const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
   const page = route.parts[0] || "";   // "": the Runs tab, which picks its subtab (RunsHome)
   const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
-  const plotting = page === "exploit" && route.parts[1] === "plot";                  // the Plot page fills the window
+  const plotting = page === "exploit" && (route.parts[1] === "plot" || route.parts[1] === "extract");                  // the Plot page fills the window
   useEffect(() => { setAppName(title); }, [title]);
   const nav = [
     ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
@@ -145,7 +147,7 @@ function App() {
   else if (page === "campaigns" && route.parts[1]) content = <CampaignRunPage id={route.parts[1]} />;
   else if (page === "lab") content = <LabPage editor={editor} />;
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
-  else if (plotting) content = <PlotPage />;
+  else if (plotting) content = route.parts[1] === "extract" ? <ExtractPage /> : <PlotPage />;
   else if (page === "exploit") content = <ExploitPage />;
   else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
