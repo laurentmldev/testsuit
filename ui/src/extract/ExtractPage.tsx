@@ -156,6 +156,24 @@ function DatabaseDialog({ onAdd, onClose }: { onAdd: (path: string) => void; onC
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
+  // lists of the server (databases, tables) behind a field: type to search (the browser filters the list)
+  const [lists, setLists] = useState<{ databases: string[]; tables: string[] }>({ databases: [], tables: [] });
+  const [listing, setListing] = useState<string | null>(null);
+  const load = async (what: "databases" | "tables") => {
+    setListing(what); setError(null);
+    try { const r = await post<{ items: string[] }>("extract/database/list", { ...form, what }); setLists((l) => ({ ...l, [what]: r.items })); }
+    catch (e: any) { setError(e.message); }
+    finally { setListing(null); }
+  };
+  const choice = (k: "database" | "table", label: string, what: "databases" | "tables", hint = "") => (
+    <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{label}
+      <span style={{ display: "flex", gap: 6 }}>
+        <input className="mono" style={{ flex: 1 }} list={`extract-${what}`} value={form[k]} placeholder={hint} autoComplete="off" onChange={(e) => set(k, e.target.value)} />
+        <button type="button" className="small" disabled={listing !== null || !form.host || (what === "tables" && !form.database)} onClick={() => load(what)}
+          title={`List the ${what} of the server, then type to search`}>{listing === what ? "…" : `List (${lists[what].length || "?"})`}</button>
+      </span>
+      <datalist id={`extract-${what}`}>{lists[what].map((n) => <option key={n} value={n} />)}</datalist></label>
+  );
   const row = (k: keyof typeof form, label: string, hint = "", type = "text") => (
     <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{label}
       <input className="mono" type={type} value={form[k]} placeholder={hint} autoComplete="off" onChange={(e) => set(k, e.target.value)} /></label>
@@ -170,8 +188,8 @@ function DatabaseDialog({ onAdd, onClose }: { onAdd: (path: string) => void; onC
       {row("host", "Host", "http://localhost:8181")}
       {row("token", "Token", "", "password")}
       {row("org", "Organization")}
-      {row("database", "Database")}
-      {row("table", "Table", "* for all (a regex)")}
+      {choice("database", "Database", "databases")}
+      {choice("table", "Table", "tables", "* for all (a regex)")}
       <p className="muted small">Written to a temporary file (readable by you only) that the data loader reads, removed when the server stops.</p>
       {error && <div className="banner error">{error}</div>}
     </Dialog>
