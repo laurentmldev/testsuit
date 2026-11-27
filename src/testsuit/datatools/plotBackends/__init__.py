@@ -22,7 +22,7 @@ Built-in backends:
 
 - ``plotly`` (default): static figures are interactive by default (zoom, hover, 3D rotation in the HTML
   report, which then embeds plotly.js, ~2 MB), or SVG/PNG images with kaleido. FigureWidgets in Jupyter
-  need anywidget (``pip install testsuit[plotly]``)
+  need anywidget (installed with testsuit)
 - ``matplotlib``: static figures as SVG (or PNG)
 
 The backend of a plot is, by priority: the ``rendering_engine`` entry of its critConf (scenario YAML),
