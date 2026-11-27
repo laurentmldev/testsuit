@@ -13,19 +13,20 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -e .
 ```
 
-Optional features are installed as extras:
+The plotly widgets, the data file formats (InfluxDB, ClickHouse, TDMS, MDF) and the web UI (`mxp webui`) come with
+the default install. Optional features are installed as extras:
 
-| Extra      | Adds                                         |
-|------------|----------------------------------------------|
-| `plotly`   | plotly figures updated in place in Jupyter   |
-| `jupyter`  | notebook GUIs (`jupytertools`)               |
-| `influxdb` | InfluxDB readers and `data2db` targets       |
-| `editor`   | the criteria editor, exploit runs, plots of data and parameter extraction to HDF5 (Extract tab) in the browser (`mxp webui`) |
-| `sequencer`| the test sequencer `tsq`/`tsqd` and its web UI, with `editor` |
-| `test`     | what the test suite needs                    |
-| `dev`      | `test` plus build and lint tools             |
+| Extra          | Adds                                                                 |
+|----------------|----------------------------------------------------------------------|
+| `jupyter`      | notebook GUIs (`jupytertools`)                                       |
+| `dwdatareader` | DXD (Dewesoft) files                                                 |
+| `sequencer`    | the test sequencer `tsq`/`tsqd` and its web UI                       |
+| `test`         | what the test suite needs                                            |
+| `dev`          | `test` plus build and lint tools                                     |
 
-For example `pip install -e ".[plotly,jupyter]"`.
+`plotly`, `file_formats` and `editor` still exist as empty extras, so older install commands keep working.
+
+For example `pip install -e ".[jupyter,dwdatareader]"`.
 
 To use testsuit without cloning it, install straight from GitHub (add `@<tag>` to pin a version):
 
@@ -102,7 +103,7 @@ Figures (Data-Plot GUI, mexploit `plot*` checks, sequence timelines) are drawn b
 
 | Backend | Jupyter | mexploit / exploit_runner report |
 |---|---|---|
-| `plotly` (default) | plotly FigureWidget (with `pip install "testsuit[plotly]"`) | interactive figure (zoom, hover, 3D rotation), or `svg`/`png` with kaleido |
+| `plotly` (default) | plotly FigureWidget  | interactive figure (zoom, hover, 3D rotation), or `svg`/`png` with kaleido |
 | `matplotlib` | matplotlib figure | SVG (`figure_format: png` also works) |
 
 Pick it per check with `rendering_engine: matplotlib` in the scenario YAML, per run with `mxp --plot-backend matplotlib` / `exploit_runner --plot-backend matplotlib` (or the `PLOT_RENDERING_BACKEND` environment variable), and in the Data-Plot GUI with its Backend menu. The figure format works the same way: `figure_format`, `--figure-format`, `PLOT_FIGURE_FORMAT`.

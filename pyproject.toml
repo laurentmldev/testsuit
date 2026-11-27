@@ -38,21 +38,34 @@ dependencies = [
     "python-dateutil>=2.8",
     "pyarrow>=15",
     "Jinja2>=3.1",
-    "pydantic>=2.5"
+    "pydantic>=2.5",
+    # plotly figures updated in place in Jupyter (FigureWidget)
+    "anywidget>=0.9",
+    # the data file formats (InfluxDB, ClickHouse, TDMS, MDF); DXD (dwdatareader) is an extra
+    "influxdb-client>=1.40",
+    "influxdb3-python>=0.10",
+    "clickhouse-driver>=0.2",
+    "npTDMS>=1.10",
+    "asammdf>=8.7",
+    # the criteria editor and web UI (mxp webui, mxp edit)
+    "fastapi>=0.110",
+    "uvicorn>=0.29"
 ]
 
 [project.optional-dependencies]
-# plotly figures updated in place in Jupyter (FigureWidget); plotly itself is a core dependency
-plotly = ["anywidget>=0.9"]
 # nbclassic: the GUIs drive cells through the classic notebook JavaScript API
 jupyter = ["ipython>=8", "ipywidgets>=8", "nbclassic>=1.0"]
-file_formats = ["influxdb-client>=1.40", "influxdb3-python>=0.10", "clickhouse-driver>=0.2","dwdatareader>=1.3","npTDMS>=1.10","asammdf>=8.7"]
+# DXD (Dewesoft) files: kept apart, its library is not available everywhere
+dwdatareader = ["dwdatareader>=1.3"]
+# plotly, file_formats and editor are core dependencies now: these extras stay empty, so that existing
+# "pip install testsuit[editor]" commands keep working
+plotly = []
+file_formats = []
+editor = []
 # what the test suite needs on top of the runtime deps: pip install -e ".[test]"
-test = ["npTDMS>=1.10", "testsuit[sequencer]"]
-# the criteria editor on its own (mxp edit): pip install "testsuit[editor]"
-editor = ["fastapi>=0.110", "uvicorn>=0.29"]
+test = ["testsuit[sequencer]"]
 # the test sequencer (tsq, tsqd), with the criteria editor in its Editor: pip install "testsuit[sequencer]"
-sequencer = ["asyncssh>=2.14", "testsuit[editor]", "python-multipart>=0.0.9", "jq>=1.6"]
+sequencer = ["asyncssh>=2.14", "python-multipart>=0.0.9", "jq>=1.6"]
 # contributor tooling: pip install -e ".[dev]"
 dev = ["testsuit[test]", "build>=1.3", "ruff>=0.6"]
 

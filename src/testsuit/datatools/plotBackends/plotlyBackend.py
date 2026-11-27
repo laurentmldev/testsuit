@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-"""plotly plot backend (pip install testsuit[plotly]).
+"""plotly plot backend (installed with testsuit).
 
 - interactive (Jupyter): figures are plotly FigureWidgets (with anywidget), updated in place
 - static (reports): by default the figure is saved as plotly JSON (<name>.plotly.json), drawn by plotly.js
