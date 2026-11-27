@@ -78,7 +78,6 @@ requirements:
     - pyarrow >=15
     - jinja2 >=3.1
     - pydantic >=2.5
-    - jq.py >=1.6  # the jq Python bindings (PyPI: jq): the rest requirements backend
     # the criteria editor (testsuit[editor]): the web UI of the app
     - fastapi >=0.110
     - uvicorn >=0.29
