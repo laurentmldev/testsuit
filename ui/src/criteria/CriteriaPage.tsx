@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { get } from "../api";
 import { ExploitPage } from "../exploit/ExploitPage";
+import { ExtractPage } from "../extract/ExtractPage";
 import { PlotPage } from "../plot/PlotPage";
 import { classes, navigate, setQuery, Toasts, type Route } from "../util";
 import { restAdapter, type Overview } from "./adapter";
@@ -57,8 +58,8 @@ export function SessionCriteriaPage({ sid, route }: { sid: string; route: Route 
 }
 
 /** The pages of `mxp webui`, in its bar. */
-type WebuiPage = "criteria" | "exploit" | "plot";
-const PAGE_NAMES: Record<WebuiPage, string> = { criteria: "Criteria", exploit: "Exploit", plot: "Plot" };
+type WebuiPage = "criteria" | "exploit" | "plot" | "extract";
+const PAGE_NAMES: Record<WebuiPage, string> = { criteria: "Criteria", exploit: "Exploit", plot: "Plot", extract: "Extract" };
 
 function WebuiNav({ page }: { page: WebuiPage }) {
   return (
@@ -66,13 +67,14 @@ function WebuiNav({ page }: { page: WebuiPage }) {
       <a href="#/criteria" className={classes(page === "criteria" && "active")}>Criteria</a>
       <a href="#/exploit" className={classes(page === "exploit" && "active")}>Exploit</a>
       <a href="#/plot" className={classes(page === "plot" && "active")} title="Plot the parameters of data files by hand">Plot</a>
+      <a href="#/extract" className={classes(page === "extract" && "active")} title="Extract parameters of data files to an HDF5 file">Extract</a>
     </nav>
   );
 }
 
 export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
   const adapter = useMemo(() => restAdapter("criteria", "local"), []);
-  const read = () => ({ page: (window.location.hash.startsWith("#/exploit") ? "exploit" : window.location.hash.startsWith("#/plot") ? "plot" : "criteria") as WebuiPage,
+  const read = () => ({ page: (window.location.hash.startsWith("#/exploit") ? "exploit" : window.location.hash.startsWith("#/plot") ? "plot" : window.location.hash.startsWith("#/extract") ? "extract" : "criteria") as WebuiPage,
     file: new URLSearchParams(window.location.hash.split("?")[1] || "").get("file") });
   const [where, setWhere] = useState(read);
   const [stopped, setStopped] = useState(false);
@@ -114,6 +116,15 @@ export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
           <span className="muted small">testsuit {mode.testsuit}</span>
         </div>
         <main><FolderPickerPage mode={mode} /></main>
+        <Toasts />
+      </div>
+    );
+  }
+  if (where.page === "extract") {
+    return (
+      <div className="app full standalone">
+        {head()}
+        <ExtractPage />
         <Toasts />
       </div>
     );
