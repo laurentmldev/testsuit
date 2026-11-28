@@ -116,7 +116,7 @@ python_files = ["*_t.py"]
 # GitLab Custom executor scripts and the sequencer documentation
 "testsuit.sequencer" = ["gitlab/*", "*.md"]
 # the web UI of the testsuit app (built from ui/: npm run build)
-"testsuit.app" = ["ui/*", "ui/assets/*"]
+"testsuit.app" = ["ui/*", "ui/assets/*", "logo.svg"]
 
 [tool.setuptools_scm]
 root = "."  # ".git" is in the parent directory

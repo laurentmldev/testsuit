@@ -306,6 +306,7 @@ def test_server_exploit_only_and_local_only_routes(tmp_path, home):
     with TestClient(app) as client:
         info = client.get("/app/info").json()
         assert info["modes"] == ["exploit"] and info["sequencer"] is None and info["stoppable"] is False
+        assert info["logo"] == "app/logo.svg" and client.get("/app/logo.svg").status_code == 200   # testsuit's icon
         assert client.get("/x/mode").json()["folder"] is None          # nothing remembered: the folder picker
         assert client.get("/seq/health").status_code == 404
         assert client.post("/app/stop").status_code == 400
@@ -379,3 +380,62 @@ def test_command_errors(tmp_path, home, capsys):
     (tmp_path / "testsuit.toml").write_text('modes = ["sequencer"]\n')
     assert cli.main(["--folder", str(tmp_path)]) == 2
     assert "exploit mode, which is off" in capsys.readouterr().err
+
+
+# ── behind a reverse proxy ───────────────────────────────────────────────
+
+def test_behind_a_reverse_proxy(tmp_path, home, fake_tsqd):
+    """ui.base_path (a proxy passing its sub-path on), exploit.remote, the event stream not buffered."""
+    from fastapi.testclient import TestClient
+
+    from testsuit.app.server import create_app
+    (tmp_path / "ui-config.toml").write_text(textwrap.dedent(f'''
+        modes = ["sequencer", "exploit"]
+        [ui]
+        base_path = "/testsuit/"
+        public_url = "https://lab.example.org/testsuit/"
+        trusted_proxies = ["127.0.0.1"]
+        [sequencer]
+        listen = "127.0.0.1:{free_port()}"
+    '''))
+    config = load_config(tmp_path / "ui-config.toml")
+    assert config.ui.base_path == "/testsuit" and config.public_url == "https://lab.example.org/testsuit"
+    assert config.local_url.endswith("/testsuit")
+    tsqd = tsqd_of(config, fake_tsqd, home / "tsqd.log")
+    tsqd.start()
+    try:
+        wait_for(lambda: tsqd.state == "running")
+        port = free_port()
+        server = serve(create_app(config, tsqd=tsqd, plugins=False), port)
+        url = f"http://127.0.0.1:{port}"
+        try:
+            get = lambda path, **kw: requests.get(url + path, allow_redirects=False, **kw)  # noqa: E731
+            assert get("/testsuit").headers["location"] == "/testsuit/ui/"
+            assert get("/testsuit/").headers["location"] == "ui/"
+            assert get("/other").headers["location"] == "/testsuit/ui/"
+            info = get("/testsuit/app/info").json()
+            assert info["url"] == "https://lab.example.org/testsuit" and info["available"] == ["sequencer", "exploit"]
+            assert get("/testsuit/x/mode").status_code == 200
+            assert get("/testsuit/x/mode", headers={"X-Forwarded-For": "10.1.2.3"}).status_code == 403
+            assert get("/testsuit/seq/health").json()["ok"] is True
+            with requests.get(f"{url}/testsuit/seq/events", stream=True, timeout=10) as r:
+                assert r.headers["x-accel-buffering"] == "no"
+        finally:
+            server.should_exit = True
+            server.thread.join(10)
+        # exploit.remote: the exploit mode through the (authenticating) proxy too
+        config.exploit.remote = True
+        with TestClient(create_app(config, tsqd=tsqd, plugins=False)) as client:
+            assert client.get("/testsuit/x/mode", headers={"X-Forwarded-For": "10.1.2.3"}).status_code == 200
+            assert client.get("/testsuit/app/info", headers={"Forwarded": "for=10.1.2.3"}).json()["available"] == ["sequencer", "exploit"]
+    finally:
+        tsqd.stop()
+    with pytest.raises(ConfigError, match="base_path"):
+        load_config_text(tmp_path, '[ui]\nbase_path = "/a?b"\n')
+    with pytest.raises(ConfigError, match="public_url"):
+        load_config_text(tmp_path, '[ui]\npublic_url = "lab/testsuit"\n')
+
+
+def load_config_text(tmp_path, text):
+    (tmp_path / "t.toml").write_text(text)
+    return load_config(tmp_path / "t.toml")

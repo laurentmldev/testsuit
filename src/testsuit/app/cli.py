@@ -177,7 +177,11 @@ def start(args) -> int:
             await app.state.close_streams()
             await super().shutdown(sockets)
 
-    server = Server(uvicorn.Config(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=10))
+    # behind a reverse proxy: the client address and scheme of its X-Forwarded-For and X-Forwarded-Proto, when it
+    # is one of ui.trusted_proxies
+    proxies = config.ui.trusted_proxies
+    server = Server(uvicorn.Config(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=10,
+                                   proxy_headers=bool(proxies), forwarded_allow_ips=",".join(proxies) or None))
 
     def announce() -> None:
         try:
@@ -186,7 +190,8 @@ def start(args) -> int:
                     return
                 time.sleep(0.1)
             step("listening")
-            say(f"testsuit ({', '.join(config.modes)}): {url}/ui/  (Ctrl+C or 'testsuit stop' to stop)")
+            public = f"  (behind its reverse proxy: {config.public_url}/ui/)" if config.ui.public_url else ""
+            say(f"testsuit ({', '.join(config.modes)}): {url}/ui/{public}  (Ctrl+C or 'testsuit stop' to stop)")
             if browser:
                 open_browser(f"{url}/ui/")
         except Exception as e:  # the server runs on: the log tells what went wrong
@@ -237,6 +242,8 @@ def status(args) -> int:
         print(f"testsuit is not running at {url}")
         return 1
     print(f"testsuit {info['testsuit']} running at {url}/ui/: {info['title']}")
+    if info.get("url") and info["url"] != url:
+        print(f"  public URL     {info['url']}/ui/")
     print(f"  configuration  {info.get('config') or 'none (defaults)'}")
     print(f"  modes          {', '.join(info['modes'])}")
     s = info.get("sequencer")

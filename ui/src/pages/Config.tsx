@@ -130,6 +130,7 @@ export function ConfigPage({ info, editor, refresh, onStopped }: {
           <span className="muted">the app: one web UI, the modes of <code>testsuit.toml</code> behind it</span></div>
         <Rows rows={[
           ["modes on", info.modes.join(", ") + (info.modes.length !== info.available.length ? ` (here: ${info.available.join(", ") || "none"}; the exploit mode only from the machine testsuit runs on)` : "")],
+          ["address", `${info.url}/ui/`],
           ["configuration file", info.config || "none: the defaults (the exploit mode alone)"],
           ["testsuit version", about.data?.testsuit],
           ["Python", about.data?.python],

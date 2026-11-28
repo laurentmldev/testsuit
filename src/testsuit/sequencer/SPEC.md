@@ -866,7 +866,11 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 | `modes` | `["exploit"]` | `sequencer`, `exploit`: at least one |
 | `title`, `logo` | `testsuit`, none | UI branding (a file or an http(s) URL) |
 | `ui.listen`, `ui.browser` | `127.0.0.1:8650`, `true` | the one port; open the browser at the start |
+| `ui.base_path` | none | a sub-path a reverse proxy passes on: everything is served under it (root_path), anything else redirected to `<base_path>/ui/` |
+| `ui.public_url` | none | the URL users open, printed and in `/app/info` (`url`) |
+| `ui.trusted_proxies` | `[]` | addresses whose `X-Forwarded-For`/`-Proto` are believed |
 | `exploit.folder`, `exploit.results` | the folder opened last, `<folder>/exploit_results` | the exploit mode's folder and exploit_runner runs |
+| `exploit.remote` | `false` | the exploit mode and stop answer every request, not only local ones |
 | `sequencer.config` | tsqd's own lookup (§3) | `tsq.yml` of the tsqd started |
 | `sequencer.listen` | `127.0.0.1:8640` | where the tsqd started listens |
 | `sequencer.restart` | `true` | start tsqd again when it ends by itself (given up after 5 exits within 30 s of their start) |
@@ -878,11 +882,11 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 | `GET /app/info` | `{app, testsuit, title, logo, modes, available, local, stoppable, config, url, sequencer: {state, detail, url, managed, pid, restarts, last_exit, started_at, log, config} \| null}`; `state`: `starting \| running \| restarting \| failed \| stopped \| unreachable` |
 | `GET /app/config`, `GET /app/about`, `GET /app/plugins`, `GET /app/logo{ext}` | settings with their source, versions, plugins of the app's process, logo |
 | `POST /app/stop`, `GET /app/sequencer/log`, `POST /app/sequencer/restart` | stop the app (and the tsqd it started); tsqd's output; restart it |
-| `/seq/{path}` | the REST API of tsqd (§12.2), passed through, streamed (SSE included); 503 when tsqd does not answer |
+| `/seq/{path}` | the REST API of tsqd (§12.2), passed through, streamed (SSE included, sent with `X-Accel-Buffering: no`); 503 when tsqd does not answer |
 | `/x/{criteria, exploit, plot, extract, mode, folder, folders, config, plugins}` | the exploit mode, on a folder of the machine |
 
 - A tsqd already answering on `sequencer.listen` at the start is used, not started nor stopped. On Linux the tsqd started gets SIGTERM if the app dies.
-- `/x/...` and `POST /app/stop` MUST answer only requests from the loopback interface without `X-Forwarded-For`, `Forwarded` or `X-Real-IP` (403 otherwise); `available` leaves the exploit mode out for other viewers.
+- Unless `exploit.remote`, `/x/...` and `POST /app/stop` MUST answer only requests from the loopback interface without `X-Forwarded-For`, `Forwarded` or `X-Real-IP` (403 otherwise); `available` leaves the exploit mode out for other viewers.
 - Launched while an app answers at `ui.listen`, `testsuit` opens the browser on it (and its folder on `--folder`) instead of starting.
 
 ---

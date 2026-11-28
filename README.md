@@ -143,15 +143,17 @@ mode alone, on the folder opened last (a folder picker the first time). Relative
 ```toml
 modes = ["sequencer", "exploit"]   # default ["exploit"]
 title = "Rail lab"                 # the title of the UI (top bar and browser tab); default "testsuit"
-logo = "logo.svg"                  # an image before the title: a file, or an http(s) URL
+logo = "logo.svg"                  # an image before the title: a file, or an http(s) URL; default testsuit's icon
 
 [ui]
 listen = "127.0.0.1:8650"          # the one port of the UI and of every API behind it
 browser = true                     # open the browser at the start
+# base_path, public_url, trusted_proxies: behind a reverse proxy, see below
 
 [exploit]
 folder = "~/tests"                 # default: the folder opened last; "Change folder…" in the top bar opens another
 results = "~/exploit_results"      # where the exploit_runner runs are kept (default <folder>/exploit_results)
+remote = false                     # true: also for other machines, through a reverse proxy (see below)
 
 [sequencer]
 config = "tsq.yml"                 # tsqd's configuration (default: $TSQ_CONFIG, then /etc/testsuit/tsq.yml)
@@ -161,13 +163,63 @@ restart = true                     # start tsqd again when it ends by itself
 ```
 
 Behind the one port: the UI under `/ui/`, the app's own API under `/app/`, the exploit mode under `/x/`, the REST API
-of tsqd under `/seq/` (passed through, its event stream included). Only that port is to be opened, or put behind a
-reverse proxy: every URL of the UI is relative, so it works under a sub-path the proxy strips (for example nginx
-`location /testsuit/ { proxy_pass http://127.0.0.1:8650/; proxy_buffering off; }`; live updates are Server-Sent
-Events, no websocket, and need the proxy's buffering off). The exploit mode runs the user's own code and reads any
-file of the machine: it (and *Stop*) answers only requests made on that machine, never one through a reverse proxy
-(`X-Forwarded-For`, `Forwarded` or `X-Real-IP`): other browsers get the sequencer's tabs only. With the exploit mode
-on too, its pickers also offer the data of the sequencer's runs.
+of tsqd under `/seq/` (passed through, its event stream included). tsqd itself listens on `127.0.0.1` only. The
+exploit mode runs the user's own code and reads any file of the machine: it (and *Stop*) answers only requests made
+on that machine, never one through a reverse proxy (`X-Forwarded-For`, `Forwarded` or `X-Real-IP`), unless
+`exploit.remote`; other browsers get the sequencer's tabs only. With the exploit mode on too, its pickers also offer
+the data of the sequencer's runs.
+
+### Behind a reverse proxy
+
+Only the one port of `ui.listen` is put behind the proxy (keep it on `127.0.0.1` when the proxy runs on the same
+machine). The proxy brings what testsuit has not: TLS and the authentication of the users (testsuit has none). What
+to know:
+
+- **Sub-path**: every URL the UI uses is relative, so it works under any sub-path. Either the proxy strips it (nginx
+  `proxy_pass http://127.0.0.1:8650/;` with the trailing slash), and nothing is to set; or the proxy passes it on, and
+  `ui.base_path` names it (`"/testsuit"`: testsuit then answers under `/testsuit/...`, and redirects anything else to
+  `/testsuit/ui/`).
+- **Live updates** are Server-Sent Events (`/seq/events`), no websocket: no `Upgrade` to pass on. The proxy must not
+  buffer them: testsuit sends them with `X-Accel-Buffering: no` (nginx honours it); for others, turn buffering off
+  for that path, and give it a read timeout above 15 s (tsqd sends a keep-alive every 15 s).
+- **Uploads**: a datapack or campaign posted from the UI can be large: raise the proxy's limit (`client_max_body_size`
+  of nginx, 1 MB by default).
+- `ui.public_url`: the URL users open (`"https://lab.example.org/testsuit"`), which `testsuit` and `testsuit status`
+  print and the Configuration tab shows.
+- `ui.trusted_proxies`: the addresses of the proxies (`["127.0.0.1"]`) whose `X-Forwarded-For` and
+  `X-Forwarded-Proto` testsuit believes (the client's address and `https` in its logs and redirects).
+- `exploit.remote = true`: the exploit mode (and *Stop*) for the users of the proxy too, not only on the machine
+  itself. It runs code as the user testsuit runs as, on that machine: only behind a proxy that authenticates them.
+- **The `tsq` command line** reaches tsqd through the same URL: `tsq --server https://lab.example.org/testsuit/seq`
+  (with the credentials the proxy asks, in the URL or a `.netrc`).
+
+nginx, the proxy passing the sub-path on:
+
+```nginx
+location /testsuit/ {
+    proxy_pass http://127.0.0.1:8650;          # no trailing slash: /testsuit/... reaches testsuit as is
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 1h;                     # event streams stay open
+    client_max_body_size 2g;                   # datapacks posted from the UI
+    auth_basic "testsuit";                     # or your SSO
+    auth_basic_user_file /etc/nginx/testsuit.htpasswd;
+}
+```
+
+```toml
+[ui]
+listen = "127.0.0.1:8650"
+browser = false
+base_path = "/testsuit"
+public_url = "https://lab.example.org/testsuit"
+trusted_proxies = ["127.0.0.1"]
+```
+
+Apache (`mod_proxy_http`): `ProxyPass /testsuit/ http://127.0.0.1:8650/testsuit/ flushpackets=on` and
+`ProxyPassReverse` alike, `RequestHeader set X-Forwarded-Proto https`, with the same `testsuit.toml`. To serve it at the
+root of a host instead, leave `base_path` out and proxy `/` to `http://127.0.0.1:8650/`.
 
 What each launch did is in `testsuit.log`, and what tsqd printed in `tsqd.log`, both in the user's configuration
 folder: read them when a launch from a shortcut, which shows no console, seems to do nothing.

@@ -21,9 +21,10 @@
 
 The exploit mode runs the user's own code and reads any file of the machine: it answers only requests
 from this machine, whatever ``ui.listen`` (stopping the app too); a request through a reverse proxy
-(X-Forwarded-For, Forwarded, X-Real-IP) never counts as one. Every URL of the UI is relative: behind a reverse
-proxy, the app can be served under a sub-path (the proxy strips it). Live updates are Server-Sent Events
-(``/seq/events``), no websocket.
+(X-Forwarded-For, Forwarded, X-Real-IP) never counts as one, unless ``exploit.remote``. Every URL of the UI
+is relative: behind a reverse proxy, the app works under a sub-path the proxy strips, or one it passes on
+(``ui.base_path``). Live updates are Server-Sent Events (``/seq/events``, sent with ``X-Accel-Buffering: no``),
+no websocket.
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from testsuit.app.config import AppConfig
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
+DEFAULT_LOGO = Path(__file__).resolve().parent / "logo.svg"     # testsuit's icon, when testsuit.toml names no logo
 
 # not passed through the proxy (RFC 9110, section 7.6.1), and those the server sets itself
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
@@ -54,6 +56,34 @@ def is_local(host: str | None) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def route_path(scope) -> str:
+    """The path of a request under the base path (ui.base_path, ASGI root_path)."""
+    path, root = scope["path"], scope.get("root_path", "")
+    return path[len(root):] or "/" if root and (path == root or path.startswith(root + "/")) else path
+
+
+class BasePath:
+    """Serves an app under a base path (ui.base_path), for a reverse proxy that passes its sub-path on:
+    /testsuit/ui/ is the UI, as /ui/ is without it (the ASGI root_path, the paths kept whole). Anything
+    outside it is redirected to the UI."""
+
+    def __init__(self, app, base: str) -> None:
+        self.app, self.base = app, base
+        self.state = app.state
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            path = scope["path"]
+            if path == self.base and scope["type"] == "http":
+                return await RedirectResponse(f"{self.base}/ui/")(scope, receive, send)
+            if path.startswith(self.base + "/"):
+                scope = {**scope, "root_path": scope.get("root_path", "") + self.base}
+            elif scope["type"] == "http":
+                response = RedirectResponse(f"{self.base}/ui/")
+                return await response(scope, receive, send)
+        await self.app(scope, receive, send)
 
 
 def is_local_request(request) -> bool:
@@ -111,23 +141,29 @@ def create_app(config: AppConfig, tsqd=None, stop: Callable[[], None] | None = N
     app.state.exploit = exploit_app
     app.state.close_streams = close_streams
 
+    remote = config.exploit.remote
+
+    def allowed(request) -> bool:
+        return remote or is_local_request(request)
+
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        # the exploit mode runs the user's code and reads any file: only from this machine
-        path = request.url.path
-        if (path.startswith("/x/") or path == "/app/stop") and not is_local_request(request):
+        # the exploit mode runs the user's code and reads any file: only from this machine (unless exploit.remote)
+        path = route_path(request.scope)
+        if (path.startswith("/x/") or path == "/app/stop") and not allowed(request):
             return JSONResponse({"detail": "only from the machine testsuit runs on"}, status_code=403)
         return await call_next(request)
 
     # ── the app ────────────────────────────────────────────────────────
 
+    def logo_file() -> Path | None:
+        # logo of testsuit.toml, else testsuit's own icon
+        return config.logo_file if config.logo else DEFAULT_LOGO
+
     def logo_url() -> str | None:
-        logo = config.logo
-        if not logo:
-            return None
-        if logo.startswith(("http://", "https://")):
-            return logo
-        file = config.logo_file
+        if config.logo and config.logo.startswith(("http://", "https://")):
+            return config.logo
+        file = logo_file()
         return f"app/logo{file.suffix}" if file and file.is_file() else None
 
     @app.get("/app/info")
@@ -135,12 +171,12 @@ def create_app(config: AppConfig, tsqd=None, stop: Callable[[], None] | None = N
         """What the UI shows: the title and logo, the modes on (those this viewer can use: the exploit mode
         only from this machine), and the state of the sequencer's tsqd."""
         import asyncio
-        local = is_local_request(request)
+        local = allowed(request)
         sequencer = await asyncio.to_thread(tsqd.status) if tsqd is not None else None
         return {"app": "testsuit", "testsuit": __version__, "title": config.title, "logo": logo_url(),
                 "modes": config.modes, "available": [m for m in config.modes if m != "exploit" or local],
                 "local": local, "stoppable": stop is not None and local, "config": str(config.file) if config.file else None,
-                "url": config.local_url, "sequencer": sequencer}
+                "url": config.public_url, "sequencer": sequencer}
 
     @app.get("/app/config")
     async def settings():
@@ -163,7 +199,7 @@ def create_app(config: AppConfig, tsqd=None, stop: Callable[[], None] | None = N
     @app.get("/app/logo{suffix}", include_in_schema=False)
     async def logo(suffix: str):
         """The UI's logo image (logo of testsuit.toml), when it is a file."""
-        file = config.logo_file
+        file = logo_file()
         if file is None or not file.is_file():
             raise HTTPException(404, "no logo file (logo in testsuit.toml)")
         return FileResponse(file)
@@ -231,6 +267,8 @@ def create_app(config: AppConfig, tsqd=None, stop: Callable[[], None] | None = N
 
             out_headers = {k: v for k, v in response.headers.items()
                            if k.lower() not in HOP_HEADERS and k.lower() != "content-length"}
+            if response.headers.get("content-type", "").startswith("text/event-stream"):
+                out_headers["x-accel-buffering"] = "no"      # nginx: the events as they come, not buffered
             if "content-length" in response.headers and "content-encoding" not in response.headers:
                 out_headers["content-length"] = response.headers["content-length"]
             return StreamingResponse(body_of(), status_code=response.status_code, headers=out_headers,
@@ -250,9 +288,9 @@ def create_app(config: AppConfig, tsqd=None, stop: Callable[[], None] | None = N
 
     @app.get("/", include_in_schema=False)
     async def root():
-        return RedirectResponse("ui/")
+        return RedirectResponse("ui/")      # relative: right behind a reverse proxy that strips its sub-path too
 
-    return app
+    return BasePath(app, config.ui.base_path) if config.ui.base_path else app
 
 
 def sequencer_data_roots(config: AppConfig, tsqd) -> list[tuple[str, Path]]:

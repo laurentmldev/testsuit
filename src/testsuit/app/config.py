@@ -17,15 +17,19 @@ One file names the modes to turn on and has one section per mode::
 
     modes = ["exploit", "sequencer"]   # default: ["exploit"]
     title = "Rail lab"                 # the UI's title (top bar and browser tab)
-    logo = "logo.svg"                  # an image before the title: a file, or an http(s) URL
+    logo = "logo.svg"                  # an image before the title: a file, or an http(s) URL (default: testsuit's icon)
 
     [ui]
     listen = "127.0.0.1:8650"          # the one port of the web UI
     browser = true                     # open the browser at the start
+    base_path = "/testsuit"            # behind a reverse proxy that passes its sub-path on (default: none)
+    public_url = "https://lab.example.org/testsuit"   # the URL users open, printed and shown
+    trusted_proxies = ["127.0.0.1"]    # whose X-Forwarded-For and X-Forwarded-Proto are believed
 
     [exploit]                          # criteria editor, exploit_runner, Plot and Extract on a folder
     folder = "~/tests"                 # default: the folder opened last (a folder picker the first time)
     results = "..."                    # where the exploit_runner runs are kept (default <folder>/exploit_results)
+    remote = false                     # true: also for other machines and through a reverse proxy (it runs code!)
 
     [sequencer]                        # the test sequencer: tsqd, started and supervised by testsuit
     config = "tsq.yml"                 # its configuration (default: $TSQ_CONFIG, then /etc/testsuit/tsq.yml)
@@ -75,6 +79,9 @@ def _host_port(value: str, what: str) -> tuple[str, int]:
 class UiSettings(_Model):
     listen: str = "127.0.0.1:8650"
     browser: bool = True
+    base_path: str = ""                       # behind a reverse proxy that keeps its sub-path: "/testsuit"
+    public_url: str | None = None             # the URL users open (behind a reverse proxy), printed and shown
+    trusted_proxies: list[str] = Field(default_factory=list)   # their X-Forwarded-For/-Proto are believed
 
     @field_validator("listen")
     @classmethod
@@ -82,10 +89,26 @@ class UiSettings(_Model):
         _host_port(v, "ui.listen")
         return v
 
+    @field_validator("base_path")
+    @classmethod
+    def _base_path(cls, v):
+        v = (v or "").strip().strip("/")
+        if any(c in v for c in "?#") or "//" in v:
+            raise ValueError("ui.base_path: expected a path such as /testsuit")
+        return f"/{v}" if v else ""
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url(cls, v):
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("ui.public_url: expected an http(s) URL")
+        return v.rstrip("/") if v else v
+
 
 class ExploitSettings(_Model):
     folder: str | None = None
     results: str | None = None
+    remote: bool = False                      # also answer other machines and a reverse proxy (authenticating!)
 
 
 class SequencerSettings(_Model):
@@ -147,10 +170,15 @@ class AppConfig(_Model):
 
     @property
     def local_url(self) -> str:
-        """The URL of the UI from this machine."""
+        """The URL of the app from this machine (its base path included)."""
         host, port = self.listen
         host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
-        return f"http://{'[' + host + ']' if ':' in host else host}:{port}"
+        return f"http://{'[' + host + ']' if ':' in host else host}:{port}{self.ui.base_path}"
+
+    @property
+    def public_url(self) -> str:
+        """The URL users open: ui.public_url (behind a reverse proxy), else local_url."""
+        return self.ui.public_url or self.local_url
 
     @property
     def loopback_only(self) -> bool:
