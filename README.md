@@ -34,6 +34,27 @@ To use testsuit without cloning it, install straight from GitHub (add `@<tag>` t
 pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
 ```
 
+### Windows installer
+
+For a Windows machine with no Python (or with another Python, or Anaconda, which it leaves alone): one
+`testsuit-<version>-Windows-x86_64.exe` installs its own Python, testsuit and all its dependencies, offline, with
+a **testsuit** shortcut in the Start menu and on the desktop that runs the mexploit web UI (`mxp webui --last`, as
+the Navigator tile below). Get it from the `conda` workflow (artifact `testsuit-windows-installer` of a run, on each
+`v*` tag or by hand from the Actions tab). Windows 10 or later, 64-bit; no admin rights needed: it installs for the
+current user in `%LOCALAPPDATA%\testsuit` by default, does not add itself to `PATH` nor register its Python as the
+system's default, and is removed from Windows' *Installed apps*. An installer of a newer version installs over it
+(uninstall the old one first, or pick another folder). Plugins go in with its own Python:
+`%LOCALAPPDATA%\testsuit\python.exe -m pip install <plugin>`.
+
+It is built with [conda constructor](https://github.com/conda/constructor) from the conda package below
+(recipe in [conda/installer/](conda/installer/construct.yaml)), on Windows:
+
+```bash
+conda install -n base constructor conda-standalone
+cp LICENSE conda/installer/LICENSE.txt
+TESTSUIT_VERSION=<version> TESTSUIT_CHANNEL=file:///C:/conda-channels/testsuit-conda-channel constructor conda/installer
+```
+
 ### From Anaconda Navigator
 
 Installed with conda, testsuit shows in Anaconda Navigator as the **testsuit** app (its tile runs the mexploit web UI). The package is not published to
@@ -52,7 +73,8 @@ in either of two ways.
 
 **In Navigator**: on the *Home* page, *Channels*, *Add*: `file:///C:/conda-channels/testsuit-conda-channel` (forward
 slashes, also on Windows), and *Add* `conda-forge` too (the dependencies come from there); *Update channels*.
-**testsuit** shows on *Home*: *Install*, then *Launch*. To upgrade, unzip the new version into the same folder, then
+**testsuit** shows on *Home*: *Install*, then *Launch* (installing it also adds a **testsuit** shortcut to the
+Start menu, which runs the same). To upgrade, unzip the new version into the same folder, then
 *Update channels*: the tile offers the new version.
 
 > **Tips for the Channels dialog.** There is no *Browse* button: the field takes a name or a URL only, so a plain

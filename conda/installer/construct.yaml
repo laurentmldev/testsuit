@@ -1,0 +1,51 @@
+# Copyright (C) 2026 Laurent Millet-Lacombe
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of testsuit.
+# testsuit is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+# General Public License as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# testsuit is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General
+# Public License for more details.
+# You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
+# see <https://www.gnu.org/licenses/>.
+
+# The Windows installer of testsuit (conda constructor): one testsuit-<version>-Windows-x86_64.exe that installs its
+# own Python, testsuit (the conda package of conda/meta.yaml) and all its dependencies, offline, with a Start-menu
+# and desktop shortcut running the mexploit web UI (mxp webui --last). No Python, conda or Anaconda is needed on
+# the machine, and one already there is left alone: the installer neither adds itself to PATH nor registers its
+# Python as the system's default. Installed per user (no admin rights) in %LOCALAPPDATA%\testsuit by default;
+# uninstalled from Windows' "Installed apps".
+# Built by .github/workflows/conda.yml (job installer, on windows-latest) from the local channel of the conda job:
+#   TESTSUIT_VERSION=1.2.0 TESTSUIT_CHANNEL=file:///D:/a/testsuit/conda-out constructor conda/installer
+# Run on Linux, the same command builds a .sh installer (handy to check this file).
+
+{% set version = environ.get("TESTSUIT_VERSION", "0.0.0") %}
+
+name: testsuit
+version: {{ version }}
+company: testsuit
+
+channels:
+  - {{ environ["TESTSUIT_CHANNEL"] }}
+  - conda-forge
+
+specs:
+  - python 3.12.*
+  - testsuit {{ version }}
+  - pip  # plugins: %LOCALAPPDATA%\testsuit\python.exe -m pip install <plugin>
+
+# the shortcut of the package (conda/menu/testsuit.json)
+menu_packages:
+  - testsuit
+
+# a standalone app: leave any Python or conda already on the machine as it is. No conda in the installation, which
+# also lets it go in a folder with spaces (C:\Users\Jean Dupont\...)
+initialize_conda: false
+register_python: false
+check_path_spaces: false
+
+default_prefix: '%LOCALAPPDATA%\testsuit'  # [win]
+license_file: LICENSE.txt  # copied from LICENSE by the workflow (NSIS shows .txt or .rtf)
+icon_image: ../icon.png  # [win]

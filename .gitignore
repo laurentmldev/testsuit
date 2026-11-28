@@ -21,3 +21,6 @@ src/testsuit/sequencer/ui/
 
 # mxp utest results (default output folder)
 mxp_utest_result/
+
+# copied from LICENSE when building the Windows installer
+conda/installer/LICENSE.txt
