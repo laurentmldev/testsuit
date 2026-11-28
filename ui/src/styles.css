@@ -968,10 +968,18 @@ table.grid tr.focused td { background: var(--accent-soft); transition: backgroun
 .picker-where { display: flex; gap: 6px; align-items: center; padding: 2px 0 6px; overflow-wrap: anywhere; }
 .picker-row { display: flex; gap: 8px; align-items: center; padding: 2px 4px; border-radius: 4px; }
 .picker-row.selected { background: var(--accent-soft); }
-.picker-name { cursor: pointer; overflow-wrap: anywhere; }
-.webui-nav { display: flex; gap: 4px; }
-.webui-nav a { padding: 2px 10px; border-radius: 5px; color: var(--muted); }
+.picker-name { cursor: pointer; overflow-wrap: anywhere; flex: 1; text-align: left; }
+.picker-meta { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.picker-meta.size { min-width: 64px; text-align: right; }
+.picker-meta.date { min-width: 128px; text-align: right; }
+/* the tabs of mxp webui: drawn as the top-level tabs of tsqd (.topbar nav), an icon and the name */
+.webui-nav { display: flex; gap: 6px; padding: 0 6px 0 12px; border-left: 1px solid var(--border); align-self: stretch; align-items: center; }
+.webui-nav a { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 7px; color: var(--muted); }
+.webui-nav a + a::before { content: ""; position: absolute; left: -4px; top: 22%; bottom: 22%; border-left: 1px solid var(--border); }
+.webui-nav a .nav-icon { flex-shrink: 0; opacity: 0.85; }
+.webui-nav a:hover { background: var(--panel-2); text-decoration: none; }
 .webui-nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.webui-nav a.active .nav-icon { opacity: 1; }
 .workspace-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 8px; padding: 6px 10px;
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; background: var(--panel); }
 .workspace-actions .edit-workspace { margin-left: auto; }
@@ -1081,6 +1089,10 @@ tr.bypassed td { background: var(--warn-soft); }
 .plot-field:hover { background: var(--panel-2); }
 .plot-field.selected { background: var(--accent-soft); }
 .plot-field .mono { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a long name is cut at its start, so that its end (the parameter itself) stays visible: the box is right to left,
+   the name inside it left to right (isolated, so that its punctuation keeps its place) */
+.plot-field .mono.cut-start { direction: rtl; text-align: left; }
+.plot-field .mono.cut-start > bdi { direction: ltr; unicode-bidi: isolate; }
 .plot-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .plot-field-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .plot-field-actions select { max-width: 150px; }
@@ -1500,3 +1512,16 @@ button.dyn-tag.selected { outline: 2px solid var(--warn, #8a5a00); }
 .form-split.nav-collapsed { grid-template-columns: 26px minmax(0, 1fr); }
 .file-tree-new .wide { flex: 1; width: auto; }
 .banner.inline { display: inline-flex; margin: 0; padding: 2px 10px; font-size: 13px; white-space: nowrap; }
+/* the Plugins section of the Configuration tabs (plugins.tsx) */
+.config-section { margin-top: 22px; }
+.config-section .page-head h3 { margin: 0; }
+.plugins-table td { vertical-align: top; }
+.plugin-kind { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+.plugin-kind > .muted { min-width: 170px; flex-shrink: 0; }
+.plugin-names { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.plugin-error { color: var(--bad); white-space: pre-wrap; }
+/* the bar of mxp webui with its icon tabs: the folder path gives way (cut at its start) before anything wraps */
+.standalone-bar > code { min-width: 60px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.standalone-bar > code > bdi { direction: ltr; unicode-bidi: isolate; }
+.standalone-bar > .pill, .standalone-bar > .small, .standalone-bar button { white-space: nowrap; flex-shrink: 0; }
+.standalone-bar .webui-nav { flex-shrink: 0; }

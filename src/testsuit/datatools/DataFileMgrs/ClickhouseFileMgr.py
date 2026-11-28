@@ -25,10 +25,11 @@ from testsuit.misc.logger import get_logger
 from testsuit.misc.MonitorProgress import MonitorProgress
 
 from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
+from testsuit.datatools.DataFileMgrs.ADatabaseFileMgr import ADatabaseFileMgr
 from testsuit.credentials import resolve_secret
 
 
-class ClickhouseFileMgr(AFileMgr):
+class ClickhouseFileMgr(ADatabaseFileMgr):
     """Uses a YML description ('*.clickhouse.yml') as a pseudo data file to access ClickHouse tables contents.
 
     Data is read with the 'clickhouse_driver' package (native protocol, default port 9000).
@@ -102,12 +103,13 @@ class ClickhouseFileMgr(AFileMgr):
     def _tableIdent(self, table: str) -> str:
         return self._ident(self._database) + "." + self._ident(table)
 
-    def _connect(self) -> None:
+    def _connect(self, needsDatabase: bool = True) -> None:
         """
-        Establish connection to ClickHouse if not already connected.
+        Establish connection to ClickHouse if not already connected (to its 'default' database when the
+        description has none and needsDatabase is False: to list the databases).
         """
         if self._client is None:
-            if not all([self._host, self._database]):
+            if not self._host or (needsDatabase and not self._database):
                 raise Exception(
                     f"ClickHouse connection parameters not fully configured. "
                     f"host={self._host}, database={self._database}"
@@ -117,7 +119,7 @@ class ClickhouseFileMgr(AFileMgr):
                                   port=self._port,
                                   user=self._user,
                                   password=self._password or "",
-                                  database=self._database)
+                                  database=self._database or "default")
 
     def close(self) -> None:
         """Close the ClickHouse connection if open (idempotent, safe to call several times)."""
@@ -143,6 +145,20 @@ class ClickhouseFileMgr(AFileMgr):
         except Exception as e:
             raise Exception(f"ERROR while running query \n-----\n{query}\n-----\n: {e}")
 
+    # the server's own databases, left out of listDatabases
+    SYSTEM_DATABASES = ("system", "INFORMATION_SCHEMA", "information_schema")
+
+    def listDatabases(self) -> list[str]:
+        """The databases of the server, but its own (system, information_schema)."""
+        self._connect(needsDatabase=False)
+        rows = self._execute("SELECT name FROM system.databases ORDER BY name")
+        return [row[0] for row in rows if row[0] not in self.SYSTEM_DATABASES]
+
+    def listTables(self) -> list[str]:
+        """The tables of the database, all of them."""
+        rows = self._execute("SELECT name FROM system.tables WHERE database = %(db)s ORDER BY name", {"db": self._database})
+        return [row[0] for row in rows]
+
     def _get_matching_tables(self) -> list[str]:
         """
         Tables of the database whose name matches the 'table' regex of the config.
@@ -153,7 +169,7 @@ class ClickhouseFileMgr(AFileMgr):
             get_logger().warning(f"Failed to query table names from ClickHouse. Please check database is reachable: {e}")
             raise e
 
-        pattern = self._table if self._table else '.*'
+        pattern = self._table if self._table and self._table != '*' else '.*'
         return [row[0] for row in rows if re.fullmatch(pattern, row[0])]
 
     def getFileType(self) -> str:

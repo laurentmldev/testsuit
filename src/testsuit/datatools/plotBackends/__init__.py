@@ -42,6 +42,8 @@ External backends are registered with register_plot_backend()::
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 import os
 from collections.abc import Callable
 
@@ -127,6 +129,7 @@ def register_plot_backend(backend: APlotBackend | Callable[[], APlotBackend], na
     if not name:
         raise ValueError("plot backend without name")
     _backends[name] = backend
+    note_registration("plot backends", name)
 
 
 def unregister_plot_backend(name: str) -> None:

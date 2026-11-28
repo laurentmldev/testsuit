@@ -166,4 +166,4 @@ The calls above are enough when your code runs testsuit in its own process (`mex
 
 - or list modules in the `TESTSUIT_PLUGINS` environment variable (`module` or `module:function`, comma-separated; a module given alone has its `register()` called if it defines one). Child processes inherit it.
 
-A plugin that fails to load is logged as a warning and skipped.
+A plugin that fails to load is logged as a warning and skipped. The **Configuration** tabs of tsqd and of `mxp webui` list the plugins found, whether each one loaded (else why not) and what it registered while it loaded (`testsuit.plugins.plugins_report()`): a new registration function calls `testsuit.plugins.note_registration(kind, name)` so that it shows there.

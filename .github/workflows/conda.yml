@@ -15,6 +15,8 @@
 # installed. Not published anywhere: the job keeps the package, in a local channel folder, as the artifact
 # "testsuit-conda-channel" of the run (on a v* tag, a pull request changing it, or by hand from the Actions
 # tab). Install it from that folder: README.md, "From Anaconda Navigator".
+# The job installer then builds the Windows installer from that channel (conda/installer/construct.yaml), kept as
+# the artifact "testsuit-<version>-Windows-x86_64.exe" (the .exe itself, not zipped): README.md, "Windows installer".
 name: conda
 
 on:
@@ -33,6 +35,8 @@ permissions:
 jobs:
   conda:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.sdist.outputs.version }}
     defaults:
       run:
         shell: bash -el {0}   # a login shell: the conda environment is activated
@@ -54,12 +58,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build the sdist (with the web UI)
+        id: sdist
         run: |
           python -m pip install --upgrade build setuptools-scm
           python -m build --sdist
           version=$(python -m setuptools_scm)
           echo "TESTSUIT_VERSION=$version" >> "$GITHUB_ENV"
           echo "TESTSUIT_SDIST=$PWD/dist/testsuit-$version.tar.gz" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -94,4 +100,45 @@ jobs:
         with:
           name: testsuit-conda-channel
           path: conda-out/
+          retention-days: 90
+
+  # The Windows installer: one .exe with its own Python, testsuit (from the channel above) and its dependencies
+  # (from conda-forge), installed offline with a Start-menu shortcut. Built on Windows (NSIS).
+  installer:
+    needs: conda
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      TESTSUIT_VERSION: ${{ needs.conda.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: testsuit-conda-channel
+          path: conda-out
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          conda-remove-defaults: true
+      - name: Build the installer
+        run: |
+          conda install -n base -y constructor conda-standalone
+          # the NSIS installer shows a .txt or .rtf license
+          cp LICENSE conda/installer/LICENSE.txt
+          export TESTSUIT_CHANNEL="file:///$(cygpath -m "$PWD/conda-out")"
+          conda run -n base constructor conda/installer --output-dir installer-out
+          ls -l installer-out
+
+      # the .exe as is, not zipped (archive: false): the artifact is named after it,
+      # testsuit-<version>-Windows-x86_64.exe
+      - name: Keep the installer
+        uses: actions/upload-artifact@v7
+        with:
+          path: installer-out/*.exe
+          archive: false
           retention-days: 90

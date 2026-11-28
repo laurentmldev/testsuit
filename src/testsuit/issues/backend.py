@@ -42,6 +42,8 @@ the reading's progress too.
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 import inspect
 import threading
 import json
@@ -319,6 +321,7 @@ def register_issue_backend(name: str, factory: BackendFactory) -> None:
     """Declare an issues backend, usable as ``backend: <name>`` in issues.yml (case-insensitive; a name registered
     again replaces it, the built-in ones included)."""
     _backends[name.lower()] = factory
+    note_registration("issue backends", name.lower())
 
 
 def unregister_issue_backend(name: str) -> None:

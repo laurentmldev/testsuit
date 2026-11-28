@@ -288,6 +288,7 @@ def register():
     monkeypatch.syspath_prepend(str(tmp_folder))
     monkeypatch.setenv(plugins.ENV_VAR,"my_testsuit_plugin, missing_testsuit_plugin")
     monkeypatch.setattr(plugins,"_loaded",set())
+    monkeypatch.setattr(plugins,"_records",[])
     try:
         # a plugin failing to load does not stop the others
         assert plugins.load_plugins()==["my_testsuit_plugin"]
@@ -295,6 +296,21 @@ def register():
         assert registry.get_criterion("plugin_check") is not None
         # loaded once
         assert plugins.load_plugins()==[]
+        # what each one did, and what it registered (the Configuration tabs)
+        report={p["name"]:p for p in plugins.plugins_report() if p["source"]==plugins.ENV_VAR}
+        assert report["my_testsuit_plugin"]["status"]=="loaded"
+        assert report["my_testsuit_plugin"]["includes"]=={"data file formats":["plugin-format (.plugdata)"],
+                                                          "mexploit criteria":["plugin_check"]}
+        assert report["missing_testsuit_plugin"]["status"]=="failed"
+        assert "ModuleNotFoundError" in report["missing_testsuit_plugin"]["error"]
+        # registrations outside a plugin's load are nobody's
+        formats.register_file_format("plugin-format-2", ["plugdata2"], formats.find_file_format("x.plugdata").factory)
+        formats.unregister_file_format("plugin-format-2")
+        assert plugins.plugins_report()[0]["includes"]["data file formats"]==["plugin-format (.plugdata)"]
+        # declared since: found, not loaded
+        monkeypatch.setenv(plugins.ENV_VAR,"my_testsuit_plugin, missing_testsuit_plugin, later_plugin")
+        assert plugins.plugins_report()[-1]["name"]=="later_plugin"
+        assert plugins.plugins_report()[-1]["status"]=="not loaded"
     finally:
         formats.unregister_file_format("plugin-format")
         registry.unregister_criterion("plugin_check")

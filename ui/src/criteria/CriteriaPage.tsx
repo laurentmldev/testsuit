@@ -13,9 +13,11 @@
 
 // The two hosts of the criteria editor: a page of tsqd on an editing session (#/criteria/<session>),
 // and the whole app when `mxp webui` serves it (#/criteria, criteria mode), with its exploit_runner page (#/exploit)
-// and its Plot page (#/plot).
+// its Plot and Extract pages (#/plot, #/extract) and its Configuration page (#/config).
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { get } from "../api";
+import { get, useResource } from "../api";
+import { NavIcon } from "../navicons";
+import { PluginsSection } from "../plugins";
 import { ExploitPage } from "../exploit/ExploitPage";
 import { ExtractPage } from "../extract/ExtractPage";
 import { PlotPage } from "../plot/PlotPage";
@@ -58,23 +60,51 @@ export function SessionCriteriaPage({ sid, route }: { sid: string; route: Route 
 }
 
 /** The pages of `mxp webui`, in its bar. */
-type WebuiPage = "criteria" | "exploit" | "plot" | "extract";
-const PAGE_NAMES: Record<WebuiPage, string> = { criteria: "Criteria", exploit: "Exploit", plot: "Plot", extract: "Extract" };
+type WebuiPage = "criteria" | "exploit" | "plot" | "extract" | "config";
+const PAGE_NAMES: Record<WebuiPage, string> = { criteria: "Criteria", exploit: "Exploit", plot: "Plot", extract: "Extract", config: "Configuration" };
+// its tabs, drawn as the top-level tabs of tsqd: an icon (navicons.tsx, named after the page) and the name
+const WEBUI_TABS: [WebuiPage, string][] = [
+  ["criteria", "Edit the scenarios of the folder (completion and checks) and their unit tests"],
+  ["exploit", "Run exploit_runner on scenarios and data, open its reports"],
+  ["plot", "Plot the parameters of data files by hand"],
+  ["extract", "Extract parameters of data files to an HDF5 file"],
+  ["config", "What this server works with, and the plugins it loaded"],
+];
 
 function WebuiNav({ page }: { page: WebuiPage }) {
   return (
     <nav className="webui-nav">
-      <a href="#/criteria" className={classes(page === "criteria" && "active")}>Criteria</a>
-      <a href="#/exploit" className={classes(page === "exploit" && "active")}>Exploit</a>
-      <a href="#/plot" className={classes(page === "plot" && "active")} title="Plot the parameters of data files by hand">Plot</a>
-      <a href="#/extract" className={classes(page === "extract" && "active")} title="Extract parameters of data files to an HDF5 file">Extract</a>
+      {WEBUI_TABS.map(([key, title]) => (
+        <a key={key} href={`#/${key}`} title={title} className={classes(page === key && "active")}><NavIcon name={key} />{PAGE_NAMES[key]}</a>
+      ))}
     </nav>
+  );
+}
+
+/** The Configuration tab of `mxp webui`: the server, its folders, and its plugins. */
+function WebuiConfigPage() {
+  const config = useResource<Record<string, string | null>>("config");
+  const rows: [string, string][] = [["testsuit", "testsuit version"], ["python", "Python"], ["folder", "folder open"],
+    ["results", "exploit_runner runs kept in"], ["log", "launch log"]];
+  return (
+    <div className="page">
+      <div className="page-head"><h2>Configuration</h2><span className="muted">what this mxp webui works with</span></div>
+      {config.error && <div className="error-box">{config.error}</div>}
+      <table className="grid compact">
+        <tbody>
+          {rows.map(([key, label]) => (
+            <tr key={key}><td className="muted" style={{ width: 220 }}>{label}</td><td className="mono">{config.data?.[key] ?? ""}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      <PluginsSection server="mxp webui" />
+    </div>
   );
 }
 
 export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
   const adapter = useMemo(() => restAdapter("criteria", "local"), []);
-  const read = () => ({ page: (window.location.hash.startsWith("#/exploit") ? "exploit" : window.location.hash.startsWith("#/plot") ? "plot" : window.location.hash.startsWith("#/extract") ? "extract" : "criteria") as WebuiPage,
+  const read = () => ({ page: (window.location.hash.startsWith("#/exploit") ? "exploit" : window.location.hash.startsWith("#/plot") ? "plot" : window.location.hash.startsWith("#/extract") ? "extract" : window.location.hash.startsWith("#/config") ? "config" : "criteria") as WebuiPage,
     file: new URLSearchParams(window.location.hash.split("?")[1] || "").get("file") });
   const [where, setWhere] = useState(read);
   const [stopped, setStopped] = useState(false);
@@ -97,7 +127,7 @@ export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
     <div className="standalone-bar">
       <span className="brand">mexploit</span>
       <WebuiNav page={where.page} />
-      <code title="The folder of this web UI">{mode.folder}</code>
+      <code title={`The folder of this web UI: ${mode.folder}`}><bdi>{mode.folder}</bdi></code>
       {extra}
       <span style={{ flex: 1 }} />
       <WebuiFolderActions mode={mode} onStopped={() => setStopped(true)} />
@@ -134,6 +164,15 @@ export function StandaloneCriteriaApp({ mode }: { mode: WebuiMode }) {
       <div className="app full standalone">
         {head()}
         <PlotPage />
+        <Toasts />
+      </div>
+    );
+  }
+  if (where.page === "config") {
+    return (
+      <div className="app standalone">
+        {head()}
+        <main><WebuiConfigPage /></main>
         <Toasts />
       </div>
     );

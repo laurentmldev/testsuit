@@ -860,7 +860,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 
 ## 13. Extension points
 
-Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`) or `tsq.yml` `plugins`:
+Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`) or `tsq.yml` `plugins`. `GET /plugins` (tsqd and `mxp webui`, their Configuration tab) lists each one found: `name`, `source`, `target`, `package`, `version`, `status` (`loaded` | `failed` | `not loaded`), `error`, and `includes`: what it registered while loading, by kind (testsuit's own built-ins excluded).
 
 | Registration | Contract | Built in |
 |---|---|---|
