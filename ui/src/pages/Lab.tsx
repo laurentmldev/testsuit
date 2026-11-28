@@ -144,24 +144,29 @@ function CommandsDialog({ id, onClose }: { id: string; onClose: () => void }) {
               setNote="set for the commands run from here." overrideNote="the lab's value is replaced for the commands run from here (recorded with each run)." />
             {keysError && <div className="error-box">{keysError}</div>}
           </details>
-          <table className="grid compact manual-commands">
-            <tbody>
-              {info.commands.map((c: any) => (
-                <tr key={c.name} className={classes(c.spec.via && "via-row", running === c.name && "running")}>
-                  <td><code>{c.name}</code>{c.spec.via && <div>{c.via
+          <div className="manual-commands">
+            {info.commands.map((c: any) => (
+              <section key={c.name} className={classes("manual-command", c.spec.via && "via-row", running === c.name && "running", !c.manual && "needs-run")}>
+                <header>
+                  <code className="manual-command-name">{c.name}</code>
+                  <span className="manual-command-kind">{c.kind}{c.spec.detach && " · detached"}</span>
+                  {c.spec.via && (c.via
                     ? <ViaTag via={c.via.id} label={labelOf(c.via.id)} host={c.via.host_alias || c.via.host}
                       title={`${c.name} runs on ${c.via.id} (${c.via.host}), which reaches ${id}: not on ${id} itself`} />
-                    : <span className="via-tag" title={c.via_error || ""}>↪ via <strong>{c.spec.via}</strong> <span className="bad-text">(not found)</span></span>}</div>}</td>
-                  <td className="small mono">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : c.spec.http ? (typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`) : c.kind)}{c.spec.detach && <span className="muted"> (detached)</span>}
-                    {c.params?.length > 0 && <div className="muted" title="Its parameters: their defaults are used; set params.<name> by hand for another value">params: {c.params.map((p: any) => <code key={p.name} title={p.description || ""}>{p.name}{p.default !== undefined && p.default !== null ? `=${typeof p.default === "string" ? p.default : JSON.stringify(p.default)}` : " (no default)"} </code>)}</div>}
-                    <CommentsNote text={c.spec.comments} compact /></td>
-                  <td className="manual-run">{c.manual
+                    : <span className="via-tag" title={c.via_error || ""}>↪ via <strong>{c.spec.via}</strong> <span className="bad-text">(not found)</span></span>)}
+                  <span className="spacer" />
+                  {c.manual
                     ? <button className="small" disabled={!!blocked || !!running} onClick={() => run(c.name)}>{running === c.name ? "Running…" : "Run"}</button>
-                    : <span className="muted small" style={{ whiteSpace: "nowrap" }} title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    : <span className="muted small" title="deploy, collect, wait_for and python commands need a datapack">needs a run</span>}
+                </header>
+                <div className="manual-command-body">
+                  {(c.segments || c.spec.run != null || c.spec.signal || c.spec.http) && <div className="manual-command-code mono small">{c.segments ? <Rendered segments={c.segments} /> : c.spec.run ?? (c.spec.signal ? `signal ${c.spec.signal}` : typeof c.spec.http === "string" ? `GET ${c.spec.http}` : `${String(c.spec.http.method || "GET").toUpperCase()} ${c.spec.http.url}`)}</div>}
+                  {c.params?.length > 0 && <div className="muted small" title="Its parameters: their defaults are used; set params.<name> by hand for another value">params: {c.params.map((p: any) => <code key={p.name} title={p.description || ""}>{p.name}{p.default !== undefined && p.default !== null ? `=${typeof p.default === "string" ? p.default : JSON.stringify(p.default)}` : " (no default)"} </code>)}</div>}
+                  <CommentsNote text={c.spec.comments} compact />
+                </div>
+              </section>
+            ))}
+          </div>
           {running && current && (
             <div className="manual-result">
               <div><span className="pulse run" /> <code>{running}</code> running…</div>
@@ -226,6 +231,9 @@ const STATE_HELP: Record<string, string> = {
   broken: "it answers, but its probe or its last self-test says it cannot be used",
   unknown: "its probe gives no state (no probe, or no rule matches its answer)",
 };
+
+/** The states a probe gives when it failed: its "Why" is shown as a warning. */
+const PROBE_FAILED = new Set(["offline", "broken", "unknown"]);
 
 /** One action of a probe: what was run, and what the component answered. */
 function ProbeStep({ step, index, running }: { step: any; index: number; running?: boolean }) {
@@ -383,7 +391,7 @@ function ProbeDialog({ id, onClose }: { id: string; onClose: () => void }) {
               : <><Badge value={data.state} /> <span className="muted">{STATE_HELP[data.state] || ""}</span>
                 {data.expected && data.expected !== data.state && <> · <span className="warning-text">expected {data.expected}</span></>}</>}
           </p>
-          {!live && p?.why && <p className="probe-why"><strong>Why:</strong> {p.why}.</p>}
+          {!live && p?.why && <p className={classes("probe-why", PROBE_FAILED.has(data.state) && "failed")}><strong>Why:</strong> {p.why}.</p>}
           {!p && <p className="muted">Not probed since tsqd started{data.detail ? <>: last recorded detail <code>{data.detail}</code></> : ""}. Probe it again to see what is tested.</p>}
           {p && (
             <>
@@ -565,7 +573,7 @@ export function LabPage({ editor }: { editor?: boolean }) {
   return (
     <div className="page">
       <div className="page-head">
-        <h2>Lab</h2>
+        <h2>Infra</h2>
         <span className="muted">{git ? <>commit <code>{git.commit?.slice(0, 10)}</code>{git.tag && <> tag <code>{git.tag}</code></>}{git.branch && <> on {git.branch}</>}{!git.clean && <Badge value="local changes" />}</> : "not a git work tree"}</span>
         <span className="muted small">loaded {ago(lab.data?.loaded_at)}</span>
         <span className="spacer" />

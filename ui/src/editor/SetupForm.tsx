@@ -20,6 +20,7 @@ import { attempt, classes, freeName, idInput, idProblem, Markdown, relPath, slug
 import { Named } from "../kinds";
 import { DictionaryDialog } from "./DictionaryDialog";
 import { clone, labRoleChoices, roleChoices, slotTagChoices, stageSlotTagChoices, stageTypeChoices, useSession, useTestKeys, type Doc } from "./state";
+import { FormSplit } from "./panels";
 
 /** The inputs a lab role expects (its parents' included), each {name, type, optional, description, from}. */
 function expectedInputs(ctx: any, role?: string): any[] {
@@ -55,8 +56,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
   const keyItems = useTestKeys(session.sid, testdef, session.ctx, JSON.stringify(data.dictionaries || []));
   return (
     <KeysProvider keys={keyItems}>
-    <div className="form-split">
-      <div className="form-nav">
+    <FormSplit label="Configurations and classes" nav={<>
         <div className={classes("nav-item", sel.kind === "general" && "selected")} onClick={() => setSel({ kind: "general" })}>General</div>
         <div className={classes("nav-item", sel.kind === "data" && "selected")} onClick={() => setSel({ kind: "data" })}>Data repositories ({(data.datarepositories || []).length})</div>
         <div className="nav-title">Configurations <button className="small" onClick={() => {
@@ -78,7 +78,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
             <strong><Named kind="slot_class" name={t} /></strong> <span className="muted small">{Object.keys(types[t]?.configurations || {}).join(", ")}</span>
           </div>
         ))}
-      </div>
+      </>}>
       <div className="form-main">
         {sel.kind === "general" && <General doc={doc} data={data} update={update} />}
         {sel.kind === "data" && <DataRepos doc={doc} data={data} update={update} />}
@@ -102,7 +102,7 @@ export function SetupForm({ doc, api }: { doc: Doc; api: { setData: (d: any) => 
         api.setData(draft);
         setWizard(null);
       }} />}
-    </div>
+    </FormSplit>
     </KeysProvider>
   );
 }

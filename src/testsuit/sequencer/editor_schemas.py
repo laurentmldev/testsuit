@@ -39,7 +39,7 @@ DURATION = h("A duration: `30s`, `2m`, `1h30m`, or a number of seconds.",
              type=["string", "number"], examples=["30s", "2m", "15m"])
 
 COMMENTS = h("Free notes for the people who maintain it (Markdown, as long as needed): why it is done this way, "
-             "what to beware of, what was tried. Shown in the Editor and on the Lab page; never run nor rendered "
+             "what to beware of, what was tried. Shown in the Editor and on the Infra tab; never run nor rendered "
              "(templates in it stay as written).", type="string")
 
 COMMENT_CARDS = h(
@@ -486,7 +486,7 @@ VARS = {
                    "these links (no command, probe, lock or binding uses them).",
                    type=["array", "object", "string"], items={"type": "string"},
                    additionalProperties={"type": "string"}, examples=[["switch_1"], {"au": "USB GPIO adapter"}]),
-    "tsq_description": h("What it is, shown in the editor and on the Lab page: in `all.vars`, the lab; on a stage "
+    "tsq_description": h("What it is, shown in the editor and on the Infra tab: in `all.vars`, the lab; on a stage "
                          "group, the stage; on a host, the component. Not inherited: each level has its own.",
                          type="string"),
     "tsq_transport": h("How the sequencer talks to the component: `ssh` (default) or `local` (commands run on the "

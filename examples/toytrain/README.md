@@ -244,7 +244,7 @@ docker compose run --rm --entrypoint pytest toytrain
 
 Behind a proxy, set `CI_HTTPS_PROXY` (and `CI_HTTP_PROXY` if apt needs another one) in `.env`: they are used by apt, wget and pip during the build only. To build with a branch of testsuit instead of its PyPI release, set `TESTSUIT_SPEC=testsuit[sequencer] @ git+https://github.com/laurentmldev/testsuit@<branch>`.
 
-As on a dev host, the release store only holds placeholders, so a run ends in `error` at the self-test and the simulations show as broken on the Lab page.
+As on a dev host, the release store only holds placeholders, so a run ends in `error` at the self-test and the simulations show as broken on the Infra tab.
 
 ## Assumptions
 
