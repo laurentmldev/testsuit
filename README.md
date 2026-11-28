@@ -123,7 +123,7 @@ turned on in `testsuit.toml`, and the underlying apps it needs:
 
 | Mode | Tabs | What runs |
 |---|---|---|
-| `exploit` (default) | **Criteria**, **Exploit**, **Plot**, **Extract** | the criteria editor, exploit_runner runs and their reports, data plotted or extracted by hand, on a folder of this machine (in the testsuit process) |
+| `exploit` (default) | **Criteria** (only with the sequencer mode off: on, the criteria are edited on its **Datapacks** tab), **Exploit**, **Plot**, **Extract** | the criteria editor, exploit_runner runs and their reports, data plotted or extracted by hand, on a folder of this machine (in the testsuit process) |
 | `sequencer` | **Runs**, **Datapacks**, **Infra** (and **Exploit** on the data of its runs, when the exploit mode is off) | `tsqd`, started by testsuit as a child process on `127.0.0.1:8640`, watched and restarted if it ends, stopped with testsuit; or a tsqd running elsewhere (`sequencer.url`) |
 
 **Configuration** shows every setting of `testsuit.toml` with where it comes from, the state and log of tsqd (with

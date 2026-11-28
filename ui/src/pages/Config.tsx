@@ -96,13 +96,14 @@ function SequencerSection({ info, editor, refresh }: { info: AppInfo; editor: bo
   );
 }
 
-function ExploitSection() {
+function ExploitSection({ seq }: { seq: boolean }) {
   const config = useResource<Record<string, any>>("x/config");
   const d = config.data;
   return (
     <section className="config-section">
       <div className="page-head"><h3><NavIcon name="criteria" /> Exploit mode</h3>
-        <span className="muted">the criteria editor, exploit_runner, Plot and Extract, on a folder of this machine</span></div>
+        <span className="muted">{seq ? "exploit_runner, Plot and Extract, on a folder of this machine (criteria are edited on the Datapacks tab)"
+          : "the criteria editor, exploit_runner, Plot and Extract, on a folder of this machine"}</span></div>
       {config.error && <div className="error-box">{config.error}</div>}
       {d && <Rows rows={[
         ["folder open", d.folder || "none yet"],
@@ -141,7 +142,7 @@ export function ConfigPage({ info, editor, refresh, onStopped }: {
         <SettingsTable path="app/config" hide={["exploit", "sequencer"].filter((m) => !info.modes.includes(m))} />
         <PluginsSection server="testsuit" path="app/plugins" />
       </section>
-      {on("exploit") && <ExploitSection />}
+      {on("exploit") && <ExploitSection seq={on("sequencer")} />}
       {on("sequencer") && <SequencerSection info={info} editor={editor} refresh={refresh} />}
     </div>
   );

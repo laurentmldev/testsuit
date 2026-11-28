@@ -112,10 +112,30 @@ jobs:
           TESTSUIT_URL: http://127.0.0.1:8650
           CHROMIUM: /usr/bin/google-chrome
         run: npm run e2e
+      - name: Start testsuit (exploit mode only, its criteria editor on the example)
+        run: |
+          cat > "$RUNNER_TEMP/testsuit-x.toml" <<EOF
+          modes = ["exploit"]
+          [ui]
+          listen = "127.0.0.1:8651"
+          browser = false
+          [exploit]
+          folder = "$GITHUB_WORKSPACE/examples/toytrain/datapack"
+          EOF
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/config-x"
+          nohup testsuit --config "$RUNNER_TEMP/testsuit-x.toml" > "$RUNNER_TEMP/testsuit-x.log" 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8651/app/info > /dev/null && break; sleep 1; done
+      - name: Render the views of the exploit mode alone
+        working-directory: ui
+        env:
+          TESTSUIT_URL: http://127.0.0.1:8651
+          CHROMIUM: /usr/bin/google-chrome
+        run: npm run e2e
       - name: testsuit and tsqd logs
         if: always()
         run: |
           cat "$RUNNER_TEMP/testsuit.log"
+          cat "$RUNNER_TEMP/testsuit-x.log" || true
           cat "$RUNNER_TEMP/config/testsuit/tsqd.log" || true
 
   build:
