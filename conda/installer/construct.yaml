@@ -24,7 +24,8 @@
 {% set version = environ.get("TESTSUIT_VERSION", "0.0.0") %}
 
 name: testsuit
-version: {{ version }}
+# the installer's version admits no "+" (a dev version of setuptools-scm: 3.2.3.dev2+g7578d3941)
+version: {{ version | replace("+", "_") }}
 company: testsuit
 
 channels:
