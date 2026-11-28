@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from testsuit.plugins import note_registration
+
 transports: dict[str, type] = {}
 roles: dict[str, dict] = {}
 components: dict[str, dict] = {}
@@ -40,23 +42,29 @@ def _key(name: str) -> str:
 
 def register_transport(name: str, cls: type) -> None:
     transports[_key(name)] = cls
+    note_registration("sequencer transports", name.strip())
 
 
 def register_role(name: str, definition: dict[str, Any]) -> None:
     roles[name.strip()] = dict(definition)
+    note_registration("roles", name.strip())
 
 
 def register_component(name: str, definition: dict[str, Any]) -> None:
     components[name.strip()] = dict(definition)
+    note_registration("components", name.strip())
 
 
 def register_state_probe(name: str, fn: Callable) -> None:
     state_probes[_key(name)] = fn
+    note_registration("state probes", name.strip())
 
 
 def register_step_type(name: str, fn: Callable) -> None:
     step_types[_key(name)] = fn
+    note_registration("step types", name.strip())
 
 
 def register_ready_check(name: str, fn: Callable) -> None:
     ready_checks[_key(name)] = fn
+    note_registration("ready checks", name.strip())

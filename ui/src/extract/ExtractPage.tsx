@@ -104,7 +104,7 @@ export function ExtractPage() {
             {matching.slice(0, MAX_LISTED).map((f) => (
               <label key={f} className={classes("plot-field", ticked.has(f) && "selected")} title={f}>
                 <input type="checkbox" checked={ticked.has(f)} disabled={running} onChange={() => toggle(f)} />
-                <span className="mono">{found!.sources.length > 1 ? f : paramOf(f)}</span>
+                <span className="mono cut-start"><bdi>{found!.sources.length > 1 ? f : paramOf(f)}</bdi></span>
               </label>
             ))}
             {matching.length > MAX_LISTED && <p className="muted small">{count(matching.length - MAX_LISTED)} more: refine the search.</p>}

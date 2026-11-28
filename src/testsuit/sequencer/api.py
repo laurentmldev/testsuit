@@ -738,6 +738,12 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         return [{"key": k, "value": v if isinstance(v, (int, float, str, bool, list, type(None))) else str(v),
                  "source": s} for k, v, s in seq.config.describe()]
 
+    @app.get("/plugins")
+    async def plugins():
+        """The testsuit plugins of tsqd: found, loaded or not, and what each registered (the Configuration tab)."""
+        from testsuit.plugins import plugins_report
+        return plugins_report()
+
     def logo_url() -> str | None:
         logo = seq.config.server.logo
         if not logo:

@@ -1669,6 +1669,8 @@ An optional mode of the same UI, enabled with `server.editor` (off by default, s
 Leaving a session, with its back link or **Close**, returns to the tab it belongs to: Lab for the lab repository, Datapacks for a tests repository. Leaving a lab session asks whether to reload the lab: from the folder as it is for an in-place session, from the latest pushed commit (`tsq lab reload --pull`) for a scratch clone.
 The Editor home (`#/edit`, linked as **Editing sessions** on the Configuration tab) still lists every session and can open a scratch clone.
 
+**Configuration.** The settings in use, each with where its value comes from (`GET /config`, as `tsq config`), then the **Plugins** of tsqd (`GET /plugins`, `testsuit.plugins.plugins_report()`): each one found (an entry point of the group `testsuit.plugins`, `TESTSUIT_PLUGINS`, or `plugins` of `tsq.yml`), its package and version, whether it loaded (else the error), and what it registered while it loaded, by kind (data file formats, mexploit criteria, datapack importers, step types...). A plugin installed or declared after tsqd started is listed as *not loaded*.
+
 **Where it works.** An editing session works either in place, on the folder of the repository being edited (the lab repository, or one of `server.workspaces`), or in a scratch clone of it, on the branch it was opened on, so that a half-done change never reaches the running lab. On the Editor home, `in place (no clone)` is ticked by default; untick it for a scratch clone. `POST /edit/sessions` clones unless it is given `"local": true`.
 
 **In place.** A session that edits the folder itself:

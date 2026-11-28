@@ -36,6 +36,8 @@ See testsuit.plugins to make this registration visible to the ``datapack`` comma
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -57,6 +59,7 @@ def register_data_importer(name: str, factory: ImporterFactory) -> None:
         an ADataImporter subclass
     """
     _importers[name.lower()] = factory
+    note_registration("datapack importers", name.lower())
 
 
 def unregister_data_importer(name: str) -> None:

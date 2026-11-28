@@ -2152,6 +2152,8 @@ def test_ui_title_and_logo(tmp_path, no_git):
         assert (await health())["logo"] == "https://example.org/rail.png"
         with pytest.raises(HTTPException):
             await logo(".png")
+        # the plugins of the Configuration tab
+        assert isinstance(await routes["/plugins"](), list)
         await seq.close()
     asyncio.run(main())
 

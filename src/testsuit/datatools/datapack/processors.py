@@ -41,6 +41,8 @@ called as ``function(target: Path, *args: str)`` (see testsuit.plugins).
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 import re
 import shlex
 import stat
@@ -65,6 +67,7 @@ class ProcessorError(Exception):
 def register_processor(name: str, function: Processor) -> None:
     """Declare a processor, usable as ``postprocess: [<name> args...]`` in setup files."""
     _processors[name] = function
+    note_registration("datapack processors", name)
 
 
 def unregister_processor(name: str) -> None:
