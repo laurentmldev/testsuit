@@ -75,8 +75,15 @@ if (edit?.enabled) {
   }
 }
 
-// the exploit mode: its criteria editor on its folder, unit tests run from the page, its other tabs
-if (info.available.includes("exploit")) {
+// the exploit mode: its criteria editor on its folder (only without the sequencer, whose Datapacks tab edits the
+// criteria), unit tests run from the page, its other tabs
+if (info.available.includes("exploit") && info.available.includes("sequencer")) {
+  // no Criteria tab: #/criteria alone opens the Exploit tab
+  await page.goto(`${base}/ui/#/criteria`);
+  await page.waitForSelector("text=Run exploit_runner", { timeout: 20000 });
+  if (await page.$('header nav a[href="#/criteria"]')) errors.push("both modes on: the exploit mode shows a Criteria tab");
+}
+if (info.available.includes("exploit") && !info.available.includes("sequencer")) {
   const overview = await (await fetch(`${base}/x/criteria`)).json();
   const scenario = overview.scenarios.find((sc) => sc.utests.length) || overview.scenarios[0];
   await page.goto(`${base}/ui/#/criteria?file=${encodeURIComponent(scenario.files[0])}`);
@@ -97,6 +104,8 @@ if (info.available.includes("exploit")) {
     await page.waitForSelector(".data-plot", { timeout: 20000 });
     if (shots) await page.screenshot({ path: `${shots}/${String(++n).padStart(2, "0")}-exploit-criteria-data.png` });
   }
+}
+if (info.available.includes("exploit")) {
   // its Exploit page
   await page.goto(`${base}/ui/#/exploit`);
   await page.waitForSelector("text=Run exploit_runner", { timeout: 20000 });

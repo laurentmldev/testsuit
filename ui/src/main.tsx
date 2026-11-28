@@ -160,8 +160,10 @@ function App({ initial }: { initial: AppInfo }) {
   const xOn = info.available.includes("exploit");
   const page = route.parts[0] || "";
   // the pages of the exploit mode, on its folder; #/exploit/plot and #/exploit/extract stay the sequencer's
-  // (the data of its runs: the Files tab of a run opens them)
-  const xPage = xOn && (((page === "criteria" || page === "exploit") && !route.parts[1]) || page === "plot" || page === "extract");
+  // (the data of its runs: the Files tab of a run opens them). With the sequencer on, the criteria are edited
+  // on the Datapacks tab (#/criteria/<session>): the exploit mode has no Criteria tab then
+  const xCriteria = xOn && !seqOn;
+  const xPage = xOn && ((((page === "criteria" && xCriteria) || page === "exploit") && !route.parts[1]) || page === "plot" || page === "extract");
   setApiScope(xPage ? "x" : "seq");
   const connected = useConnected();
   const [stopped, setStopped] = useState(false);
@@ -180,6 +182,8 @@ function App({ initial }: { initial: AppInfo }) {
   const logo = info.logo ? (/^https?:/.test(info.logo) ? info.logo : url(info.logo)) : null;
   // without the sequencer, the home page is the criteria editor
   useEffect(() => { if (page === "" && !seqOn) window.location.replace("#/criteria"); }, [page, seqOn]);
+  // with both modes on, #/criteria alone (no editing session) opens the exploit mode's Exploit tab
+  useEffect(() => { if (page === "criteria" && !route.parts[1] && xOn && seqOn) window.location.replace("#/exploit"); }, [page, route.parts[1], xOn, seqOn]);
   // an editor session and the criteria editor name their own browser tab and fill the window
   const editing = (page === "edit" && !!route.parts[1]) || (page === "criteria" && (!!route.parts[1] || xPage));
   const plotting = page === "plot" || page === "extract" || (page === "exploit" && (route.parts[1] === "plot" || route.parts[1] === "extract"));
@@ -190,7 +194,7 @@ function App({ initial }: { initial: AppInfo }) {
     // the sequencer's Exploit tab (on the data of its runs) when the exploit mode is off; with it on, its tabs serve
     ...(editor && !xOn ? [["exploit", "Exploit", "Check criteria, plot and extract the data of the runs"]] : []),
   ] : [];
-  const xNav = xOn ? EXPLOIT_TABS : [];
+  const xNav = xOn ? EXPLOIT_TABS.filter(([key]) => key !== "criteria" || xCriteria) : [];
   const nav = [...seqNav, ...xNav, ["config", "Configuration", "What this testsuit app runs: its modes, their settings, the plugins"]];
   // the Runs tab groups the queue and the list of all runs as its subtabs
   const tabOf = (key: string) => (key === "queue" || key === "" || key === "campaigns" ? "runs"

@@ -878,7 +878,7 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 
 | Path | Purpose |
 |---|---|
-| `/ui/` | the web UI; it shows the tabs of the modes the viewer can use. Every URL it uses is relative (it works under a reverse proxy's sub-path) |
+| `/ui/` | the web UI; it shows the tabs of the modes the viewer can use (with both modes on, the exploit mode has no Criteria tab: the criteria are edited on the Datapacks tab, §12.4). Every URL it uses is relative (it works under a reverse proxy's sub-path) |
 | `GET /app/info` | `{app, testsuit, title, logo, modes, available, local, stoppable, config, url, sequencer: {state, detail, url, managed, pid, restarts, last_exit, started_at, log, config} \| null}`; `state`: `starting \| running \| restarting \| failed \| stopped \| unreachable` |
 | `GET /app/config`, `GET /app/about`, `GET /app/plugins`, `GET /app/logo{ext}` | settings with their source, versions, plugins of the app's process, logo |
 | `POST /app/stop`, `GET /app/sequencer/log`, `POST /app/sequencer/restart` | stop the app (and the tsqd it started); tsqd's output; restart it |
