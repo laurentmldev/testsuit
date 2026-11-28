@@ -183,7 +183,7 @@ class InfluxDbV3FileMgr(ADatabaseFileMgr):
             all_tables = result['table_name'].tolist()
             
             # Apply wildcard pattern matching
-            pattern = self._table.lower() if self._table else '.*'
+            pattern = self._table.lower() if self._table and self._table != '*' else '.*'
             
             for table_name in all_tables:
                 if re.match(pattern,table_name):
@@ -571,7 +571,7 @@ class InfluxDbV3FileMgr(ADatabaseFileMgr):
     
 ###############################################################################################################""
 
-class InfluxDbV2FileMgr(AFileMgr):    
+class InfluxDbV2FileMgr(ADatabaseFileMgr):
     """Uses a YML description as a pseudo data file to access DB contents."""
     
     def __init__(self, filename: str, fileIdx: int) -> None:
@@ -610,6 +610,13 @@ class InfluxDbV2FileMgr(AFileMgr):
                     f"InfluxDB V2 connection parameters not fully configured. "
                     f"host={self._host}, org={self._org}, bucket={self._bucket}"
                 )
+            self._open()
+
+    def _open(self) -> None:
+        """The client, with only the host (and the token and org when given): enough to list the buckets."""
+        if self._client is None:
+            if not self._host:
+                raise Exception("no 'host' in the InfluxDB V2 description")
             from influxdb_client import InfluxDBClient
             self._client = InfluxDBClient(
                 url=self._host,  # Changed from 'host' to 'url'
@@ -627,14 +634,36 @@ class InfluxDbV2FileMgr(AFileMgr):
         try:
             client.close()
         except Exception as e:
-            get_logger().warning(f"Failed to close InfluxDB V3 client: {e}")
+            get_logger().warning(f"Failed to close InfluxDB V2 client: {e}")
 
     def __del__(self):
         try:
             self.close()
         except Exception:
             pass
-        
+
+    def listDatabases(self) -> list[str]:
+        """The buckets of the server (of the organization, when the description has one), but its own
+        (_monitoring, _tasks)."""
+        self._open()
+        api = self._client.buckets_api()
+        kwargs = {"org": self._org} if self._org else {}
+        if hasattr(api, "find_buckets_iter"):
+            buckets = list(api.find_buckets_iter(**kwargs))
+        else:
+            buckets = api.find_buckets(limit=100, **kwargs).buckets or []
+        return sorted({b.name for b in buckets if b.name and not b.name.startswith("_")})
+
+    def listTables(self) -> list[str]:
+        """The measurements of the bucket, all of them."""
+        import json
+        self._connect()
+        result = self._query_to_dataframe('import "influxdata/influxdb/schema"\n'
+                                          f'schema.measurements(bucket: {json.dumps(str(self._bucket))})')
+        if result is None or "_value" not in result.columns:
+            return []
+        return sorted({str(m) for m in result["_value"]})
+
     def getFileType(self) -> str:
         return "influxdb-v2"
 
@@ -642,7 +671,7 @@ class InfluxDbV2FileMgr(AFileMgr):
         fileInfo = AFileMgr.getFileInfo(self)        
         return fileInfo + [ f"Host: {self._host}",
                             f"Org: {self._org}",
-                            f"Bucket: {self._bucket}"
+                            f"Bucket: {self._bucket}",
                             f"Measurement: {self._measurement}"]
 
     def toHtmlTbl(self) -> str:
