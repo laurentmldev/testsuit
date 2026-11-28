@@ -144,52 +144,72 @@ export function ExtractPage() {
   );
 }
 
+/** A type of database of the Database dialog (route /extract/database/types): its fields and those each action needs. */
+interface DbField { key: string; label: string; hint?: string; default?: string; secret?: boolean; list?: "databases" | "tables"; regex?: boolean }
+interface DbType { type: string; label: string; fields: DbField[]; add: string[]; databases: string[]; tables: string[] }
+
+const formOf = (t: DbType): Record<string, string> =>
+  Object.fromEntries([["type", t.type], ...t.fields.map((f) => [f.key, f.default ?? ""])]);
+
 /** The access to a database, written to a temporary file its data loader reads (route /extract/database). */
 function DatabaseDialog({ onAdd, onClose }: { onAdd: (path: string) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ type: "influxdbV3", host: "http://localhost:8181", token: "", org: "", database: "", table: "*" });
+  const [types, setTypes] = useState<DbType[]>([]);
+  const [form, setForm] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // lists of the server (databases, tables) behind a field: type to search (the browser filters the list)
+  const [lists, setLists] = useState<{ databases: string[]; tables: string[] }>({ databases: [], tables: [] });
+  const [listing, setListing] = useState<string | null>(null);
+  useEffect(() => {
+    get<{ types: DbType[] }>("extract/database/types")
+      .then((r) => { setTypes(r.types); if (r.types.length) setForm(formOf(r.types[0])); })
+      .catch((e) => setError(e.message));
+  }, []);
+  const spec = types.find((t) => t.type === form.type);
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const pickType = (type: string) => {
+    const t = types.find((x) => x.type === type);
+    if (t) { setForm(formOf(t)); setLists({ databases: [], tables: [] }); setError(null); }
+  };
+  const ready = (needs: string[] | undefined) => !!spec && (needs || []).every((k) => (form[k] || "").trim());
   const add = async () => {
     setBusy(true); setError(null);
     try { onAdd((await post<{ path: string }>("extract/database", form)).path); onClose(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
-  // lists of the server (databases, tables) behind a field: type to search (the browser filters the list)
-  const [lists, setLists] = useState<{ databases: string[]; tables: string[] }>({ databases: [], tables: [] });
-  const [listing, setListing] = useState<string | null>(null);
   const load = async (what: "databases" | "tables") => {
     setListing(what); setError(null);
     try { const r = await post<{ items: string[] }>("extract/database/list", { ...form, what }); setLists((l) => ({ ...l, [what]: r.items })); }
     catch (e: any) { setError(e.message); }
     finally { setListing(null); }
   };
-  const choice = (k: "database" | "table", label: string, what: "databases" | "tables", hint = "") => (
-    <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{label}
-      <span style={{ display: "flex", gap: 6 }}>
-        <input className="mono" style={{ flex: 1 }} list={`extract-${what}`} value={form[k]} placeholder={hint} autoComplete="off" onChange={(e) => set(k, e.target.value)} />
-        <button type="button" className="small" disabled={listing !== null || !form.host || (what === "tables" && !form.database)} onClick={() => load(what)}
-          title={`List the ${what} of the server, then type to search`}>{listing === what ? "…" : `List (${lists[what].length || "?"})`}</button>
-      </span>
-      <datalist id={`extract-${what}`}>{lists[what].map((n) => <option key={n} value={n} />)}</datalist></label>
-  );
-  const row = (k: keyof typeof form, label: string, hint = "", type = "text") => (
-    <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{label}
-      <input className="mono" type={type} value={form[k]} placeholder={hint} autoComplete="off" onChange={(e) => set(k, e.target.value)} /></label>
-  );
+  const field = (f: DbField) => {
+    const input = <input className="mono" style={{ flex: 1 }} type={f.secret ? "password" : "text"} list={f.list ? `extract-${f.list}` : undefined}
+      value={form[f.key] ?? ""} placeholder={f.hint || ""} autoComplete="off" onChange={(e) => set(f.key, e.target.value)} />;
+    const what = f.list;
+    return (
+      <label key={f.key} className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>{f.label}
+        {what ? <>
+          <span style={{ display: "flex", gap: 6 }}>{input}
+            <button type="button" className="small" disabled={listing !== null || !ready(spec?.[what])} onClick={() => load(what)}
+              title={`List the ${f.label.toLowerCase()}s of the server, then type to search (needs: ${(spec?.[what] || []).map((k) => spec?.fields.find((x) => x.key === k)?.label || k).join(", ")})`}>
+              {listing === what ? "…" : `List (${lists[what].length || "?"})`}</button>
+          </span>
+          <datalist id={`extract-${what}`}>{lists[what].map((n) => <option key={n} value={n} />)}</datalist>
+        </> : input}
+      </label>
+    );
+  };
   return (
     <Dialog title="Database" onClose={onClose} footer={<>
       <span style={{ flex: 1 }} />
-      <button className="primary" disabled={busy || !form.host || !form.org || !form.database} onClick={add}>Add</button>
+      <button className="primary" disabled={busy || !ready(spec?.add)} onClick={add}>Add</button>
     </>}>
       <label className="small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>Type
-        <select value={form.type} onChange={(e) => set("type", e.target.value)}><option value="influxdbV3">InfluxDB 3</option></select></label>
-      {row("host", "Host", "http://localhost:8181")}
-      {row("token", "Token", "", "password")}
-      {row("org", "Organization")}
-      {choice("database", "Database", "databases")}
-      {choice("table", "Table", "tables", "* for all (a regex)")}
+        <select value={form.type || ""} onChange={(e) => pickType(e.target.value)}>
+          {types.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}</select></label>
+      {spec?.fields.map(field)}
       <p className="muted small">Written to a temporary file (readable by you only) that the data loader reads, removed when the server stops.</p>
       {error && <div className="banner error">{error}</div>}
     </Dialog>
