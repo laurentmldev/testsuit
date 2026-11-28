@@ -16,7 +16,7 @@
 # "testsuit-conda-channel" of the run (on a v* tag, a pull request changing it, or by hand from the Actions
 # tab). Install it from that folder: README.md, "From Anaconda Navigator".
 # The job installer then builds the Windows installer from that channel (conda/installer/construct.yaml), kept as
-# the artifact "testsuit-windows-installer": README.md, "Windows installer".
+# the artifact "testsuit-<version>-Windows-x86_64.exe" (the .exe itself, not zipped): README.md, "Windows installer".
 name: conda
 
 on:
@@ -134,9 +134,11 @@ jobs:
           conda run -n base constructor conda/installer --output-dir installer-out
           ls -l installer-out
 
+      # the .exe as is, not zipped (archive: false): the artifact is named after it,
+      # testsuit-<version>-Windows-x86_64.exe
       - name: Keep the installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: testsuit-windows-installer
           path: installer-out/*.exe
+          archive: false
           retention-days: 90
