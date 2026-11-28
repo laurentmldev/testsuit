@@ -119,6 +119,12 @@ Navigator shows no console: when *Launch* seems to do nothing, open http://127.0
 already), and read `testsuit\mxp_webui.log` in `%APPDATA%` (`~/.config/testsuit/mxp_webui.log` elsewhere), which
 tells what each launch did: the folder, the address, whether the browser opened.
 
+On Linux, `mxp webui` (and `tsq view`) open the browser with the desktop's own openers (`$BROWSER`, `xdg-open`,
+`gio open`, then the usual browsers), run without the conda environment's folders on their `PATH`: the `gio` of a
+conda environment has no handler for web pages (it printed `gio: <url>: Operation not supported` and no browser
+opened). What the openers print goes to the log; when none opens a browser, the command says to open the address by
+hand.
+
 ## Jupyter GUIs
 
 Three notebook GUIs come with the package: Data-Plot (browse and plot parameters), H5-Conv (convert data files to HDF5) and M-Exploit (run a scenario and view its report). Copy their starter notebooks into a working folder and open Jupyter there:
@@ -217,6 +223,14 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API, web UI at `/ui` ([sequencer README](src/testsuit/sequencer/README.md)) |
 | `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |
 | `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
+
+**HDF5 files written** (`data2h5`, `apply_clock_correction`, `extract_data_any`, `extract_data_flags`, H5-Conv, the
+Extract of the Exploit pages): each parameter is a dataset of its group, whose `TimestampRef` attribute names its
+timestamp (index) dataset. The parameters of a group whose timestamps are exactly the same (same values, same type)
+share one timestamp dataset; a timestamp that differs gets its own (`<name>`, else `<name>_2`, `_3`…). The comparison
+hashes and reads the data by chunks, so it holds for files of several GB. Appending rows to a parameter keeps it on a
+shared timestamp only while its other parameters get the same rows. The group keeps the list of its timestamp
+datasets (`IndexDatasets`) and each timestamp dataset its user count and hash (`IndexUsers`, `IndexDigest`).
 
 **Secrets.** Wherever a password or a token is given (the `token` of an InfluxDB config file, the `password` of a ClickHouse one, `data2db --token`, the credentials of a requirements source), it can be a reference rather than the secret itself: `env:<VARIABLE>` reads an environment variable, and `file:<path>` the content of a file, such as a Docker or Kubernetes secret (`token: file:/run/secrets/influx_token`; trailing white space dropped; a relative path is relative to the config file, or to the current folder on the command line). The sources file of the requirements accepts references only.
 
