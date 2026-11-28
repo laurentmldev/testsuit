@@ -13,14 +13,14 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -e .
 ```
 
-The plotly widgets, the data file formats (InfluxDB, ClickHouse, TDMS, MDF) and the web UI (`mxp webui`) come with
+The plotly widgets, the data file formats (InfluxDB, ClickHouse, TDMS, MDF) and the web UI (the `testsuit` command) come with
 the default install. Optional features are installed as extras:
 
 | Extra          | Adds                                                                 |
 |----------------|----------------------------------------------------------------------|
 | `jupyter`      | notebook GUIs (`jupytertools`)                                       |
 | `dwdatareader` | DXD (Dewesoft) files                                                 |
-| `sequencer`    | the test sequencer `tsq`/`tsqd` and its web UI                       |
+| `sequencer`    | the test sequencer `tsq`/`tsqd` (the sequencer mode of the web UI)  |
 | `test`         | what the test suite needs                                            |
 | `dev`          | `test` plus build and lint tools                                     |
 
@@ -28,18 +28,14 @@ the default install. Optional features are installed as extras:
 
 For example `pip install -e ".[jupyter,dwdatareader]"`.
 
-To use testsuit without cloning it, install straight from GitHub (add `@<tag>` to pin a version):
-
-```bash
-pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
-```
+The web UI is [the testsuit app](#the-testsuit-app): `testsuit`.
 
 ### Windows installer
 
 For a Windows machine with no Python (or with another Python, or Anaconda, which it leaves alone): one
 `testsuit-<version>-Windows-x86_64.exe` installs its own Python, testsuit and all its dependencies, offline, with
-a **testsuit** shortcut in the Start menu and on the desktop that runs the mexploit web UI (`mxp webui --last`, as
-the Navigator tile below). Get it from the `conda` workflow (artifact `testsuit-<version>-Windows-x86_64.exe` of a run, the
+a **testsuit** shortcut in the Start menu and on the desktop that runs [the testsuit app](#the-testsuit-app)
+(`testsuit`, as the Navigator tile below). Get it from the `conda` workflow (artifact `testsuit-<version>-Windows-x86_64.exe` of a run, the
 installer itself, not zipped, on each
 `v*` tag or by hand from the Actions tab). Windows 10 or later, 64-bit; no admin rights needed: it installs for the
 current user in `%LOCALAPPDATA%\testsuit` by default, does not add itself to `PATH` nor register its Python as the
@@ -52,7 +48,7 @@ Plugins (entry points of the `testsuit.plugins` group) are installed with its ow
 "%LOCALAPPDATA%\testsuit\python.exe" -m pip install <plugin, wheel or git URL>
 ```
 
-The shortcut, and the `mxp` and `exploit_runner` processes it starts, load them at each launch. Without installing it,
+The shortcut, and the `mxp`, `exploit_runner` and `tsqd` processes it starts, load them at each launch. Without installing it,
 a plugin can also be declared in the `TESTSUIT_PLUGINS` user environment variable (`module` or `module:function`,
 comma-separated), with its folder in `PYTHONPATH`. Installing a newer version of testsuit may remove the plugins
 installed with pip: install them again after an upgrade.
@@ -68,7 +64,7 @@ TESTSUIT_VERSION=<version> TESTSUIT_CHANNEL=file:///C:/conda-channels/testsuit-c
 
 ### From Anaconda Navigator
 
-Installed with conda, testsuit shows in Anaconda Navigator as the **testsuit** app (its tile runs the mexploit web UI). The package is not published to
+Installed with conda, testsuit shows in Anaconda Navigator as the **testsuit** app (its tile runs [the testsuit app](#the-testsuit-app)). The package is not published to
 any channel: it is installed from a local folder. Get that folder from the `conda` workflow (artifact
 `testsuit-conda-channel` of a run, on each `v*` tag or by hand from the Actions tab: unzip it anywhere), or build it
 yourself (recipe in [conda/](conda/meta.yaml)):
@@ -110,20 +106,135 @@ then restart Navigator (or *Refresh* its *Home* page): **testsuit** is there, in
 from a newer folder. Upgrade testsuit in that environment with conda, not `pip install -U`, which would leave conda
 and Navigator on the old version.
 
-*Launch* runs `mxp webui --last`: the folder opened last, or a folder picker the first time; *Change folder…* in its
-bar opens another one, and *Stop* stops it (launching it again while it runs only opens the browser on it). Plugins
+*Launch* runs `testsuit`: with no `testsuit.toml`, the exploit mode on the folder opened last, or a folder picker the
+first time; *Change folder…* in the top bar opens another one, and *Stop testsuit…* in its Configuration tab stops it
+(launching it again while it runs only opens the browser on it). Plugins
 (entry points of the `testsuit.plugins` group) must be installed in the same environment: `pip install` them from a
 terminal on it (*Environments*, ▶, *Open Terminal* in Navigator); upgrading testsuit keeps them.
 
 Navigator shows no console: when *Launch* seems to do nothing, open http://127.0.0.1:8650 (the server may be running
-already), and read `testsuit\mxp_webui.log` in `%APPDATA%` (`~/.config/testsuit/mxp_webui.log` elsewhere), which
-tells what each launch did: the folder, the address, whether the browser opened.
+already), and read `testsuit\testsuit.log` in `%APPDATA%` (`~/.config/testsuit/testsuit.log` elsewhere), which
+tells what each launch did: the configuration, the folder, the address, whether the browser opened.
 
-On Linux, `mxp webui` (and `tsq view`) open the browser with the desktop's own openers (`$BROWSER`, `xdg-open`,
+## The testsuit app
+
+`testsuit` starts the web UI: one server on one port (`127.0.0.1:8650` by default), with the tabs of the modes
+turned on in `testsuit.toml`, and the underlying apps it needs:
+
+| Mode | Tabs | What runs |
+|---|---|---|
+| `exploit` (default) | **Criteria**, **Exploit**, **Plot**, **Extract** | the criteria editor, exploit_runner runs and their reports, data plotted or extracted by hand, on a folder of this machine (in the testsuit process) |
+| `sequencer` | **Runs**, **Datapacks**, **Infra** (and **Exploit** on the data of its runs, when the exploit mode is off) | `tsqd`, started by testsuit as a child process on `127.0.0.1:8640`, watched and restarted if it ends, stopped with testsuit; or a tsqd running elsewhere (`sequencer.url`) |
+
+**Configuration** shows every setting of `testsuit.toml` with where it comes from, the state and log of tsqd (with
+*Restart tsqd*), its own settings (`tsq.yml`), the plugins of each process, and *Stop testsuit…*.
+
+```bash
+testsuit                         # start (opens the browser); launched again, it opens the running one
+testsuit --folder ~/tests        # the exploit mode on this folder
+testsuit status                  # running or not, its modes, the state of its tsqd (--json: all of it)
+testsuit stop                    # stop it, and the tsqd it started
+```
+
+`testsuit.toml` is read from `--config`, else `$TESTSUIT_CONFIG`, else `./testsuit.toml`, else `testsuit.toml` in the
+user's configuration folder (`%APPDATA%\testsuit` on Windows, `~/.config/testsuit` elsewhere). Without any: the exploit
+mode alone, on the folder opened last (a folder picker the first time). Relative paths are relative to the file.
+
+```toml
+modes = ["sequencer", "exploit"]   # default ["exploit"]
+title = "Rail lab"                 # the title of the UI (top bar and browser tab); default "testsuit"
+logo = "logo.svg"                  # an image before the title: a file, or an http(s) URL; default testsuit's icon
+
+[ui]
+listen = "127.0.0.1:8650"          # the one port of the UI and of every API behind it
+browser = true                     # open the browser at the start
+# base_path, public_url, trusted_proxies: behind a reverse proxy, see below
+
+[exploit]
+folder = "~/tests"                 # default: the folder opened last; "Change folder…" in the top bar opens another
+results = "~/exploit_results"      # where the exploit_runner runs are kept (default <folder>/exploit_results)
+remote = false                     # true: also for other machines, through a reverse proxy (see below)
+
+[sequencer]
+config = "tsq.yml"                 # tsqd's configuration (default: $TSQ_CONFIG, then /etc/testsuit/tsq.yml)
+listen = "127.0.0.1:8640"          # where the tsqd testsuit starts listens (keep it on 127.0.0.1)
+restart = true                     # start tsqd again when it ends by itself
+# url = "http://lab:8640"          # instead: a tsqd running elsewhere, used as it is (not started)
+```
+
+Behind the one port: the UI under `/ui/`, the app's own API under `/app/`, the exploit mode under `/x/`, the REST API
+of tsqd under `/seq/` (passed through, its event stream included). tsqd itself listens on `127.0.0.1` only. The
+exploit mode runs the user's own code and reads any file of the machine: it (and *Stop*) answers only requests made
+on that machine, never one through a reverse proxy (`X-Forwarded-For`, `Forwarded` or `X-Real-IP`), unless
+`exploit.remote`; other browsers get the sequencer's tabs only. With the exploit mode on too, its pickers also offer
+the data of the sequencer's runs.
+
+### Behind a reverse proxy
+
+Only the one port of `ui.listen` is put behind the proxy (keep it on `127.0.0.1` when the proxy runs on the same
+machine). The proxy brings what testsuit has not: TLS and the authentication of the users (testsuit has none). What
+to know:
+
+- **Sub-path**: every URL the UI uses is relative, so it works under any sub-path. Either the proxy strips it (nginx
+  `proxy_pass http://127.0.0.1:8650/;` with the trailing slash), and nothing is to set; or the proxy passes it on, and
+  `ui.base_path` names it (`"/testsuit"`: testsuit then answers under `/testsuit/...`, and redirects anything else to
+  `/testsuit/ui/`).
+- **Live updates** are Server-Sent Events (`/seq/events`), no websocket: no `Upgrade` to pass on. The proxy must not
+  buffer them: testsuit sends them with `X-Accel-Buffering: no` (nginx honours it); for others, turn buffering off
+  for that path, and give it a read timeout above 15 s (tsqd sends a keep-alive every 15 s).
+- **Uploads**: a datapack or campaign posted from the UI can be large: raise the proxy's limit (`client_max_body_size`
+  of nginx, 1 MB by default).
+- `ui.public_url`: the URL users open (`"https://lab.example.org/testsuit"`), which `testsuit` and `testsuit status`
+  print and the Configuration tab shows.
+- `ui.trusted_proxies`: the addresses of the proxies (`["127.0.0.1"]`) whose `X-Forwarded-For` and
+  `X-Forwarded-Proto` testsuit believes (the client's address and `https` in its logs and redirects).
+- `exploit.remote = true`: the exploit mode (and *Stop*) for the users of the proxy too, not only on the machine
+  itself. It runs code as the user testsuit runs as, on that machine: only behind a proxy that authenticates them.
+- **The `tsq` command line** reaches tsqd through the same URL: `tsq --server https://lab.example.org/testsuit/seq`
+  (with the credentials the proxy asks, in the URL or a `.netrc`).
+
+nginx, the proxy passing the sub-path on:
+
+```nginx
+location /testsuit/ {
+    proxy_pass http://127.0.0.1:8650;          # no trailing slash: /testsuit/... reaches testsuit as is
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 1h;                     # event streams stay open
+    client_max_body_size 2g;                   # datapacks posted from the UI
+    auth_basic "testsuit";                     # or your SSO
+    auth_basic_user_file /etc/nginx/testsuit.htpasswd;
+}
+```
+
+```toml
+[ui]
+listen = "127.0.0.1:8650"
+browser = false
+base_path = "/testsuit"
+public_url = "https://lab.example.org/testsuit"
+trusted_proxies = ["127.0.0.1"]
+```
+
+Apache (`mod_proxy_http`): `ProxyPass /testsuit/ http://127.0.0.1:8650/testsuit/ flushpackets=on` and
+`ProxyPassReverse` alike, `RequestHeader set X-Forwarded-Proto https`, with the same `testsuit.toml`. To serve it at the
+root of a host instead, leave `base_path` out and proxy `/` to `http://127.0.0.1:8650/`.
+
+What each launch did is in `testsuit.log`, and what tsqd printed in `tsqd.log`, both in the user's configuration
+folder: read them when a launch from a shortcut, which shows no console, seems to do nothing.
+
+On Linux, `testsuit` (and `tsq view`) open the browser with the desktop's own openers (`$BROWSER`, `xdg-open`,
 `gio open`, then the usual browsers), run without the conda environment's folders on their `PATH`: the `gio` of a
 conda environment has no handler for web pages (it printed `gio: <url>: Operation not supported` and no browser
 opened). What the openers print goes to the log; when none opens a browser, the command says to open the address by
 hand.
+
+To use testsuit without cloning it, install straight from GitHub (add `@<tag>` to pin a version):
+
+```bash
+pip install "testsuit[jupyter] @ git+https://github.com/laurentmldev/testsuit.git"
+```
 
 ## Jupyter GUIs
 
@@ -158,7 +269,7 @@ The checks run on test results are mexploit scenarios: YAML files of entries, ea
 | `mxp describe` | every criterion a scenario can use, with its help and the JSON Schema of its fields; the helpers of expressions |
 | `mxp lint` | checks a scenario without running it: fields, expressions, computed parameters, parameter names against data (`--auto`: with the keys of its test definition) |
 | `mxp utest` | unit tests of a scenario: small data cases (`criteria_utests/<scenario>/utests.yml`), each with the status every check must give, and the coverage of each check |
-| `mxp webui` | the web UI (on the current folder, or `--last`: the folder opened last; *Change folder…* opens another one): the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page; and **Plot**, to plot the parameters of data files by hand (2D or 3D, a style per trace, exports to PNG, HTML and CSV). Also in tsqd (criteria on the Datapacks tab, and an Exploit tab with its subtabs Criteria (exploit_runner), Plot and Extract, on the data of its runs). |
+| `testsuit` | [the testsuit app](#the-testsuit-app), its exploit mode (on a folder: `--folder`, `exploit.folder`, else the folder opened last; *Change folder…* opens another one): the criteria editor in the browser: completion of the criteria, fields, helpers, parameters and keys, problems as you type, the unit tests with their matrix and coverage, the data of the cases as tables and plots; **Exploit**, which runs exploit_runner on scenarios, dictionaries, keys set by hand and data picked in the page; and **Plot**, to plot the parameters of data files by hand (2D or 3D, a style per trace, exports to PNG, HTML and CSV). Also in its sequencer mode (criteria on the Datapacks tab, and, with the exploit mode off, an Exploit tab with its subtabs Criteria (exploit_runner), Plot and Extract, on the data of its runs). |
 | `mxp vscode` | sets up VSCode with no extension of its own: schemas for completion and validation, unit tests in the Testing view, tasks for lint (Problems view), utest and edit |
 
 Scenarios are Jinja templates rendered before they run: a value can be a key of the test's dictionaries (`max: "{{ train.speed_limit_mps }}"`), a shared part can be included (`{% include "limits.inc.yml" %}`), and a loop can apply the same checks to several parameters (`{% for p in train.monitored %}`). The tools above render them too, and report each problem on the line where it is written ([examples](src/testsuit/exploit/README.md#templating-with-jinja-keys-includes-and-loops)).
@@ -183,6 +294,7 @@ Input files are Jinja2 templates (`{{ train.speed_limit_mps }}`, `{% include "x"
 ## Repository layout
 
 ```
+ui/                     the web UI (React, TypeScript): npm run build writes it into src/testsuit/app/ui
 src/testsuit/           the installable package
   datatools/            load data files into pandas, convert to HDF5, push to a DB
     plotBackends/       matplotlib and plotly drawing of plotHelpers' figures
@@ -192,7 +304,8 @@ src/testsuit/           the installable package
   exploit/              checks of recorded data, see its README
     mexploit/           YAML scenario checks (corridors, sequences, computed params, plots) run through pytest
     runner/             runs mexploit over test sessions and builds HTML reports
-  sequencer/            test sequencer: tsqd daemon, REST API, run engine, web UI and Editor (tsq command line in cli/, UI sources in ui/)
+  app/                  the testsuit app: testsuit command, testsuit.toml, its server (one port, the web UI built from ui/), the tsqd it starts
+  sequencer/            test sequencer: tsqd daemon, REST API, run engine, Editor (tsq command line in cli/)
   jupytertools/         ipywidgets GUIs for notebooks
   misc/                 logging, progress reporting, file helpers
   cli/                  command-line tools (see below)
@@ -215,12 +328,13 @@ Installing the package puts these commands on your `PATH`. Each prints its full 
 | `extract_data_any`       | decode raw bit fields into parameters from a JSON/YAML config (example: `examples/config_extract_data_any.json`) |
 | `extract_data_flags`     | extract flag values described in a YAML file                      |
 | `apply_clock_correction` | shift timestamps of a folder of data files                        |
-| `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest`, `mxp webui`, `mxp vscode` help to write and test scenarios ([Writing criteria](#writing-criteria)) |
+| `testsuit`               | [the testsuit app](#the-testsuit-app): the web UI, with its exploit and sequencer modes (`testsuit status`, `testsuit stop`) |
+| `mxp`                    | run a mexploit scenario folder against data folders; `mxp describe`, `mxp lint`, `mxp utest`, `mxp vscode` help to write and test scenarios ([Writing criteria](#writing-criteria)) |
 | `exploit_runner`         | run mexploit over whole test sessions from a YAML config          |
 | `datapack`               | generate a datapack from a test definition file                   |
 | `reqs`                   | requirements coverage: browse the requirements sources, coverage matrices of tests, results and campaigns, uncovered requirements |
 | `tsq`                    | test sequencer client: submit datapacks, follow runs, manage the lab (`pip install "testsuit[sequencer]"`) |
-| `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API, web UI at `/ui` ([sequencer README](src/testsuit/sequencer/README.md)) |
+| `tsqd`                   | test sequencer daemon: queue, lab locks, runs, REST API (its web UI: the sequencer mode of `testsuit`, which starts it) ([sequencer README](src/testsuit/sequencer/README.md)) |
 | `evalfile`               | render a Jinja2 template file with keys from YAML dictionaries    |
 | `testsuit-notebooks`     | copy the Jupyter GUI notebooks into a folder, optionally open Jupyter |
 

@@ -2129,30 +2129,17 @@ def test_daemon_api_and_cli(daemon, capsys):
     assert tsq(["--server", url, "kill", "nope"]) == 2
 
 
-def test_ui_title_and_logo(tmp_path, no_git):
-    """server.title and server.logo reach the UI through /health; a logo file is served at /logo<ext>."""
-    from fastapi import HTTPException
-
+def test_health_and_plugins_routes(tmp_path, no_git):
+    """/health (the testsuit app probes tsqd with it) and the plugins of the Configuration tab."""
     from testsuit.sequencer.api import create_app
     bench = Bench(tmp_path, stages=1)
     seq = bench.sequencer()
     routes = {r.path: r.endpoint for r in create_app(seq).routes if hasattr(r, "endpoint")}
-    health, logo = routes["/health"], routes["/logo{suffix}"]
 
     async def main():
-        assert (await health())["title"] == "Test sequencer" and (await health())["logo"] is None
-        write(tmp_path / "logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
-        seq.config.file = tmp_path / "tsq.yml"
-        seq.config.server.title = "Rail lab"
-        seq.config.server.logo = "logo.svg"
-        shown = await health()
-        assert shown["title"] == "Rail lab" and shown["logo"] == "logo.svg"
-        assert Path((await logo(".svg")).path) == tmp_path / "logo.svg"
-        seq.config.server.logo = "https://example.org/rail.png"
-        assert (await health())["logo"] == "https://example.org/rail.png"
-        with pytest.raises(HTTPException):
-            await logo(".png")
-        # the plugins of the Configuration tab
+        health = await routes["/health"]()
+        assert health["ok"] is True and "title" not in health
+        assert "/ui" not in routes and "/logo{suffix}" not in routes
         assert isinstance(await routes["/plugins"](), list)
         await seq.close()
     asyncio.run(main())

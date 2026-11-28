@@ -11,19 +11,19 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Build of the sequencer web UI (sequencer README, sections 13 and 14). The output goes into the Python
-// package (src/testsuit/sequencer/ui), which tsqd serves under /ui when server.ui is on.
-// `npm run dev` serves it with hot reload, the API proxied to a running tsqd (TSQ_URL, default 127.0.0.1:8640).
+// Build of the web UI of the testsuit app (README, "The testsuit app"). The output goes into the Python
+// package (src/testsuit/app/ui), which the `testsuit` command serves under /ui.
+// `npm run dev` serves it with hot reload, the API proxied to a running testsuit (TESTSUIT_URL, default 127.0.0.1:8650).
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const target = process.env.TSQ_URL || "http://127.0.0.1:8640";
+const target = process.env.TESTSUIT_URL || "http://127.0.0.1:8650";
 
 export default defineConfig({
   base: "./",
   plugins: [react()],
   build: {
-    outDir: "../src/testsuit/sequencer/ui",
+    outDir: "../src/testsuit/app/ui",
     emptyOutDir: true,
     chunkSizeWarningLimit: 6000,
   },

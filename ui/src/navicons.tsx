@@ -19,7 +19,7 @@ const PATHS: Record<string, string> = {
   lab: "M5 2h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM4 8h16M4 14h16M7.5 5h.01M7.5 11h.01M7.5 17h.01M11 5h5.5M11 11h5.5M11 17h5.5M7 20v2M17 20v2",   // a rack of computers
   exploit: "M4 20V11M10 20V5M16 20v-6M2.5 20h19",
   config: "M4 6h9M17 6h3M15 4v4M4 12h3M11 12h9M9 10v4M4 18h11M19 18h1M17 16v4",
-  // the tabs of `mxp webui` (with exploit and config above)
+  // the tabs of the exploit mode (with exploit and config above)
   criteria: "M9 11l2.5 2.5L16 8.5M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",   // a ticked box
   plot: "M3 3v18h18M6.5 15.5l4-5l3.5 3l5.5-7",   // a curve on axes
   extract: "M12 3v12M7.5 10.5L12 15l4.5-4.5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17",   // down into a file

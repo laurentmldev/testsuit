@@ -744,27 +744,9 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
         from testsuit.plugins import plugins_report
         return plugins_report()
 
-    def logo_url() -> str | None:
-        logo = seq.config.server.logo
-        if not logo:
-            return None
-        if logo.startswith(("http://", "https://")):
-            return logo
-        file = seq.config.logo_file
-        return f"logo{file.suffix}" if file and file.is_file() else None
-
     @app.get("/health")
     async def health():
-        return {"ok": True, "started_at": seq.started_at, "lab": seq.lab.git,
-                "title": seq.config.server.title, "logo": logo_url()}
-
-    @app.get("/logo{suffix}", include_in_schema=False)
-    async def logo(suffix: str):
-        """The UI's logo image (server.logo), when it is a file."""
-        file = seq.config.logo_file
-        if file is None or not file.is_file():
-            raise HTTPException(404, "no logo file (server.logo)")
-        return FileResponse(file)
+        return {"ok": True, "started_at": seq.started_at, "lab": seq.lab.git}
 
     # ── events ───────────────────────────────────────────────────────────
     @app.get("/events")
@@ -800,28 +782,4 @@ def create_app(seq: Sequencer, lifespan=None) -> FastAPI:
     if seq.config.server.editor:
         from testsuit.sequencer.editor_api import add_editor_routes
         add_editor_routes(app, seq)
-    if seq.config.server.ui:
-        add_ui(app)
     return app
-
-
-UI_DIR = Path(__file__).parent / "ui"
-
-
-def add_ui(app: FastAPI) -> None:
-    """The web UI (README section 13.1), a static build served under /ui (built from the repository's ui/ folder)."""
-    from fastapi.responses import HTMLResponse, RedirectResponse
-    from fastapi.staticfiles import StaticFiles
-
-    if (UI_DIR / "index.html").is_file():
-        app.mount("/ui", StaticFiles(directory=UI_DIR, html=True), name="ui")
-    else:
-        @app.get("/ui/", include_in_schema=False)
-        async def no_ui():
-            return HTMLResponse("<h1>testsuit sequencer</h1><p>The web UI is not built in this installation: "
-                                "<code>cd ui && npm ci && npm run build</code> in the testsuit repository, then "
-                                "reinstall. The REST API is at <a href='../docs'>/docs</a>.</p>")
-
-    @app.get("/", include_in_schema=False)
-    async def root():
-        return RedirectResponse("ui/")

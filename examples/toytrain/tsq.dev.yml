@@ -10,7 +10,6 @@ storage:
   max_run_output: 1GB
 server:
   listen: 127.0.0.1:8640               # local only
-  ui: true
   editor: true
   workspaces: [datapack]               # this example's datapack/ folder
 selftest: {before_each_run: true, timeout: 30s, max_attempts: 1}

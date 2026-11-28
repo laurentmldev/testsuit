@@ -42,7 +42,7 @@ imported and its ``register()`` function, if any, is called.
 
 What each plugin registered while it loaded is recorded (the registration functions call
 ``note_registration()``): ``plugins_report()`` lists the plugins found, whether they loaded, and what they
-include. The Configuration tabs of tsqd and of ``mxp webui`` show it.
+include. The Configuration tab of the testsuit app shows it.
 """
 from __future__ import annotations
 

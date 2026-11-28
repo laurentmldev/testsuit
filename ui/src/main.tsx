@@ -15,7 +15,8 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
-import { get, post, url, useConnected, useResource } from "./api";
+import { get, post, setApiScope, setSequencerOn, url, useConnected, useResource } from "./api";
+import type { AppInfo } from "./appinfo";
 import { attempt, classes, notify, Toasts, useRoute } from "./util";
 import { NavIcon } from "./navicons";
 import { KindLegend } from "./kinds";
@@ -33,7 +34,8 @@ import { ExtractPage } from "./extract/ExtractPage";
 import { PlotPage } from "./plot/PlotPage";
 import { SessionPage } from "./editor/Session";
 import { LabPushDialog } from "./editor/Publish";
-import { SessionCriteriaPage, StandaloneCriteriaApp } from "./criteria/CriteriaPage";
+import { ExploitCriteriaPage, SessionCriteriaPage } from "./criteria/CriteriaPage";
+import { AppStopped, FolderButton, FolderPickerPage, type ExploitMode } from "./criteria/FolderPicker";
 import { ExportsBadge } from "./pages/Review";
 
 function LabBanner({ editor }: { editor: boolean }) {
@@ -117,31 +119,96 @@ function RunsHome() {
   return null;
 }
 
-function App() {
-  const route = useRoute();
-  const connected = useConnected();
-  const [editor, setEditor] = useState(false);
-  const health = useResource<any>("health", ["lab"]);
+// The tabs of the exploit mode, on its folder
+const EXPLOIT_TABS = [
+  ["criteria", "Criteria", "Edit the scenarios of the folder (completion and checks) and their unit tests"],
+  ["exploit", "Exploit", "Run exploit_runner on scenarios and data, open its reports"],
+  ["plot", "Plot", "Plot the parameters of data files by hand"],
+  ["extract", "Extract", "Extract parameters of data files to an HDF5 file"],
+];
+
+/** app/info, again every few seconds while the sequencer's tsqd is not running (it may be starting). */
+function useAppInfo(initial: AppInfo): [AppInfo, () => void] {
+  const [info, setInfo] = useState(initial);
+  const refresh = () => { get<AppInfo>("app/info").then(setInfo).catch(() => {}); };
+  const seqState = info.sequencer?.state;
   useEffect(() => {
-    get("edit").then(() => setEditor(true)).catch(() => setEditor(false));
-  }, []);
-  const title = health.data?.title || "Test sequencer";
-  const logo = health.data?.logo ? (/^https?:/.test(health.data.logo) ? health.data.logo : url(health.data.logo)) : null;
-  const page = route.parts[0] || "";   // "": the Runs tab, which picks its subtab (RunsHome)
-  const editing = (page === "edit" || page === "criteria") && !!route.parts[1];   // an editor session names its own tab
-  const plotting = page === "exploit" && (route.parts[1] === "plot" || route.parts[1] === "extract");                  // the Plot page fills the window
+    if (!info.available.includes("sequencer")) return;
+    const t = window.setInterval(refresh, seqState === "running" ? 30000 : 3000);
+    return () => window.clearInterval(t);
+  }, [seqState]);
+  return [info, refresh];
+}
+
+function SequencerBanner({ info }: { info: AppInfo }) {
+  const s = info.sequencer;
+  if (!s || s.state === "running") return null;
+  const starting = s.state === "starting" || s.state === "restarting";
+  return (
+    <div className={classes("banner", starting ? "info" : "warn")}>
+      {starting ? <>The sequencer is starting (tsqd{s.detail ? `, ${s.detail}` : ""}): its tabs fill in once it answers.</>
+        : <>The sequencer (tsqd at <code>{s.url}</code>) is <strong>{s.state}</strong>{s.detail ? `: ${s.detail}` : ""}.</>}
+      {" "}<a href="#/config">Configuration</a>
+    </div>
+  );
+}
+
+function App({ initial }: { initial: AppInfo }) {
+  const [info, refreshInfo] = useAppInfo(initial);
+  const route = useRoute();
+  const seqOn = info.available.includes("sequencer");
+  const xOn = info.available.includes("exploit");
+  const page = route.parts[0] || "";
+  // the pages of the exploit mode, on its folder; #/exploit/plot and #/exploit/extract stay the sequencer's
+  // (the data of its runs: the Files tab of a run opens them)
+  const xPage = xOn && (((page === "criteria" || page === "exploit") && !route.parts[1]) || page === "plot" || page === "extract");
+  setApiScope(xPage ? "x" : "seq");
+  const connected = useConnected();
+  const [stopped, setStopped] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [editor, setEditor] = useState(false);
+  const [xMode, setXMode] = useState<ExploitMode | null>(null);
+  const seqUp = seqOn && info.sequencer?.state === "running";
+  const health = useResource<any>(seqUp ? "seq/health" : null, ["lab"]);
+  useEffect(() => {
+    if (seqUp) get("seq/edit").then(() => setEditor(true)).catch(() => setEditor(false));
+  }, [seqUp]);
+  useEffect(() => {
+    if (xOn) get<ExploitMode>("x/mode").then(setXMode).catch(() => setXMode(null));
+  }, [xOn]);
+  const title = info.title;
+  const logo = info.logo ? (/^https?:/.test(info.logo) ? info.logo : url(info.logo)) : null;
+  // without the sequencer, the home page is the criteria editor
+  useEffect(() => { if (page === "" && !seqOn) window.location.replace("#/criteria"); }, [page, seqOn]);
+  // an editor session and the criteria editor name their own browser tab and fill the window
+  const editing = (page === "edit" && !!route.parts[1]) || (page === "criteria" && (!!route.parts[1] || xPage));
+  const plotting = page === "plot" || page === "extract" || (page === "exploit" && (route.parts[1] === "plot" || route.parts[1] === "extract"));
   useEffect(() => { setAppName(title); }, [title]);
-  const nav = [
-    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Infra"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
-  ];
-  // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
-  // are kept as they were, so existing links still work
-  const tabOf = (key: string) => (key === "queue" || key === "" || key === "campaigns" ? "runs" : key);
-  // the browser tab follows the selected top-level tab: "Infra · Test sequencer"
+  const seqNav: string[][] = seqOn ? [
+    ["runs", "Runs", "Runs waiting, running and done"], ...(editor ? [["datapacks", "Datapacks", "Test definitions, campaigns, requirements and issues: edit, generate, run"]] : []),
+    ["lab", "Infra", "The lab: its components, their state, the resources"],
+    // the sequencer's Exploit tab (on the data of its runs) when the exploit mode is off; with it on, its tabs serve
+    ...(editor && !xOn ? [["exploit", "Exploit", "Check criteria, plot and extract the data of the runs"]] : []),
+  ] : [];
+  const xNav = xOn ? EXPLOIT_TABS : [];
+  const nav = [...seqNav, ...xNav, ["config", "Configuration", "What this testsuit app runs: its modes, their settings, the plugins"]];
+  // the Runs tab groups the queue and the list of all runs as its subtabs
+  const tabOf = (key: string) => (key === "queue" || key === "" || key === "campaigns" ? "runs"
+    : xOn && key === "exploit" && route.parts[1] ? route.parts[1] : key);
   const tabLabel = page === "edit" ? "Editor" : nav.find(([key]) => key === tabOf(page))?.[1] ?? "Runs";
   useTabTitle(editing ? undefined : tabLabel);
+  if (stopped) return <div className="app"><main><AppStopped /></main></div>;
   let content;
-  if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor}
+  const needsFolder = xPage && (page === "criteria" || page === "exploit") && xMode && !xMode.folder;
+  if (needsFolder) content = <FolderPickerPage mode={xMode!} />;
+  else if (xPage && page === "criteria") content = xMode ? <ExploitCriteriaPage mode={xMode} onFolder={() => setPicking(true)} /> : null;
+  else if (xPage && page === "exploit") content = <ExploitPage />;
+  else if (xPage && page === "plot") content = <PlotPage />;
+  else if (xPage && page === "extract") content = <ExtractPage />;
+  else if (page === "config") content = <ConfigPage info={info} editor={editor} refresh={refreshInfo} onStopped={() => setStopped(true)} />;
+  else if (!seqOn) content = null;
+  else if (!seqUp) content = <div className="page"><p className="muted">Waiting for the sequencer…</p></div>;
+  else if (page === "runs" && route.parts[1]) content = <RunPage id={route.parts[1]} tab={route.query.get("tab") || "pipeline"} editor={editor}
     file={route.query.get("file")} line={Number(route.query.get("line")) || null} />;
   else if (page === "runs") content = <RunsPage />;
   else if (page === "campaigns" && route.parts[1]) content = <CampaignRunPage id={route.parts[1]} />;
@@ -149,41 +216,45 @@ function App() {
   else if (page === "datapacks") content = <DatapacksPage route={route} />;
   else if (plotting) content = route.parts[1] === "extract" ? <ExtractPage /> : <PlotPage />;
   else if (page === "exploit") content = <ExploitPage />;
-  else if (page === "config") content = <ConfigPage editor={editor} />;
   else if (page === "edit" && route.parts[1]) content = <SessionPage id={route.parts[1]} route={route} />;
   else if (page === "criteria" && route.parts[1]) content = <SessionCriteriaPage sid={route.parts[1]} route={route} />;
   else if (page === "edit") content = <EditorHome />;
   else if (page === "queue") content = <QueuePage />;
   else content = <RunsHome />;
   return (
-    <div className={classes("app", (editing || plotting) && "full")}>
+    <div className={classes("app", (editing || plotting) && !needsFolder && "full")}>
       <header className="topbar">
-        <a className="brand" href="#/">
+        <a className="brand" href="#/" title={`testsuit ${info.testsuit}`}>
           {logo && <img src={logo} alt="" />}
           {title}
         </a>
         <nav>
-          {nav.map(([key, label]) => (
-            <a key={key} href={key === "runs" ? "#/" : `#/${key}`} className={classes(tabOf(page) === key && "active")}><NavIcon name={key} />{label}</a>
+          {nav.map(([key, label, hint], i) => (
+            <a key={key} href={key === "runs" ? "#/" : `#/${key}`} title={hint}
+               className={classes(tabOf(page) === key && "active", seqNav.length > 0 && xNav.length > 0 && (i === seqNav.length || i === seqNav.length + xNav.length) && "group-start")}>
+              <NavIcon name={key} />{label}</a>
           ))}
         </nav>
         <div className="topbar-right">
-          <ExportsBadge />
-          {health.data?.lab && (
+          {xOn && xMode && <FolderButton mode={xMode} open={picking} setOpen={setPicking} />}
+          {seqOn && <ExportsBadge />}
+          {seqOn && health.data?.lab && (
             <span className="pill" title={`lab commit ${health.data.lab.commit || ""}`}>
               lab {health.data.lab.tag || health.data.lab.commit?.slice(0, 8) || "?"}
             </span>
           )}
-          <KindLegend />
+          {seqOn && <KindLegend />}
           <a href="https://github.com/laurentmldev/testsuit" target="_blank" rel="noreferrer"
-             title="testsuit is free software under the GNU AGPL, version 3 or later: get its source code">source</a>
-          <span className={classes("dot", connected ? "on" : "off")} title={connected ? "live updates on" : "no live updates (reconnecting)"} />
+             title={`testsuit ${info.testsuit} is free software under the GNU AGPL, version 3 or later: get its source code`}>source</a>
+          {seqOn && <span className={classes("dot", connected && seqUp ? "on" : "off")}
+            title={!seqUp ? `the sequencer is ${info.sequencer?.state}` : connected ? "live updates on" : "no live updates (reconnecting)"} />}
         </div>
       </header>
-      <LabBanner editor={editor} />
+      {seqOn && <SequencerBanner info={info} />}
+      {seqUp && <LabBanner editor={editor} />}
       <main className={classes(plotting && "plot-host")}>
-        {(page === "queue" || (page === "runs" && !route.parts[1])) && <RunsSubtabs page={page} />}
-        {page === "exploit" && <ExploitSubtabs sub={route.parts[1] || ""} />}
+        {seqUp && (page === "queue" || (page === "runs" && !route.parts[1])) && <RunsSubtabs page={page} />}
+        {seqUp && !xOn && page === "exploit" && <ExploitSubtabs sub={route.parts[1] || ""} />}
         {content}
       </main>
       <Toasts />
@@ -191,14 +262,20 @@ function App() {
   );
 }
 
-// `mxp webui` serves this UI in its criteria mode: only the criteria editor (tsqd has no /mode)
+// The app's modes come first (app/info): the tabs, and the APIs the pages call, follow them.
 function Root() {
-  const [mode, setMode] = useState<any>(undefined);
+  const [info, setInfo] = useState<AppInfo | null | undefined>(undefined);
+  const [error, setError] = useState("");
   useEffect(() => {
-    get("mode").then((m) => setMode(m?.mode === "criteria" ? m : null)).catch(() => setMode(null));
+    get<AppInfo>("app/info")
+      .then((i) => { setSequencerOn(i.available.includes("sequencer")); setInfo(i); })
+      .catch((e) => { setError(String(e.message || e)); setInfo(null); });
   }, []);
-  if (mode === undefined) return null;
-  return mode ? <StandaloneCriteriaApp mode={mode} /> : <App />;
+  if (info === undefined) return null;
+  if (info === null) return <div className="app"><main><div className="page"><h2>testsuit does not answer</h2><p className="muted">{error}</p></div></main></div>;
+  if (!info.available.length) return <div className="app"><main><div className="page"><h2>{info.title}</h2>
+    <p className="muted">The modes of this testsuit app ({info.modes.join(", ")}) can be used only from the machine it runs on.</p></div></main></div>;
+  return <App initial={info} />;
 }
 
 window.addEventListener("unhandledrejection", (e) => notify(String(e.reason?.message || e.reason), "error"));

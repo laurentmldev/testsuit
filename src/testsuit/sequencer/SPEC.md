@@ -2,7 +2,7 @@
 
 ```
 Category:   Standards Track (project-internal)
-Status:     Describes the implemented system (tsqd, tsq, REST API, web UI, Editor)
+Status:     Describes the implemented system (tsqd, tsq, REST API, the testsuit app's sequencer mode, Editor)
 Companion:  README.md (architecture overview, user manual, rationale, examples)
 ```
 
@@ -73,6 +73,7 @@ Other terms:
 - State (queue, locks, resource states, history, events) is held in one SQLite database in WAL mode.
 - `tsq run --local` executes one datapack in the foreground against the same store and locks as `tsqd`.
 - All functionality MUST be reachable from the CLI and the REST API. The web UI is a client of the REST API and the kernel MUST NOT depend on it.
+- The web UI is served by the **testsuit app** (`testsuit`, §12.5), not by `tsqd`: its sequencer mode starts `tsqd` as a supervised child process (or uses one at `sequencer.url`) and passes the REST API through under `/seq/`.
 - The lab definition and the test definitions are YAML files in git repositories. The sequencer reads them; only the optional Editor (§12.4) writes them.
 
 Modules (`src/testsuit/sequencer/`): `config` (tsq.yml), `inventory`, `library` (roles, classes, command resolution), `lab` (git state, reload), `model` (pipeline), `intake`, `store`, `scheduler`, `monitor` (probes, self-test), `engine` (steps, DAG), `sequencer` (run lifecycle), `results`, `transports/`, `api`, `editor*`, `daemon`.
@@ -95,10 +96,9 @@ One YAML file, `tsq.yml`, located by `--config`, else `$TSQ_CONFIG`, else `/etc/
 | `storage.max_run_output` | | collected outputs above it end the run in `error` |
 | `storage.large_files` | `{threshold: 200MB, mode: zip}` | `mode: zip \| external` (§11) |
 | `storage.retention` | `{runs: 30d, results: forever}` | `{runs: <duration>, results: <duration> \| forever}`; `runs` counts from the end of the run, or from when its folder was unpacked again (§11) |
-| `server.listen` | `0.0.0.0:8640` | REST API and UI |
-| `server.ui`, `server.editor` | `true`, `false` | serve the UI; enable the Editor |
+| `server.listen` | `0.0.0.0:8640` | REST API (`--listen` overrides it; the testsuit app passes `sequencer.listen`, `127.0.0.1:8640` by default) |
+| `server.editor` | `false` | enable the Editor |
 | `server.workspaces` | `[]` | tests repositories offered by the Editor |
-| `server.title`, `server.logo` | | UI branding |
 | `queue.default_priority` | `50` | |
 | `queue.priority_aging` | `off` | e.g. `+1 per 30 min` |
 | `selftest.before_each_run` | `true` | §4.7 |
@@ -833,6 +833,7 @@ FastAPI, OpenAPI at `/docs`. Core resources:
 | `POST /runs/{id}/export`, `POST /campaigns/{id}/export`, `GET /exports/{id}`, `POST /exports/{id}/cancel`, `GET /exports/{id}/download` | exported reports (§11.2) |
 | `GET /runs/{id}/requirements[/report]`, `GET /campaigns/{id}/requirements[/report]` | requirements coverage of a run or of a campaign run (§5.5), JSON or one HTML page; `GET /campaigns/{id}/report` includes it |
 | `GET /events` | Server-Sent Events: state changes, log lines, `review`, `issue`, `export`, `export_progress` |
+| `GET /health` | `{ok, started_at, lab}`: the testsuit app probes tsqd with it |
 | `/edit/...`, `/exploit/...`, `/plot/...` | Editor mode only (§12.4) |
 
 ### 12.3 GitLab runner
@@ -856,11 +857,43 @@ Enabled by `server.editor`. It edits the files the CLI reads and MUST NOT add se
 - **Issues** (§11.3): the Datapacks page has an Issues subtab: its sources as cards (`GET /edit/sessions/{id}/issues`: `{file, sources: [{name, backend, project, label, url, default, group, capabilities, class, vars, filter}], default, routes, requirements, backends}`) with Test connection (`POST .../issues/test {source, data?}`, `data` the file as being edited: count, first issues, projects of a group, `types: {list, origin, failure, improvement, seen} | {error, seen}` (the types a new issue can have, where they come from, those proposed for a failure and for a green run, and how many of the issues read have each type), each call with credentials masked, or the error), and their issues (`GET .../issues/list?source=&state=&q=&refresh=&find=&only=reqs|bound&offset=&limit=`: a page, `limit` at most 500, of the lists as read so far (§11.3 Long lists), newest first; `q` is searched by the tools, `find` words of their key, title, labels or assignees; `{issues, total, offset, limit, listed, with_requirements, bound, errors, loading: {<source>: {read, total, exact, mode: first | since | whole}}, read_at}`: a page answers at once with what is read so far, the UI polls while `loading`), each with the requirements it names and the results it is bound to (an issue has `type`, `type_color`, `type_icon` when its tool gives them: a GitLab `type::` label and its colour, else its `issue_type`; a GitHub issue type and its colour; a Jira issue type and its icon; a Redmine tracker. ◉ is drawn in the colour of its type, the tool's, else red for a bug-like type, blue for an improvement-like one, purple for a task, else green when open and grey when closed, faded when closed; the UI shows the Jira icon instead when it loads); without an `issues.yml`, it offers to create one. `GET .../requirements` adds `issues: {<requirement key>: [{issue, via}]}` (open issues; derived and explicit) and `issues_errors`; the Requirements view shows ◉ per requirement, a filter on them, and the issues of a requirement opened. The Run page has ◉ Issue… on each failure (check, step, verdict) and on the verdict of a succeeded run (an improvement: title `[tsq] <testdef>: ` to complete): the draft to edit and create, or an existing issue to search and bind; the known issues of a failure beside it, with Unbind; an Issues tab. The campaign page and report list the known issues of each run.
 - **Criteria**: the datapack overview lists the criteria the exploit steps name (§6.8), per step with their data, and the scenarios of the test definition no step uses. The criteria editor marks each scenario with the steps that check it.
 
+### 12.5 The testsuit app
+
+`testsuit [start] [--config F] [--listen H:P] [--folder D] [--no-browser]`, `testsuit status [--json]`, `testsuit stop`. One server on one port (`ui.listen`, `127.0.0.1:8650`) serves the web UI and the APIs of the modes turned on; only that port is exposed. Its configuration, `testsuit.toml`, is located by `--config`, else `$TESTSUIT_CONFIG`, else `./testsuit.toml`, else the user's configuration folder (`%APPDATA%\testsuit`, `~/.config/testsuit`); none: the defaults. Relative paths are relative to the file; unknown keys are errors.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `modes` | `["exploit"]` | `sequencer`, `exploit`: at least one |
+| `title`, `logo` | `testsuit`, none | UI branding (a file or an http(s) URL) |
+| `ui.listen`, `ui.browser` | `127.0.0.1:8650`, `true` | the one port; open the browser at the start |
+| `ui.base_path` | none | a sub-path a reverse proxy passes on: everything is served under it (root_path), anything else redirected to `<base_path>/ui/` |
+| `ui.public_url` | none | the URL users open, printed and in `/app/info` (`url`) |
+| `ui.trusted_proxies` | `[]` | addresses whose `X-Forwarded-For`/`-Proto` are believed |
+| `exploit.folder`, `exploit.results` | the folder opened last, `<folder>/exploit_results` | the exploit mode's folder and exploit_runner runs |
+| `exploit.remote` | `false` | the exploit mode and stop answer every request, not only local ones |
+| `sequencer.config` | tsqd's own lookup (§3) | `tsq.yml` of the tsqd started |
+| `sequencer.listen` | `127.0.0.1:8640` | where the tsqd started listens |
+| `sequencer.restart` | `true` | start tsqd again when it ends by itself (given up after 5 exits within 30 s of their start) |
+| `sequencer.url` | none | a tsqd running elsewhere: used, not started |
+
+| Path | Purpose |
+|---|---|
+| `/ui/` | the web UI; it shows the tabs of the modes the viewer can use. Every URL it uses is relative (it works under a reverse proxy's sub-path) |
+| `GET /app/info` | `{app, testsuit, title, logo, modes, available, local, stoppable, config, url, sequencer: {state, detail, url, managed, pid, restarts, last_exit, started_at, log, config} \| null}`; `state`: `starting \| running \| restarting \| failed \| stopped \| unreachable` |
+| `GET /app/config`, `GET /app/about`, `GET /app/plugins`, `GET /app/logo{ext}` | settings with their source, versions, plugins of the app's process, logo |
+| `POST /app/stop`, `GET /app/sequencer/log`, `POST /app/sequencer/restart` | stop the app (and the tsqd it started); tsqd's output; restart it |
+| `/seq/{path}` | the REST API of tsqd (§12.2), passed through, streamed (SSE included, sent with `X-Accel-Buffering: no`); 503 when tsqd does not answer |
+| `/x/{criteria, exploit, plot, extract, mode, folder, folders, config, plugins}` | the exploit mode, on a folder of the machine |
+
+- A tsqd already answering on `sequencer.listen` at the start is used, not started nor stopped. On Linux the tsqd started gets SIGTERM if the app dies.
+- Unless `exploit.remote`, `/x/...` and `POST /app/stop` MUST answer only requests from the loopback interface without `X-Forwarded-For`, `Forwarded` or `X-Real-IP` (403 otherwise); `available` leaves the exploit mode out for other viewers.
+- Launched while an app answers at `ui.listen`, `testsuit` opens the browser on it (and its folder on `--folder`) instead of starting.
+
 ---
 
 ## 13. Extension points
 
-Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`) or `tsq.yml` `plugins`. `GET /plugins` (tsqd and `mxp webui`, their Configuration tab) lists each one found: `name`, `source`, `target`, `package`, `version`, `status` (`loaded` | `failed` | `not loaded`), `error`, and `includes`: what it registered while loading, by kind (testsuit's own built-ins excluded).
+Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`) or `tsq.yml` `plugins`. `GET /plugins` (tsqd, `/seq/plugins`; the testsuit app's own process, `/app/plugins`; the Configuration tab) lists each one found: `name`, `source`, `target`, `package`, `version`, `status` (`loaded` | `failed` | `not loaded`), `error`, and `includes`: what it registered while loading, by kind (testsuit's own built-ins excluded).
 
 | Registration | Contract | Built in |
 |---|---|---|
@@ -877,7 +910,8 @@ Plugins register through `testsuit.plugins` (entry points or `TESTSUIT_PLUGINS`)
 
 ## 14. Security considerations
 
-- The kernel has no authentication or authorisation. Deployments with the Editor enabled SHOULD sit behind an authenticating reverse proxy.
+- The kernel has no authentication or authorisation. Deployments with the Editor enabled SHOULD sit behind an authenticating reverse proxy, in front of the testsuit app's one port; `tsqd` SHOULD listen on the loopback interface only.
+- The testsuit app's exploit mode runs the user's code and reads any file: it answers only local, non-forwarded requests (§12.5).
 - SSH uses key-based authentication only. Host keys are checked against `tsq_ssh_host_key` when given, else `known_hosts`; a key is never trusted on first use.
 - Secrets in templates come from inventory variables; secret-looking HTTP headers are masked in logs and UI.
 - Issues: credentials only by reference; a person's own token for creating an issue is used for that call only, never stored nor logged; tokens are masked in errors and traces. An issue's text is shown, editable, before it is sent, since logs can hold secrets.

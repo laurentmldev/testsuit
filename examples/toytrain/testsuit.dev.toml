@@ -1,0 +1,15 @@
+# The testsuit app on this example, on this machine: `testsuit --config testsuit.dev.toml` (from this folder).
+# Both modes: the sequencer (tsqd on tsq.dev.yml, the emulated lab, its Editor on) and the exploit mode on the
+# test definitions of datapack/. The UI: http://127.0.0.1:8650/ui/
+modes = ["sequencer", "exploit"]
+title = "Toy train (emulated)"
+
+[ui]
+listen = "127.0.0.1:8650"
+
+[exploit]
+folder = "datapack"
+
+[sequencer]
+config = "tsq.dev.yml"
+listen = "127.0.0.1:8640"

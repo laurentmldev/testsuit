@@ -70,6 +70,8 @@ datapack/                              owned by the test authors
 baseline_expected.yml                  expected baseline of the campaign
 tsq.yml                                main configuration of the lab's sequencer
 tsq.dev.yml                            main configuration of a sequencer on a dev host (emulated mode)
+testsuit.dev.toml                      the testsuit app on a dev host: the sequencer on tsq.dev.yml, the exploit mode on datapack/
+testsuit.docker.toml                   the testsuit app of the Docker image (the sequencer mode)
 sample/
   data/<test>/                         recordings of a nominal run: telemetry.csv, propulsion.propj
   exploit_<test>.yml                   exploit_runner session: the test's criteria on its recording
@@ -146,7 +148,7 @@ mxp lint datapack/testdef/max_speed/criteria -k datapack/testdef/max_speed/scena
 mxp utest datapack/testdef/max_speed/criteria_utests/max_speed/utests.yml -o .work/utest --require-coverage
 ```
 
-In VSCode, `mxp vscode` (from this folder) sets up completion and validation of the scenarios, the unit tests in the Testing view, and a lint task. Or all of it in the browser: `mxp webui datapack` opens the criteria editor on the test definitions, with completion of the criteria and their fields, the problems as you type, the unit tests to run with their matrix and coverage, and the recordings of the cases as tables and plots.
+In VSCode, `mxp vscode` (from this folder) sets up completion and validation of the scenarios, the unit tests in the Testing view, and a lint task. Or all of it in the browser: `testsuit --folder datapack` opens the criteria editor on the test definitions, with completion of the criteria and their fields, the problems as you type, the unit tests to run with their matrix and coverage, and the recordings of the cases as tables and plots.
 
 **Build a datapack.** The software and simulation datasets come from the release store (`datapack/release_store`). `--nocheck` is needed because the example folders are not a tagged Git checkout:
 
@@ -201,6 +203,10 @@ datapack datapack/testdef/front_contact/testdef.yml --nocheck --setup-config emu
 tsq --config tsq.dev.yml run .work/datapacks/toytrain_front_contact_toytrain_setup_*.zip --local
 ```
 
+Or in the browser: `testsuit --config testsuit.dev.toml` starts the testsuit app with its tsqd on `tsq.dev.yml` (runs,
+datapacks, the emulated lab, its Editor) and the exploit mode on `datapack/` (criteria, exploit_runner, plots), at
+http://127.0.0.1:8650/ui/.
+
 What changes, and what does not:
 - **The datapack** is built from the same test definitions and setup. Only the setup configuration differs: `emulated` adds the dictionary `platforms/emulated.yml`, which moves every address to the loopback interface (`127.0.0.10` to `127.0.0.30`). Linux routes all of `127.0.0.0/8` to it, multicast included, so this needs no network setup. Ports and the multicast group are unchanged.
 - **The lab** is `lab/toytrain_emulated.yml`. Its stage `train_emu` has the type `toytrain` and the roles pilot, telemetry and acquisition, so the datapack binds to it unchanged. Every component uses the `local` transport, under `~/.toytrain-emu/`.
@@ -216,7 +222,7 @@ A run in emulated mode is flagged non-conform against `baseline_expected.yml`, s
 
 ## In Docker
 
-The example ships a Docker image of this environment: Debian 12 slim, Miniconda, testsuit with its sequencer, and the `toytrain` package. By default the container runs the sequencer of the emulated mode (`tsq.dev.yml`), with its UI and Editor on port 8640.
+The example ships a Docker image of this environment: Debian 12 slim, Miniconda, testsuit with its sequencer, and the `toytrain` package. By default the container runs the testsuit app (`testsuit.docker.toml`): the sequencer of the emulated mode (`tsq.dev.yml`), with its UI and Editor on port 8640.
 
 ```bash
 cp .env.sample .env            # optional: host folders and user, proxies, host port, Miniconda and testsuit versions

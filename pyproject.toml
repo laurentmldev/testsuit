@@ -47,9 +47,11 @@ dependencies = [
     "clickhouse-driver>=0.2",
     "npTDMS>=1.10",
     "asammdf>=8.7",
-    # the criteria editor and web UI (mxp webui, mxp edit)
+    # the testsuit app (its web UI): its server, the sequencer's API passed through, testsuit.toml on Python 3.10
     "fastapi>=0.110",
-    "uvicorn>=0.29"
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "tomli>=2.0; python_version < '3.11'"
 ]
 
 [project.optional-dependencies]
@@ -82,6 +84,7 @@ testsuit-notebooks = "testsuit.cli.notebooks:main"
 evalfile = "testsuit.cli.evalfile:main"
 tsq = "testsuit.cli.tsq:main"
 reqs = "testsuit.cli.reqs:main"
+testsuit = "testsuit.app.cli:main"
 tsqd = "testsuit.sequencer.daemon:main"
 
 [project.urls]
@@ -110,8 +113,10 @@ python_files = ["*_t.py"]
 "testsuit.jupytertools.notebooks" = ["*.ipynb"]
 # JS/CSS libraries embedded in the HTML report (offline, single file)
 "testsuit.exploit.runner" = ["report_libs/*"]
-# GitLab Custom executor scripts, the sequencer documentation and its web UI (built from ui/: npm run build)
-"testsuit.sequencer" = ["gitlab/*", "*.md", "ui/*", "ui/assets/*"]
+# GitLab Custom executor scripts and the sequencer documentation
+"testsuit.sequencer" = ["gitlab/*", "*.md"]
+# the web UI of the testsuit app (built from ui/: npm run build)
+"testsuit.app" = ["ui/*", "ui/assets/*", "logo.svg"]
 
 [tool.setuptools_scm]
 root = "."  # ".git" is in the parent directory
