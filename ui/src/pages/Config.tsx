@@ -11,8 +11,9 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// The configuration in use, with where each value comes from (tsq config).
+// The configuration in use, with where each value comes from (tsq config), and the plugins loaded.
 import { useResource } from "../api";
+import { PluginsSection } from "../plugins";
 
 export function ConfigPage({ editor }: { editor: boolean }) {
   const config = useResource<any[]>("config");
@@ -31,6 +32,7 @@ export function ConfigPage({ editor }: { editor: boolean }) {
           ))}
         </tbody>
       </table>
+      <PluginsSection server="tsqd" />
     </div>
   );
 }

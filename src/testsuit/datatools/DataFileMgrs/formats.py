@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 import logging
 
+from testsuit.plugins import note_registration
+
 if TYPE_CHECKING:
     from testsuit.datatools.DataFileMgrs.AFileMgr import AFileMgr
 
@@ -112,6 +114,7 @@ def register_file_format(name: str, extensions: str | list[str] | tuple[str, ...
         # external formats first, latest registered first
         _formats.insert(0, fmt)
     _addSupportedExtensions(fmt.extensions)
+    note_registration("data file formats", f"{name} (" + ", ".join("." + ext for ext in fmt.extensions) + ")")
     return fmt
 
 
@@ -134,6 +137,7 @@ def register_csv_variant(name: str, detect: Callable[[str], bool], factory: File
     
     originStr="builtin" if builtin else "extension"
     logging.getLogger("testsuit").debug(f"registered {originStr} CSV variant '{name}'")
+    note_registration("CSV variants", name)
     return variant
 
 

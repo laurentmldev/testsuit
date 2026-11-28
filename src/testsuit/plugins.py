@@ -39,23 +39,83 @@ starts are separate processes, so they find your registrations through one of:
 
 The entry point target, or ``function``, is called without argument; a module given alone is
 imported and its ``register()`` function, if any, is called.
+
+What each plugin registered while it loaded is recorded (the registration functions call
+``note_registration()``): ``plugins_report()`` lists the plugins found, whether they loaded, and what they
+include. The Configuration tabs of tsqd and of ``mxp webui`` show it.
 """
 from __future__ import annotations
 
 import importlib
 import logging
 import os
+import sys
 from importlib.metadata import entry_points
+from typing import Any
 
 ENTRY_POINT_GROUP = "testsuit.plugins"
 ENV_VAR = "TESTSUIT_PLUGINS"
 
 _loaded: set[str] = set()
+# what load_plugins() did with each plugin, in load order (see plugins_report())
+_records: list[dict[str, Any]] = []
+# the record of the plugin being loaded: the registrations made meanwhile are its own
+_current: list[dict[str, Any]] = []
 
 
 def _call(target: object) -> None:
     if callable(target):
         target()
+
+
+def _by_testsuit() -> bool:
+    """Whether the registration function calling note_registration() was called by testsuit itself: its
+    built-in formats, backends... registered when a plugin first imports their module are not the plugin's."""
+    frame = sys._getframe(2)            # the registration function
+    registering = frame.f_globals.get("__name__")
+    while frame is not None and frame.f_globals.get("__name__") == registering:
+        if frame.f_code.co_name == "<module>":   # at the import of the registration module itself
+            return True
+        frame = frame.f_back
+    caller = frame.f_globals.get("__name__", "") if frame is not None else ""
+    return caller == "testsuit" or caller.startswith("testsuit.")
+
+
+def note_registration(kind: str, name: str) -> None:
+    """Called by the registration functions: while a plugin loads, ``name`` is listed among the ``kind`` it
+    includes ("data file formats", "mexploit criteria"...). Does nothing outside load_plugins(), nor for
+    testsuit's own registrations."""
+    if not _current or _by_testsuit():
+        return
+    names = _current[-1]["includes"].setdefault(kind, [])
+    if name not in names:
+        names.append(name)
+
+
+def _load(record: dict[str, Any], load: Any) -> bool:
+    """Run ``load()`` as the plugin of ``record`` (its registrations noted in it), recording the outcome."""
+    _records.append(record)
+    _current.append(record)
+    try:
+        load()
+        record["status"] = "loaded"
+        return True
+    except Exception as e:
+        record["status"] = "failed"
+        record["error"] = f"{type(e).__name__}: {e}"
+        return False
+    finally:
+        _current.pop()
+
+
+def _dist(ep: Any) -> tuple[str | None, str | None]:
+    dist = getattr(ep, "dist", None)
+    if dist is None:
+        return None, None
+    try:
+        return dist.metadata["Name"], dist.version
+    except Exception:
+        return None, None
 
 
 def load_plugins() -> list[str]:
@@ -71,12 +131,14 @@ def load_plugins() -> list[str]:
         if key in _loaded:
             continue
         _loaded.add(key)
-        try:
-            _call(ep.load())
+        package, version = _dist(ep)
+        record = {"name": ep.name, "source": "entry point", "target": ep.value, "package": package,
+                  "version": version, "includes": {}}
+        if _load(record, lambda ep=ep: _call(ep.load())):
             loaded.append(ep.name)
             logging.getLogger("testsuit").debug(f"testsuit plugin '{ep.name}' ({ep.value}) loaded")
-        except Exception as e:
-            logging.getLogger("testsuit").warning(f"testsuit plugin '{ep.name}' ({ep.value}) failed to load: {e}")
+        else:
+            logging.getLogger("testsuit").warning(f"testsuit plugin '{ep.name}' ({ep.value}) failed to load: {record['error']}")
 
     for spec in os.environ.get(ENV_VAR, "").split(","):
         spec = spec.strip()
@@ -84,12 +146,42 @@ def load_plugins() -> list[str]:
             continue
         _loaded.add(spec)
         mdlName, _, funcName = spec.partition(":")
-        try:
+
+        def load(mdlName: str = mdlName, funcName: str = funcName) -> None:
             mdl = importlib.import_module(mdlName)
             _call(getattr(mdl, funcName) if funcName else getattr(mdl, "register", None))
+        record = {"name": spec, "source": ENV_VAR, "target": spec, "package": None, "version": None, "includes": {}}
+        if _load(record, load):
             loaded.append(spec)
             logging.getLogger("testsuit").debug(f"testsuit plugin '{spec}' ({ENV_VAR}) loaded")
-        except Exception as e:
-            logging.getLogger("testsuit").warning(f"testsuit plugin '{spec}' ({ENV_VAR}) failed to load: {e}")
+        else:
+            logging.getLogger("testsuit").warning(f"testsuit plugin '{spec}' ({ENV_VAR}) failed to load: {record['error']}")
 
     return loaded
+
+
+def plugins_report() -> list[dict[str, Any]]:
+    """The plugins of this process: those load_plugins() tried, then those it would find now but has not loaded
+    (installed or named in TESTSUIT_PLUGINS since).
+
+    Each one: ``name``, ``source`` ("entry point" or "TESTSUIT_PLUGINS"), ``target`` (``module:function``),
+    ``package`` and ``version`` (of an entry point's distribution), ``status`` ("loaded", "failed" or
+    "not loaded"), ``error`` (when failed) and ``includes``: what it registered while it loaded, by kind
+    ({"data file formats": ["myformat"], ...}).
+    """
+    out = [{**r, "includes": {k: list(v) for k, v in r["includes"].items()}} for r in _records]
+    try:
+        eps = list(entry_points(group=ENTRY_POINT_GROUP))
+    except Exception:
+        eps = []
+    for ep in eps:
+        if "ep:" + ep.name not in _loaded:
+            package, version = _dist(ep)
+            out.append({"name": ep.name, "source": "entry point", "target": ep.value, "package": package,
+                        "version": version, "status": "not loaded", "includes": {}})
+    for spec in os.environ.get(ENV_VAR, "").split(","):
+        spec = spec.strip()
+        if spec and spec not in _loaded:
+            out.append({"name": spec, "source": ENV_VAR, "target": spec, "package": None, "version": None,
+                        "status": "not loaded", "includes": {}})
+    return out

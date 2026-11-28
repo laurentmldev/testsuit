@@ -33,6 +33,8 @@ the slots it needs, ``slots.<id>.input_dir``).
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 import json
 import sys
 import tempfile
@@ -53,6 +55,7 @@ class GeneratorError(Exception):
 def register_generator(name: str, function: Generator) -> None:
     """Declare a generator, usable as ``method: generate, generator: <name>`` in setup files."""
     _generators[name] = function
+    note_registration("datapack generators", name)
 
 
 def unregister_generator(name: str) -> None:

@@ -44,6 +44,8 @@ Without ``children_query``, ``list(path, children=True)`` is answered from ``tre
 """
 from __future__ import annotations
 
+from testsuit.plugins import note_registration
+
 import hashlib
 import json
 import re
@@ -123,6 +125,7 @@ def register_req_backend(name: str, factory: BackendFactory) -> None:
     """Declare a requirements backend, usable as ``backend: <name>`` in the sources file (case-insensitive;
     registering a name again replaces it, the built-in one included)."""
     _backends[name.lower()] = factory
+    note_registration("requirements backends", name.lower())
 
 
 def unregister_req_backend(name: str) -> None:

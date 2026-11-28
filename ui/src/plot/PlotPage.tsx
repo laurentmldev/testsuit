@@ -394,7 +394,7 @@ export function PlotPage() {
                 {fields.map((f) => (
                   <label key={f} className={classes("plot-field", picked.includes(f) && "selected")} title={f} onDoubleClick={(e) => { e.preventDefault(); add([f]); }}>
                     <input type="checkbox" checked={picked.includes(f)} onChange={() => toggle(f)} />
-                    <span className="mono">{paramOf(f)}</span>
+                    <span className="mono cut-start"><bdi>{paramOf(f)}</bdi></span>
                     {is3d && picked.includes(f) && picked.length <= 3 && <span className="badge info">{"XYZ"[picked.indexOf(f)]}</span>}
                     {plotted.has(f) && <span className="plot-dot" title="plotted" style={{ background: traces.find((t) => t.fields.includes(f))?.color }} />}
                   </label>
