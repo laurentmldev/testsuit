@@ -11,7 +11,7 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// The Extract page of `mxp webui` (#/extract): pick data files or folders, tick the parameters to keep (quick
+// The Extract page of the exploit mode (#/extract) and of the sequencer (#/exploit/extract): pick data files or folders, tick the parameters to keep (quick
 // search, "select all" on what the search shows), and write them to an HDF5 file (routes /extract,
 // testsuit.exploit.editor.extract), with a progress bar. The data are listed by the Plot routes (/plot/sources).
 // CSV output and other sources of parameters (an InfluxDB query, as a pseudo-file) are not there yet.

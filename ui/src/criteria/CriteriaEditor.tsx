@@ -15,7 +15,7 @@
 // (criteria, their fields, helpers, computed parameters, parameters of the data, keys), problems as
 // markers, the help of the criterion under the cursor and a palette of checks to add; the unit tests
 // with their coverage; the data of the cases as a table and a plot. Shared by tsqd (on an editing
-// session) and `mxp webui` (on a folder): everything goes through the adapter.
+// session) and the exploit mode of the testsuit app (on a folder): everything goes through the adapter.
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api";
 import { Dialog } from "../fields";

@@ -11,7 +11,7 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// The Plot page of `mxp webui` (#/plot) and of tsqd (#/exploit/plot, on the data of its runs): the data-plot notebook in the browser. Pick data files or folders
+// The Plot page of the exploit mode (#/plot) and of the sequencer (#/exploit/plot, on the data of its runs): the data-plot notebook in the browser. Pick data files or folders
 // (a folder is one data source, read as a whole by FolderParamMgr)
 // (every format of the data loaders), find their parameters by name or regex, plot them in 2D (against time)
 // or 3D (X, Y, Z), style each trace on its own, then export the figure (PNG, interactive HTML, or the CSV
@@ -66,7 +66,7 @@ function load(): State {
   return { sources: [], traces: [], options: OPTIONS };
 }
 
-// ── plotly.js, served by mxp webui from the plotly package ─────────────
+// ── plotly.js, served from the plotly package ─────────────
 
 let plotlyLoading: Promise<any> | null = null;
 export function plotly(): Promise<any> {

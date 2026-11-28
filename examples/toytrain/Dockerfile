@@ -12,7 +12,8 @@
 # see <https://www.gnu.org/licenses/>.
 
 # Image of the toy-train test environment: testsuit with its sequencer, and the toytrain package.
-# By default it runs the sequencer of the emulated mode (tsq.dev.yml), with its UI and Editor on port 8640.
+# By default it runs the testsuit app (testsuit.docker.toml): the sequencer of the emulated mode (tsq.dev.yml), with
+# its UI and Editor on port 8640.
 # Build and run it with docker-compose.yml, from this folder: docker compose up --build
 
 FROM debian:12.14-slim
@@ -77,8 +78,9 @@ ENV HOME=/home/toytrain USER=toytrain LOGNAME=toytrain
 RUN mkdir -p $HOME/.toytrain-emu && chmod -R 1777 $HOME \
     && git config --system --add safe.directory '*'
 
-# the sequencer's UI and REST API (tsq.dev.yml: server.listen, opened to the host by --listen below)
+# the testsuit app: its UI and the sequencer's REST API behind it (testsuit.docker.toml: ui.listen); tsqd itself
+# listens inside the container only
 EXPOSE 8640
 
-ENTRYPOINT ["tsqd"]
-CMD ["--config", "tsq.dev.yml", "--listen", "0.0.0.0:8640"]
+ENTRYPOINT ["testsuit"]
+CMD ["--config", "testsuit.docker.toml", "--no-browser"]

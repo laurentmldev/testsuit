@@ -1131,8 +1131,8 @@ def test_api(repos, tmp_path):
         assert pipeline["slots"]["dut"]["role"] == "dut"
         assert pipeline["phases"][0]["comments"] == []                 # the phase's comment cards (none here)
 
-        # the UI, when it is built, or its placeholder
-        assert requests.get(f"{url}/ui/").status_code == 200
+        # tsqd serves no UI: the testsuit app does
+        assert requests.get(f"{url}/ui/").status_code == 404
     finally:
         server.should_exit = True
         thread.join(30)

@@ -11,14 +11,38 @@
 // You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 // see <https://www.gnu.org/licenses/>.
 
-// Client of the tsqd REST API (sequencer README, section 13). In production the UI is served under /ui,
-// so the API is one level up; in development, Vite proxies /api to tsqd.
+// Client of the server of the testsuit app (README, "The testsuit app"). The UI is served under /ui, so the
+// server is one level up; in development, Vite proxies /api to a running testsuit. Behind the one server:
+//   app/...  the app itself (its modes, title, logo, settings, stop)
+//   seq/...  the sequencer mode: the tsqd REST API (sequencer README, section 13), passed through
+//   x/...    the exploit mode: the criteria editor, exploit_runner, Plot and Extract on a folder
+// The pages call the paths of their own API ("runs", "exploit/runs"...): url() puts the prefix of the mode the
+// page shown belongs to (setApiScope), since the Exploit, Plot and Extract pages serve both modes.
 import { useEffect, useRef, useState } from "react";
 
 export const API = import.meta.env.DEV ? "/api/" : new URL("../", window.location.href).toString();
 
+export type ApiScope = "seq" | "x";
+let scope: ApiScope = "seq";
+let sequencerOn = true;
+// the routes of the exploit mode (testsuit.exploit.editor.standalone): the others are always the sequencer's
+const EXPLOIT_ROUTES = new Set(["criteria", "exploit", "plot", "extract", "mode", "folder", "folders", "plugins", "config"]);
+
+/** The mode of the page shown: its calls go to that mode's API. */
+export function setApiScope(s: ApiScope) {
+  scope = s;
+}
+
+/** Whether the sequencer mode is on: without it, no event stream is opened. */
+export function setSequencerOn(on: boolean) {
+  sequencerOn = on;
+}
+
 export function url(path: string): string {
-  return API + path.replace(/^\//, "");
+  const p = path.replace(/^\//, "");
+  if (/^(app|seq|x)\//.test(p)) return API + p;          // a mode named explicitly
+  const first = p.split(/[/?]/)[0];
+  return API + (scope === "x" && EXPLOIT_ROUTES.has(first) ? "x/" : "seq/") + p;
 }
 
 export class ApiError extends Error {
@@ -83,7 +107,7 @@ let source: EventSource | null = null;
 export const connection = { connected: false, listeners: new Set<(c: boolean) => void>() };
 
 function ensureSource() {
-  if (source) return;
+  if (source || !sequencerOn) return;
   source = new EventSource(url("events"));
   const kinds = ["run", "phase", "step", "component", "probe", "lab", "release", "resource", "selftest", "state_mismatch", "manual_output", "manual_operation", "campaign", "pause", "intervention"];
   for (const kind of kinds) {

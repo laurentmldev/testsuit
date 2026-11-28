@@ -12,7 +12,8 @@
 // see <https://www.gnu.org/licenses/>.
 
 // The testsuit plugins of the server (GET /plugins, testsuit.plugins.plugins_report()): the ones found, whether
-// they loaded, and what each one registered. In the Configuration tab of tsqd and of `mxp webui`.
+// they loaded, and what each one registered. In the Configuration tab of the testsuit app: those of its own
+// process (the exploit mode's, app/plugins), and those of tsqd (seq/plugins).
 import { useResource } from "./api";
 
 export interface PluginInfo {
@@ -22,8 +23,8 @@ export interface PluginInfo {
 
 const STATUS_BADGE: Record<string, string> = { loaded: "ok", failed: "bad", "not loaded": "idle" };
 
-export function PluginsSection({ server }: { server: string }) {
-  const plugins = useResource<PluginInfo[]>("plugins");
+export function PluginsSection({ server, path = "plugins" }: { server: string; path?: string }) {
+  const plugins = useResource<PluginInfo[]>(path);
   const list = plugins.data || [];
   return (
     <section className="config-section">

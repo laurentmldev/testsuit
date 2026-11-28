@@ -11,8 +11,7 @@ storage:
   large_files: {threshold: 200MB, mode: zip}
   retention: {runs: 30d, results: forever}
 server:
-  listen: 0.0.0.0:8640
-  ui: true
+  listen: 127.0.0.1:8640               # its UI and API: the testsuit app of the lab, which starts it
   editor: true                         # behind the lab's authenticating reverse proxy
   workspaces: [/srv/tsq/toytrain-tests]   # git clone of the tests repository: this example's datapack/ folder
 selftest: {before_each_run: true, timeout: 60s, max_attempts: 3}

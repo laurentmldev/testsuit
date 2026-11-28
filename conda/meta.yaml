@@ -11,14 +11,14 @@
 # You should have received a copy of the GNU Affero General Public License along with testsuit. If not,
 # see <https://www.gnu.org/licenses/>.
 
-# The conda package of testsuit, shown as the "testsuit" app (the mexploit web UI) in Anaconda Navigator once installed (its app:
+# The conda package of testsuit, shown as the "testsuit" app (its web UI, the testsuit command) in Anaconda Navigator once installed (its app:
 # section). Not published to any channel: installed from a local file (README.md, "From Anaconda Navigator").
 # Built by .github/workflows/conda.yml from the sdist of python -m build (with the web UI in it):
 #   TESTSUIT_VERSION=1.2.0 TESTSUIT_SDIST=$PWD/dist/testsuit-1.2.0.tar.gz conda build conda -c conda-forge
 # Without TESTSUIT_SDIST, the sdist of that version on PyPI.
 # The Windows installer (conda/installer/construct.yaml) is built from this package.
 # One noarch package for Linux, macOS and Windows; the runtime dependencies are those of pyproject.toml,
-# with the criteria editor (fastapi, uvicorn) since the app is its web UI.
+# with the web UI of the testsuit app (fastapi, uvicorn, httpx).
 
 {% set version = environ.get("TESTSUIT_VERSION", "0.0.0") %}
 {% set sdist = environ.get("TESTSUIT_SDIST", "") %}
@@ -54,6 +54,7 @@ build:
     - evalfile = testsuit.cli.evalfile:main
     - tsq = testsuit.cli.tsq:main
     - tsqd = testsuit.sequencer.daemon:main
+    - testsuit = testsuit.app.cli:main
 
 requirements:
   host:
@@ -82,25 +83,28 @@ requirements:
     - pyarrow >=15
     - jinja2 >=3.1
     - pydantic >=2.5
-    # the criteria editor (testsuit[editor]): the web UI of the app
+    # the testsuit app: its web server, the sequencer's API passed through, testsuit.toml on Python 3.10
     - fastapi >=0.110
     - uvicorn >=0.29
+    - httpx >=0.27
+    - tomli >=2.0
 
 test:
   imports:
     - testsuit
-    - testsuit.exploit.editor.standalone
+    - testsuit.app.server
   commands:
-    - mxp webui -h
-    - python -c "from testsuit.exploit.editor.standalone import UI_DIR; assert (UI_DIR / 'index.html').is_file(), 'the web UI is not in the package'"
+    - testsuit -h
+    - python -c "from testsuit.app.server import UI_DIR; assert (UI_DIR / 'index.html').is_file(), 'the web UI is not in the package'"
     - python -c "import os, sys; assert os.path.isfile(os.path.join(sys.prefix, 'Menu', 'testsuit.json')), 'the shortcut is not in the package'"
 
 # Anaconda Navigator lists the packages of its channels that have this section on its Home page;
-# Launch runs the entry in the environment: the folder opened last, or a folder picker the first time.
+# Launch runs the entry in the environment: testsuit with the modes of the user's testsuit.toml (none: the exploit
+# mode alone, on the folder opened last, or a folder picker the first time).
 app:
-  entry: mxp webui --last
+  entry: testsuit
   icon: icon.png
-  summary: "mexploit: write test criteria and run them on test data, in the browser"
+  summary: "testsuit: write test criteria and run them on test data, in the browser"
   type: desk
 
 about:

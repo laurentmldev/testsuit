@@ -1,0 +1,13 @@
+# The testsuit app of the Docker image (Dockerfile): the sequencer mode alone, tsqd on tsq.dev.yml inside the
+# container, its UI and API on port 8640 of the container (the exploit mode answers only the machine it runs on,
+# which a browser of the host is not).
+modes = ["sequencer"]
+title = "Toy train (emulated)"
+
+[ui]
+listen = "0.0.0.0:8640"
+browser = false
+
+[sequencer]
+config = "tsq.dev.yml"
+listen = "127.0.0.1:8641"             # tsqd, inside the container only

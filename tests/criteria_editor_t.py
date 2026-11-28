@@ -13,7 +13,7 @@
 
 
 """The criteria editor's services (testsuit.exploit.editor): on a folder, through Python and through the
-REST routes of ``mxp webui``."""
+REST routes of the exploit mode of the testsuit app."""
 import shutil
 import socket
 import threading
@@ -183,7 +183,7 @@ def test_unit_tests_stopped(folder):
 
 
 def test_mxp_edit_routes(folder):
-    """The routes and the UI of `mxp webui`, through HTTP."""
+    """The routes of the exploit mode of the testsuit app, through HTTP."""
     import uvicorn
 
     from testsuit.exploit.editor.standalone import create_app
@@ -203,8 +203,7 @@ def test_mxp_edit_routes(folder):
         except requests.ConnectionError:
             time.sleep(0.1)
     try:
-        assert requests.get(f"{url}/mode").json()["mode"] == "criteria"
-        assert requests.get(f"{url}/", allow_redirects=False).headers["location"] == "ui/#/criteria"
+        assert requests.get(f"{url}/mode").json()["mode"] == "exploit"
         ov = requests.get(f"{url}/criteria").json()
         assert ov["scenarios"][0]["utests"] == ["limits/utests.yml"]
         doc = requests.get(f"{url}/criteria/files/{SCN}").json()

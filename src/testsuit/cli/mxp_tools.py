@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-SUBCOMMANDS = ("describe", "lint", "utest", "webui", "edit", "vscode")   # edit: the former name of webui
+SUBCOMMANDS = ("describe", "lint", "utest", "vscode")
 
 
 def _parse_set(values: list[str]) -> dict:
@@ -144,7 +144,7 @@ def vscode_main(argv: list[str]) -> int:
         "Set up VSCode for the scenarios of a workspace, with no extension of its own: the JSON Schemas of "
         "scenario and utests files for the YAML extension (completion, help, validation), pytest with the "
         "unit tests in the Testing view, and tasks for mxp lint (problems in the Problems view), mxp utest "
-        "and mxp webui. Writes in <workspace>/.vscode, keeping the other settings and tasks. Run it again when "
+        "and the testsuit app. Writes in <workspace>/.vscode, keeping the other settings and tasks. Run it again when "
         "criteria change (a plugin, a library of criteria).")
     parser.add_argument("workspace", nargs="?", default=".", help="the folder opened in VSCode (default: the current one)")
     parser.add_argument("--no-tasks", action="store_true", help="do not write tasks.json")
@@ -165,7 +165,4 @@ def main(argv: list[str]) -> int:
     """Run the sub-command named by argv[0]."""
     if argv[0] == "vscode":
         return vscode_main(argv[1:])
-    if argv[0] in ("webui", "edit"):
-        from testsuit.exploit.editor.standalone import webui_main
-        return webui_main(argv[1:])
     return {"describe": describe_main, "lint": lint_main, "utest": utest_main}[argv[0]](argv[1:])

@@ -12,7 +12,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 
-"""The Plot page of ``mxp webui`` (testsuit.exploit.editor.plots): data files opened with the data loaders,
+"""The Plot page of the exploit mode of the testsuit app (testsuit.exploit.editor.plots): data files opened with the data loaders,
 figures of the plotly backend, exports; through Python and through the REST routes."""
 
 import base64
@@ -290,7 +290,7 @@ def test_loaded_fields_kept_within_memory(data, monkeypatch):
 
 
 def test_webui_plot_routes(data):
-    """The /plot routes of ``mxp webui``, through HTTP."""
+    """The /plot routes of the exploit mode, through HTTP."""
     import uvicorn
 
     from testsuit.exploit.editor.standalone import create_app

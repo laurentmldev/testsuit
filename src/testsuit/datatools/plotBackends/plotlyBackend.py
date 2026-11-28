@@ -36,7 +36,7 @@ from testsuit.datatools.plotBackends.common import FigureSpec,timeline_label_pos
 
 PLOTLY_JSON_SUFFIX = ".plotly.json"
 
-# plotly.js config of every figure testsuit shows (reports, figure pages, exported HTML, mxp webui): figures
+# plotly.js config of every figure testsuit shows (reports, figure pages, exported HTML, testsuit's exploit mode): figures
 # hold test data, which may be industrial property. No button may send them to a third party: plotly.js 3
 # shows "Share to Plotly Cloud" (showSendToCloud, which uploads the figure to plotlyServerURL) by default.
 PRIVATE_CONFIG = {"displaylogo": False, "showSendToCloud": False, "plotlyServerURL": ""}

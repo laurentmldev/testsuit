@@ -15,9 +15,9 @@ tests/etc/mexploit/scenarii/*/conftest.py
 build/
 dist/
 
-# web UI: dependencies, and the build served by tsqd (npm run build in ui/)
+# web UI: dependencies, and the build served by the testsuit app (npm run build in ui/)
 ui/node_modules/
-src/testsuit/sequencer/ui/
+src/testsuit/app/ui/
 
 # mxp utest results (default output folder)
 mxp_utest_result/

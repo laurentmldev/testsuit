@@ -15,12 +15,6 @@
 import argparse
 import sys,os,re
 
-# mxp webui: its launch is logged before the imports below, which can take long the first time in a new
-# environment (Anaconda Navigator shows nothing meanwhile); standalone.py imports only the standard library
-if sys.argv[1:2] in (["webui"], ["edit"]):
-    from testsuit.exploit.editor import standalone as _webui
-    _webui.log(f"process started: mxp {' '.join(sys.argv[1:])}, loading testsuit")
-
 from testsuit.exploit.mexploit.mexploit import mexploit
 from testsuit.datatools.plotBackends import plot_backend_names
 from testsuit.datatools.DataFileMgrs.AFileMgr import enable_pandas_display_helpers
@@ -61,7 +55,7 @@ def main():
     
     Another note: this tool is called by exploit_runner.py to execute M-Exploit analysis as a separate process.
 
-    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', the editor 'mxp webui', and 'mxp vscode' (each with -h).
+    To write and test scenarios: 'mxp describe', 'mxp lint', 'mxp utest', and 'mxp vscode' (each with -h); the web UI is the 'testsuit' command.
 
     
     Return 1 if something went wrong, 0 otherwise

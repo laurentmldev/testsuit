@@ -13,11 +13,11 @@
 
 import { useEffect, useState } from "react";
 
-// The browser tab is named after what it shows, then the name of the app: "Lab · Test sequencer".
-// The app name comes from the sequencer's /health (its configured title); App sets it once it is known,
-// and every page that names its tab follows it.
+// The browser tab is named after what it shows, then the name of the app: "Infra · Rail lab".
+// The app name is the title of testsuit.toml (app/info); App sets it once it is known, and every page that
+// names its tab follows it.
 
-let appName = "Test sequencer";
+let appName = "testsuit";
 const listeners = new Set<() => void>();
 
 export function setAppName(name: string) {

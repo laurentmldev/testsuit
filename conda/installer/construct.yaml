@@ -13,7 +13,7 @@
 
 # The Windows installer of testsuit (conda constructor): one testsuit-<version>-Windows-x86_64.exe that installs its
 # own Python, testsuit (the conda package of conda/meta.yaml) and all its dependencies, offline, with a Start-menu
-# and desktop shortcut running the mexploit web UI (mxp webui --last). No Python, conda or Anaconda is needed on
+# and desktop shortcut running the testsuit app (python -m testsuit.app). No Python, conda or Anaconda is needed on
 # the machine, and one already there is left alone: the installer neither adds itself to PATH nor registers its
 # Python as the system's default. Installed per user (no admin rights) in %LOCALAPPDATA%\testsuit by default;
 # uninstalled from Windows' "Installed apps".
