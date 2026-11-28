@@ -576,7 +576,6 @@ def serve_zip(path: Path, port: int = 0, open_browser: bool = True) -> None:
     """Serve an exported zip on localhost (its pages read from the zip), until interrupted."""
     import mimetypes
     import threading
-    import webbrowser
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import unquote, urlparse
     archive = zipfile.ZipFile(path)
@@ -606,7 +605,12 @@ def serve_zip(path: Path, port: int = 0, open_browser: bool = True) -> None:
     url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
     print(f"serving {path} at {url} (Ctrl+C to stop)")
     if open_browser:
-        webbrowser.open(url)
+        from testsuit.misc.browser import open_url
+
+        def browse() -> None:
+            if not open_url(url)[0]:
+                print(f"no browser could be opened here: open {url} in yours", flush=True)
+        threading.Thread(target=browse, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

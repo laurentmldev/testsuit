@@ -24,10 +24,15 @@ import numpy as np
 import pandas as pd
 
 from testsuit.datatools.DataFileMgrs.H5FileMgr import H5FileMgr
+from testsuit.datatools.DataframeToHdf5 import TIMESTAMP_DIGEST_ATTR, TIMESTAMP_INDEXES_ATTR, TIMESTAMP_USERS_ATTR
+
+# what DataframeToHdf5 keeps to share index datasets between parameters: not compared (files written before
+# it did are the same data)
+BOOKKEEPING_ATTRS = {TIMESTAMP_INDEXES_ATTR, TIMESTAMP_USERS_ATTR, TIMESTAMP_DIGEST_ATTR}
 
 def read_attributes(hval: h5py.Group | h5py.Dataset) -> dict[str, type]:
     """Type of each attribute of an HDF5 object (attribute values themselves are not compared)."""
-    return {k: type(hval.attrs[k]) for k in hval.attrs}
+    return {k: type(hval.attrs[k]) for k in hval.attrs if k not in BOOKKEEPING_ATTRS}
 
 def read_group(hval: h5py.Group) -> dict:
     """Summary of a group: only its attributes are compared."""
