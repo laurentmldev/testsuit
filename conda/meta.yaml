@@ -16,6 +16,7 @@
 # Built by .github/workflows/conda.yml from the sdist of python -m build (with the web UI in it):
 #   TESTSUIT_VERSION=1.2.0 TESTSUIT_SDIST=$PWD/dist/testsuit-1.2.0.tar.gz conda build conda -c conda-forge
 # Without TESTSUIT_SDIST, the sdist of that version on PyPI.
+# The Windows installer (conda/installer/construct.yaml) is built from this package.
 # One noarch package for Linux, macOS and Windows; the runtime dependencies are those of pyproject.toml,
 # with the criteria editor (fastapi, uvicorn) since the app is its web UI.
 
@@ -36,7 +37,10 @@ source:
 build:
   noarch: python
   number: 0
-  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+  script:
+    - {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+    # the Start-menu (and desktop) shortcut, created by conda when installed: conda/menu/ into $PREFIX/Menu/
+    - {{ PYTHON }} "{{ RECIPE_DIR }}/install_menu.py"
   entry_points:
     - data2h5 = testsuit.cli.data2h5:main
     - data2db = testsuit.cli.data2db:main
@@ -89,6 +93,7 @@ test:
   commands:
     - mxp webui -h
     - python -c "from testsuit.exploit.editor.standalone import UI_DIR; assert (UI_DIR / 'index.html').is_file(), 'the web UI is not in the package'"
+    - python -c "import os, sys; assert os.path.isfile(os.path.join(sys.prefix, 'Menu', 'testsuit.json')), 'the shortcut is not in the package'"
 
 # Anaconda Navigator lists the packages of its channels that have this section on its Home page;
 # Launch runs the entry in the environment: the folder opened last, or a folder picker the first time.

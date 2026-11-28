@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schemas.conda.org/menuinst/menuinst-1-1-0.schema.json",
+  "menu_name": "testsuit",
+  "menu_items": [
+    {
+      "name": "testsuit",
+      "description": "mexploit: write test criteria and run them on test data, in the browser",
+      "command": ["{{ PYTHON }}", "-m", "testsuit.cli.mxp", "webui", "--last"],
+      "icon": "{{ MENU_DIR }}/testsuit.{{ ICON_EXT }}",
+      "activate": false,
+      "terminal": false,
+      "platforms": {
+        "win": {
+          "command": ["{{ PYTHONW }}", "-m", "testsuit.cli.mxp", "webui", "--last"],
+          "desktop": true
+        },
+        "linux": {
+          "Categories": ["Development"]
+        }
+      }
+    }
+  ]
+}
