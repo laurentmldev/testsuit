@@ -39,9 +39,10 @@ export function extendsKind(session: Session, name: string): ItemKind {
   return session.ctx.lab.library?.[name] || !session.ctx.lab.components?.[name] ? "component" : "host";
 }
 
-export function goTo(session: Session, file: string, kind: ItemKind, name: string) {
+export function goTo(session: Session, file: string, kind: ItemKind, name: string, command?: string) {
   setQuery("view", null);
   setQuery("item", `${kind}:${name}`);
+  setQuery("command", command || null);
   session.open(file);
 }
 
@@ -56,6 +57,21 @@ export function ItemLink({ kind, name, label }: { kind: ItemKind; name: string; 
   return (
     <button type="button" className="link item-link" title={`Edit the ${what} ${name} (${file})`}
       onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name); }}><code className={nameClass(ITEM_KIND[kind]) || undefined}><KindIcon kind={ITEM_KIND[kind]} title={`Edit the ${what} ${name}`} />{text}</code></button>
+  );
+}
+
+/** Where an inherited command (or status probe) comes from: the class or component that defines it, opened on
+ *  that command for editing when it is editable here (plain code otherwise, as linux_system out of the session). */
+export function OriginLink({ name, command }: { name: string; command?: string }) {
+  const session = useSession();
+  if (!name) return null;
+  const kind = extendsKind(session, name);
+  const file = itemFile(session, kind, name);
+  const what = kind === "host" ? "inventory component" : "class";
+  if (!file) return <code className={nameClass(ITEM_KIND[kind]) || undefined} title={`${what} ${name}`}>{name}</code>;
+  return (
+    <button type="button" className="link item-link" title={command ? `Edit ${command} in the ${what} ${name} (${file})` : `Edit the ${what} ${name} (${file})`}
+      onClick={(e) => { e.stopPropagation(); goTo(session, file, kind, name, command); }}><code className={nameClass(ITEM_KIND[kind]) || undefined}>{name}</code></button>
   );
 }
 

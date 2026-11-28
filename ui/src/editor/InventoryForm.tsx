@@ -21,8 +21,9 @@ import { Named } from "../kinds";
 import { CommandsEditor, summary } from "./commands";
 import { clone, componentChoices, labTagChoices, roleChoices, stageTypeChoices, transportChoices, useSession, type Doc } from "./state";
 import { SelftestEditor, StatusEditor } from "./LibraryForm";
-import { ItemLink, ItemLinks, extendsKind, useItemRequest, type CommandRequest } from "./links";
+import { ItemLink, ItemLinks, OriginLink, extendsKind, useItemRequest, type CommandRequest } from "./links";
 import { IconPicker, LinksEditor } from "./LabPicture";
+import { FormSplit } from "./panels";
 
 type Inv = any;
 type Path = (string | number)[];
@@ -116,8 +117,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
   };
   const missing = useMemo(() => missingFromLab(ctx, inv), [ctx, inv]);
   return (
-    <div className="form-split">
-      <div className="form-nav">
+    <FormSplit label="Stages and components" nav={<>
         <div className={classes("nav-item", sel.kind === "defaults" && "selected")} onClick={() => setSel({ kind: "defaults" })}>Defaults (all.vars)</div>
         <div className="nav-title">Stages <button className="small" onClick={() => setWizard({ kind: "stage" })}>+ Stage</button></div>
         {stages.map((s) => (
@@ -149,7 +149,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
             <Markdown text={missing.map((m) => `- ${m}`).join("\n")} />
           </div>
         )}
-      </div>
+      </>}>
       <div className="form-main">
         {sel.kind === "defaults" && <DefaultsForm inv={inv} update={update} />}
         {sel.kind === "group" && gs.find((g) => g.name === sel.name) && (
@@ -170,7 +170,7 @@ export function InventoryForm({ doc, api }: { doc: Doc; api: { setData: (d: any)
           setWizard(null);
         }} />
       )}
-    </div>
+    </FormSplit>
   );
 }
 
@@ -334,7 +334,7 @@ function RoleCard({ name }: { name?: string | null }) {
       <table className="grid compact">
         <tbody>
           {Object.entries<any>(r.commands).map(([c, info]) => (
-            <tr key={c}><td><code>{c}</code></td><td className="small">{info.description}</td><td className="muted small">{info.from}</td></tr>
+            <tr key={c}><td><code>{c}</code></td><td className="small">{info.description}</td><td className="muted small">{info.from && info.from !== name ? <OriginLink name={info.from} command={c} /> : info.from}</td></tr>
           ))}
         </tbody>
       </table>
@@ -355,7 +355,7 @@ function ComponentCard({ name }: { name?: string | null }) {
       <table className="grid compact">
         <tbody>
           {Object.entries<any>(c.commands).map(([cmd, info]) => (
-            <tr key={cmd}><td><code>{cmd}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from}</td></tr>
+            <tr key={cmd}><td><code>{cmd}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from && info.from !== name ? <OriginLink name={info.from} command={c} /> : info.from}</td></tr>
           ))}
         </tbody>
       </table>
@@ -389,7 +389,7 @@ function HostCard({ name, own, onOverride }: {
       <table className="grid compact">
         <tbody>
           {Object.entries<any>(h.commands).map(([c, info]) => (
-            <tr key={c} title={role[c]?.description}><td><code>{c}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from}</td>
+            <tr key={c} title={role[c]?.description}><td><code>{c}</code></td><td className="mono small">{summary(info.spec)}</td><td className="muted small">{info.from && info.from !== name ? <OriginLink name={info.from} command={c} /> : info.from}</td>
               {onOverride && <td>{own && c in own
                 ? <span className="muted small">overridden here</span>
                 : <button className="small" title="Give this component its own implementation, starting from this one" onClick={() => onOverride(c, info.spec)}>Override</button>}</td>}

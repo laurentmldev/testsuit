@@ -89,9 +89,9 @@ function RunsSubtabs({ page }: { page: string }) {
   );
 }
 
-// The subtabs of the Exploit tab: run exploit_runner, and plot the data of the runs by hand.
+// The subtabs of the Exploit tab: check the criteria (run exploit_runner), plot and extract the data of the runs by hand.
 const EXPLOIT_SUBTABS: [string, string, string][] = [
-  ["exploit", "exploit_runner", "Run exploit_runner on scenarios and the data of runs, open its reports"],
+  ["exploit", "Criteria", "Check criteria: run exploit_runner on scenarios and the data of runs, open its reports"],
   ["exploit/plot", "Plot", "Plot the parameters of the data of runs (or of the workspaces) by hand"],
   ["exploit/extract", "Extract", "Extract parameters of the data of runs (or of the workspaces) to an HDF5 file"],
 ];
@@ -132,12 +132,12 @@ function App() {
   const plotting = page === "exploit" && (route.parts[1] === "plot" || route.parts[1] === "extract");                  // the Plot page fills the window
   useEffect(() => { setAppName(title); }, [title]);
   const nav = [
-    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Lab"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
+    ["runs", "Runs"], ...(editor ? [["datapacks", "Datapacks"]] : []), ["lab", "Infra"], ...(editor ? [["exploit", "Exploit"]] : []), ["config", "Configuration"],
   ];
   // the Runs tab groups the queue and the list of all runs as its subtabs; their routes #/queue and #/runs
   // are kept as they were, so existing links still work
   const tabOf = (key: string) => (key === "queue" || key === "" || key === "campaigns" ? "runs" : key);
-  // the browser tab follows the selected top-level tab: "Lab · Test sequencer"
+  // the browser tab follows the selected top-level tab: "Infra · Test sequencer"
   const tabLabel = page === "edit" ? "Editor" : nav.find(([key]) => key === tabOf(page))?.[1] ?? "Runs";
   useTabTitle(editing ? undefined : tabLabel);
   let content;

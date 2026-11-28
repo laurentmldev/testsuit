@@ -83,7 +83,7 @@ export function EditorHome() {
             <tr key={s.id}>
               <td><a href={`#/edit/${s.id}`}><strong>{s.repo === "lab" ? "Lab" : s.folder}</strong></a> <span className="muted small">{s.id}</span></td>
               <td>{s.local && <span className="badge info">in place</span>} {s.git === false ? "files only" : `branch ${s.branch || "detached"}`}</td>
-              <td>{s.changed == null ? "" : s.changed ? `${s.changed} changed file(s)` : "no change"}</td>
+              <td>{s.changed == null ? "" : s.changed ? <span className="banner warn inline">{s.changed} changed file{s.changed > 1 ? "s" : ""}</span> : "no change"}</td>
               <td>{s.pushed?.length ? `${s.pushed.length} push(es), last ${ago(s.pushed[s.pushed.length - 1].at)}` : ""}</td>
               <td className="muted">opened {ago(s.created_at)}</td>
               <td><button className="small" onClick={() => navigate(`edit/${s.id}`)}>Open</button> <button className="small" onClick={() => close(s)}>Close</button></td>

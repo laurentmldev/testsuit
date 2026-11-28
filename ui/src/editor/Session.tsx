@@ -32,6 +32,7 @@ import { RequirementsForm } from "./RequirementsForm";
 import { IssuesForm } from "./IssuesForm";
 import { WorkspaceTag } from "./workspace";
 import { NewFileDialog } from "./wizards";
+import { CollapseButton, PanelRail, usePanel } from "./panels";
 
 const KIND_LABELS: [string, string, string][] = [
   ["inventory", "Lab inventory", "Stages, ad hoc components and their variables (Ansible YAML inventory)."],
@@ -64,7 +65,7 @@ function splitPath(path: string): [string, string] {
   return [path.slice(0, i + 1), path.slice(i + 1)];
 }
 
-function FileTree({ files, current, problems, onNew }: { files: FileInfo[]; current: string | null; problems: Problem[]; onNew: () => void }) {
+function FileTree({ files, current, problems, onNew, onCollapse }: { files: FileInfo[]; current: string | null; problems: Problem[]; onNew: () => void; onCollapse: () => void }) {
   const { open } = useSession();
   const [showOther, setShowOther] = useState(false);
   const counts = useMemo(() => {
@@ -78,7 +79,7 @@ function FileTree({ files, current, problems, onNew }: { files: FileInfo[]; curr
   }, [problems]);
   return (
     <div className="file-tree">
-      <div className="file-tree-new"><button className="primary small wide" onClick={onNew}>+ New…</button></div>
+      <div className="file-tree-new"><button className="primary small wide" onClick={onNew}>+ New…</button><CollapseButton label="Files" side="left" onCollapse={onCollapse} /></div>
       {KIND_LABELS.map(([kind, label, help]) => {
         const list = files.filter((f) => f.kind === kind);
         const hasCurrent = list.some((f) => f.path === current);
@@ -219,6 +220,10 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
   const [allProblems, setAllProblems] = useState<Problem[]>([]);
   const [dialog, setDialog] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  // the side panels give their room to the form on a small screen: the help and problems panel starts hidden
+  // below 1250 px wide, the file tree below 1100 px (each one's choice is then remembered in the browser)
+  const [treeHidden, toggleTree] = usePanel("tree", 1100);
+  const [sideHidden, toggleSide] = usePanel("side", 1250);
   const api = useDoc(id, path, (saved) => {
     const touched = new Set([saved.path, ...(saved.problems || []).map((p: Problem) => p.file)]);
     setAllProblems((all) => [...all.filter((p) => !touched.has(p.file)), ...(saved.problems || [])]);
@@ -276,7 +281,7 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
     && !doc.problems.some((d) => d.file === p.file && d.line === p.line && d.message === p.message))] : allProblems;
   const info = session.info;
   // where a session belongs: the Lab page for the lab, the Datapacks page (on its repository) for tests
-  const back = info.repo === "lab" ? { path: "lab", label: "Lab" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };
+  const back = info.repo === "lab" ? { path: "lab", label: "Infra" } : { path: "datapacks", label: "Datapacks", query: { repo: info.repo } };
   // leaving a lab session offers to reload the lab, so that tsqd runs what was edited: the folder as it is
   // (in place), or the latest pushed commit (a clone on a branch, once pushed)
   // closing the session (closeTab) in a tab the Lab or Datapacks page opened closes that tab and refreshes the
@@ -311,7 +316,12 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
               {info.repo === "lab" ? <strong>Lab</strong> : <WorkspaceSwitch current={session.ctx.repository} local={info.local} />}
               {info.local && <span className="badge info" title={`Files are saved directly in ${info.source}, where the sequencer reads them. Closing the session keeps them.`}>in place</span>}
               {info.git === false ? <span className="muted">not a git work tree: files only</span> : (
-                <span className="muted">branch <code>{info.branch || "detached"}</code> · {info.changed ? `${info.changed} changed file(s)` : "no change yet"}</span>
+                <span className="muted">branch <code>{info.branch || "detached"}</code>{!info.changed && " · no change yet"}</span>
+              )}
+              {info.git !== false && info.changed > 0 && (
+                <span className="banner warn inline" title="Changed in this session and not pushed yet: Review and push… commits and pushes them">
+                  {info.changed} changed file{info.changed > 1 ? "s" : ""}{info.local ? "" : ", not pushed"}
+                </span>
               )}
               {session.ctx.lab_error && <span className="badge bad" title={session.ctx.lab_error}>the lab files do not load as they are (see the problems)</span>}
               <span className="spacer" />
@@ -323,8 +333,9 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
                 await leave(true, () => attempt(() => del(`edit/sessions/${id}`)));
               }} title={`Close the session and this tab, back to the ${back.label} page`}>Close</button>
             </div>
-            <div className="session-main">
-              <FileTree files={session.files} current={path} problems={problems} onNew={() => setDialog("new")} />
+            <div className={classes("session-main", treeHidden && "tree-collapsed", sideHidden && "side-collapsed")}>
+              {treeHidden ? <PanelRail label="Files" side="left" onExpand={toggleTree} />
+                : <FileTree files={session.files} current={path} problems={problems} onNew={() => setDialog("new")} onCollapse={toggleTree} />}
               <div className="session-center">
                 {!path && <SessionWelcome session={session} />}
                 {path && !doc && !api.error && <div className="pad"><Spinner text={`Loading and checking ${path}…`} /></div>}
@@ -335,14 +346,15 @@ export function SessionPage({ id, route }: { id: string; route: Route }) {
                   </KeysProvider>
                 )}
               </div>
-              <div className="session-side">
+              {sideHidden ? <PanelRail label={problems.length ? `Help and problems (${problems.length})` : "Help and problems"} side="right" onExpand={toggleSide} /> : <div className="session-side">
+                <CollapseButton label="Help and problems" side="right" onCollapse={toggleSide} />
                 <HelpPanel topic={topic} fallback={<KindHelp kind={doc?.kind} />} />
                 <h4>Problems</h4>
                 <Problems problems={problems} onPick={(p) => {
                   openFile(p.file, p.line);
                   setQuery("view", "yaml");
                 }} />
-              </div>
+              </div>}
             </div>
             {dialog === "generate" && <GenerateDialog onClose={() => setDialog(null)} />}
             {dialog === "publish" && <PublishDialog onClose={() => {

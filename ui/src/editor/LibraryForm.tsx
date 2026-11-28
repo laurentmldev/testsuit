@@ -19,8 +19,9 @@ import { get, post, put } from "../api";
 import { Named } from "../kinds";
 import { attempt, classes, freeName, labIdInput, labIdProblem, Markdown, notify } from "../util";
 import { CommandEditor, CommandsEditor, CommentsField, CommentsNote, HttpEditor, summary, WELL_KNOWN, type CommandTransfer } from "./commands";
-import { ItemLink, ItemLinks, useItemRequest, type CommandRequest } from "./links";
+import { ItemLink, ItemLinks, OriginLink, useItemRequest, type CommandRequest } from "./links";
 import { clone, componentChoices, labRoleChoices, viaChoices, transportChoices, useSession, type Doc } from "./state";
+import { FormSplit } from "./panels";
 
 const TP = ["component_classes", "_"];
 const RP = ["roles", "_"];
@@ -155,27 +156,42 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
   });
   const item = sel ? (sel.kind === "role" ? roles : components)[sel.name] : undefined;
   return (
-    <div className="form-split">
-      <div className="form-nav">
+    <FormSplit label="Roles and classes" nav={<>
         <div className="nav-title">Roles <button className="small" onClick={() => setCreating("role")}>+ Role</button></div>
-        {Object.entries(roles).map(([name, r]) => (
-          <div key={name} className={classes("nav-item", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
-            <strong className="role-name">{name}</strong> {r?.extends && <Named kind="role" name={r.extends} detail="extends it" className="muted small" />}
-            {ctx.lab.roles?.[name]?.used_by?.length ? <div className="muted small">role of <ItemLinks kind="host" names={ctx.lab.roles[name].used_by} /></div> : null}
-          </div>
-        ))}
+        {Object.entries(roles).map(([name, r]) => {
+          const described = ctx.lab.roles?.[name];
+          const commands = Object.keys(described?.commands || r?.commands || {});
+          return (
+            <div key={name} className={classes("nav-item nav-card", sel?.kind === "role" && sel.name === name && "selected")} onClick={() => setSel({ kind: "role", name })}>
+              <div className="nav-card-head"><Named kind="role" name={name} className="nav-card-name" />
+                {r?.extends && <span className="muted small">extends <Named kind="role" name={r.extends} /></span>}</div>
+              {r?.description && <div className="nav-card-text small">{String(r.description)}</div>}
+              <div className="nav-card-meta small muted">
+                <span>{commands.length} command{commands.length === 1 ? "" : "s"}</span>
+                {described?.used_by?.length ? <span>role of <ItemLinks kind="host" names={described.used_by} /></span> : null}
+              </div>
+            </div>
+          );
+        })}
         <div className="nav-title">Classes <button className="small" onClick={() => setCreating("component")}>+ Class</button></div>
-        {Object.entries(components).map(([name, c]) => (
-          <div key={name} className={classes("nav-item", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
-            <strong>{name}</strong> {c?.extends && <Named kind={ctx.lab.library?.[c.extends] ? "component_class" : "component"} name={c.extends} detail="extends it" className="muted small" />}
-            {ctx.lab.library?.[name]?.roles?.length ? <div className="muted small">roles <ItemLinks kind="role" names={ctx.lab.library[name].roles} /></div> : null}
-            {ctx.lab.library?.[name]?.used_by?.length ? <div className="muted small">extended by <ItemLinks kind="host" names={ctx.lab.library[name].used_by} /></div> : null}
-          </div>
-        ))}
+        {Object.entries(components).map(([name, c]) => {
+          const described = ctx.lab.library?.[name];
+          return (
+            <div key={name} className={classes("nav-item nav-card", sel?.kind === "component" && sel.name === name && "selected")} onClick={() => setSel({ kind: "component", name })}>
+              <div className="nav-card-head"><Named kind="component_class" name={name} className="nav-card-name" />
+                {c?.extends && <span className="muted small">extends <Named kind={ctx.lab.library?.[c.extends] ? "component_class" : "component"} name={c.extends} /></span>}</div>
+              {c?.description && <div className="nav-card-text small">{String(c.description)}</div>}
+              <div className="nav-card-meta small muted">
+                {described?.roles?.length ? <span>roles <ItemLinks kind="role" names={described.roles} /></span> : <span>no role: a base</span>}
+                {described?.used_by?.length ? <span>extended by <ItemLinks kind="host" names={described.used_by} /></span> : null}
+              </div>
+            </div>
+          );
+        })}
         <div className="nav-hint">
           <Markdown text={"Roles are abstract: the commands a lab component offers, with what each does. Classes (component classes) are concrete: the roles they support, and how they implement their commands. The lab components of the inventory extend a class (`tsq_extends`) and have its role, or pick one of its roles (`tsq_role`).\n\nEvery role: " + Object.keys(ctx.lab.roles || {}).map((t) => `\`${t}\``).join(", ") + "\n\nEvery class: " + Object.keys(ctx.lab.library || {}).map((t) => `\`${t}\``).join(", ")} />
         </div>
-      </div>
+      </>}>
       <div className="form-main">
         {sel && item !== undefined ? (sel.kind === "role"
           ? <RoleForm key={"r:" + sel.name} name={sel.name} value={item} onChange={(v) => setItem("role", sel.name, v)} onRename={(to) => rename("role", sel.name, to)} onDelete={() => remove("role", sel.name)} />
@@ -192,7 +208,7 @@ export function LibraryForm({ doc, api }: { doc: Doc; api: { setData: (d: any) =
         setSel({ kind: "role", name });
         setCreating(null);
       }} />}
-    </div>
+    </FormSplit>
   );
 }
 
@@ -439,7 +455,7 @@ function ComponentForm({ name, value, onChange, onRename, onDelete, transfer, fo
   // the roles it supports (its own list, else its parent's): their commands are required
   const roles: string[] = t.roles ?? parent?.roles ?? [];
   const required: Record<string, { description?: string; from?: string; params?: Record<string, string> }> = {};
-  for (const r of roles) for (const [c, i] of Object.entries<any>(ctx.lab.roles?.[r]?.commands || {})) required[c] = { description: i.description, from: r, params: { ...(required[c]?.params || {}), ...(i.params || {}) } };
+  for (const r of roles) for (const [c, i] of Object.entries<any>(ctx.lab.roles?.[r]?.commands || {})) required[c] = { description: i.description, from: i.from || r, params: { ...(required[c]?.params || {}), ...(i.params || {}) } };
   return (
     <div>
       <div className="form-title">
@@ -529,7 +545,7 @@ export function StatusEditor({ value, onChange, inherited }: { value: any; onCha
     <Section title="State monitoring (status)" help={help([])} collapsed={!s}>
       {!s && (
         <p>
-          {inherited ? <>Inherited from <code>{inherited.from}</code>: {inherited.spec.builtin ? `built-in ${inherited.spec.builtin}` : probeSummary(inherited.spec.probe)}. </> : "No probe: the state stays unknown. "}
+          {inherited ? <>Inherited from <OriginLink name={inherited.from} />: {inherited.spec.builtin ? `built-in ${inherited.spec.builtin}` : probeSummary(inherited.spec.probe)}. </> : "No probe: the state stays unknown. "}
           <button className="small" onClick={() => onChange({ probe: { run: "" }, states: { running: { regex: "^active" }, idle: { regex: "^inactive" } } })}>Define a probe</button>
         </p>
       )}
@@ -620,7 +636,7 @@ export function SelftestEditor({ value, onChange, inherited }: { value: any[] | 
   const set = (i: number, v: any) => onChange(list.map((c, j) => (j === i ? v : c)));
   return (
     <Section title="Self-test checks" help={helpText(schemas.library, [...TP, "selftest"])}>
-      {inherited.length > 0 && <p className="small muted">Inherited: {inherited.map((c) => <code key={c.spec.id} title={summary(c.spec)}>{c.spec.id}</code>)} (a check with the same id replaces one).</p>}
+      {inherited.length > 0 && <p className="small muted">Inherited: {inherited.map((c, i) => <span key={c.spec.id}>{i > 0 && ", "}<code title={summary(c.spec)}>{c.spec.id}</code>{c.from && <> from <OriginLink name={c.from} /></>}</span>)} (a check with the same id replaces one).</p>}
       <table className="grid compact">
         <tbody>
           {list.map((c, i) => [

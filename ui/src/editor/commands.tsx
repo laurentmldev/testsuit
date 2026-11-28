@@ -19,6 +19,7 @@ import { CodeEditor } from "../monaco";
 import { classes, CommentsNote, freeName, Markdown } from "../util";
 
 export { CommentsNote };
+import { ItemLink, OriginLink } from "./links";
 import { clone, useSession, viaChoices } from "./state";
 
 const CMD_PATH = ["component_classes", "_", "commands", "_"];
@@ -582,7 +583,7 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 <tr key={name} data-command={name} className="missing" title={role?.description}>
                   <td><code>{name}</code></td>
                   <td className="error-text small">not implemented{role?.description ? `: ${role.description}` : ""}</td>
-                  <td className="muted small">{role?.from ? `listed by role ${role.from}` : ""}</td>
+                  <td className="muted small">{role?.from ? <>listed by role <ItemLink kind="role" name={role.from} /></> : ""}</td>
                   <td><button className="small" onClick={() => add(name)}>Implement</button></td>
                 </tr>
               );
@@ -592,7 +593,10 @@ export function CommandsEditor({ value, onChange, inherited, required, title, he
                 <td><span className="disclosure" aria-hidden="true">{openName === name ? "▾" : "▸"}</span><code>{name}</code>
                   {String((mine ? own[name] : from?.spec)?.comments ?? "").trim() && <span className="comments-mark" title={String((mine ? own[name] : from?.spec).comments)}>💬</span>}</td>
                 <td className="mono small">{summary(mine ? own[name] : from?.spec)}</td>
-                <td className="muted small">{mine ? (from ? `overrides ${from.from}` : "defined here") : `from ${from?.from}`}{required && !role && <span className="warning-text"> · not in the role</span>}</td>
+                <td className="muted small command-origin">{mine
+                  ? (from ? <>overrides <OriginLink name={from.from} command={name} /></> : role?.from ? <>for role <ItemLink kind="role" name={role.from} /></> : "defined here")
+                  : <>from <OriginLink name={from!.from} command={name} /></>}
+                  {required && !role && <span className="warning-text"> · not in the role</span>}</td>
                 <td>
                   {mine ? <span className="row-actions">
                     {transfer && <>

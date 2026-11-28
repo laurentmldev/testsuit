@@ -640,7 +640,7 @@ export function LabGraph({ comps, stages, view, onComponent, onProbe, onStage, o
             )}
             <span className="spacer" />
             <button className="small" onClick={() => { setDraft(null); setPicked(null); }}>Cancel</button>
-            <button className="small primary" disabled={saving} onClick={saveArrangement} title="Every user of the Lab page sees this arrangement">Save for everyone</button>
+            <button className="small primary" disabled={saving} onClick={saveArrangement} title="Every user of the Infra tab sees this arrangement">Save for everyone</button>
           </>
         ) : (
           <>
